@@ -1,4 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { readOwnedText, resolvePhaseReadPath } from "../project-fs/index.ts";
+import { archiveWritePath } from "../project-fs/authorities/archive-authority.ts";
+import type { ArchiveAuthorityPath } from "../project-fs/authorities/archive-authority.ts";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
 import {
@@ -13,12 +15,18 @@ import { loadMergedProgress, mergeProgressStreams } from "../progress/io.ts";
 import { readPackSources } from "../progress/all-sources.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
 import { computeEventId } from "../progress/event-id.ts";
-import { resolveMissingPhaseRef, readLoosePhaseSnapshotRaw } from "./load-phase-snapshot.ts";
+import {
+  resolveMissingPhaseRef,
+  readLoosePhaseSnapshotRaw,
+} from "./load-phase-snapshot.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { resolveArchiveRecordBytes } from "./resolve-archive-record.ts";
-import { resolveWithinProject } from "../path-safety.ts";
 import { atomicWriteText, type ExpectedState } from "../../io/atomic-text.ts";
-import { phaseSnapshotPath, sha256Hex } from "./paths.ts";
+import {
+  phaseSnapshotRelPath,
+  resolveArchiveOwnedPath,
+  sha256Hex,
+} from "./paths.ts";
 
 // ---------------------------------------------------------------------------
 // Phase snapshot writer (record layer — NO CLI, NO reader changes).
@@ -50,7 +58,7 @@ import { phaseSnapshotPath, sha256Hex } from "./paths.ts";
 //     before it is trusted for ANY verdict, including the no-ops. Mismatch
 //     fails closed (`record_identity_mismatch`), never silently overwrites.
 //   - Every phase YAML read (target AND the dependant scan) goes through
-//     `resolveWithinProject`, so a symlink escaping the project can never feed
+//     `resolveSymlinkFreeProjectPath`, so a symlink escaping the project can never feed
 //     a control record.
 //   - The apply step passes the plan's observed destination state to
 //     `atomicWriteText` as `ExpectedState` — `absent` for a fresh write OR a
@@ -97,7 +105,11 @@ export type PhaseSnapshotBlock =
       dependant_phase_id: string;
       depends_on_task_id: string;
     }
-  | { kind: "record_stale"; existing_source_sha256: string; current_source_sha256: string }
+  | {
+      kind: "record_stale";
+      existing_source_sha256: string;
+      current_source_sha256: string;
+    }
   | { kind: "record_inputs_changed"; detail: string }
   | {
       kind: "refresh_expectation_mismatch";
@@ -109,10 +121,10 @@ export type PhaseSnapshotBlock =
   | { kind: "live_file_missing"; original_path: string };
 
 export type PhaseSnapshotPlan =
-  | { kind: "write"; path: string; record: PhaseSnapshot }
+  | { kind: "write"; path: ArchiveAuthorityPath; record: PhaseSnapshot }
   | {
       kind: "refresh";
-      path: string;
+      path: ArchiveAuthorityPath;
       record: PhaseSnapshot;
       existing_source_sha256: string;
       current_source_sha256: string;
@@ -157,10 +169,9 @@ function isPhaseNotFound(err: unknown): boolean {
   return (err as NodeJS.ErrnoException)?.code === "PHASE_NOT_FOUND";
 }
 
-/** Symlink-escape-guarded raw read of a project-relative path. */
+/** Symlink-free owned read of a project-relative phase path. */
 async function readRawWithin(cwd: string, relPath: string): Promise<string> {
-  const abs = await resolveWithinProject(cwd, relPath);
-  return readFile(abs, "utf8");
+  return readOwnedText(await resolvePhaseReadPath(cwd, relPath));
 }
 
 async function readExistingRecord(
@@ -169,7 +180,12 @@ async function readExistingRecord(
 ): Promise<
   | { state: "missing" }
   | { state: "invalid"; detail: string }
-  | { state: "present"; record: PhaseSnapshot; raw: string; looseFilePresent: boolean }
+  | {
+      state: "present";
+      record: PhaseSnapshot;
+      raw: string;
+      looseFilePresent: boolean;
+    }
 > {
   // Resolve the existing record from loose ∪ bundle (reader-loose-wins): a snapshot
   // compacted into a bundle (loose gone) is still "present", so a re-run correctly
@@ -186,13 +202,19 @@ async function readExistingRecord(
       loadBundleIndex: () => loadArchiveBundles(cwd).index,
     });
   } catch (err) {
-    return { state: "invalid", detail: err instanceof Error ? err.message : String(err) };
+    return {
+      state: "invalid",
+      detail: err instanceof Error ? err.message : String(err),
+    };
   }
   if (resolved.kind === "absent") return { state: "missing" };
   if (resolved.kind === "invalid") {
     return {
       state: "invalid",
-      detail: resolved.error instanceof Error ? resolved.error.message : String(resolved.error),
+      detail:
+        resolved.error instanceof Error
+          ? resolved.error.message
+          : String(resolved.error),
     };
   }
   const raw = resolved.bytes;
@@ -206,7 +228,10 @@ async function readExistingRecord(
   } catch (err) {
     // Fail closed: an unreadable/invalid record silences nothing and is never
     // silently overwritten — surface it instead.
-    return { state: "invalid", detail: err instanceof Error ? err.message : String(err) };
+    return {
+      state: "invalid",
+      detail: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
@@ -215,7 +240,10 @@ async function readExistingRecord(
  * matches the requested identity: it must be the record FOR this phase id, and
  * its own path_sha256 must cover its own original_path.
  */
-function recordIdentityMismatch(record: PhaseSnapshot, phaseId: string): string | null {
+function recordIdentityMismatch(
+  record: PhaseSnapshot,
+  phaseId: string,
+): string | null {
   if (record.phase_id !== phaseId) {
     return `record at the ${phaseId} path is for phase "${record.phase_id}"`;
   }
@@ -240,10 +268,13 @@ function semanticProjection(r: PhaseSnapshot): unknown {
   const { snapshotted_at: _at, git_ref: _ref, tasks, ...rest } = r;
   return {
     ...rest,
-    tasks: tasks.map((t) => {
+    tasks: tasks.map(t => {
       const ev =
         t.terminal_evidence.kind === "maintainer_attestation"
-          ? { kind: t.terminal_evidence.kind, reason: t.terminal_evidence.reason }
+          ? {
+              kind: t.terminal_evidence.kind,
+              reason: t.terminal_evidence.reason,
+            }
           : t.terminal_evidence;
       return {
         id: t.id,
@@ -256,7 +287,10 @@ function semanticProjection(r: PhaseSnapshot): unknown {
 }
 
 function semanticEqual(a: PhaseSnapshot, b: PhaseSnapshot): boolean {
-  return JSON.stringify(semanticProjection(a)) === JSON.stringify(semanticProjection(b));
+  return (
+    JSON.stringify(semanticProjection(a)) ===
+    JSON.stringify(semanticProjection(b))
+  );
 }
 
 export async function planPhaseSnapshot(
@@ -264,10 +298,17 @@ export async function planPhaseSnapshot(
   phaseId: string,
   opts: PhaseSnapshotOptions,
 ): Promise<PhaseSnapshotPlan> {
-  const path = phaseSnapshotPath(cwd, phaseId);
+  const path = await resolveArchiveOwnedPath(
+    cwd,
+    phaseSnapshotRelPath(phaseId),
+  );
   const existing = await readExistingRecord(cwd, phaseId);
   if (existing.state === "invalid") {
-    return { kind: "ineligible", path, blocks: [{ kind: "record_invalid", detail: existing.detail }] };
+    return {
+      kind: "ineligible",
+      path,
+      blocks: [{ kind: "record_invalid", detail: existing.detail }],
+    };
   }
   if (existing.state === "present") {
     const mismatch = recordIdentityMismatch(existing.record, phaseId);
@@ -296,7 +337,10 @@ export async function planPhaseSnapshot(
     throw err; // PHASE_NOT_FOUND without a record, or AMBIGUOUS_PHASE_ID: fail closed.
   }
 
-  if (existing.state === "present" && existing.record.original_path !== ref.path) {
+  if (
+    existing.state === "present" &&
+    existing.record.original_path !== ref.path
+  ) {
     return {
       kind: "ineligible",
       path,
@@ -314,7 +358,8 @@ export async function planPhaseSnapshot(
     rawPhase = await readRawWithin(cwd, ref.path);
   } catch (err) {
     if (isEnoent(err)) {
-      if (existing.state === "present") return { kind: "noop_record_authoritative", path };
+      if (existing.state === "present")
+        return { kind: "noop_record_authoritative", path };
       return {
         kind: "ineligible",
         path,
@@ -322,7 +367,11 @@ export async function planPhaseSnapshot(
       };
     }
     // Structural failure or symlink escape: never snapshot through it.
-    return { kind: "ineligible", path, blocks: [{ kind: "unsafe_path", original_path: ref.path }] };
+    return {
+      kind: "ineligible",
+      path,
+      blocks: [{ kind: "unsafe_path", original_path: ref.path }],
+    };
   }
   const currentSha = sha256Hex(rawPhase);
   // NOTE: a matching source_sha256 is NOT an early exit. source_sha256 hashes
@@ -358,7 +407,9 @@ export async function planPhaseSnapshot(
   }
 
   const terminalStatus =
-    phase.status === "done" || phase.status === "cancelled" ? phase.status : null;
+    phase.status === "done" || phase.status === "cancelled"
+      ? phase.status
+      : null;
   if (terminalStatus === null) {
     blocks.push({ kind: "phase_not_terminal", status: phase.status });
   }
@@ -378,11 +429,25 @@ export async function planPhaseSnapshot(
   // `status` is the live PhaseStatus enum (snapshot tasks carry its done/cancelled
   // subset). Narrow, NOT `string`, so adding a new status breaks this assignment at
   // typecheck and forces a look at the dependant-scan skip below — not a silent miss.
-  type ScanTask = { id: string; status: "planned" | "in_progress" | "done" | "cancelled"; depends_on?: string[] };
-  const activePhases: { refId: string; refPath: string; id: string; tasks: ScanTask[] }[] = [];
+  type ScanTask = {
+    id: string;
+    status: "planned" | "in_progress" | "done" | "cancelled";
+    depends_on?: string[];
+  };
+  const activePhases: {
+    refId: string;
+    refPath: string;
+    id: string;
+    tasks: ScanTask[];
+  }[] = [];
   for (const otherRef of roadmap.phases) {
     if (otherRef.id === ref.id) {
-      activePhases.push({ refId: ref.id, refPath: ref.path, id: phase.id, tasks: phase.tasks ?? [] });
+      activePhases.push({
+        refId: ref.id,
+        refPath: ref.path,
+        id: phase.id,
+        tasks: phase.tasks ?? [],
+      });
       continue;
     }
     let raw: string;
@@ -390,13 +455,16 @@ export async function planPhaseSnapshot(
       raw = await readRawWithin(cwd, otherRef.path);
     } catch (err) {
       if (!isEnoent(err)) throw err;
-      const res = await resolveMissingPhaseRef(cwd, { id: otherRef.id, path: otherRef.path });
+      const res = await resolveMissingPhaseRef(cwd, {
+        id: otherRef.id,
+        path: otherRef.path,
+      });
       if (res.kind !== "tolerated") throw err; // no valid snapshot → genuinely broken ref
       activePhases.push({
         refId: otherRef.id,
         refPath: otherRef.path,
         id: res.snapshot.phase_id,
-        tasks: res.snapshot.tasks.map((t) => ({
+        tasks: res.snapshot.tasks.map(t => ({
           id: t.id,
           status: t.status,
           ...(t.depends_on ? { depends_on: t.depends_on } : {}),
@@ -415,7 +483,12 @@ export async function planPhaseSnapshot(
       });
       continue;
     }
-    activePhases.push({ refId: otherRef.id, refPath: otherRef.path, id: otherPhase.id, tasks: otherPhase.tasks ?? [] });
+    activePhases.push({
+      refId: otherRef.id,
+      refPath: otherRef.path,
+      id: otherPhase.id,
+      tasks: otherPhase.tasks ?? [],
+    });
   }
 
   // Task-id uniqueness across the WHOLE active graph. Progress events bind by
@@ -476,20 +549,26 @@ export async function planPhaseSnapshot(
       // would make the snapshot contradict the event-derived dependency
       // satisfaction readers rely on. Refuse to freeze a contradiction.
       if (deriveTaskState(durableEvents, task.id).current === "done") {
-        blocks.push({ kind: "cancelled_task_with_done_event", task_id: task.id });
+        blocks.push({
+          kind: "cancelled_task_with_done_event",
+          task_id: task.id,
+        });
       }
       if (claimedAttestations.has(task.id)) {
         blocks.push({
           kind: "attestation_not_applicable",
           task_id: task.id,
-          detail: "cancelled tasks always use design_status evidence — an attestation would misstate the provenance",
+          detail:
+            "cancelled tasks always use design_status evidence — an attestation would misstate the provenance",
         });
       }
       claimedAttestations.delete(task.id);
       tasks.push({
         id: task.id,
         status: "cancelled",
-        ...(task.depends_on && task.depends_on.length > 0 ? { depends_on: task.depends_on } : {}),
+        ...(task.depends_on && task.depends_on.length > 0
+          ? { depends_on: task.depends_on }
+          : {}),
         terminal_evidence: {
           kind: "design_status",
           observed_status: "cancelled",
@@ -499,11 +578,15 @@ export async function planPhaseSnapshot(
       continue;
     }
     if (task.status !== "done") {
-      blocks.push({ kind: "task_not_terminal", task_id: task.id, status: task.status });
+      blocks.push({
+        kind: "task_not_terminal",
+        task_id: task.id,
+        status: task.status,
+      });
       continue;
     }
     // Evidence is derived from DURABLE events only (loose ∪ pack) — never legacy.
-    const taskEvents = durableEvents.filter((e) => e.task_id === task.id);
+    const taskEvents = durableEvents.filter(e => e.task_id === task.id);
     const derived = deriveTaskState(durableEvents, task.id).current;
     let evidence: TerminalEvidence;
     if (derived === "done") {
@@ -516,8 +599,8 @@ export async function planPhaseSnapshot(
       }
       claimedAttestations.delete(task.id);
       const eventIds = taskEvents
-        .filter((e) => e.status === "done")
-        .map((e) => computeEventId(e));
+        .filter(e => e.status === "done")
+        .map(e => computeEventId(e));
       evidence = { kind: "progress_events", event_ids: eventIds };
     } else if (taskEvents.length > 0) {
       // Durable history exists and it does NOT say done: a drift between the
@@ -554,7 +637,9 @@ export async function planPhaseSnapshot(
     tasks.push({
       id: task.id,
       status: "done",
-      ...(task.depends_on && task.depends_on.length > 0 ? { depends_on: task.depends_on } : {}),
+      ...(task.depends_on && task.depends_on.length > 0
+        ? { depends_on: task.depends_on }
+        : {}),
       terminal_evidence: evidence,
     });
   }
@@ -574,7 +659,8 @@ export async function planPhaseSnapshot(
   if (cancelledTaskIds.size > 0) {
     for (const entry of activePhases) {
       for (const otherTask of entry.tasks) {
-        if (otherTask.status === "done" || otherTask.status === "cancelled") continue;
+        if (otherTask.status === "done" || otherTask.status === "cancelled")
+          continue;
         for (const dep of otherTask.depends_on ?? []) {
           if (cancelledTaskIds.has(dep)) {
             blocks.push({
@@ -592,7 +678,10 @@ export async function planPhaseSnapshot(
   // The phase YAML body changed under an existing record: that is a stale
   // record (default fail; explicit refresh with both source hashes only). This
   // is distinct from the body-identical / inputs-changed case decided below.
-  if (existing.state === "present" && existing.record.source_sha256 !== currentSha) {
+  if (
+    existing.state === "present" &&
+    existing.record.source_sha256 !== currentSha
+  ) {
     if (!opts.refresh) {
       blocks.push({
         kind: "record_stale",
@@ -600,7 +689,8 @@ export async function planPhaseSnapshot(
         current_source_sha256: currentSha,
       });
     } else if (
-      opts.refresh.expected_old_source_sha256 !== existing.record.source_sha256 ||
+      opts.refresh.expected_old_source_sha256 !==
+        existing.record.source_sha256 ||
       opts.refresh.expected_new_source_sha256 !== currentSha
     ) {
       blocks.push({
@@ -656,7 +746,8 @@ export async function planPhaseSnapshot(
       // Explicit refresh of an inputs-changed record: the YAML hash is the same
       // old==new, so require the refresh to name it for both.
       if (
-        opts.refresh.expected_old_source_sha256 !== existing.record.source_sha256 ||
+        opts.refresh.expected_old_source_sha256 !==
+          existing.record.source_sha256 ||
         opts.refresh.expected_new_source_sha256 !== currentSha
       ) {
         return {
@@ -665,9 +756,11 @@ export async function planPhaseSnapshot(
           blocks: [
             {
               kind: "refresh_expectation_mismatch",
-              expected_old_source_sha256: opts.refresh.expected_old_source_sha256,
+              expected_old_source_sha256:
+                opts.refresh.expected_old_source_sha256,
               existing_source_sha256: existing.record.source_sha256,
-              expected_new_source_sha256: opts.refresh.expected_new_source_sha256,
+              expected_new_source_sha256:
+                opts.refresh.expected_new_source_sha256,
               current_source_sha256: currentSha,
             },
           ],
@@ -719,7 +812,11 @@ export async function applyPhaseSnapshotPlan(
       plan.kind === "write" || plan.existing_raw === null
         ? { kind: "absent" }
         : { kind: "present", content: plan.existing_raw };
-    await atomicWriteText(plan.path, serializePhaseSnapshot(plan.record), expected);
+    await atomicWriteText(
+      archiveWritePath(plan.path),
+      serializePhaseSnapshot(plan.record),
+      expected,
+    );
     return { kind: "written", path: plan.path, record: plan.record };
   }
   return plan;

@@ -1,12 +1,32 @@
-import { readFile, stat, unlink } from "node:fs/promises";
-import { resolveWithinProject } from "../path-safety.ts";
-import { atomicWriteText, atomicReplaceExistingText, type ExpectedState } from "../../io/atomic-text.ts";
+import {
+  readOwnedText,
+  statOwned,
+  unlinkOwned,
+} from "../project-fs/operations.ts";
+import {
+  PruneSourcePath,
+  resolvePruneSourceDeletePath,
+  resolvePruneSourceReadPath,
+  resolvePruneSourceWritePath,
+  resolvePrunedLedgerReadPath,
+  resolvePrunedLedgerWritePath,
+} from "../project-fs/authorities/prune-authority.ts";
+import type { OwnedReadPath, OwnedWritePath } from "../project-fs/branded-paths.ts";
+import {
+  atomicWriteText,
+  atomicReplaceExistingText,
+  type ExpectedState,
+} from "../../io/atomic-text.ts";
 import {
   collectInboundLinks,
   type InboundLinkScan,
   type LinkRewriteItem,
 } from "./link-collector.ts";
-import { buildAppendedLedger, findPrunedRow, type PrunedLedgerRow } from "./pruned-ledger.ts";
+import {
+  buildAppendedLedger,
+  findPrunedRow,
+  type PrunedLedgerRow,
+} from "./pruned-ledger.ts";
 
 /**
  * One inbound link whose live state no longer matches the plan at write time —
@@ -38,7 +58,10 @@ export class PrunePlanStaleError extends Error {
 }
 
 /** Which commit step failed — for the `DECISION_PRUNE_WRITE_FAILED` envelope. */
-export type PruneWritePhase = "append_ledger" | "rewrite_links" | "delete_record";
+export type PruneWritePhase =
+  | "append_ledger"
+  | "rewrite_links"
+  | "delete_record";
 
 /**
  * Thrown when a disk write fails AFTER preflight passed (rename/unlink I/O
@@ -51,7 +74,11 @@ export class PruneWriteError extends Error {
   readonly phase: PruneWritePhase;
   readonly partial_applied: boolean;
   readonly detail: string;
-  constructor(phase: PruneWritePhase, partial_applied: boolean, detail: string) {
+  constructor(
+    phase: PruneWritePhase,
+    partial_applied: boolean,
+    detail: string,
+  ) {
     super(
       `decision prune --write failed during ${phase} (partial_applied=${partial_applied}): ${detail}`,
     );
@@ -110,11 +137,15 @@ function delinkText(item: LinkRewriteItem): string {
  * label collapses to the bare marker.
  */
 function tombstoneText(item: LinkRewriteItem): string {
-  return item.link_text.trim() === "" ? "(pruned)" : `~~${item.link_text}~~ (pruned)`;
+  return item.link_text.trim() === ""
+    ? "(pruned)"
+    : `~~${item.link_text}~~ (pruned)`;
 }
 
 function replacementFor(item: LinkRewriteItem): string {
-  return item.rewrite_action === "tombstone" ? tombstoneText(item) : delinkText(item);
+  return item.rewrite_action === "tombstone"
+    ? tombstoneText(item)
+    : delinkText(item);
 }
 
 /** Char offset where each `/\r?\n/`-split line begins — matches the collector's split. */
@@ -149,7 +180,10 @@ function itemKey(it: LinkRewriteItem): string {
  * would leave dangling after deletion), or a source that became
  * unreadable / reference-style all produce stale spans.
  */
-function diffPlanAgainstLive(planned: LinkRewriteItem[], live: InboundLinkScan): PruneStaleSpan[] {
+function diffPlanAgainstLive(
+  planned: LinkRewriteItem[],
+  live: InboundLinkScan,
+): PruneStaleSpan[] {
   const out: PruneStaleSpan[] = [];
   const liveKeys = new Set(live.items.map(itemKey));
   const planKeys = new Set(planned.map(itemKey));
@@ -187,7 +221,9 @@ function diffPlanAgainstLive(planned: LinkRewriteItem[], live: InboundLinkScan):
   return out;
 }
 
-function groupBySource(items: LinkRewriteItem[]): Map<string, LinkRewriteItem[]> {
+function groupBySource(
+  items: LinkRewriteItem[],
+): Map<string, LinkRewriteItem[]> {
   const byFile = new Map<string, LinkRewriteItem[]>();
   for (const it of items) {
     const arr = byFile.get(it.source_file);
@@ -197,15 +233,14 @@ function groupBySource(items: LinkRewriteItem[]): Map<string, LinkRewriteItem[]>
   return byFile;
 }
 
-/** The append-only ledger, re-resolved at commit time (not a cached preflight path). */
-const LEDGER_REL = "design/decisions/PRUNED.md";
-
 function errDetail(err: unknown): string {
   const code = (err as NodeJS.ErrnoException).code;
   return code ?? (err instanceof Error ? err.message : String(err));
 }
 
-type TargetCheck = { ok: true; abs: string; ino: number; dev: number } | { ok: false; found: string };
+type TargetCheck =
+  | { ok: true; abs: OwnedReadPath; ino: number; dev: number }
+  | { ok: false; found: string };
 
 /**
  * Verify the target record is STILL the same readable regular file with the same
@@ -230,28 +265,51 @@ async function inspectTarget(
   expectedIno?: number,
   expectedDev?: number,
 ): Promise<TargetCheck> {
-  let abs: string;
+  let abs: OwnedReadPath;
   try {
-    abs = await resolveWithinProject(cwd, relPath);
+    abs = await resolvePruneSourceReadPath(cwd, PruneSourcePath.parse(relPath));
   } catch {
     return { ok: false, found: "<path now escapes the project root>" };
   }
   let content: string;
   try {
-    content = await readFile(abs, "utf8");
+    content = await readOwnedText(abs);
   } catch (err) {
-    return { ok: false, found: errDetail(err) === "ENOENT" ? "<missing>" : `<unreadable: ${errDetail(err)}>` };
+    return {
+      ok: false,
+      found:
+        errDetail(err) === "ENOENT"
+          ? "<missing>"
+          : `<unreadable: ${errDetail(err)}>`,
+    };
   }
-  if (content !== expectedContent) return { ok: false, found: "<record content changed since the verdict>" };
+  if (content !== expectedContent)
+    return { ok: false, found: "<record content changed since the verdict>" };
   let st;
   try {
-    st = await stat(abs);
+    st = await statOwned(abs);
   } catch (err) {
-    return { ok: false, found: errDetail(err) === "ENOENT" ? "<missing>" : `<unreadable: ${errDetail(err)}>` };
+    return {
+      ok: false,
+      found:
+        errDetail(err) === "ENOENT"
+          ? "<missing>"
+          : `<unreadable: ${errDetail(err)}>`,
+    };
   }
-  if (!st.isFile()) return { ok: false, found: st.isDirectory() ? "<directory>" : "<not a regular file>" };
-  if (expectedIno !== undefined && (st.ino !== expectedIno || st.dev !== expectedDev)) {
-    return { ok: false, found: "<record replaced since the verdict (inode changed)>" };
+  if (!st.isFile())
+    return {
+      ok: false,
+      found: st.isDirectory() ? "<directory>" : "<not a regular file>",
+    };
+  if (
+    expectedIno !== undefined &&
+    (st.ino !== expectedIno || st.dev !== expectedDev)
+  ) {
+    return {
+      ok: false,
+      found: "<record replaced since the verdict (inode changed)>",
+    };
   }
   return { ok: true, abs, ino: st.ino, dev: st.dev };
 }
@@ -318,10 +376,20 @@ export async function applyPrune(
   // new open commitment, a rewritten body) keeps the inode but invalidates the
   // eligibility; an ancestor symlinked out of the repo would escape the boundary.
   // This establishes the inode/dev re-checked before the first write and the delete.
-  const t0 = await inspectTarget(cwd, input.remove_file, input.expected_target_content);
+  const t0 = await inspectTarget(
+    cwd,
+    input.remove_file,
+    input.expected_target_content,
+  );
   if (!t0.ok) {
     throw new PrunePlanStaleError([
-      { source_file: input.remove_file, line: 0, column: 0, expected: "<the decision record unchanged since the verdict>", found: t0.found },
+      {
+        source_file: input.remove_file,
+        line: 0,
+        column: 0,
+        expected: "<the decision record unchanged since the verdict>",
+        found: t0.found,
+      },
     ]);
   }
   const targetIno = t0.ino;
@@ -338,14 +406,20 @@ export async function applyPrune(
   const stale: PruneStaleSpan[] = [];
   const pending: PendingRewrite[] = [];
   for (const [file, its] of byFile) {
-    let abs: string;
+    let abs: OwnedReadPath;
     let content: string;
     try {
-      abs = await resolveWithinProject(cwd, file);
-      content = await readFile(abs, "utf8");
+      abs = await resolvePruneSourceReadPath(cwd, PruneSourcePath.parse(file));
+      content = await readOwnedText(abs);
     } catch {
       for (const it of its) {
-        stale.push({ source_file: file, line: it.line, column: it.column, expected: it.raw_link, found: "<source no longer readable>" });
+        stale.push({
+          source_file: file,
+          line: it.line,
+          column: it.column,
+          expected: it.raw_link,
+          found: "<source no longer readable>",
+        });
       }
       continue;
     }
@@ -354,20 +428,37 @@ export async function applyPrune(
     for (const it of its) {
       const lineStart = starts[it.line - 1];
       if (lineStart === undefined) {
-        stale.push({ source_file: file, line: it.line, column: it.column, expected: it.raw_link, found: "<line no longer exists>" });
+        stale.push({
+          source_file: file,
+          line: it.line,
+          column: it.column,
+          expected: it.raw_link,
+          found: "<line no longer exists>",
+        });
         fileOk = false;
         continue;
       }
       const off = lineStart + (it.column - 1);
       const found = content.slice(off, off + it.raw_link.length);
       if (found !== it.raw_link) {
-        stale.push({ source_file: file, line: it.line, column: it.column, expected: it.raw_link, found });
+        stale.push({
+          source_file: file,
+          line: it.line,
+          column: it.column,
+          expected: it.raw_link,
+          found,
+        });
         fileOk = false;
       }
     }
     if (!fileOk) continue;
     const edits = its
-      .map((it) => ({ off: starts[it.line - 1]! + (it.column - 1), len: it.raw_link.length, after: replacementFor(it), it }))
+      .map(it => ({
+        off: starts[it.line - 1]! + (it.column - 1),
+        len: it.raw_link.length,
+        after: replacementFor(it),
+        it,
+      }))
       .sort((a, b) => b.off - a.off); // highest offset first → earlier edits never shift later spans
     let out = content;
     const appliedHere: AppliedRewrite[] = [];
@@ -382,7 +473,12 @@ export async function applyPrune(
         after: e.after,
       });
     }
-    pending.push({ rel: file, original: content, content: out, applied: appliedHere });
+    pending.push({
+      rel: file,
+      original: content,
+      content: out,
+      applied: appliedHere,
+    });
   }
   if (stale.length > 0) throw new PrunePlanStaleError(stale);
 
@@ -408,10 +504,22 @@ export async function applyPrune(
   // edited (accepted → proposed), replaced, or symlinked out of the repo. Catching
   // it here means a target that drifted before any mutation is a zero-write
   // PLAN_STALE, not a late delete-phase failure after ledger + docs were changed.
-  const tPre = await inspectTarget(cwd, input.remove_file, input.expected_target_content, targetIno, targetDev);
+  const tPre = await inspectTarget(
+    cwd,
+    input.remove_file,
+    input.expected_target_content,
+    targetIno,
+    targetDev,
+  );
   if (!tPre.ok) {
     throw new PrunePlanStaleError([
-      { source_file: input.remove_file, line: 0, column: 0, expected: "<the decision record unchanged since the verdict>", found: tPre.found },
+      {
+        source_file: input.remove_file,
+        line: 0,
+        column: 0,
+        expected: "<the decision record unchanged since the verdict>",
+        found: tPre.found,
+      },
     ]);
   }
 
@@ -430,22 +538,30 @@ export async function applyPrune(
     // Re-resolve the ledger path at COMMIT time (not the cached preflight one), so
     // a design/decisions ancestor symlinked out of the repo since preflight is
     // caught here — never read/write an external PRUNED.md.
-    const ledgerPath = await resolveWithinProject(cwd, LEDGER_REL);
+    const ledgerPath = await resolvePrunedLedgerWritePath(cwd);
     // Read the ledger as it stands now, tracking existence precisely so "absent"
     // is distinguishable from "present but empty".
     let currentLedger = "";
     let currentExists = true;
     try {
-      currentLedger = await readFile(ledgerPath, "utf8");
+      currentLedger = await readOwnedText(
+        await resolvePrunedLedgerReadPath(cwd),
+      );
     } catch (err) {
       if (errDetail(err) !== "ENOENT") throw err;
       currentExists = false;
     }
     if (prepared.already_recorded) {
       const currentRow =
-        prepared.normalized_decision !== null ? findPrunedRow(currentLedger, prepared.normalized_decision) : null;
+        prepared.normalized_decision !== null
+          ? findPrunedRow(currentLedger, prepared.normalized_decision)
+          : null;
       if (currentRow === null) {
-        throw new PruneWriteError("append_ledger", false, "ledger no longer records this decision (PRUNED.md changed after preflight)");
+        throw new PruneWriteError(
+          "append_ledger",
+          false,
+          "ledger no longer records this decision (PRUNED.md changed after preflight)",
+        );
       }
       // Report the row as it actually stands now (the user may have hand-edited
       // its phase/date/rationale) — not the stale preflight copy.
@@ -456,8 +572,15 @@ export async function applyPrune(
       // empty file appearing where we expected none is refused, not silently
       // overwritten) and same bytes. The existence-aware `ExpectedState` re-checks
       // again just before the rename.
-      if (currentExists !== prepared.existed || currentLedger !== prepared.existing_content) {
-        throw new PruneWriteError("append_ledger", false, "ledger (PRUNED.md) changed after preflight");
+      if (
+        currentExists !== prepared.existed ||
+        currentLedger !== prepared.existing_content
+      ) {
+        throw new PruneWriteError(
+          "append_ledger",
+          false,
+          "ledger (PRUNED.md) changed after preflight",
+        );
       }
       const expected: ExpectedState = prepared.existed
         ? { kind: "present", content: prepared.existing_content }
@@ -465,7 +588,9 @@ export async function applyPrune(
       // `mkdir: false` — the ledger may CREATE PRUNED.md, but must NOT re-create a
       // vanished design/decisions/ parent (symmetric with the source rewrites'
       // replace-only helper); a removed parent → WRITE_FAILED, not a resurrected tree.
-      await atomicWriteText(ledgerPath, prepared.content, expected, { mkdir: false });
+      await atomicWriteText(ledgerPath, prepared.content, expected, {
+        mkdir: false,
+      });
       ledger_action = "appended";
     }
   } catch (err) {
@@ -483,34 +608,56 @@ export async function applyPrune(
   // Has THIS invocation already mutated the tree? The ledger row counts only when
   // it was appended this run (not an idempotent already-recorded retry), plus any
   // source already rewritten. Drives the honest `partial_applied` on a later failure.
-  const mutationLanded = (): boolean => ledger_action === "appended" || applied.length > 0;
+  const mutationLanded = (): boolean =>
+    ledger_action === "appended" || applied.length > 0;
   for (const r of pending) {
     try {
       if (hooks.beforeSourceWrite) await hooks.beforeSourceWrite(r.rel);
     } catch (err) {
-      throw new PruneWriteError("rewrite_links", mutationLanded(), errDetail(err));
+      throw new PruneWriteError(
+        "rewrite_links",
+        mutationLanded(),
+        errDetail(err),
+      );
     }
-    let abs: string;
+    let abs: OwnedWritePath;
     try {
-      abs = await resolveWithinProject(cwd, r.rel);
+      abs = await resolvePruneSourceWritePath(
+        cwd,
+        PruneSourcePath.parse(r.rel),
+      );
     } catch {
-      throw new PruneWriteError("rewrite_links", mutationLanded(), `source path escapes the project root: ${r.rel}`);
+      throw new PruneWriteError(
+        "rewrite_links",
+        mutationLanded(),
+        `source path escapes the project root: ${r.rel}`,
+      );
     }
     let current: string | null = null;
     try {
-      current = await readFile(abs, "utf8");
+      current = await readOwnedText(
+        await resolvePruneSourceReadPath(cwd, PruneSourcePath.parse(r.rel)),
+      );
     } catch {
       current = null;
     }
     if (current !== r.original) {
-      throw new PruneWriteError("rewrite_links", mutationLanded(), `source changed after preflight: ${r.rel}`);
+      throw new PruneWriteError(
+        "rewrite_links",
+        mutationLanded(),
+        `source changed after preflight: ${r.rel}`,
+      );
     }
     try {
       // Pass the expected content so the helper re-checks just before rename,
       // narrowing the drift window to the temp-write gap.
       await atomicReplaceExistingText(abs, r.content, r.original);
     } catch (err) {
-      throw new PruneWriteError("rewrite_links", mutationLanded(), errDetail(err));
+      throw new PruneWriteError(
+        "rewrite_links",
+        mutationLanded(),
+        errDetail(err),
+      );
     }
     applied.push(...r.applied);
   }
@@ -526,17 +673,34 @@ export async function applyPrune(
     if (hooks.beforeDelete) await hooks.beforeDelete();
     // Re-resolve + re-verify (content then inode/dev); unlink the FRESHLY resolved
     // path, so an ancestor symlinked out of the repo can never redirect the unlink.
-    const tDel = await inspectTarget(cwd, input.remove_file, input.expected_target_content, targetIno, targetDev);
+    const tDel = await inspectTarget(
+      cwd,
+      input.remove_file,
+      input.expected_target_content,
+      targetIno,
+      targetDev,
+    );
     if (!tDel.ok) {
-      throw new PruneWriteError("delete_record", mutationLanded(), `target changed under prune (${tDel.found}) — refusing to delete`);
+      throw new PruneWriteError(
+        "delete_record",
+        mutationLanded(),
+        `target changed under prune (${tDel.found}) — refusing to delete`,
+      );
     }
-    await unlink(tDel.abs);
+    await unlinkOwned(
+      await resolvePruneSourceDeletePath(
+        cwd,
+        PruneSourcePath.parse(input.remove_file),
+      ),
+    );
   } catch (err) {
     if (err instanceof PruneWriteError) throw err;
     throw new PruneWriteError(
       "delete_record",
       mutationLanded(),
-      errDetail(err) === "ENOENT" ? "target disappeared before unlink" : errDetail(err),
+      errDetail(err) === "ENOENT"
+        ? "target disappeared before unlink"
+        : errDetail(err),
     );
   }
 
@@ -549,5 +713,10 @@ export async function applyPrune(
         ? a.line - b.line
         : a.column - b.column,
   );
-  return { removed_file: input.remove_file, link_rewrites_applied: applied, ledger_row: committedLedgerRow, ledger_action };
+  return {
+    removed_file: input.remove_file,
+    link_rewrites_applied: applied,
+    ledger_row: committedLedgerRow,
+    ledger_action,
+  };
 }

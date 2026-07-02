@@ -83,7 +83,7 @@ tasks:
 ### `reads`
 
 - **In `plan lint`:** path-safety check (`TASK_READS_UNSAFE_PATH`), glob-syntax check against the supported subset (`TASK_READS_GLOB_INVALID`), and a warning when a glob matches zero files on disk (`TASK_READS_NO_MATCH`).
-- **In `task context`:** the pack gains a `## Declared read surface` section listing each glob and the set of currently-matched files. **File contents are not inlined** — only the path list.
+- **In `task context`:** the pack gains a `## Declared read surface` section listing each glob and the set of currently-matched **Git tracked** files. **File contents are not inlined** — only the path list. Untracked local files are not enumerated, even when a glob such as `**` would match them on disk. In a non-git project, declared reads fail closed instead of walking the filesystem.
 
 ### `writes`
 

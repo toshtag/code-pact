@@ -12,8 +12,8 @@
 // decision seams are FAIL-CLOSED (throw on a non-ENOENT error), so the loaders
 // wrap them in a call-site catch to keep their optional degrade-to-[]/skip.
 
-import { readFile, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { readOwnedText, listOwned } from "../project-fs/operations.ts";
+import { resolveRulesDirectoryReadPath } from "../project-fs/authority-resolvers.ts";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
 import { AgentProfile } from "../schemas/agent-profile.ts";
@@ -26,27 +26,23 @@ import {
   type RuleDoc,
 } from "./formatters/markdown.ts";
 import { loadMergedProgress } from "../progress/io.ts";
-import { validateGlobSyntax, walkAndMatch } from "../glob.ts";
+import { matchGlob, validateGlobSyntax } from "../glob.ts";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
-import { resolveWithinProject } from "../path-safety.ts";
-import { resolveAgentProfilePath } from "../agent-profile-path.ts";
+import { readProjectTextOrNull } from "../project-read.ts";
+import {
+  assertAgentProfileNameMatches,
+  resolveAgentProfilePath,
+} from "../agent-profile-path.ts";
+import { listTrackedProjectFiles } from "../project-files/tracked-files.ts";
 
-/**
- * Read a project file only if `relPath` resolves within the project root —
- * rejects `..`/absolute (lexical) AND symlink escape (via resolveWithinProject).
- * Returns null when unsafe or unreadable so callers can skip silently. This is
- * the read-side guard for every file whose path is derived from loaded YAML
- * (decision_refs) or from a readdir entry (which could be a symlink).
- */
-async function readWithinProject(cwd: string, relPath: string): Promise<string | null> {
-  try {
-    return await readFile(await resolveWithinProject(cwd, relPath), "utf8");
-  } catch {
-    return null;
-  }
-}
+// The project-contained read guard (`..`/absolute/symlink-escape → null) lives
+// in the shared `core/project-read.ts` (`readProjectTextOrNull`) so the planning
+// prompt and any other agent-facing grounding read share one implementation.
 
-export async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentProfile | null> {
+export async function loadAgentProfile(
+  cwd: string,
+  agentName: string,
+): Promise<AgentProfile | null> {
   // Validate the agent name and resolve the path OUTSIDE the try, so an unsafe
   // `agentName` is a hard CONFIG_ERROR rather than being swallowed by the catch
   // (which returns null) — a `../evil` name can never read outside the project.
@@ -55,20 +51,29 @@ export async function loadAgentProfile(cwd: string, agentName: string): Promise<
   // A missing-but-safe profile still degrades gracefully to null.
   assertSafePlanId(agentName, "Agent");
   const profilePath = await resolveAgentProfilePath(cwd, agentName);
+  let raw: string;
   try {
-    const raw = await readFile(profilePath, "utf8");
-    return AgentProfile.parse(parseYaml(raw) as unknown);
+    raw = await readOwnedText(profilePath);
   } catch {
     return null;
   }
+  let profile: AgentProfile;
+  try {
+    profile = AgentProfile.parse(parseYaml(raw) as unknown);
+  } catch {
+    return null;
+  }
+  assertAgentProfileNameMatches(profile, agentName, profilePath);
+  return profile;
 }
 
 export async function loadConstitution(cwd: string): Promise<string | null> {
-  try {
-    return await readFile(join(cwd, "design", "constitution.md"), "utf8");
-  } catch {
-    return null;
-  }
+  // Route through the project-contained read helper — identical to rule and
+  // decision reads — so a `design/constitution.md` symlinked OUTSIDE the
+  // project (resolveWithinProject rejects symlink escape) cannot leak a
+  // foreign file into the agent-facing context pack. OPTIONAL source:
+  // missing / unreadable / unsafe → null, same degrade contract as before.
+  return readProjectTextOrNull(cwd, "design/constitution.md");
 }
 
 // includeAll=true bypasses the applies_to filter (used for write_surface: large)
@@ -77,10 +82,10 @@ export async function loadRules(
   taskType: string,
   includeAll = false,
 ): Promise<RuleDoc[]> {
-  const rulesDir = join(cwd, "design", "rules");
   let entries: string[];
   try {
-    entries = await readdir(rulesDir);
+    const rulesDir = await resolveRulesDirectoryReadPath(cwd);
+    entries = await listOwned(rulesDir);
   } catch {
     return [];
   }
@@ -91,10 +96,12 @@ export async function loadRules(
     // constitution.md is included via the dedicated constitution slot, not rules
     if (entry === "constitution.md") continue;
 
-    const raw = await readWithinProject(cwd, `design/rules/${entry}`);
+    const raw = await readProjectTextOrNull(cwd, `design/rules/${entry}`);
     if (raw === null) continue; // unsafe (e.g. symlink escape) or unreadable
     const { frontMatter, body } = parseFrontMatter(raw);
-    const tags: string[] = Array.isArray(frontMatter.tags) ? (frontMatter.tags as string[]) : [];
+    const tags: string[] = Array.isArray(frontMatter.tags)
+      ? (frontMatter.tags as string[])
+      : [];
     const appliesTo: string[] = Array.isArray(frontMatter.applies_to)
       ? (frontMatter.applies_to as string[])
       : [];
@@ -115,8 +122,8 @@ export async function loadDecisions(
   // OPTIONAL context source: degrade to [] on ANY listing error. The shared
   // live-listing seam (readLiveDecisionDir) is fail-closed (throws on non-ENOENT),
   // so wrap it here to keep this loader's degrade-on-any-error contract — the
-  // leniency stays at the call site, never pushed into the seam. NON_DECISION_FILES
-  // (index + PRUNED.md) are already filtered out by the seam.
+  // leniency stays at the call site, never pushed into the seam. README.md and
+  // PRUNED.md are already filtered out by the seam via normalizeDecisionRefPath.
   let entries: string[];
   try {
     entries = (await readLiveDecisionDir(cwd)).entries;
@@ -126,15 +133,16 @@ export async function loadDecisions(
 
   const docs: DecisionDoc[] = [];
   for (const entry of entries.sort()) {
+    const basename = entry.split("/").pop() ?? entry;
     if (!entry.endsWith(".md")) continue;
-    if (!allDecisions && !entry.includes(taskId)) continue;
+    if (!allDecisions && !basename.includes(taskId)) continue;
 
     // Live per-file read seam; missing/unsafe → skip (identical to the prior
     // readWithinProject → null → skip). A non-ENOENT read error throws from the
     // seam; catch it to preserve the optional-source skip contract.
     let raw: string;
     try {
-      const r = await readLiveDecisionFile(cwd, `design/decisions/${entry}`);
+      const r = await readLiveDecisionFile(cwd, entry);
       if (r.kind !== "ok") continue; // unsafe (e.g. symlink escape) or missing
       raw = r.content;
     } catch {
@@ -152,12 +160,12 @@ export async function loadDoneEventsInPhase(
   cwd: string,
   phase: Phase,
 ): Promise<ProgressEvent[]> {
-  const taskIds = new Set((phase.tasks ?? []).map((t) => t.id));
+  const taskIds = new Set((phase.tasks ?? []).map(t => t.id));
   if (taskIds.size === 0) return [];
   try {
     const { log } = await loadMergedProgress(cwd);
     return log.events
-      .filter((e) => e.status === "done" && taskIds.has(e.task_id))
+      .filter(e => e.status === "done" && taskIds.has(e.task_id))
       .slice(-5);
   } catch {
     return [];
@@ -168,7 +176,9 @@ export async function loadDoneEventsInPhase(
 // .code-pact/state/events/ merged with the legacy .code-pact/state/progress.yaml)
 // or returns [] when the ledger is missing / unparseable. The pack uses this to
 // derive the current state of each id listed in task.depends_on.
-export async function loadAllProgressEvents(cwd: string): Promise<ProgressEvent[]> {
+export async function loadAllProgressEvents(
+  cwd: string,
+): Promise<ProgressEvent[]> {
   try {
     const { log } = await loadMergedProgress(cwd);
     return log.events;
@@ -206,24 +216,21 @@ export async function loadDeclaredDecisions(
       continue; // unexpected read error — skip (optional source)
     }
     const { body } = parseFrontMatter(raw);
-    // Use just the basename for the section header so the rendered
-    // pack matches the existing "Related Decisions" presentation
-    // (which keys by filename, not full path).
-    const filename = ref.split("/").pop() ?? ref;
-    docs.push({ filename, body });
+    docs.push({ filename: ref, body });
   }
   return docs;
 }
 
-// Walks the project for each declared `reads` glob and returns the
-// matched paths per glob. Skips any glob that the lint surface would
-// reject (path safety / syntax) so the pack renderer never sees a
-// half-parsed pattern. Returns [] when task.reads is absent or empty.
+// Matches each declared `reads` glob against Git tracked filenames only. This
+// deliberately does not walk the filesystem: task.reads is an agent-facing
+// declaration surface, and untracked local filenames must not become observable
+// through the context pack. Non-git projects fail closed when reads are present.
 export async function loadReadMatches(
   cwd: string,
   reads: readonly string[],
 ): Promise<ReadGlobMatches[]> {
   const result: ReadGlobMatches[] = [];
+  const tracked = await listTrackedProjectFiles(cwd);
   for (const glob of reads) {
     if (validateGlobSyntax(glob) !== null) {
       // Pattern lint failed — still surface it in the pack with no
@@ -231,12 +238,7 @@ export async function loadReadMatches(
       result.push({ glob, matches: [] });
       continue;
     }
-    let matches: string[];
-    try {
-      matches = await walkAndMatch(cwd, glob);
-    } catch {
-      matches = [];
-    }
+    const matches = tracked.filter(path => matchGlob(glob, path));
     result.push({ glob, matches });
   }
   return result;

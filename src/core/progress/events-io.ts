@@ -1,9 +1,30 @@
 import { randomUUID } from "node:crypto";
-import { link, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  linkOwned,
+  mkdirOwned,
+  listOwned,
+  readOwnedText,
+  removeOwned,
+  writeOwnedTextExclusive,
+} from "../project-fs/operations.ts";
+import {
+  resolveProgressEventDeletePath,
+  resolveProgressEventReadPath,
+  resolveProgressEventsDirListPath,
+  resolveProgressEventsDirWritePath,
+  resolveProgressEventWritePath,
+  unbrand,
+} from "../project-fs/authorities/project-config-authority.ts";
 import { join } from "node:path";
+import type { OwnedReadPath } from "../project-fs/branded-paths.ts";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { ProgressEvent } from "../schemas/progress-event.ts";
-import { atCompact, computeEventId, eventFileName, normalizeAt } from "./event-id.ts";
+import {
+  atCompact,
+  computeEventId,
+  eventFileName,
+  normalizeAt,
+} from "./event-id.ts";
 
 /**
  * Per-event progress ledger.
@@ -22,6 +43,70 @@ export const EVENTS_DIR_SEGMENTS = [".code-pact", "state", "events"];
 
 export function eventsDir(cwd: string): string {
   return join(cwd, ...EVENTS_DIR_SEGMENTS);
+}
+
+async function resolveEventsDirForWrite(cwd: string) {
+  try {
+    return await resolveProgressEventsDirWritePath(cwd);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (
+      code === "PATH_OUTSIDE_PROJECT" ||
+      code === "PATH_NOT_OWNED" ||
+      code === "FS_AUTHORITY_FAILURE"
+    ) {
+      const e = new Error(
+        `.code-pact/state/events is not a safe owned progress ledger path: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
+  }
+}
+
+export async function resolveEventsDir(cwd: string) {
+  try {
+    return await resolveProgressEventsDirListPath(cwd);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (
+      code === "PATH_OUTSIDE_PROJECT" ||
+      code === "PATH_NOT_OWNED" ||
+      code === "FS_AUTHORITY_FAILURE"
+    ) {
+      const e = new Error(
+        `.code-pact/state/events is not a safe owned progress ledger path: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
+  }
+}
+
+function mapEventPathError(file: string, err: unknown): never {
+  const code = (err as NodeJS.ErrnoException).code;
+  if (
+    code === "PATH_OUTSIDE_PROJECT" ||
+    code === "PATH_NOT_OWNED" ||
+    code === "FS_AUTHORITY_FAILURE"
+  ) {
+    const e = new Error(
+      `.code-pact/state/events/${file} is not a safe owned progress ledger path: ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+  throw err;
+}
+
+async function resolveEventReadPath(cwd: string, file: string) {
+  try {
+    return await resolveProgressEventReadPath(cwd, file);
+  } catch (err) {
+    mapEventPathError(file, err);
+  }
 }
 
 export type LoadedEventFile = {
@@ -58,15 +143,22 @@ function taggedEventError(
   message: string,
   file: string,
 ): NodeJS.ErrnoException {
-  const err = new Error(`Event file ${file}: ${message}`) as NodeJS.ErrnoException;
+  const err = new Error(
+    `Event file ${file}: ${message}`,
+  ) as NodeJS.ErrnoException;
   err.code = code;
   return err;
 }
 
-function eventFileMismatch(message: string, file: string): NodeJS.ErrnoException {
+function eventFileMismatch(
+  message: string,
+  file: string,
+): NodeJS.ErrnoException {
   // Literal `.code =` assignment (not via taggedEventError's variable) so the
   // error-code-surface scan sees EVENT_FILE_ID_MISMATCH as an emitted code.
-  const err = new Error(`Event file ${file}: ${message}`) as NodeJS.ErrnoException;
+  const err = new Error(
+    `Event file ${file}: ${message}`,
+  ) as NodeJS.ErrnoException;
   err.code = "EVENT_FILE_ID_MISMATCH";
   return err;
 }
@@ -90,7 +182,10 @@ function eventFileMismatch(message: string, file: string): NodeJS.ErrnoException
  * reader and the git-tree reader (branch-drift) — guaranteeing identical
  * validation everywhere. Throws `EVENT_FILE_ID_MISMATCH` on any divergence.
  */
-export function validateEventFileContent(file: string, raw: string): LoadedEventFile {
+export function validateEventFileContent(
+  file: string,
+  raw: string,
+): LoadedEventFile {
   const name = parseEventFileName(file);
   if (!name) throw eventFileMismatch("not a valid event-file name", file);
   let doc: Record<string, unknown> | null;
@@ -104,11 +199,15 @@ export function validateEventFileContent(file: string, raw: string): LoadedEvent
   const { id: storedId, ...rest } = doc ?? {};
   const parsed = ProgressEvent.safeParse(rest);
   // Parses but is not a valid ProgressEvent — SCHEMA_ERROR, not EVENT_FILE_ID_MISMATCH.
-  if (!parsed.success) throw taggedEventError("SCHEMA_ERROR", parsed.error.message, file);
+  if (!parsed.success)
+    throw taggedEventError("SCHEMA_ERROR", parsed.error.message, file);
   const event = parsed.data;
   const id = computeEventId(event);
   if (id !== name.id) {
-    throw eventFileMismatch(`content id (${id}) does not match filename id (${name.id})`, file);
+    throw eventFileMismatch(
+      `content id (${id}) does not match filename id (${name.id})`,
+      file,
+    );
   }
   if (atCompact(event.at) !== name.atCompact) {
     throw eventFileMismatch(
@@ -125,8 +224,11 @@ export function validateEventFileContent(file: string, raw: string): LoadedEvent
   return { event, id, file };
 }
 
-async function readValidatedEventFile(path: string, file: string): Promise<LoadedEventFile> {
-  return validateEventFileContent(file, await readFile(path, "utf8"));
+async function readValidatedEventFile(
+  path: OwnedReadPath,
+  file: string,
+): Promise<LoadedEventFile> {
+  return validateEventFileContent(file, await readOwnedText(path));
 }
 
 export type WrittenEvent = {
@@ -158,35 +260,42 @@ export async function writeEventFile(
 ): Promise<WrittenEvent> {
   const parsed = ProgressEvent.parse(event); // fail closed on an invalid event
   const id = computeEventId(parsed);
-  const dir = eventsDir(cwd);
   const file = eventFileName(parsed);
-  const path = join(dir, file);
-  await mkdir(dir, { recursive: true });
+  const pathRead: OwnedReadPath = await resolveEventReadPath(cwd, file);
+  await mkdirOwned(await resolveEventsDirForWrite(cwd), { recursive: true });
   const body = stringifyYaml({ ...parsed, at: normalizeAt(parsed.at), id });
 
   // Temp name is dot-prefixed (never matches EVENT_FILE_RE) and carries a random
   // uuid so it can't collide with a stale temp / reused pid; `wx` refuses to
   // reuse an existing temp rather than clobber it.
-  const tmp = join(dir, `.tmp-${process.pid}-${randomUUID()}-${file}`);
+  const tmpFile = `.tmp-${process.pid}-${randomUUID()}-${file}`;
   // Outer try guarantees the temp is removed even if the temp write itself
   // fails partway; the inner try/catch handles ONLY `link`'s EEXIST (a temp
   // collision is impossible via the uuid, so its errors must propagate, not be
   // mistaken for "the final already exists").
   try {
-    await writeFile(tmp, body, { encoding: "utf8", flag: "wx" });
+    const tmpWrite = await resolveProgressEventWritePath(cwd, tmpFile);
+    await writeOwnedTextExclusive(tmpWrite, body);
     try {
-      await link(tmp, path); // atomic, no-overwrite publish
-      return { id, path, alreadyExisted: false };
+      const pathWrite = await resolveProgressEventWritePath(cwd, file);
+      await linkOwned(tmpWrite, pathWrite); // atomic, no-overwrite publish
+      return { id, path: unbrand(pathWrite), alreadyExisted: false };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
       // Final already exists. A valid event here necessarily hashes to our id
       // (the filename), so it IS the same event; corruption / wrong stored id /
       // mismatched prefix throws EVENT_FILE_ID_MISMATCH.
-      await readValidatedEventFile(path, file);
-      return { id, path, alreadyExisted: true };
+      await readValidatedEventFile(pathRead, file);
+      return {
+        id,
+        path: unbrand(await resolveProgressEventWritePath(cwd, file)),
+        alreadyExisted: true,
+      };
     }
   } finally {
-    await rm(tmp, { force: true });
+    await removeOwned(await resolveProgressEventDeletePath(cwd, tmpFile), {
+      force: true,
+    });
   }
 }
 
@@ -200,10 +309,9 @@ export async function writeEventFile(
  * file (callers map to the usual INVALID_YAML / SCHEMA_ERROR surfaces).
  */
 export async function readEventFiles(cwd: string): Promise<LoadedEventFile[]> {
-  const dir = eventsDir(cwd);
   let names: string[];
   try {
-    names = await readdir(dir);
+    names = await listOwned(await resolveEventsDir(cwd));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
@@ -211,7 +319,9 @@ export async function readEventFiles(cwd: string): Promise<LoadedEventFile[]> {
   const out: LoadedEventFile[] = [];
   for (const file of names.sort()) {
     if (!parseEventFileName(file)) continue; // not an event file — ignore
-    out.push(await readValidatedEventFile(join(dir, file), file));
+    out.push(
+      await readValidatedEventFile(await resolveEventReadPath(cwd, file), file),
+    );
   }
   return out;
 }

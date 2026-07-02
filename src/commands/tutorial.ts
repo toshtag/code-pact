@@ -1,6 +1,9 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import {
+  createTutorialSandbox,
+  removeTutorialSandbox,
+} from "../core/project-fs/authorities/temporary-sandbox-authority.ts";
+import { unbrand } from "../core/project-fs/branded-paths.ts";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { LocaleCode } from "../core/schemas/locale.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
 import { runInitCore } from "./init.ts";
@@ -57,7 +60,9 @@ const T2 = "TUTORIAL-T2";
 // has no test suite, so the real verify command is irrelevant here.
 const SANDBOX_VERIFY = "exit 0";
 
-export async function runTutorial(opts: TutorialOptions): Promise<TutorialResult> {
+export async function runTutorial(
+  opts: TutorialOptions,
+): Promise<TutorialResult> {
   const t = messageCatalog[opts.locale].tutorial;
   const out = opts.write ?? ((s: string) => process.stdout.write(s));
   const human = opts.json !== true;
@@ -66,11 +71,14 @@ export async function runTutorial(opts: TutorialOptions): Promise<TutorialResult
   const emit = (step: TutorialStep): void => {
     steps.push(step);
     if (human) {
-      out(`\n▶ code-pact ${step.command}\n  ${step.explanation}\n  → ${step.result}\n`);
+      out(
+        `\n▶ code-pact ${step.command}\n  ${step.explanation}\n  → ${step.result}\n`,
+      );
     }
   };
 
-  const sandbox = await mkdtemp(join(opts.sandboxParent ?? tmpdir(), "code-pact-tutorial-"));
+  const sandboxPath = await createTutorialSandbox(opts.sandboxParent ?? tmpdir());
+  const sandbox = unbrand(sandboxPath);
   let kept = false;
 
   try {
@@ -93,11 +101,18 @@ export async function runTutorial(opts: TutorialOptions): Promise<TutorialResult
     });
 
     // 2. prepare T1 — the single per-task entry point.
-    const prepareT1 = await runTaskPrepare({ cwd: sandbox, taskId: T1, agent: AGENT });
+    const prepareT1 = await runTaskPrepare({
+      cwd: sandbox,
+      taskId: T1,
+      agent: AGENT,
+    });
     emit({
       command: `task prepare ${T1}`,
       explanation: t.step.prepareT1,
-      result: t.result.prepare(prepareT1.current_state, prepareT1.next_action.type),
+      result: t.result.prepare(
+        prepareT1.current_state,
+        prepareT1.next_action.type,
+      ),
     });
 
     // 3. start T1.
@@ -109,7 +124,11 @@ export async function runTutorial(opts: TutorialOptions): Promise<TutorialResult
     });
 
     // 4. prepare T2 while T1 is unfinished — demonstrates the dependency gate.
-    const prepareT2Blocked = await runTaskPrepare({ cwd: sandbox, taskId: T2, agent: AGENT });
+    const prepareT2Blocked = await runTaskPrepare({
+      cwd: sandbox,
+      taskId: T2,
+      agent: AGENT,
+    });
     emit({
       command: `task prepare ${T2}`,
       explanation: t.step.prepareT2Blocked,
@@ -117,8 +136,13 @@ export async function runTutorial(opts: TutorialOptions): Promise<TutorialResult
     });
 
     // 5. complete T1 — runs verify, records a `done` event on pass.
-    const complete = await runTaskComplete({ cwd: sandbox, taskId: T1, agent: AGENT });
-    const checkCount = complete.kind === "done" ? complete.verify.checks.length : 0;
+    const complete = await runTaskComplete({
+      cwd: sandbox,
+      taskId: T1,
+      agent: AGENT,
+    });
+    const checkCount =
+      complete.kind === "done" ? complete.verify.checks.length : 0;
     emit({
       command: `task complete ${T1}`,
       explanation: t.step.complete,
@@ -134,11 +158,18 @@ export async function runTutorial(opts: TutorialOptions): Promise<TutorialResult
     });
 
     // 7. prepare T2 again — now unblocked.
-    const prepareT2Ready = await runTaskPrepare({ cwd: sandbox, taskId: T2, agent: AGENT });
+    const prepareT2Ready = await runTaskPrepare({
+      cwd: sandbox,
+      taskId: T2,
+      agent: AGENT,
+    });
     emit({
       command: `task prepare ${T2}`,
       explanation: t.step.prepareT2Ready,
-      result: t.result.prepare(prepareT2Ready.current_state, prepareT2Ready.next_action.type),
+      result: t.result.prepare(
+        prepareT2Ready.current_state,
+        prepareT2Ready.next_action.type,
+      ),
     });
 
     if (opts.keep === true) {
@@ -151,7 +182,7 @@ export async function runTutorial(opts: TutorialOptions): Promise<TutorialResult
     return { sandbox, kept, steps };
   } finally {
     if (opts.keep !== true) {
-      await rm(sandbox, { recursive: true, force: true });
+      await removeTutorialSandbox(sandboxPath);
     }
   }
 }

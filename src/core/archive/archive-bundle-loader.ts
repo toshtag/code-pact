@@ -1,8 +1,17 @@
-import { readdirSync, readFileSync } from "node:fs";
+import {
+  readOwnedTextSyncNoFollow,
+  listOwnedDirentsSync,
+} from "../project-fs/operations.ts";
 import { join } from "node:path";
-import { archiveBundlesDir } from "./paths.ts";
-import { validateArchiveBundleTier1, type LoadedArchiveBundle } from "./archive-bundle-reader.ts";
-import { buildBundleMemberIndex, type BundleMemberIndex } from "./archive-bundle-index.ts";
+import { archiveBundlesRelDir, resolveArchiveOwnedPathSync } from "./paths.ts";
+import {
+  validateArchiveBundleTier1,
+  type LoadedArchiveBundle,
+} from "./archive-bundle-reader.ts";
+import {
+  buildBundleMemberIndex,
+  type BundleMemberIndex,
+} from "./archive-bundle-index.ts";
 
 // ---------------------------------------------------------------------------
 // Archive-bundle directory loader (Layer 1c-ii-a) — the I/O that reads
@@ -31,23 +40,28 @@ export type LoadedArchiveBundles = {
  * bundles directory yields an empty index (tolerated as an empty store).
  */
 export function loadArchiveBundles(cwd: string): LoadedArchiveBundles {
-  const dir = archiveBundlesDir(cwd);
+  const dir = resolveArchiveOwnedPathSync(cwd, archiveBundlesRelDir());
   let names: string[];
   try {
     // withFileTypes + isFile() so a `.json`-named SUBDIRECTORY can never reach
     // readFileSync (which would throw an untyped EISDIR instead of the contract's
     // ARCHIVE_BUNDLE_INVALID). Bundles are plain files only.
-    names = readdirSync(dir, { withFileTypes: true })
-      .filter((e) => e.isFile() && e.name.endsWith(".json"))
-      .map((e) => e.name)
+    names = listOwnedDirentsSync(dir)
+      .filter(e => e.isFile() && e.name.endsWith(".json"))
+      .map(e => e.name)
       .sort();
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { index: new Map(), bundles: [] };
+    if ((err as NodeJS.ErrnoException).code === "ENOENT")
+      return { index: new Map(), bundles: [] };
     throw err;
   }
-  const bundles = names.map((name) => {
+  const bundles = names.map(name => {
     const file = join("bundles", name); // stable relative label for error messages
-    const raw = readFileSync(join(dir, name), "utf8");
+    const path = resolveArchiveOwnedPathSync(
+      cwd,
+      `${archiveBundlesRelDir()}/${name}`,
+    );
+    const raw = readOwnedTextSyncNoFollow(path);
     return { file, loaded: validateArchiveBundleTier1(raw, file) };
   });
   return { index: buildBundleMemberIndex(bundles), bundles };

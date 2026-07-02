@@ -3,8 +3,10 @@
 export { LocaleCode, LocaleConfig } from "./locale.ts";
 
 export { AgentRef, Project } from "./project.ts";
+export { AgentProfileRefPath } from "./agent-profile-ref-path.ts";
 
 export { PhaseRef, Roadmap } from "./roadmap.ts";
+export { PhasePath } from "./phase-path.ts";
 export { RelativePosixPath } from "./relative-path.ts";
 
 export {

@@ -223,7 +223,7 @@ describe("runTaskAdd — non-interactive path (P13-T3)", () => {
         description: "Task with P10 declarations",
         type: "feature",
         depends_on: ["P1-T0"],
-        decision_refs: ["design/decisions/foo.md"],
+        decision_refs: ["design/decisions/security/foo.md"],
         reads: ["src/foo.ts", "src/bar.ts"],
         writes: ["src/baz.ts"],
         acceptance_refs: ["docs/acceptance/foo.md"],
@@ -240,7 +240,7 @@ describe("runTaskAdd — non-interactive path (P13-T3)", () => {
     };
     const t = phase.tasks[0]!;
     expect(t.depends_on).toEqual(["P1-T0"]);
-    expect(t.decision_refs).toEqual(["design/decisions/foo.md"]);
+    expect(t.decision_refs).toEqual(["design/decisions/security/foo.md"]);
     expect(t.reads).toEqual(["src/foo.ts", "src/bar.ts"]);
     expect(t.writes).toEqual(["src/baz.ts"]);
     expect(t.acceptance_refs).toEqual(["docs/acceptance/foo.md"]);

@@ -1,12 +1,21 @@
-import { readFile, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { mkdir } from "node:fs/promises";
+import {
+  readExplicitUserText,
+  statOwned,
+  resolveExplicitUserReadPath,
+  resolvePhaseReadPath,
+  resolvePhaseWritePath,
+  type ExplicitUserReadPath,
+} from "../core/project-fs/index.ts";
+import { type OwnedWritePath } from "../core/project-fs/branded-paths.ts";
 import { stringify as stringifyYaml } from "yaml";
 
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { assertSafeRelativePath } from "../core/path-safety.ts";
 import { type SpecImportDetail } from "../contracts/spec-import-details.ts";
-import { parseTasksMd, type ParserWarning } from "../core/spec-import/tasks-md-parser.ts";
+import {
+  parseTasksMd,
+  type ParserWarning,
+} from "../core/spec-import/tasks-md-parser.ts";
 import {
   extractSpecMd,
   type BriefCandidates,
@@ -22,7 +31,11 @@ export class SpecImportError extends Error {
   readonly detail: SpecImportDetail;
   readonly sourcePath?: string;
   readonly phaseId?: string;
-  constructor(detail: SpecImportDetail, message: string, ctx?: { sourcePath?: string; phaseId?: string }) {
+  constructor(
+    detail: SpecImportDetail,
+    message: string,
+    ctx?: { sourcePath?: string; phaseId?: string },
+  ) {
     super(message);
     this.name = "SpecImportError";
     this.detail = detail;
@@ -53,17 +66,63 @@ export interface SpecImportResult {
 
 const PHASE_ID_RE = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
-export async function runSpecImport(opts: SpecImportOptions): Promise<SpecImportResult> {
+async function resolveSpecInputPath(
+  cwd: string,
+  relPath: string,
+  ctx: { sourcePath?: string; phaseId?: string },
+): Promise<ExplicitUserReadPath> {
+  try {
+    return await resolveExplicitUserReadPath(cwd, relPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      throw new SpecImportError(
+        "unsafe_path",
+        `spec import: input path is unsafe: ${(err as Error).message}`,
+        { sourcePath: ctx.sourcePath, phaseId: ctx.phaseId },
+      );
+    }
+    throw err;
+  }
+}
+
+async function resolveSpecOutputPath(
+  cwd: string,
+  relPath: string,
+  ctx: { sourcePath?: string; phaseId?: string },
+): Promise<OwnedWritePath> {
+  try {
+    return await resolvePhaseWritePath(cwd, relPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      throw new SpecImportError(
+        "unsafe_path",
+        `spec import: output path is unsafe: ${(err as Error).message}`,
+        { sourcePath: ctx.sourcePath, phaseId: ctx.phaseId },
+      );
+    }
+    throw err;
+  }
+}
+
+export async function runSpecImport(
+  opts: SpecImportOptions,
+): Promise<SpecImportResult> {
   const { cwd, fromPath, phaseId, write, force } = opts;
 
   try {
     assertSafeRelativePath(fromPath);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new SpecImportError("unsafe_path", `spec import: --from path is unsafe: ${msg}`, {
-      sourcePath: fromPath,
-      phaseId,
-    });
+    throw new SpecImportError(
+      "unsafe_path",
+      `spec import: --from path is unsafe: ${msg}`,
+      {
+        sourcePath: fromPath,
+        phaseId,
+      },
+    );
   }
 
   if (!PHASE_ID_RE.test(phaseId)) {
@@ -74,17 +133,24 @@ export async function runSpecImport(opts: SpecImportOptions): Promise<SpecImport
     );
   }
 
-  const absInput = join(cwd, fromPath);
+  const absInput = await resolveSpecInputPath(cwd, fromPath, {
+    sourcePath: fromPath,
+    phaseId,
+  });
   let raw: string;
   try {
-    raw = await readFile(absInput, "utf8");
+    raw = await readExplicitUserText(absInput);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
-      throw new SpecImportError("file_not_found", `spec import: file not found: ${fromPath}`, {
-        sourcePath: fromPath,
-        phaseId,
-      });
+      throw new SpecImportError(
+        "file_not_found",
+        `spec import: file not found: ${fromPath}`,
+        {
+          sourcePath: fromPath,
+          phaseId,
+        },
+      );
     }
     throw new SpecImportError(
       "unreadable",
@@ -102,7 +168,10 @@ export async function runSpecImport(opts: SpecImportOptions): Promise<SpecImport
     );
   }
 
-  const tasksTotal = parsed.sections.reduce((acc, s) => acc + s.tasks.length, 0);
+  const tasksTotal = parsed.sections.reduce(
+    (acc, s) => acc + s.tasks.length,
+    0,
+  );
 
   const phaseYamlObj = buildPhaseObject({
     phaseId,
@@ -112,12 +181,15 @@ export async function runSpecImport(opts: SpecImportOptions): Promise<SpecImport
   const phaseYaml = stringifyYaml(phaseYamlObj);
 
   const outputRel = `design/phases/${phaseId}-imported.yaml`;
-  const outputAbs = join(cwd, outputRel);
+  const outputAbs = await resolveSpecOutputPath(cwd, outputRel, {
+    sourcePath: fromPath,
+    phaseId,
+  });
 
   if (write) {
     if (!force) {
       try {
-        await stat(outputAbs);
+        await statOwned(await resolvePhaseReadPath(cwd, outputRel));
         throw new SpecImportError(
           "phase_yaml_exists",
           `spec import: ${outputRel} already exists. Re-run with --force to overwrite.`,
@@ -135,7 +207,6 @@ export async function runSpecImport(opts: SpecImportOptions): Promise<SpecImport
         }
       }
     }
-    await mkdir(dirname(outputAbs), { recursive: true });
     await atomicWriteText(outputAbs, phaseYaml);
   }
 
@@ -224,7 +295,9 @@ export interface SpecSuggestResult {
   skipped_sections: string[];
 }
 
-export async function runSpecSuggest(opts: SpecSuggestOptions): Promise<SpecSuggestResult> {
+export async function runSpecSuggest(
+  opts: SpecSuggestOptions,
+): Promise<SpecSuggestResult> {
   const { cwd, suggestFromPath } = opts;
 
   try {
@@ -238,10 +311,12 @@ export async function runSpecSuggest(opts: SpecSuggestOptions): Promise<SpecSugg
     );
   }
 
-  const absInput = join(cwd, suggestFromPath);
+  const absInput = await resolveSpecInputPath(cwd, suggestFromPath, {
+    sourcePath: suggestFromPath,
+  });
   let raw: string;
   try {
-    raw = await readFile(absInput, "utf8");
+    raw = await readExplicitUserText(absInput);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {

@@ -1,6 +1,17 @@
-import type { Dirent } from "node:fs";
-import { readFile, readdir, stat } from "node:fs/promises";
-import { join, relative } from "node:path";
+import {
+  readOwnedText,
+  listOwnedDirents,
+  statOwned,
+  statOwnedList,
+} from "../project-fs/operations.ts";
+import {
+  NormalizeTargetPath,
+  resolveNormalizeListPath,
+  resolveNormalizeReadPath,
+  resolveNormalizeWritePath,
+} from "../project-fs/authorities/normalize-authority.ts";
+import type { OwnedListPath, OwnedReadPath } from "../project-fs/branded-paths.ts";
+import { join, relative, sep } from "node:path";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { progressPath } from "../progress/io.ts";
 
@@ -25,34 +36,43 @@ export type NormalizeResult = {
   written: string[];
 };
 
-async function pathExists(p: string): Promise<boolean> {
+async function pathExists(p: OwnedReadPath): Promise<boolean> {
   try {
-    await stat(p);
+    await statOwned(p);
     return true;
   } catch {
     return false;
   }
 }
 
-async function walkFiles(root: string): Promise<string[]> {
+async function listPathExists(p: OwnedListPath): Promise<boolean> {
+  try {
+    await statOwnedList(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function walkFiles(rootRel: string, cwd: string): Promise<string[]> {
   const out: string[] = [];
-  async function recurse(dir: string): Promise<void> {
-    let entries: Dirent[];
+  async function recurse(relDir: string): Promise<void> {
+    let entries;
     try {
-      entries = await readdir(dir, { withFileTypes: true });
+      entries = await listOwnedDirents(await resolveNormalizeListPath(cwd, relDir));
     } catch {
       return;
     }
     for (const entry of entries) {
-      const abs = join(dir, entry.name);
+      const rel = join(relDir, entry.name);
       if (entry.isDirectory()) {
-        await recurse(abs);
+        await recurse(rel);
       } else if (entry.isFile()) {
-        out.push(abs);
+        out.push(rel);
       }
     }
   }
-  await recurse(root);
+  await recurse(rootRel);
   return out;
 }
 
@@ -86,7 +106,7 @@ export function normalizeYamlContent(input: string): {
     reasons.push("crlf");
   }
   let trimmed = false;
-  const lines = s.split("\n").map((line) => {
+  const lines = s.split("\n").map(line => {
     if (TRAILING_WHITESPACE.test(line)) {
       trimmed = true;
       return line.replace(TRAILING_WHITESPACE, "");
@@ -136,9 +156,12 @@ export async function runNormalize(opts: {
   const changes: NormalizeFileChange[] = [];
   const written: string[] = [];
 
-  for (const abs of files) {
-    const raw = await readFile(abs, "utf8");
-    const kind: NormalizeFileKind = isMarkdownFile(abs) ? "markdown" : "yaml";
+  for (const rel of files) {
+    const target = NormalizeTargetPath.parse(rel);
+    const raw = await readOwnedText(
+      await resolveNormalizeReadPath(opts.cwd, target),
+    );
+    const kind: NormalizeFileKind = isMarkdownFile(rel) ? "markdown" : "yaml";
     const result =
       kind === "markdown"
         ? normalizeMarkdownContent(raw)
@@ -146,11 +169,13 @@ export async function runNormalize(opts: {
 
     if (result.content === raw) continue;
 
-    const rel = relative(opts.cwd, abs);
     changes.push({ path: rel, kind, reasons: result.reasons });
 
     if (opts.mode === "write") {
-      await atomicWriteText(abs, result.content);
+      await atomicWriteText(
+        await resolveNormalizeWritePath(opts.cwd, target),
+        result.content,
+      );
       written.push(rel);
     }
   }
@@ -161,16 +186,21 @@ export async function runNormalize(opts: {
 async function collectTargetFiles(cwd: string): Promise<string[]> {
   const files: string[] = [];
 
-  const designDir = join(cwd, "design");
-  if (await pathExists(designDir)) {
-    const all = await walkFiles(designDir);
-    for (const abs of all) {
-      if (isYamlFile(abs) || isMarkdownFile(abs)) files.push(abs);
+  if (await listPathExists(await resolveNormalizeListPath(cwd, "design"))) {
+    const all = await walkFiles("design", cwd);
+    for (const rel of all) {
+      if (isYamlFile(rel) || isMarkdownFile(rel)) files.push(rel);
     }
   }
 
-  const progress = progressPath(cwd);
-  if (await pathExists(progress)) files.push(progress);
+  const progressRel = relative(cwd, progressPath(cwd)).split(sep).join("/");
+  if (
+    await pathExists(
+      await resolveNormalizeReadPath(cwd, NormalizeTargetPath.parse(progressRel)),
+    )
+  ) {
+    files.push(progressRel);
+  }
 
   files.sort();
   return files;

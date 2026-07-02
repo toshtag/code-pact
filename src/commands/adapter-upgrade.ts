@@ -1,32 +1,40 @@
-import { readFile, readdir, mkdir, rm } from "node:fs/promises";
-import { join, dirname } from "node:path";
-import { parse as parseYaml } from "yaml";
+import {
+  statOwnedList,
+  resolveContextDirectoryReadPath,
+} from "../core/project-fs/index.ts";
+import { join } from "node:path";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
 import { isSupportedAgent } from "../core/agents.ts";
 import {
-  resolveAgentProfilePath,
   resolveAgentProfileRel,
+  loadValidatedAdapterProfile,
 } from "../core/agent-profile-path.ts";
 import type { DesiredAdapterFileRole } from "../core/adapters/types.ts";
 import {
+  assertAdapterWritePathsContained,
   assertSafeRelativePath,
+  authorizedPathExists,
   classifyFileState,
   decideAction,
-  resolveWithinProject,
-  type DesiredFileState,
+  readAuthorizedRegularFileMaybe,
+  type AdapterUpgradePlanDesiredState,
+  type AdapterUpgradeReason,
   type FileAction,
   type LocalFileState,
 } from "../core/adapters/file-state.ts";
+import { loadModelProfilesStrict } from "../core/models/load-model-profiles.ts";
+import { authorizeAdapterMutationPath } from "../core/adapters/manifest-file-ownership.ts";
 import {
   computeContentHash,
+  manifestRelPath,
+  planManifestWrite,
   readManifest,
-  writeManifest,
 } from "../core/adapters/manifest.ts";
 import { dedupeDesiredFiles } from "../core/adapters/desired.ts";
 import {
-  resolveAndPinModelVersion,
+  planModelVersionPin,
   validateModelVersionInput,
 } from "../core/adapters/model-version.ts";
 import type {
@@ -34,7 +42,17 @@ import type {
   ManifestFile,
   ProfileFingerprint,
 } from "../core/schemas/adapter-manifest.ts";
-import { atomicWriteText } from "../io/atomic-text.ts";
+import {
+  FileTransaction,
+  adapterDynamicCreateTarget,
+  adapterManifestWriteTarget,
+  adapterProfileWriteTarget,
+  adapterStaticDeleteTarget,
+  adapterStaticWriteTarget,
+  assertNoUntrustedAdapterTransactionJournals,
+  recoverPendingAdapterTransactions,
+} from "../core/adapters/staged-write.ts";
+import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import {
   detectModelMapDrift,
@@ -71,9 +89,15 @@ export type AdapterUpgradePlanEntry = {
   /** Project-relative POSIX path. */
   relPath: string;
   role: DesiredAdapterFileRole;
-  local: LocalFileState;
-  desired: DesiredFileState;
+  local: LocalFileState | "unverifiable";
+  desired: AdapterUpgradePlanDesiredState;
   action: FileAction;
+  /**
+   * Stable machine-readable reason for a non-obvious action. Set for `warn`
+   * (`dynamic_file_unverifiable`, `unowned_orphan_not_pruned`) and `refuse`
+   * (`managed_modified`, `unowned_generated_path`, `symlink_traversal`).
+   */
+  reason?: AdapterUpgradeReason;
 };
 
 export type AdapterUpgradeResult = {
@@ -88,53 +112,23 @@ export type AdapterUpgradeResult = {
 };
 
 // ---------------------------------------------------------------------------
-// Loaders (parallel to adapter-install / adapter-doctor; kept local for clarity)
+// Loaders
 // ---------------------------------------------------------------------------
 
-async function loadAgentProfile(
-  cwd: string,
-  agentName: string,
-): Promise<AgentProfile> {
-  const path = await resolveAgentProfilePath(cwd, agentName);
-  let raw: string;
-  try {
-    raw = await readFile(path, "utf8");
-  } catch {
-    const err = new Error(
-      `Agent profile for "${agentName}" not found at ${path}.`,
-    );
-    (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
-    throw err;
-  }
-  return AgentProfile.parse(parseYaml(raw) as unknown);
-}
-
 async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
-  const dir = join(cwd, ".code-pact", "model-profiles");
-  let entries: string[];
+  // Fail-closed: a symlinked or unreadable model-profiles directory is a
+  // CONFIG_ERROR, not silently degraded to empty profiles.
   try {
-    entries = await readdir(dir);
-  } catch {
-    return [];
-  }
-  const profiles: ModelProfile[] = [];
-  for (const entry of entries.sort()) {
-    if (!entry.endsWith(".yaml")) continue;
-    const raw = await readFile(join(dir, entry), "utf8");
-    try {
-      profiles.push(ModelProfile.parse(parseYaml(raw) as unknown));
-    } catch {
-      // skip malformed
-    }
-  }
-  return profiles;
-}
-
-async function readFileMaybe(absPath: string): Promise<string | null> {
-  try {
-    return await readFile(absPath, "utf8");
+    return await loadModelProfilesStrict(cwd);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_NOT_OWNED" || code === "PATH_OUTSIDE_PROJECT") {
+      const e = new Error(
+        `Model profiles directory is not an owned project path and was refused: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
     throw err;
   }
 }
@@ -177,13 +171,16 @@ function buildFingerprint(
  * preserved unchanged.
  *
  * **Orphan prune:** a path the OLD manifest tracked but the generator no
- * longer emits (e.g. a renamed skill) is pruned — deleted from disk when its
- * content still matches the manifest hash (`action: "prune"`), or refused and
- * left in place when the user edited it (`action: "refuse"`). `--check`
- * reports the same actions without touching disk. This keeps the generated
- * skill set convergent: a rename leaves no stale `-N` file behind. Files never
- * tracked by the manifest (hand-authored skills) are not manifest entries, so
- * they are never pruned.
+ * longer emits is auto-deleted ONLY when (a) its path is in the adapter
+ * descriptor's owned path set and (b) its content still matches the manifest
+ * hash (`action: "prune"`). An owned orphan the user edited is `refuse`d (left
+ * in place). An orphan OUTSIDE the owned set is never deleted — even when
+ * clean — but surfaced as `warn` and kept tracked, because the manifest is
+ * project-controlled and trusting it to authorize a delete would let a forged
+ * manifest remove arbitrary in-project files (see the security note at the
+ * prune loop). `--check` reports the same actions without touching disk. Files
+ * never tracked by the manifest (hand-authored skills) are not manifest
+ * entries, so they are never considered.
  */
 export async function runAdapterUpgrade(
   opts: AdapterUpgradeOptions,
@@ -201,7 +198,9 @@ export async function runAdapterUpgrade(
   } = opts;
 
   if (!isSupportedAgent(agentName)) {
-    const err = new Error(`No adapter implementation for agent "${agentName}".`);
+    const err = new Error(
+      `No adapter implementation for agent "${agentName}".`,
+    );
     (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
     throw err;
   }
@@ -221,26 +220,23 @@ export async function runAdapterUpgrade(
     throw err;
   }
 
+  const descriptor = adapterRegistry[agentName];
   const [profile, modelProfiles] = await Promise.all([
-    loadAgentProfile(cwd, agentName),
+    loadValidatedAdapterProfile(cwd, agentName, descriptor),
     loadModelProfiles(cwd),
   ]);
 
-  // `--write` pins `--model` to the profile (after validation). `--check` is
-  // read-only: it validates the value (unknown → CONFIG_ERROR) but never
-  // persists. The CLI also rejects `--check --model` outright; this keeps the
-  // core honest if called directly.
-  const resolvedModelVersion =
-    mode === "write"
-      ? await resolveAndPinModelVersion({
-          cwd,
-          agentName,
-          profile,
-          modelVersionInput: modelVersion,
-        })
-      : (validateModelVersionInput(modelVersion) ?? profile.model_version);
+  // Profile contract validation has already run inside loadValidatedAdapterProfile.
 
-  const descriptor = adapterRegistry[agentName];
+  // Effective model version for GENERATION, computed WITHOUT persisting it.
+  // `--check` never pins (and the CLI rejects `--check --model`); `--write` pins
+  // `--model`, but the pin is a profile write deferred until AFTER the path-safety
+  // preflight below, so a doomed `--write` never strands a pinned `model_version`.
+  // validateModelVersionInput is pure and fails fast (CONFIG_ERROR) on an unknown
+  // `--model` in both modes. (Matches resolveAndPinModelVersion's own resolution.)
+  const resolvedModelVersion =
+    validateModelVersionInput(modelVersion) ?? profile.model_version;
+
   const desiredFiles = dedupeDesiredFiles(
     await descriptor.generateDesiredFiles({
       cwd,
@@ -252,48 +248,177 @@ export async function runAdapterUpgrade(
   );
 
   const existingByPath = new Map<string, ManifestFile>(
-    existingManifest.files.map((f) => [f.path, f]),
+    existingManifest.files.map(f => [f.path, f]),
   );
 
-  // For --write only: ensure directory placeholders exist before any write.
-  if (mode === "write") {
-    await mkdir(join(cwd, profile.context_dir), { recursive: true });
-    if (profile.hook_dir) {
-      await mkdir(join(cwd, profile.hook_dir), { recursive: true });
+  // Write PREFLIGHT — only the manifest path. Profile-derived paths are NOT
+  // pre-checked: the profile contract has already validated them against
+  // canonical values, and the write loop creates parent dirs as needed.
+  await assertAdapterWritePathsContained(cwd, [
+    { path: manifestRelPath(agentName), kind: "file" },
+  ]);
+
+  // Resolve context_dir symlink-free BEFORE the model pin. context_dir is
+  // NOT pre-created: the atomic write path creates it lazily when the first
+  // context pack is written.
+  let contextDirAbs;
+  try {
+    contextDirAbs = await resolveContextDirectoryReadPath(
+      cwd,
+      profile.context_dir,
+    );
+  } catch (err) {
+    const e = new Error(
+      `context_dir "${profile.context_dir}" resolves through a symlink or outside the project root and was refused: ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+
+  // Type check: if context_dir already exists as a non-directory, a later
+  // context pack write would fail. Catch it here — before any side effect.
+  try {
+    const s = await statOwnedList(contextDirAbs);
+    if (!s.isDirectory()) {
+      const e = new Error(
+        `context_dir "${profile.context_dir}" already exists but is not a directory`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      // not-yet-created — valid
+    } else if ((err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
+      throw err;
+    } else {
+      throw err;
+    }
+  }
+
+  // Verify hook_dir is symlink-free (if declared). NOT pre-created, but a
+  // symlinked hook_dir must be caught before the model pin.
+  if (profile.hook_dir !== undefined) {
+    try {
+      await resolveSymlinkFreeProjectPath(cwd, profile.hook_dir);
+    } catch (err) {
+      const e = new Error(
+        `hook_dir "${profile.hook_dir}" resolves through a symlink or outside the project root and was refused: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
     }
   }
 
   const plan: AdapterUpgradePlanEntry[] = [];
   const newManifestFiles: ManifestFile[] = [];
+  const desiredApply: Array<{
+    desired: (typeof desiredFiles)[number];
+    absPath: string;
+    action: FileAction;
+  }> = [];
+  const orphanApply: Array<{
+    relPath: string;
+    role: DesiredAdapterFileRole;
+    absPath: string;
+    action: FileAction;
+  }> = [];
 
   for (const desired of desiredFiles) {
     assertSafeRelativePath(desired.path);
-    const absPath = await resolveWithinProject(cwd, desired.path);
-
     const desiredHash = computeContentHash(desired.content);
-    const diskContent = await readFileMaybe(absPath);
-    const diskHash =
-      diskContent === null ? null : computeContentHash(diskContent);
     const manifestEntry = existingByPath.get(desired.path);
     const manifestHash = manifestEntry?.sha256 ?? null;
+    const authority = await authorizeAdapterMutationPath(
+      cwd,
+      descriptor,
+      desired.path,
+      {
+        expectedRole: desired.role,
+        declaredRole: manifestEntry?.role,
+        allowDynamicWrite: true,
+      },
+    );
+    const absPath =
+      authority.kind === "owned" || authority.kind === "dynamic_write"
+        ? authority.absPath
+        : join(cwd, desired.path);
 
-    const cls = classifyFileState({ manifestHash, diskHash, desiredHash });
-    const effectiveForce = force || (regenSkills && desired.role === "skill");
-    const action = decideAction({
-      local: cls.local,
-      desired: cls.desired,
-      mode: mode === "check" ? "upgrade-check" : "upgrade-write",
-      force: effectiveForce,
-      acceptModified,
-    });
+    let local: LocalFileState | "unverifiable";
+    let desiredState: AdapterUpgradePlanDesiredState;
+    let action: FileAction;
+    let reason: AdapterUpgradeReason | undefined;
+    if (authority.kind === "unowned") {
+      local = "unverifiable";
+      desiredState = "unverifiable";
+      action = "refuse";
+      reason = "unowned_generated_path";
+    } else if (authority.kind === "unsafe") {
+      local = "unverifiable";
+      desiredState = "unverifiable";
+      action = "refuse";
+      reason = "symlink_traversal";
+    } else if (authority.kind === "dynamic_write") {
+      // Dynamic paths may be CREATED, but an existing target is never read or
+      // hashed. Even with the reserved `code-pact-*` namespace, an existing
+      // file's ownership cannot be proven via manifest SHA alone. An existing
+      // dynamic file is preserved (warn) — not refused — so the rest of the
+      // upgrade can proceed (static writes, model pin, manifest refresh).
+      if (await authorizedPathExists(authority.absPath, desired.path)) {
+        if (manifestEntry?.ownership === "handed_off") {
+          local = "managed-clean";
+          desiredState = "current";
+          action = "skip";
+        } else {
+          local = "unverifiable";
+          desiredState = "unverifiable";
+          action = "warn";
+          reason = "dynamic_file_unverifiable";
+        }
+      } else {
+        const cls = classifyFileState({
+          manifestHash,
+          diskHash: null,
+          desiredHash,
+        });
+        local = cls.local;
+        desiredState = cls.desired;
+        action = decideAction({
+          local,
+          desired: cls.desired,
+          mode: mode === "check" ? "upgrade-check" : "upgrade-write",
+          force: force || (regenSkills && desired.role === "skill"),
+          acceptModified,
+        });
+      }
+    } else {
+      const diskContent = await readAuthorizedRegularFileMaybe(
+        authority.absPath,
+        desired.path,
+      );
+      const diskHash =
+        diskContent === null ? null : computeContentHash(diskContent);
+      const cls = classifyFileState({ manifestHash, diskHash, desiredHash });
+      local = cls.local;
+      desiredState = cls.desired;
+      action = decideAction({
+        local,
+        desired: desiredState,
+        mode: mode === "check" ? "upgrade-check" : "upgrade-write",
+        force: force || (regenSkills && desired.role === "skill"),
+        acceptModified,
+      });
+      if (action === "refuse") reason = "managed_modified";
+    }
 
     plan.push({
       path: absPath,
       relPath: desired.path,
       role: desired.role,
-      local: cls.local,
-      desired: cls.desired,
+      local,
+      desired: desiredState,
       action,
+      ...(reason ? { reason } : {}),
     });
 
     if (mode === "check") {
@@ -302,13 +427,17 @@ export async function runAdapterUpgrade(
       continue;
     }
 
-    // ---- --write: execute action ----
+    desiredApply.push({ desired, absPath, action });
     let recordedHash: string | null = null;
+    let recordedOwnership: ManifestFile["ownership"] = "managed";
 
-    if (action === "write" || action === "replace_unmanaged" || action === "update") {
-      await mkdir(dirname(absPath), { recursive: true });
-      await atomicWriteText(absPath, desired.content);
+    if (
+      action === "write" ||
+      action === "replace_unmanaged" ||
+      action === "update"
+    ) {
       recordedHash = desiredHash;
+      if (authority.kind === "dynamic_write") recordedOwnership = "handed_off";
     } else if (action === "adopt") {
       // Disk matches desired; record manifest entry only.
       recordedHash = desiredHash;
@@ -320,17 +449,22 @@ export async function runAdapterUpgrade(
       // For unmanaged-without-force, we don't record (file isn't ours).
       if (manifestHash !== null) {
         recordedHash = manifestHash;
+        recordedOwnership = manifestEntry?.ownership ?? "managed";
       }
     } else if (action === "refuse") {
       // Preserve the existing manifest entry so the file stays tracked.
       // The disk content remains the user's local modification.
       if (manifestHash !== null) {
         recordedHash = manifestHash;
+        recordedOwnership = manifestEntry?.ownership ?? "managed";
+      }
+    } else if (action === "warn") {
+      // Existing dynamic file preserved without read/hash. Keep the existing
+      // manifest entry unchanged; do not adopt or update the hash.
+      if (manifestEntry !== undefined) {
+        newManifestFiles.push(manifestEntry);
       }
     }
-    // action === "warn" is only used by --check for unmanaged rows;
-    // --write should never produce it (decideAction returns skip/adopt/
-    // replace_unmanaged instead). Defensive no-op.
 
     if (recordedHash !== null) {
       newManifestFiles.push({
@@ -338,6 +472,7 @@ export async function runAdapterUpgrade(
         sha256: recordedHash,
         managed: true,
         role: desired.role,
+        ownership: recordedOwnership,
       });
     }
   }
@@ -354,16 +489,57 @@ export async function runAdapterUpgrade(
   // already gone (managed-missing) needs no action. Files never tracked by the
   // manifest (hand-authored skills like ship-task.md) are not in
   // `existingByPath`, so they are never considered here.
-  const desiredPaths = new Set(desiredFiles.map((d) => d.path));
+  const desiredPaths = new Set(desiredFiles.map(d => d.path));
   for (const [relPath, entry] of existingByPath) {
     if (desiredPaths.has(relPath)) continue; // still emitted — handled above
     assertSafeRelativePath(relPath);
-    const absPath = await resolveWithinProject(cwd, relPath);
-    const diskContent = await readFileMaybe(absPath);
-    if (diskContent === null) continue; // managed-missing: nothing on disk to prune
+    const authority = await authorizeAdapterMutationPath(
+      cwd,
+      descriptor,
+      relPath,
+      {
+        expectedRole: entry.role,
+        declaredRole: entry.role,
+        allowDynamicWrite: false,
+      },
+    );
+    const absPath =
+      authority.kind === "owned" ? authority.absPath : join(cwd, relPath);
 
-    const diskHash = computeContentHash(diskContent);
-    const isClean = diskHash === entry.sha256;
+    if (authority.kind === "unowned" || authority.kind === "dynamic_write") {
+      // Manifest-only unowned paths are never statted or read. Report the same
+      // opaque state whether the target is missing, present, or hash-matching.
+      plan.push({
+        path: absPath,
+        relPath,
+        role: entry.role,
+        local: "unverifiable",
+        desired: "stale",
+        action: "warn",
+        reason: "unowned_orphan_not_pruned",
+      });
+      if (mode === "write") newManifestFiles.push(entry);
+      continue;
+    }
+    if (authority.kind === "unsafe") {
+      plan.push({
+        path: absPath,
+        relPath,
+        role: entry.role,
+        local: "unverifiable",
+        desired: "stale",
+        action: "refuse",
+        reason: "symlink_traversal",
+      });
+      continue;
+    }
+
+    const diskContent = await readAuthorizedRegularFileMaybe(
+      authority.absPath,
+      relPath,
+    );
+    if (diskContent === null) continue; // managed-missing: nothing on disk to prune
+    const isClean = computeContentHash(diskContent) === entry.sha256;
     const action: FileAction = isClean ? "prune" : "refuse";
 
     plan.push({
@@ -373,17 +549,18 @@ export async function runAdapterUpgrade(
       local: isClean ? "managed-clean" : "managed-modified",
       desired: "stale", // generator no longer emits this path
       action,
+      // Machine-readable reason: `warn` = unowned orphan kept on disk; `refuse` =
+      // a symlinked owned orphan (would delete the real target) or a local edit.
+      ...(action === "refuse" ? { reason: "managed_modified" } : {}),
     });
 
     if (mode === "check") continue; // read-only
 
-    if (action === "prune") {
-      await rm(absPath, { force: true });
-      // Orphan is intentionally NOT added to newManifestFiles — it is gone.
-    } else {
-      // refuse: keep the user's modified file on disk AND keep tracking it, so
-      // the next run still sees it as managed (and still refuses) rather than
-      // re-classifying it as an unmanaged surprise.
+    orphanApply.push({ relPath, role: entry.role, absPath, action });
+    if (action !== "prune") {
+      // refuse / warn: keep the file on disk AND keep tracking it, so the next
+      // run still sees it as a managed orphan (and still refuses/warns) rather
+      // than re-classifying it as an unmanaged surprise.
       newManifestFiles.push({
         path: relPath,
         sha256: entry.sha256,
@@ -393,25 +570,52 @@ export async function runAdapterUpgrade(
     }
   }
 
-  const clean = plan.every((p) => p.action === "skip");
+  const clean = plan.every(p => p.action === "skip");
 
   // Build the result + (for --write) write the manifest.
   const generatorVersion =
     generatorVersionOverride ?? (await readPackageVersion());
-  const resolvedModel = resolvedModelVersion;
-
   if (mode === "check") {
     return {
       agentName,
       mode,
-      manifestPath: join(cwd, ".code-pact", "adapters", `${agentName}.manifest.yaml`),
+      manifestPath: join(
+        cwd,
+        ".code-pact",
+        "adapters",
+        `${agentName}.manifest.yaml`,
+      ),
       generatorVersion: existingManifest.generator_version,
       clean,
       plan,
     };
   }
 
-  // --write: persist the new manifest.
+  if (plan.some(p => p.action === "refuse")) {
+    return {
+      agentName,
+      mode,
+      manifestPath: join(
+        cwd,
+        ".code-pact",
+        "adapters",
+        `${agentName}.manifest.yaml`,
+      ),
+      generatorVersion,
+      clean,
+      plan,
+    };
+  }
+
+  const pinPlan = await planModelVersionPin({
+    cwd,
+    agentName,
+    profile,
+    modelVersionInput: modelVersion,
+  });
+  const resolvedModel = pinPlan.resolvedModelVersion;
+
+  // --write: persist the new manifest after all refusal checks have passed.
   const manifest: AdapterManifest = {
     schema_version: 1,
     agent_name: agentName,
@@ -421,12 +625,107 @@ export async function runAdapterUpgrade(
     profile_fingerprint: buildFingerprint(profile, resolvedModel),
     files: newManifestFiles,
   };
-  const writtenManifestPath = await writeManifest(cwd, agentName, manifest);
+  const manifestWrite = await planManifestWrite(cwd, agentName, manifest);
+
+  // Stage profile pin, desired-file writes, orphan deletes, and manifest in one
+  // best-effort transaction. The manifest is committed last.
+  assertNoUntrustedAdapterTransactionJournals(
+    await recoverPendingAdapterTransactions(cwd),
+  );
+  const tx = new FileTransaction({ cwd });
+  try {
+    if (pinPlan.write !== null) {
+      await tx.addWrite(
+        adapterProfileWriteTarget(agentName, pinPlan.write.path),
+        pinPlan.write.content,
+      );
+    }
+    for (const item of desiredApply) {
+      if (
+        item.action === "write" ||
+        item.action === "replace_unmanaged" ||
+        item.action === "update"
+      ) {
+        const writeAuthority = await authorizeAdapterMutationPath(
+          cwd,
+          descriptor,
+          item.desired.path,
+          {
+            expectedRole: item.desired.role,
+            allowDynamicWrite: true,
+          },
+        );
+        if (
+          writeAuthority.kind !== "owned" &&
+          writeAuthority.kind !== "dynamic_write"
+        ) {
+          const err = new Error(
+            `Refusing to write adapter file "${item.desired.path}" without path authority.`,
+          );
+          (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+          throw err;
+        }
+        await tx.addWrite(
+          writeAuthority.kind === "owned"
+            ? adapterStaticWriteTarget(
+                agentName,
+                item.desired.path,
+                item.desired.role,
+                writeAuthority,
+              )
+            : adapterDynamicCreateTarget(
+                agentName,
+                item.desired.path,
+                item.desired.role,
+                writeAuthority,
+              ),
+          item.desired.content,
+        );
+      }
+    }
+    for (const item of orphanApply) {
+      if (item.action === "prune") {
+        const pruneAuthority = await authorizeAdapterMutationPath(
+          cwd,
+          descriptor,
+          item.relPath,
+          {
+            expectedRole: item.role,
+            declaredRole: item.role,
+            allowDynamicWrite: false,
+          },
+        );
+        if (pruneAuthority.kind !== "owned") {
+          const err = new Error(
+            `Refusing to prune adapter file "${item.relPath}" without path authority.`,
+          );
+          (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+          throw err;
+        }
+        tx.addDelete(
+          adapterStaticDeleteTarget(
+            agentName,
+            item.relPath,
+            item.role,
+            pruneAuthority,
+          ),
+        );
+      }
+    }
+    await tx.addWrite(
+      adapterManifestWriteTarget(agentName, manifestWrite.path),
+      manifestWrite.content,
+    );
+  } catch (err) {
+    await tx.rollback();
+    throw err;
+  }
+  await tx.commit();
 
   return {
     agentName,
     mode,
-    manifestPath: writtenManifestPath,
+    manifestPath: manifestWrite.path,
     generatorVersion,
     clean,
     plan,
@@ -474,6 +773,7 @@ export async function detectAgentModelMapDrift(
   if (await isDoctorCheckDisabled(cwd, "MODEL_MAP_STALE")) {
     return { profileRel, drift: [] };
   }
-  const profile = await loadAgentProfile(cwd, agentName);
+  const descriptor = adapterRegistry[agentName];
+  const profile = await loadValidatedAdapterProfile(cwd, agentName, descriptor);
   return { profileRel, drift: detectModelMapDrift(profile.model_map) };
 }

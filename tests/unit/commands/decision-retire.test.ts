@@ -337,16 +337,16 @@ describe("runDecisionRetire — post-write recheck (TOCTOU) + readback", () => {
     expect(await exists(X_MD())).toBe(true);
   });
 
-  it("decisions scan becomes unreadable post-write (a directory named *.md) → STALE path_inaccessible, .md survives", async () => {
+  it("post-write dependant scan ignores a directory named *.md instead of crashing", async () => {
     await scaffold(ACCEPTED, TASK_NONE);
     writeHook.afterWrite = async () => {
-      // A directory named like a decision makes the dependant scan unreadable.
+      // Only regular files are decision bodies; a directory named like a decision
+      // is skipped rather than read as markdown or surfaced as raw EISDIR.
       await mkdir(join(cwd, "design", "decisions", "bogus.md"), { recursive: true });
     };
     const res = await runDecisionRetire({ cwd, path: XREF, write: true, now: NOW });
-    expect(res.kind).toBe("stale");
-    if (res.kind === "stale") expect(res.reason).toBe("path_inaccessible");
-    expect(await exists(X_MD())).toBe(true);
+    expect(res.kind).toBe("retired");
+    expect(await exists(X_MD())).toBe(false);
   });
 
   it("DRY-RUN: an unreadable existing record path (a directory) → STALE record_unverified, not an internal error", async () => {

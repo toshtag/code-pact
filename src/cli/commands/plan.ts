@@ -224,12 +224,22 @@ async function cmdPlanBrief(
     return 2;
   }
 
-  const result = await runPlanBrief({
-    cwd,
-    locale,
-    force,
-    answers: preCollectedAnswers,
-  });
+  let result: Awaited<ReturnType<typeof runPlanBrief>>;
+  try {
+    result = await runPlanBrief({
+      cwd,
+      locale,
+      force,
+      answers: preCollectedAnswers,
+    });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
+      const message = err instanceof Error ? err.message : String(err);
+      emitError(json, "CONFIG_ERROR", message);
+      return 2;
+    }
+    throw err;
+  }
   if (result.skipped) {
     emitError(json, "ALREADY_EXISTS", m.plan.briefSkipped(result.path));
     return 2;
@@ -486,12 +496,22 @@ async function cmdPlanConstitution(
     return 2;
   }
 
-  const result = await runPlanConstitution({
-    cwd,
-    locale,
-    force,
-    answers: preCollectedAnswers,
-  });
+  let result: Awaited<ReturnType<typeof runPlanConstitution>>;
+  try {
+    result = await runPlanConstitution({
+      cwd,
+      locale,
+      force,
+      answers: preCollectedAnswers,
+    });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
+      const message = err instanceof Error ? err.message : String(err);
+      emitError(json, "CONFIG_ERROR", message);
+      return 2;
+    }
+    throw err;
+  }
   if (result.skipped) {
     emitError(json, "ALREADY_EXISTS", m.plan.constitutionSkipped(result.path));
     return 2;
@@ -615,12 +635,22 @@ async function cmdPlanNormalize(
 
     return result.ok ? 0 : 1;
   } catch (err: unknown) {
-    const code =
+    const rawCode =
       (err as NodeJS.ErrnoException).code ?? "PLAN_NORMALIZE_FAILED";
+    const code = normalizeFsAuthorityConfigCode(rawCode);
     const message = err instanceof Error ? err.message : String(err);
     emitError(json, code, message);
-    return 3;
+    return code === "CONFIG_ERROR" ? 2 : 3;
   }
+}
+
+function normalizeFsAuthorityConfigCode(code: string): string {
+  return code === "PATH_NOT_OWNED" ||
+    code === "PATH_OUTSIDE_PROJECT" ||
+    code === "FS_AUTHORITY_FAILURE" ||
+    code === "ENOSYS"
+    ? "CONFIG_ERROR"
+    : code;
 }
 
 // Ledger-read failures are integrity DIAGNOSTICS, not public command errors —
@@ -689,7 +719,7 @@ async function cmdPlanAnalyze(
     const code = planCatchCode(err, "PLAN_ANALYZE_FAILED");
     const message = err instanceof Error ? err.message : String(err);
     emitError(json, code, message);
-    return 1;
+    return code === "CONFIG_ERROR" ? 2 : 1;
   }
 }
 
@@ -827,7 +857,20 @@ async function cmdPlanSyncPaths(
   const mode = writeFlag ? "write" : "check";
 
   const run = async (): Promise<number> => {
-    const result = await runPlanSyncPaths({ cwd, renames, mode });
+    let result: Awaited<ReturnType<typeof runPlanSyncPaths>>;
+    try {
+      result = await runPlanSyncPaths({ cwd, renames, mode });
+    } catch (err) {
+      const code = normalizeFsAuthorityConfigCode(
+        (err as NodeJS.ErrnoException).code ?? "PLAN_SYNC_PATHS_FAILED",
+      );
+      if (code === "CONFIG_ERROR") {
+        const message = err instanceof Error ? err.message : String(err);
+        emitError(json, "CONFIG_ERROR", message);
+        return 2;
+      }
+      throw err;
+    }
     if (json) {
       emitOk(serializePlanSyncPathsData(result));
     } else {

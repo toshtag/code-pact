@@ -3,15 +3,37 @@
 // agent-resolution contract (codes, messages, precedence) defined in one place;
 // the per-function doc below is the contract of record.
 
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  resolveProjectConfigReadPath,
+  readOwnedText,
+} from "./project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { Project } from "./schemas/project.ts";
 
 /** Load and validate `.code-pact/project.yaml`. */
 export async function loadProject(cwd: string): Promise<Project> {
-  const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
-  return Project.parse(parseYaml(raw) as unknown);
+  let raw: string;
+  try {
+    raw = await readOwnedText(await resolveProjectConfigReadPath(cwd));
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    const detail =
+      code === "ENOENT"
+        ? ".code-pact/project.yaml is missing"
+        : (err as Error).message;
+    const e = new Error(`Cannot read .code-pact/project.yaml: ${detail}.`);
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+  try {
+    return Project.parse(parseYaml(raw) as unknown);
+  } catch (err) {
+    const e = new Error(
+      `Cannot parse or validate .code-pact/project.yaml: ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
 }
 
 /**
@@ -30,9 +52,11 @@ export function resolveEnabledAgent(
   explicitAgent?: string,
 ): string {
   const agentName = explicitAgent ?? project.default_agent;
-  const ref = project.agents.find((a) => a.name === agentName);
+  const ref = project.agents.find(a => a.name === agentName);
   if (!ref) {
-    const err = new Error(`Agent "${agentName}" is not configured in project.yaml.`);
+    const err = new Error(
+      `Agent "${agentName}" is not configured in project.yaml.`,
+    );
     (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
     throw err;
   }

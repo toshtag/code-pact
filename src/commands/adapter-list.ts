@@ -1,5 +1,7 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  readOwnedText,
+  resolveProjectConfigReadPath,
+} from "../core/project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { Project } from "../core/schemas/project.ts";
 import {
@@ -47,7 +49,7 @@ export type AdapterListResult = {
 
 async function loadEnabledAgentNames(cwd: string): Promise<Set<string>> {
   try {
-    const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
+    const raw = await readOwnedText(await resolveProjectConfigReadPath(cwd));
     const project = Project.parse(parseYaml(raw) as unknown);
     const names = new Set<string>();
     for (const a of project.agents) {
@@ -106,9 +108,14 @@ export async function runAdapterList(opts: {
         generatorVersion = m.generator_version;
       }
     } catch {
-      // readManifest throws on YAML parse error or schema violation. We
-      // surface that as manifestPresent + manifestInvalid; doctor will
-      // emit ADAPTER_MANIFEST_INVALID with the parse detail.
+      // readManifest throws on a YAML parse error, a schema violation, OR a
+      // path-safety refusal (a `.code-pact/adapters` symlink that escapes the
+      // project — fail-closed; no bytes are read from outside the project).
+      // The lister is intentionally non-throwing, so rather than abort every
+      // other agent we surface this one as present-but-unusable
+      // (manifestInvalid). That keeps the adversarial / corrupt manifest VISIBLE
+      // (vs. masking it as "absent") and prompts investigation; doctor then
+      // emits ADAPTER_MANIFEST_INVALID with the concrete reason.
       manifestPresent = true;
       manifestInvalid = true;
     }
@@ -125,7 +132,8 @@ export async function runAdapterList(opts: {
     if (manifestInvalid) entry.manifestInvalid = true;
     if (fileCount !== undefined) entry.fileCount = fileCount;
     if (lastGeneratedAt !== undefined) entry.lastGeneratedAt = lastGeneratedAt;
-    if (generatorVersion !== undefined) entry.generatorVersion = generatorVersion;
+    if (generatorVersion !== undefined)
+      entry.generatorVersion = generatorVersion;
 
     agents.push(entry);
   }

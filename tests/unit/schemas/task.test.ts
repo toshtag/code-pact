@@ -132,3 +132,77 @@ describe("Task schema — P10 optional fields reject malformed input", () => {
     ).toThrow();
   });
 });
+
+// SECURITY (Blocker 1 — arbitrary local file read / gate bypass / context leak
+// via decision_refs). The decision_refs field carries a NAMESPACE contract,
+// enforced at parse time so a hostile checked-in phase YAML can never name an
+// arbitrary local file (.env, credentials) as a "decision". The schema is the
+// FRONT-LINE layer; the gate and pack loader re-validate independently.
+describe("Task schema — decision_refs namespace contract (security)", () => {
+  it("accepts a flat ADR under design/decisions/", () => {
+    const t = Task.parse({
+      ...V1_0_X_TASK,
+      decision_refs: ["design/decisions/ADR-001.md"],
+    });
+    expect(t.decision_refs).toEqual(["design/decisions/ADR-001.md"]);
+  });
+
+  it("accepts a nested ADR under design/decisions/", () => {
+    const t = Task.parse({
+      ...V1_0_X_TASK,
+      decision_refs: ["design/decisions/2026/ADR-001.md"],
+    });
+    expect(t.decision_refs).toEqual(["design/decisions/2026/ADR-001.md"]);
+  });
+
+  it("rejects .env (arbitrary local file)", () => {
+    expect(() => Task.parse({ ...V1_0_X_TASK, decision_refs: [".env"] })).toThrow();
+  });
+
+  it("rejects a non-.md file even inside the namespace", () => {
+    expect(() =>
+      Task.parse({ ...V1_0_X_TASK, decision_refs: ["design/decisions/secret"] }),
+    ).toThrow();
+  });
+
+  it("rejects design/decisions/README.md (the index, not a decision)", () => {
+    expect(() =>
+      Task.parse({ ...V1_0_X_TASK, decision_refs: ["design/decisions/README.md"] }),
+    ).toThrow();
+  });
+
+  it("rejects design/decisions/PRUNED.md (the tombstone ledger)", () => {
+    expect(() =>
+      Task.parse({ ...V1_0_X_TASK, decision_refs: ["design/decisions/PRUNED.md"] }),
+    ).toThrow();
+  });
+
+  it("rejects a path outside the decisions namespace", () => {
+    expect(() =>
+      Task.parse({ ...V1_0_X_TASK, decision_refs: ["docs/cli-contract.md"] }),
+    ).toThrow();
+  });
+
+  it("rejects traversal escaping the namespace", () => {
+    expect(() =>
+      Task.parse({ ...V1_0_X_TASK, decision_refs: ["design/decisions/../../secret.md"] }),
+    ).toThrow();
+  });
+
+  it("rejects an absolute path", () => {
+    expect(() =>
+      Task.parse({ ...V1_0_X_TASK, decision_refs: ["/etc/passwd"] }),
+    ).toThrow();
+  });
+
+  it("rejects a backslash path", () => {
+    expect(() =>
+      Task.parse({ ...V1_0_X_TASK, decision_refs: ["design\\decisions\\ADR.md"] }),
+    ).toThrow();
+  });
+
+  it("leaves acceptance_refs loose ON PURPOSE (it points at docs / phase YAML)", () => {
+    const t = Task.parse({ ...V1_0_X_TASK, acceptance_refs: ["docs/cli-contract.md"] });
+    expect(t.acceptance_refs).toEqual(["docs/cli-contract.md"]);
+  });
+});

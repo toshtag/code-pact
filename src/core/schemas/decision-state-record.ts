@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { RelativePosixPath } from "./relative-path.ts";
 import { Sha256Hex } from "./phase-snapshot.ts";
+import { DecisionRefPath } from "./decision-ref.ts";
 
 // ---------------------------------------------------------------------------
 // Decision-state record — `.code-pact/state/archive/decisions/<stem>-<hash8>.json`.
 //
-// Records the *settled state* of one decision record (`design/decisions/*.md`)
+// Records the *settled state* of one `.md` decision record under `design/decisions/`
 // as observed at a specific source hash: its ADR status and whether it may
 // satisfy an active decision gate. It is NOT a retirement: writing one deletes
 // nothing, edits no `PRUNED.md`, rewrites no link (those are the later
@@ -29,25 +29,11 @@ import { Sha256Hex } from "./phase-snapshot.ts";
 //
 // Resolution is by EXACT `canonical_ref` match against `decision_refs` /
 // `acceptance_refs` targets — never fuzzy/stem matching. `canonical_ref` is a
-// normalized project-relative POSIX path confined to a top-level
-// `design/decisions/*.md` (never README.md / PRUNED.md / nested paths), and
+// normalized project-relative POSIX path confined to
+// a `.md` decision record under `design/decisions/` (never README.md / PRUNED.md), and
 // `path_sha256` (and the filename's hash8) are computed from that canonical
 // form, never from an OS-native path.
 // ---------------------------------------------------------------------------
-
-const DecisionRefPath = RelativePosixPath.refine(
-  (s) => s.startsWith("design/decisions/"),
-  "decision path must be under design/decisions/",
-)
-  .refine((s) => s.endsWith(".md"), "decision path must end with .md")
-  .refine(
-    (s) => !s.slice("design/decisions/".length).includes("/"),
-    "decision path must be a top-level record (nested ADRs are not snapshot targets)",
-  )
-  .refine(
-    (s) => s !== "design/decisions/README.md" && s !== "design/decisions/PRUNED.md",
-    "README.md / PRUNED.md are never decision records",
-  );
 
 export const ADR_STATUS_AT_SNAPSHOT_VALUES = [
   "accepted",

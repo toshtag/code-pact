@@ -17,7 +17,10 @@ describe("Project", () => {
   });
 
   it("accepts locale as an object", () => {
-    const result = Project.parse({ ...VALID, locale: { default: "en-US", cli: "ja-JP" } });
+    const result = Project.parse({
+      ...VALID,
+      locale: { default: "en-US", cli: "ja-JP" },
+    });
     expect(result.locale).toMatchObject({ default: "en-US", cli: "ja-JP" });
   });
 
@@ -73,14 +76,21 @@ describe("AgentRef.enabled", () => {
     ).toThrow();
   });
 
-  // `profile` is read as `join(cwd, ".code-pact", profile)`, so it must be a
-  // project-relative POSIX path — reject traversal / absolute values.
-  it.each(["../agent-profiles/evil.yaml", "/etc/passwd", "a/../b.yaml", "~/x.yaml"])(
-    "rejects unsafe profile %j",
-    (profile) => {
-      expect(() => AgentRef.parse({ name: "claude-code", profile })).toThrow();
-    },
-  );
+  // `profile` must stay under `.code-pact/agent-profiles/**.yaml`.
+  it.each([
+    "../agent-profiles/evil.yaml",
+    "/etc/passwd",
+    "a/../b.yaml",
+    "~/x.yaml",
+    "state/private-agent-profile.yaml",
+    "agent-profiles/not-yaml.json",
+    "agent-profiles/private.txt",
+    "agent-profiles/no-extension",
+    "model-profiles/private.yaml",
+    "adapters/private.yaml",
+  ])("rejects unsafe profile %j", profile => {
+    expect(() => AgentRef.parse({ name: "claude-code", profile })).toThrow();
+  });
 
   it("Project preserves agents[].enabled defaulting through nested parse", () => {
     const result = Project.parse(VALID);

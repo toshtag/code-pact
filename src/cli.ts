@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
-import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  statOwnedList,
+  resolveOwnedDirectoryReadPath,
+} from "./core/project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { readPackageVersion } from "./lib/package-version.ts";
 import { splitArgv, strictParse, ConfigError } from "./lib/argv.ts";
@@ -33,6 +35,7 @@ import { cmdSpec } from "./cli/commands/spec.ts";
 import { cmdDecision } from "./cli/commands/decision.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
 import { LocaleConfig } from "./core/schemas/locale.ts";
+import { readProjectYamlStrictOrNull } from "./core/project-config-path.ts";
 
 const KNOWN_LOCALES: ReadonlySet<Locale> = new Set(["en-US", "ja-JP"]);
 const KNOWN_AGENTS: ReadonlySet<SupportedAgent> = new Set(SUPPORTED_AGENTS);
@@ -51,13 +54,31 @@ const KNOWN_AGENTS: ReadonlySet<SupportedAgent> = new Set(SUPPORTED_AGENTS);
  */
 async function codePactDirExists(cwd: string): Promise<boolean> {
   try {
-    const s = await stat(join(cwd, ".code-pact"));
+    const dirPath = await resolveOwnedDirectoryReadPath(cwd, ".code-pact");
+    const s = await statOwnedList(dirPath);
     return s.isDirectory();
   } catch {
     return false;
   }
 }
 
+function detectCodePactEnvLocale(): Locale | null {
+  const codePactLocale = process.env.CODE_PACT_LOCALE;
+  if (codePactLocale && KNOWN_LOCALES.has(codePactLocale as Locale)) {
+    return codePactLocale as Locale;
+  }
+  return null;
+}
+
+function detectLangLocale(): Locale | null {
+  const lang = process.env.LANG ?? "";
+  if (lang.startsWith("ja")) return "ja-JP";
+  return null;
+}
+
+async function readProjectYamlForLocale(cwd: string): Promise<string | null> {
+  return readProjectYamlStrictOrNull(cwd);
+}
 
 // Locale resolution priority:
 // 1. --locale flag (handled in main before this is called)
@@ -65,29 +86,35 @@ async function codePactDirExists(cwd: string): Promise<boolean> {
 // 3. .code-pact/project.yaml locale field
 // 4. LANG env var
 // 5. default en-US
-async function detectLocale(cwd: string): Promise<Locale> {
-  const codePactLocale = process.env.CODE_PACT_LOCALE;
-  if (codePactLocale && KNOWN_LOCALES.has(codePactLocale as Locale)) {
-    return codePactLocale as Locale;
-  }
+async function detectLocale(
+  cwd: string,
+  opts?: { readProject?: boolean },
+): Promise<Locale> {
+  const envLocale = detectCodePactEnvLocale();
+  if (envLocale !== null) return envLocale;
 
-  try {
-    const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
-    const data = parseYaml(raw) as { locale?: unknown };
-    if (data && typeof data === "object" && data.locale != null) {
-      const result = LocaleConfig.safeParse(data.locale);
-      if (result.success) {
-        const cfg = result.data;
-        const code = typeof cfg === "string" ? cfg : (cfg.cli ?? cfg.default);
-        if (KNOWN_LOCALES.has(code as Locale)) return code as Locale;
+  if (opts?.readProject !== false) {
+    const raw = await readProjectYamlForLocale(cwd);
+    if (raw !== null) {
+      try {
+        const data = parseYaml(raw) as { locale?: unknown };
+        if (data && typeof data === "object" && data.locale != null) {
+          const result = LocaleConfig.safeParse(data.locale);
+          if (result.success) {
+            const cfg = result.data;
+            const code =
+              typeof cfg === "string" ? cfg : (cfg.cli ?? cfg.default);
+            if (KNOWN_LOCALES.has(code as Locale)) return code as Locale;
+          }
+        }
+      } catch {
+        // project.yaml unparseable for locale discovery — continue
       }
     }
-  } catch {
-    // project.yaml absent or unparseable — continue
   }
 
-  const lang = process.env.LANG ?? "";
-  if (lang.startsWith("ja")) return "ja-JP";
+  const langLocale = detectLangLocale();
+  if (langLocale !== null) return langLocale;
   return "en-US";
 }
 
@@ -199,7 +226,7 @@ async function cmdInit(
   const agentRaw = (values.agent as string | undefined) ?? "claude-code";
   const agents: SupportedAgent[] = agentRaw
     .split(",")
-    .map((a) => a.trim())
+    .map(a => a.trim())
     .filter((a): a is SupportedAgent => KNOWN_AGENTS.has(a as SupportedAgent));
 
   if (agents.length === 0) {
@@ -209,7 +236,8 @@ async function cmdInit(
   }
 
   const initLocale: LocaleCode =
-    typeof values.locale === "string" && KNOWN_LOCALES.has(values.locale as Locale)
+    typeof values.locale === "string" &&
+    KNOWN_LOCALES.has(values.locale as Locale)
       ? (values.locale as LocaleCode)
       : locale;
 
@@ -300,7 +328,9 @@ async function cmdTutorial(
     return 0;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    emitError(json, "TUTORIAL_FAILED", msg, { human: `tutorial failed: ${msg}` });
+    emitError(json, "TUTORIAL_FAILED", msg, {
+      human: `tutorial failed: ${msg}`,
+    });
     return 1;
   }
 }
@@ -337,7 +367,7 @@ async function cmdDoctor(argv: string[], globalJson: boolean): Promise<number> {
     process.stdout.write(`${formatDoctor(result)}\n`);
   }
 
-  const hasErrors = result.issues.some((i) => i.severity === "error");
+  const hasErrors = result.issues.some(i => i.severity === "error");
   return hasErrors ? 1 : 0;
 }
 
@@ -345,7 +375,10 @@ async function cmdDoctor(argv: string[], globalJson: boolean): Promise<number> {
 // Command: validate
 // ---------------------------------------------------------------------------
 
-async function cmdValidate(argv: string[], globalJson: boolean): Promise<number> {
+async function cmdValidate(
+  argv: string[],
+  globalJson: boolean,
+): Promise<number> {
   const { values } = parseArgs({
     args: argv,
     options: {
@@ -457,7 +490,8 @@ async function cmdStatus(argv: string[], globalJson: boolean): Promise<number> {
     const cleanExit2 =
       code === "PHASE_NOT_FOUND" ||
       code === "AMBIGUOUS_PHASE_ID" ||
-      code === "PHASE_SNAPSHOT_INVALID";
+      code === "PHASE_SNAPSHOT_INVALID" ||
+      code === "CONFIG_ERROR";
     emitError(
       json,
       code,
@@ -473,21 +507,25 @@ function formatStatus(r: StatusResult): string {
   if (r.filter.mine && r.filter.supported === false) {
     lines.push(`(--mine unavailable: ${r.filter.reason})`);
   } else if (r.filter.mine && r.filter.supported === true) {
-    lines.push(`(filtered to author: ${r.filter.author} — matches your resolved author identity)`);
+    lines.push(
+      `(filtered to author: ${r.filter.author} — matches your resolved author identity)`,
+    );
   }
   const who = (a?: string) => (a ? ` — ${a}` : "");
   // Conflicts are an exception signal — printed first and only when present, so
   // a healthy project stays calm and a real conflict stands out. (The JSON
   // envelope always carries `conflicts`, possibly empty; this is human-only.)
   if (r.conflicts.length > 0) {
-    lines.push(`Conflicts (${r.conflicts.length}) — reconcile progress events (see code-pact status --json data.conflicts[].details.events[]):`);
+    lines.push(
+      `Conflicts (${r.conflicts.length}) — reconcile progress events (see code-pact status --json data.conflicts[].details.events[]):`,
+    );
     for (const c of r.conflicts) {
       // Normally always populated; if attribution degraded to empty sides, say so
       // rather than printing an empty `()` — the conflict signal still stands.
       const sides =
         c.details.events.length > 0
           ? c.details.events
-              .map((e) => (e.author ? `${e.status} by ${e.author}` : e.status))
+              .map(e => (e.author ? `${e.status} by ${e.author}` : e.status))
               .join(" vs ")
           : "details unavailable";
       lines.push(`  ${c.task_id}  (${sides})`);
@@ -496,13 +534,16 @@ function formatStatus(r: StatusResult): string {
   lines.push(`In flight (${r.in_flight.length}):`);
   for (const e of r.in_flight) lines.push(`  ${e.task_id}${who(e.author)}`);
   lines.push(`Blocked (${r.blocked.length}):`);
-  for (const e of r.blocked) lines.push(`  ${e.task_id}${who(e.author)}${e.reason ? `  reason: ${e.reason}` : ""}`);
+  for (const e of r.blocked)
+    lines.push(
+      `  ${e.task_id}${who(e.author)}${e.reason ? `  reason: ${e.reason}` : ""}`,
+    );
   lines.push(`Available to pick up (${r.available.length}):`);
   for (const e of r.available) lines.push(`  ${e.task_id}`);
   lines.push(`Waiting (${r.waiting.length}):`);
   for (const e of r.waiting) {
     const why = e.reasons
-      .map((x) =>
+      .map(x =>
         x.code === "WAITING_FOR_DEPENDENCY"
           ? `needs ${x.task_id}`
           : x.decision_ref
@@ -526,7 +567,11 @@ function formatStatus(r: StatusResult): string {
 // Command: recommend
 // ---------------------------------------------------------------------------
 
-async function cmdRecommend(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
+async function cmdRecommend(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
   const m = messages[locale];
   const { values } = parseArgs({
     args: argv,
@@ -571,7 +616,8 @@ async function cmdRecommend(argv: string[], locale: Locale, globalJson: boolean)
     if (code === "AMBIGUOUS_PHASE_ID") {
       const phases =
         (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
-      const msg = err instanceof Error ? err.message : `Phase "${phaseId}" is ambiguous.`;
+      const msg =
+        err instanceof Error ? err.message : `Phase "${phaseId}" is ambiguous.`;
       emitError(json, "AMBIGUOUS_PHASE_ID", msg, { data: { phases } });
       return 2;
     }
@@ -602,7 +648,11 @@ async function cmdRecommend(argv: string[], locale: Locale, globalJson: boolean)
 // Command: verify
 // ---------------------------------------------------------------------------
 
-async function cmdVerify(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
+async function cmdVerify(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
   const m = messages[locale];
   const { values } = parseArgs({
     args: argv,
@@ -657,13 +707,24 @@ async function cmdVerify(argv: string[], locale: Locale, globalJson: boolean): P
     if (code === "AMBIGUOUS_PHASE_ID") {
       const phases =
         (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
-      const msg = err instanceof Error ? err.message : `Phase "${phaseId}" is ambiguous.`;
+      const msg =
+        err instanceof Error ? err.message : `Phase "${phaseId}" is ambiguous.`;
       emitError(json, "AMBIGUOUS_PHASE_ID", msg, { data: { phases } });
       return 2;
     }
     if (code === "TASK_NOT_FOUND") {
       const msg = m.verify.taskNotFound(taskId, phaseId);
       emitError(json, "TASK_NOT_FOUND", msg);
+      return 2;
+    }
+    if (code === "CONFIG_ERROR") {
+      // A contained-loader path-safety refusal / malformed roadmap or phase →
+      // structured envelope (exit 2), not a top-level internal error / exit 3.
+      emitError(
+        json,
+        "CONFIG_ERROR",
+        err instanceof Error ? err.message : "Invalid configuration.",
+      );
       return 2;
     }
     throw err;
@@ -674,7 +735,11 @@ async function cmdVerify(argv: string[], locale: Locale, globalJson: boolean): P
 // Command: pack
 // ---------------------------------------------------------------------------
 
-async function cmdPack(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
+async function cmdPack(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
   const m = messages[locale];
   const { values } = parseArgs({
     args: argv,
@@ -706,7 +771,9 @@ async function cmdPack(argv: string[], locale: Locale, globalJson: boolean): Pro
     if (json) {
       emitOk(result);
     } else {
-      process.stderr.write(`${m.pack.written(result.outputPath, result.charCount)}\n`);
+      process.stderr.write(
+        `${m.pack.written(result.outputPath, result.charCount)}\n`,
+      );
     }
     return 0;
   } catch (err: unknown) {
@@ -719,13 +786,24 @@ async function cmdPack(argv: string[], locale: Locale, globalJson: boolean): Pro
     if (code === "AMBIGUOUS_PHASE_ID") {
       const phases =
         (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
-      const msg = err instanceof Error ? err.message : `Phase "${phaseId}" is ambiguous.`;
+      const msg =
+        err instanceof Error ? err.message : `Phase "${phaseId}" is ambiguous.`;
       emitError(json, "AMBIGUOUS_PHASE_ID", msg, { data: { phases } });
       return 2;
     }
     if (code === "TASK_NOT_FOUND") {
       const msg = m.pack.taskNotFound(taskId, phaseId);
       emitError(json, "TASK_NOT_FOUND", msg);
+      return 2;
+    }
+    if (code === "CONFIG_ERROR") {
+      // A control-plane read refused on path-safety grounds (a roadmap/phase
+      // path that escapes the project via `..`/symlink → loadPhase/loadRoadmap
+      // throw CONFIG_ERROR). Surface the structured envelope (exit 2) instead of
+      // letting it fall through to the top-level internal-error / exit 3. Mirrors
+      // `task context`, which already maps CONFIG_ERROR here.
+      const msg = err instanceof Error ? err.message : "Invalid configuration.";
+      emitError(json, "CONFIG_ERROR", msg);
       return 2;
     }
     throw err;
@@ -736,7 +814,11 @@ async function cmdPack(argv: string[], locale: Locale, globalJson: boolean): Pro
 // Command: progress
 // ---------------------------------------------------------------------------
 
-async function cmdProgress(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
+async function cmdProgress(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
   const m = messages[locale];
   let values: Record<string, unknown>;
   try {
@@ -766,7 +848,10 @@ async function cmdProgress(argv: string[], locale: Locale, globalJson: boolean):
     }
     return 0;
   } catch (err: unknown) {
-    if (err instanceof Error && (err as NodeJS.ErrnoException).code === "BASELINE_NOT_FOUND") {
+    if (
+      err instanceof Error &&
+      (err as NodeJS.ErrnoException).code === "BASELINE_NOT_FOUND"
+    ) {
       const msg = m.progress.baselineNotFound(baselineName);
       emitError(json, "BASELINE_NOT_FOUND", msg);
       return 2;
@@ -782,11 +867,6 @@ async function cmdProgress(argv: string[], locale: Locale, globalJson: boolean):
 async function main(): Promise<number> {
   const { globalValues, command, rest } = splitArgv(process.argv.slice(2));
   const cwd = process.cwd();
-  const locale: Locale =
-    globalValues.locale && KNOWN_LOCALES.has(globalValues.locale as Locale)
-      ? (globalValues.locale as Locale)
-      : await detectLocale(cwd);
-  const m = messages[locale];
   const json = globalValues.json === true;
 
   if (globalValues.version) {
@@ -798,6 +878,14 @@ async function main(): Promise<number> {
     }
     return 0;
   }
+
+  const locale: Locale =
+    globalValues.locale && KNOWN_LOCALES.has(globalValues.locale as Locale)
+      ? (globalValues.locale as Locale)
+      : await detectLocale(cwd, {
+          readProject: !(globalValues.help || !command),
+        });
+  const m = messages[locale];
 
   if (globalValues.help || !command) {
     process.stdout.write(`${m.usage}\n`);
@@ -861,9 +949,19 @@ async function main(): Promise<number> {
 }
 
 main().then(
-  (code) => process.exit(code),
+  code => process.exit(code),
   (err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
+    // Safety net: a structured CONFIG_ERROR that no command-level catch mapped
+    // (e.g. a contained control-plane loader's path-safety refusal surfacing from
+    // a command whose catch this PR did not individually wire) must STILL be a
+    // clean exit-2 envelope, never a top-level internal error / exit 3. This
+    // guarantees CONFIG_ERROR completeness across every command in one place; the
+    // per-command cases above stay for their nicer, localized messages.
+    if ((err as NodeJS.ErrnoException)?.code === "CONFIG_ERROR") {
+      emitError(process.argv.includes("--json"), "CONFIG_ERROR", msg);
+      process.exit(2);
+    }
     process.stderr.write(`internal error: ${msg}\n`);
     process.exit(3);
   },

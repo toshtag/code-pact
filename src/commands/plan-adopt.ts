@@ -13,13 +13,18 @@
 // prose produce no list items and fall to no_plan_items_detected — the
 // honest signal to use `plan prompt --schema-only` + an agent instead.
 
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  readExplicitUserText,
+  resolveExplicitUserReadPath,
+} from "../core/project-fs/index.ts";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import { assertSafeRelativePath } from "../core/path-safety.ts";
-import { PhaseImportInput, type PhaseImportEntry } from "../core/schemas/phase-import.ts";
-import { Roadmap } from "../core/schemas/roadmap.ts";
+import {
+  PhaseImportInput,
+  type PhaseImportEntry,
+} from "../core/schemas/phase-import.ts";
+import { loadRoadmap } from "../core/plan/roadmap.ts";
 import {
   applyParsedPhaseImport,
   collectMisshapeWarnings,
@@ -153,7 +158,9 @@ function trySinglePhase(
       typeof parsed.weight === "number" && parsed.weight > 0
         ? parsed.weight
         : 20,
-    ...(parsed.confidence !== undefined ? { confidence: parsed.confidence } : {}),
+    ...(parsed.confidence !== undefined
+      ? { confidence: parsed.confidence }
+      : {}),
     ...(parsed.risk !== undefined ? { risk: parsed.risk } : {}),
     ...(verify !== undefined && verify.length > 0
       ? { verify_commands: verify }
@@ -177,7 +184,10 @@ const TYPE_RULES: { re: RegExp; type: string }[] = [
   { re: /\b(docs?|document(ation)?|readme)\b/i, type: "docs" },
   { re: /\b(tests?|spec|coverage)\b/i, type: "test" },
   { re: /\brefactor\b/i, type: "refactor" },
-  { re: /\b(architecture|schema|contract|foundation|scaffold)\b/i, type: "architecture" },
+  {
+    re: /\b(architecture|schema|contract|foundation|scaffold)\b/i,
+    type: "architecture",
+  },
 ];
 
 function inferType(text: string): string {
@@ -258,11 +268,9 @@ function buildInputFromMarkdown(
 
 async function nextPhaseSeed(cwd: string): Promise<number> {
   try {
-    const rawRoadmap = await readFile(
-      join(cwd, "design", "roadmap.yaml"),
-      "utf8",
-    );
-    const roadmap = Roadmap.parse(parseYaml(rawRoadmap) as unknown);
+    // Contained roadmap seam; a missing / unsafe / malformed roadmap degrades to
+    // "start numbering at P1" (best-effort), never an out-of-project read.
+    const roadmap = await loadRoadmap(cwd);
     let max = 0;
     for (const ref of roadmap.phases) {
       const m = ref.id.match(/^P(\d+)$/);
@@ -270,7 +278,7 @@ async function nextPhaseSeed(cwd: string): Promise<number> {
     }
     return max + 1;
   } catch {
-    // No readable roadmap → start numbering at P1.
+    // No readable / safe roadmap → start numbering at P1.
     return 1;
   }
 }
@@ -314,7 +322,7 @@ async function detect(
 
   // 3. markdown
   const md = parseAdoptMarkdown(raw);
-  const withTasks = md.phases.filter((p) => p.tasks.length > 0);
+  const withTasks = md.phases.filter(p => p.tasks.length > 0);
   if (withTasks.length === 0) {
     throw new PlanAdoptError(
       "no_plan_items_detected",
@@ -384,10 +392,21 @@ export async function runPlanAdopt(
     );
   }
 
+  // fs-authority: containment-only
+  // reason: explicit user-selected input path (--from)
   let raw: string;
   try {
-    raw = await readFile(join(cwd, fromPath), "utf8");
+    raw = await readExplicitUserText(
+      await resolveExplicitUserReadPath(cwd, fromPath),
+    );
   } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+      throw new PlanAdoptError(
+        "unsafe_path",
+        `plan adopt: path is unsafe: ${(err as Error).message}`,
+        fromPath,
+      );
+    }
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
       throw new PlanAdoptError(

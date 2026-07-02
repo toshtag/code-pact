@@ -1,4 +1,12 @@
-import { access } from "node:fs/promises";
+import {
+  accessProjectPresence,
+  existsProjectPresenceSync,
+} from "../../project-fs/operations.ts";
+import {
+  resolveProjectProbeReadPath,
+  resolveProjectProbeReadPathSync,
+  resolveStandaloneProjectProbeReadPath,
+} from "../../project-fs/authorities/project-config-authority.ts";
 
 /**
  * True when `p` exists and is accessible. Shared internal helper for the
@@ -9,7 +17,7 @@ import { access } from "node:fs/promises";
  */
 export async function fileExists(p: string): Promise<boolean> {
   try {
-    await access(p);
+    await accessProjectPresence(await resolveStandaloneProjectProbeReadPath(p));
     return true;
   } catch {
     return false;
@@ -28,9 +36,52 @@ export async function phaseFilePresence(
   p: string,
 ): Promise<"present" | "absent" | "inaccessible"> {
   try {
-    await access(p);
+    await accessProjectPresence(await resolveStandaloneProjectProbeReadPath(p));
     return "present";
   } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "inaccessible";
+    return (err as NodeJS.ErrnoException).code === "ENOENT"
+      ? "absent"
+      : "inaccessible";
   }
+}
+
+export type ProjectPathPresence = "present" | "absent" | "inaccessible";
+
+/**
+ * Three-way presence for project-relative references. Unlike a lexical
+ * `access(join(cwd, relPath))`, this refuses external or dangling symlink
+ * traversal before probing existence, so refs cannot be satisfied by files
+ * outside the project root.
+ */
+export async function projectPathPresence(
+  cwd: string,
+  relPath: string,
+): Promise<ProjectPathPresence> {
+  let abs;
+  try {
+    abs = await resolveProjectProbeReadPath(cwd, relPath);
+  } catch {
+    return "inaccessible";
+  }
+  try {
+    await accessProjectPresence(abs);
+    return "present";
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "ENOENT"
+      ? "absent"
+      : "inaccessible";
+  }
+}
+
+export function projectPathPresenceSync(
+  cwd: string,
+  relPath: string,
+): ProjectPathPresence {
+  let abs;
+  try {
+    abs = resolveProjectProbeReadPathSync(cwd, relPath);
+  } catch {
+    return "inaccessible";
+  }
+  return existsProjectPresenceSync(abs) ? "present" : "absent";
 }

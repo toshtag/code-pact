@@ -26,7 +26,7 @@ const PROJECT_YAML = (defaultAgent = "claude-code", agents = ["claude-code"]) =>
     "locale: en-US",
     `default_agent: ${defaultAgent}`,
     "agents:",
-    ...agents.flatMap((a) => [
+    ...agents.flatMap(a => [
       `  - name: ${a}`,
       `    profile: agent-profiles/${a}.yaml`,
       `    enabled: true`,
@@ -282,7 +282,11 @@ describe("runTaskRecordDone — idempotency and transitions", () => {
     });
     expect(result.kind).toBe("done");
     const { log } = await readProgress(dir);
-    expect(log.events.map((e) => e.status)).toEqual(["started", "failed", "done"]);
+    expect(log.events.map(e => e.status)).toEqual([
+      "started",
+      "failed",
+      "done",
+    ]);
   });
 
   it("blocked → done is rejected with INVALID_TASK_TRANSITION, progress byte-identical", async () => {
@@ -460,7 +464,10 @@ describe("runTaskRecordDone — decision gate", () => {
       await runTaskRecordDone({ cwd: dir, taskId: "P1-T1", evidence: ["x"] });
       throw new Error("should have thrown");
     } catch (err: unknown) {
-      const e = err as Error & { code?: string; data?: Record<string, unknown> };
+      const e = err as Error & {
+        code?: string;
+        data?: Record<string, unknown>;
+      };
       expect(e.code).toBe("DECISION_REQUIRED");
       expect(e.data).toBeDefined();
       expect(e.data!.task_id).toBe("P1-T1");
@@ -468,7 +475,11 @@ describe("runTaskRecordDone — decision gate", () => {
       expect(e.data!.via).toBe("filename-scan");
       expect(e.data!.expected_pattern).toBe("design/decisions/*P1-T1*.md");
       expect(e.data!.considered).toEqual([]);
-      const check = e.data!.decision_check as { name: string; ok: boolean; reason?: string };
+      const check = e.data!.decision_check as {
+        name: string;
+        ok: boolean;
+        reason?: string;
+      };
       expect(check.name).toBe("decision");
       expect(check.ok).toBe(false);
       expect(check.reason).toBeTruthy();
@@ -508,7 +519,10 @@ describe("runTaskRecordDone — decision gate", () => {
       await runTaskRecordDone({ cwd: dir, taskId: "P1-T1", evidence: ["x"] });
       throw new Error("should have thrown");
     } catch (err: unknown) {
-      const e = err as Error & { code?: string; data?: Record<string, unknown> };
+      const e = err as Error & {
+        code?: string;
+        data?: Record<string, unknown>;
+      };
       expect(e.code).toBe("DECISION_REQUIRED");
       expect(e.data!.via).toBe("filename-scan");
       expect(e.data!.expected_pattern).toBe("design/decisions/*P1-T1*.md");
@@ -593,7 +607,10 @@ describe("runTaskRecordDone — decision gate", () => {
       await runTaskRecordDone({ cwd: dir, taskId: "P1-T1", evidence: ["x"] });
       throw new Error("should have thrown");
     } catch (err: unknown) {
-      const e = err as Error & { code?: string; data?: Record<string, unknown> };
+      const e = err as Error & {
+        code?: string;
+        data?: Record<string, unknown>;
+      };
       expect(e.code).toBe("DECISION_REQUIRED");
       expect(e.data!.via).toBe("decision_refs");
       // expected_pattern is filename-scan specific and must NOT be present.
@@ -608,16 +625,22 @@ describe("runTaskRecordDone — decision gate", () => {
         acceptance: string;
       }>;
       expect(considered).toHaveLength(2);
-      expect(considered.find((c) => c.path.endsWith("accepted-base.md"))!.accepted).toBe(true);
-      expect(considered.find((c) => c.path.endsWith("proposed-risky.md"))!.acceptance).toBe("blocked");
+      expect(
+        considered.find(c => c.path.endsWith("accepted-base.md"))!.accepted,
+      ).toBe(true);
+      expect(
+        considered.find(c => c.path.endsWith("proposed-risky.md"))!.acceptance,
+      ).toBe("blocked");
     }
   });
 
-  it("requires_decision with an UNSAFE decision_refs ('..' to an accepted ADR outside the repo) → DECISION_REQUIRED, acceptance=unsafe_path, progress unchanged", async () => {
+  it("requires_decision with an UNSAFE decision_refs ('..' to an accepted ADR outside the repo) → rejected at phase load, progress unchanged", async () => {
     // The regression this pins: an `accepted` ADR planted OUTSIDE the project
-    // root must never satisfy the gate. `decision_refs` carries no schema-level
-    // path refinement (task.ts: z.string().min(1)), so an escaping ref reaches
-    // the gate — which is fail-closed (never reads it) and reports unsafe_path.
+    // root must never satisfy the gate. `decision_refs` now carries a
+    // schema-level namespace contract (DecisionRefPath: design/decisions/**/*.md),
+    // so an escaping ref is rejected when the phase YAML is PARSED — even
+    // earlier and more strongly than the old gate-level unsafe_path verdict.
+    // Either way the gate is never released and progress.yaml is untouched.
     const outsideDir = await mkdtemp(join(tmpdir(), "code-pact-outside-"));
     try {
       await writeFile(
@@ -686,16 +709,15 @@ describe("runTaskRecordDone — decision gate", () => {
         await runTaskRecordDone({ cwd: dir, taskId: "P1-T1", evidence: ["x"] });
         throw new Error("should have thrown");
       } catch (err: unknown) {
-        const e = err as Error & { code?: string; data?: Record<string, unknown> };
-        expect(e.code).toBe("DECISION_REQUIRED");
-        expect(e.data!.via).toBe("decision_refs");
-        const considered = e.data!.considered as Array<{
-          accepted: boolean;
-          acceptance: string;
-        }>;
-        expect(considered).toHaveLength(1);
-        expect(considered[0]!.acceptance).toBe("unsafe_path");
-        expect(considered[0]!.accepted).toBe(false);
+        const e = err as Error & {
+          code?: string;
+          data?: Record<string, unknown>;
+        };
+        // The escaping ref is rejected when the phase is parsed — fail-closed
+        // at the schema boundary, before the gate is ever consulted.
+        expect(e.code).toBe("CONFIG_ERROR");
+        // The accepted ADR planted outside the repo is never read.
+        expect(e.message).not.toContain("accepted");
       }
       const after = await readFile(
         join(dir, ".code-pact", "state", "progress.yaml"),

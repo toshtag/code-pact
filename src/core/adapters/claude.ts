@@ -1,6 +1,3 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import type { AgentProfile } from "../schemas/agent-profile.ts";
 import { normalizeModelVersion } from "../schemas/agent-profile.ts";
 import {
@@ -9,8 +6,8 @@ import {
   type ClaudeModelVersion,
 } from "../models/catalog.ts";
 import type { ModelProfile } from "../schemas/model-profile.ts";
-import { Roadmap } from "../schemas/roadmap.ts";
 import { loadPhase } from "../plan/load-phase.ts";
+import { loadRoadmap } from "../plan/roadmap.ts";
 import type { Locale } from "../../i18n/index.ts";
 import type {
   AdapterDescriptor,
@@ -30,7 +27,9 @@ import {
 // ---------------------------------------------------------------------------
 
 function modelGuidanceSection(modelVersion: string): string {
-  const isKnown = (CLAUDE_MODEL_VERSIONS as readonly string[]).includes(modelVersion);
+  const isKnown = (CLAUDE_MODEL_VERSIONS as readonly string[]).includes(
+    modelVersion,
+  );
   if (!isKnown) {
     return [
       `## Model guidance (${modelVersion})`,
@@ -60,7 +59,9 @@ function claudeMd(
   modelVersion?: string,
 ): string {
   const t = adapterCommon(locale);
-  const modelSection = modelVersion ? `\n\n${modelGuidanceSection(modelVersion)}` : "";
+  const modelSection = modelVersion
+    ? `\n\n${modelGuidanceSection(modelVersion)}`
+    : "";
 
   return [
     `# Claude Code — Project Instructions`,
@@ -68,7 +69,10 @@ function claudeMd(
     `> ${t.managedNotice}`,
     `> ${t.editNotice}`,
     ``,
-    ...renderWorkflowSection(t, "claude-code", { step0: true, validateNote: true }),
+    ...renderWorkflowSection(t, "claude-code", {
+      step0: true,
+      validateNote: true,
+    }),
     ``,
     ...renderAgentContractSection(t),
     ``,
@@ -135,7 +139,10 @@ const PACKAGE_MANAGERS = ["pnpm", "npm", "yarn", "bun"] as const;
  * flag before a word would otherwise wrongly eat that word). `--flag=value`
  * forms are self-contained and never produce a stray word either way.
  */
-function tokenizeCommand(command: string): { words: string[]; flags: string[] } {
+function tokenizeCommand(command: string): {
+  words: string[];
+  flags: string[];
+} {
   const tokens = command.trim().split(/\s+/).filter(Boolean);
   // Strip runner prefix.
   let i = 0;
@@ -210,7 +217,11 @@ export function deriveSkillNameVariants(command: string): string[] {
 }
 
 function sanitizeSkillName(s: string): string {
-  const cleaned = s.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  const cleaned = s
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
   return cleaned || "cmd";
 }
 
@@ -234,19 +245,25 @@ function uniquifySkillName(base: string, taken: ReadonlySet<string>): string {
 }
 
 function buildCommandSkill(skillName: string, command: string): string {
-  return [`# /${skillName} — ${command}`, ``, `Usage: /${skillName}`, ``, `Runs: ${command}`, ``].join("\n");
+  return [
+    `# /${skillName} — ${command}`,
+    ``,
+    `Usage: /${skillName}`,
+    ``,
+    `Runs: ${command}`,
+    ``,
+  ].join("\n");
 }
 
 async function readVerificationCommands(cwd: string): Promise<string[]> {
-  let roadmapRaw: string;
+  // Best-effort skill generation: route through the project-contained loaders so
+  // a symlinked `design/roadmap.yaml` / `design/phases/*` (or a `..` phase ref)
+  // cannot pull an out-of-project command string into a generated skill (CWE-59).
+  // A missing / unsafe / invalid roadmap or phase degrades to "no command skills"
+  // (this is generation, not a fail-closed control-plane read).
+  let roadmap;
   try {
-    roadmapRaw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
-  } catch {
-    return [];
-  }
-  let roadmap: Roadmap;
-  try {
-    roadmap = Roadmap.parse(parseYaml(roadmapRaw) as unknown);
+    roadmap = await loadRoadmap(cwd);
   } catch {
     return [];
   }
@@ -256,7 +273,7 @@ async function readVerificationCommands(cwd: string): Promise<string[]> {
       const phase = await loadPhase(cwd, ref.path);
       for (const cmd of phase.verification.commands) seen.add(cmd);
     } catch {
-      // skip unreadable phases
+      // skip unreadable / unsafe phases
     }
   }
   return Array.from(seen);
@@ -298,16 +315,25 @@ export async function generateClaudeDesiredFiles(
   // built-in (or with an earlier derived name) is deterministically uniquified
   // rather than silently dropped or clobbering the built-in. The final name is
   // used for BOTH the path and the rendered skill body so they never diverge.
+  // Reserved prefix for code-pact-generated dynamic skills. This separates
+  // our generated skills from user-authored skills in the shared
+  // `.claude/skills/*.md` namespace. New dynamic skills are always generated
+  // with this prefix. Legacy shared-namespace files (without the prefix) are
+  // never read, hashed, overwritten, or deleted — they are preserved with a
+  // warning if encountered during install/upgrade.
+  const CODE_PACT_PREFIX = "code-pact-";
   const takenSkillNames = new Set<string>(RESERVED_SKILL_NAMES);
   for (const cmd of verificationCommands) {
     // Walk the self-describing candidate ladder (base, then flag-qualified
     // forms); take the first free one. Only if the whole ladder is taken do we
     // fall back to a numeric suffix on the most specific candidate.
     const variants = deriveSkillNameVariants(cmd);
-    const free = variants.find((v) => !takenSkillNames.has(v));
-    const skillName =
-      free ?? uniquifySkillName(variants[variants.length - 1]!, takenSkillNames);
-    takenSkillNames.add(skillName);
+    const free = variants.find(v => !takenSkillNames.has(v));
+    const baseName =
+      free ??
+      uniquifySkillName(variants[variants.length - 1]!, takenSkillNames);
+    takenSkillNames.add(baseName);
+    const skillName = `${CODE_PACT_PREFIX}${baseName}`;
     files.push({
       path: `${skillDir}/${skillName}.md`,
       role: "skill",
@@ -326,11 +352,24 @@ export const claudeAdapterDescriptor: AdapterDescriptor = {
     "hooks_dir",
     "context_dir",
   ] as const,
-  ownedPathGlobs: [
-    "CLAUDE.md",
-    ".claude/skills/context.md",
-    ".claude/skills/verify.md",
-    ".claude/skills/progress.md",
-  ] as const,
+  ownedPathRoles: {
+    "CLAUDE.md": "instruction",
+    ".claude/skills/context.md": "skill",
+    ".claude/skills/verify.md": "skill",
+    ".claude/skills/progress.md": "skill",
+  } as const,
+  // Role-scoped create-only authority: missing skill files in the reserved
+  // `.claude/skills/code-pact-*.md` namespace may be CREATED, but existing
+  // files there are never read/hashed/overwritten — create-only policy.
+  // Legacy shared-namespace files (`.claude/skills/*.md` without the prefix)
+  // are also never read/hashed/overwritten/deleted.
+  createPathGlobsByRole: {
+    skill: [".claude/skills/code-pact-*.md"],
+  } as const,
+  profilePathContract: {
+    instructionFilename: "CLAUDE.md",
+    skillDir: ".claude/skills",
+    hookDir: ".claude/hooks",
+  },
   adapterSchemaVersion: 1,
 };

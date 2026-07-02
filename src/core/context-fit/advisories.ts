@@ -19,13 +19,14 @@
 // reference, or a broad reads glob can all be legitimate. The advisories
 // surface size risk; they never block work or apply a budget automatically.
 
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readOwnedText, resolveDecisionReadPath } from "../project-fs/index.ts";
 import { buildContextPack } from "../pack/index.ts";
 import { recommendContextFit } from "../recommend/context-fit.ts";
 import { STANDARD_CONTEXT_BUDGET_PROFILES } from "./budget-profiles.ts";
-import { validateGlobSyntax, walkAndMatch } from "../glob.ts";
+import { matchGlob, validateGlobSyntax } from "../glob.ts";
 import { assertSafeRelativePath } from "../path-safety.ts";
+import { isDecisionRefPath } from "../schemas/decision-ref.ts";
+import { listTrackedProjectFiles } from "../project-files/tracked-files.ts";
 import type { PhaseEntry } from "../plan/state.ts";
 import type { PlanIssue } from "../plan/shared.ts";
 
@@ -107,6 +108,7 @@ export async function detectContextFitAdvisories(
   // nothing is written to disk.
   const fileBytesCache = new Map<string, number | null>();
   const globCountCache = new Map<string, number>();
+  let trackedFiles: string[] | null | undefined;
   const packMetricsCache = new Map<
     string,
     { naturalBytes: number; minimumAchievableBytes: number } | null
@@ -118,22 +120,30 @@ export async function detectContextFitAdvisories(
       const decisionRefs = task.decision_refs ?? [];
       for (let i = 0; i < decisionRefs.length; i++) {
         const ref = decisionRefs[i]!;
-        // An unsafe or missing decision ref is already reported by the
-        // dedicated structural detectors (TASK_DECISION_REF_UNSAFE_PATH /
-        // TASK_DECISION_REF_NOT_FOUND). Skip those here to avoid a misleading
-        // duplicate advisory.
-        if (!isSafePath(ref)) continue;
+        // An out-of-namespace, unsafe, or missing decision ref is already
+        // reported by the dedicated structural detector
+        // (TASK_DECISION_REF_UNSAFE_PATH). Skip those here to avoid a
+        // misleading duplicate advisory — AND, critically, to never read an
+        // arbitrary file (e.g. `.env`) just to measure its size. The namespace
+        // check is the same `isDecisionRefPath` the schema/gate use; the read
+        // goes through the owned seam (rejects any symlink component).
+        if (!isDecisionRefPath(ref)) continue;
         let bytes = fileBytesCache.get(ref);
         if (bytes === undefined) {
           try {
-            const content = await readFile(join(cwd, ref), "utf8");
+            const content = await readOwnedText(
+              await resolveDecisionReadPath(cwd, ref),
+            );
             bytes = Buffer.byteLength(content, "utf8");
           } catch {
             bytes = null; // missing/unreadable → not our advisory to raise
           }
           fileBytesCache.set(ref, bytes);
         }
-        if (bytes !== null && bytes > CONTEXT_FIT_ADVISORY_THRESHOLDS.largeDecisionBytes) {
+        if (
+          bytes !== null &&
+          bytes > CONTEXT_FIT_ADVISORY_THRESHOLDS.largeDecisionBytes
+        ) {
           issues.push({
             code: "TASK_DECLARED_DECISION_LARGE",
             severity: "warning",
@@ -145,7 +155,8 @@ export async function detectContextFitAdvisories(
             details: {
               path: ref,
               bytes,
-              threshold_bytes: CONTEXT_FIT_ADVISORY_THRESHOLDS.largeDecisionBytes,
+              threshold_bytes:
+                CONTEXT_FIT_ADVISORY_THRESHOLDS.largeDecisionBytes,
             },
           });
         }
@@ -162,7 +173,15 @@ export async function detectContextFitAdvisories(
         if (validateGlobSyntax(glob) !== null) continue;
         let count = globCountCache.get(glob);
         if (count === undefined) {
-          count = (await walkAndMatch(cwd, glob)).length;
+          if (trackedFiles === undefined) {
+            try {
+              trackedFiles = await listTrackedProjectFiles(cwd);
+            } catch {
+              trackedFiles = null;
+            }
+          }
+          if (trackedFiles === null) continue;
+          count = trackedFiles.filter(path => matchGlob(glob, path)).length;
           globCountCache.set(glob, count);
         }
         if (count > CONTEXT_FIT_ADVISORY_THRESHOLDS.readsMatchCount) {
@@ -203,7 +222,8 @@ export async function detectContextFitAdvisories(
           metrics = pack.explainMetrics
             ? {
                 naturalBytes: pack.explainMetrics.naturalBytes,
-                minimumAchievableBytes: pack.explainMetrics.minimumAchievableBytes,
+                minimumAchievableBytes:
+                  pack.explainMetrics.minimumAchievableBytes,
               }
             : null;
         } catch {
@@ -216,7 +236,10 @@ export async function detectContextFitAdvisories(
       }
       if (metrics === null) continue;
 
-      if (metrics.naturalBytes > CONTEXT_FIT_ADVISORY_THRESHOLDS.largeContextBalancedBytes) {
+      if (
+        metrics.naturalBytes >
+        CONTEXT_FIT_ADVISORY_THRESHOLDS.largeContextBalancedBytes
+      ) {
         // The pack already exceeds the `balanced` budget, so the actionable
         // suggestion is the next standard profile above it: `wide`.
         issues.push({
@@ -228,7 +251,8 @@ export async function detectContextFitAdvisories(
           task_id: task.id,
           details: {
             natural_bytes: metrics.naturalBytes,
-            threshold_bytes: CONTEXT_FIT_ADVISORY_THRESHOLDS.largeContextBalancedBytes,
+            threshold_bytes:
+              CONTEXT_FIT_ADVISORY_THRESHOLDS.largeContextBalancedBytes,
             recommended_profile: "wide",
           },
         });
@@ -251,7 +275,9 @@ export async function detectContextFitAdvisories(
           ? { agentContextBudgetProfiles }
           : {}),
       });
-      if (metrics.minimumAchievableBytes > recommendation.recommendedBudgetBytes) {
+      if (
+        metrics.minimumAchievableBytes > recommendation.recommendedBudgetBytes
+      ) {
         issues.push({
           code: "TASK_CONTEXT_BUDGET_UNACHIEVABLE",
           severity: "warning",

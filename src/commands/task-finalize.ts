@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { type PhaseStatus } from "../core/schemas/phase.ts";
 import { loadProgressLog } from "../core/progress/io.ts";
 import {
@@ -14,7 +12,7 @@ import {
 import type { TaskStatusDiff } from "../core/finalize/diff.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { auditWrites, type WriteAuditResult } from "../core/audit/index.ts";
-import { assertSafeRelativePath } from "../core/path-safety.ts";
+import { projectPathPresence } from "../core/plan/checks/fs.ts";
 
 // ---------------------------------------------------------------------------
 // `task finalize <task-id>`
@@ -135,15 +133,6 @@ export type TaskFinalizeResult =
       kind: "already_finalized";
     });
 
-async function fileExists(p: string): Promise<boolean> {
-  try {
-    await readFile(p, "utf8");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function runTaskFinalize(
   opts: TaskFinalizeOptions,
 ): Promise<TaskFinalizeResult> {
@@ -227,15 +216,7 @@ export async function runTaskFinalize(
 
   const acceptanceRefsCheck: AcceptanceRefCheck[] = [];
   for (const ref of task.acceptance_refs ?? []) {
-    // Confine the existence probe to the project root so an unsafe ref
-    // (`../../.ssh/id_rsa`) can't be used as an out-of-tree existence oracle.
-    let exists = false;
-    try {
-      assertSafeRelativePath(ref);
-      exists = await fileExists(join(cwd, ref));
-    } catch {
-      exists = false;
-    }
+    const exists = (await projectPathPresence(cwd, ref)) === "present";
     acceptanceRefsCheck.push({ path: ref, exists });
   }
 

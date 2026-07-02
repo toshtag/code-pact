@@ -20,12 +20,20 @@
 // step (R0–R5)" is the binding source here.
 // ---------------------------------------------------------------------------
 
-import { readdir, lstat, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  lstatOwned,
+  readOwnedText,
+  listOwned,
+} from "../project-fs/operations.ts";
+import {
+  archiveReadPath,
+  type ArchiveAuthorityPath,
+} from "../project-fs/authorities/archive-authority.ts";
 import { parse as parseYaml } from "yaml";
 import { ProgressEvent } from "../schemas/progress-event.ts";
 import { computeEventId } from "../progress/event-id.ts";
-import { eventsDir, parseEventFileName } from "../progress/events-io.ts";
+import { parseEventFileName, resolveEventsDir } from "../progress/events-io.ts";
+import { resolveArchiveAuthorityPath } from "./paths.ts";
 import { looseEventRelPath } from "./event-pack-cleanup-gate.ts";
 import {
   classifyPostRunSurvivor,
@@ -73,18 +81,21 @@ type SurvivorContent =
  * honest concurrent writers) a symlink read here only mis-classifies a survivor for
  * the advisory/INCOMPLETE counts; it can never cause a delete.
  */
-async function readSurvivorContent(abs: string): Promise<SurvivorContent> {
+async function readSurvivorContent(
+  abs: ArchiveAuthorityPath,
+): Promise<SurvivorContent> {
   let st;
   try {
-    st = await lstat(abs);
+    st = await lstatOwned(archiveReadPath(abs));
   } catch (err) {
     if (isEnoent(err)) return "gone";
     return { id: null, taskId: null, reason: "unreadable_after_cleanup" };
   }
-  if (!st.isFile()) return { id: null, taskId: null, reason: "not_regular_file_after_cleanup" };
+  if (!st.isFile())
+    return { id: null, taskId: null, reason: "not_regular_file_after_cleanup" };
   let raw: string;
   try {
-    raw = await readFile(abs, "utf8");
+    raw = await readOwnedText(archiveReadPath(abs));
   } catch (err) {
     if (isEnoent(err)) return "gone";
     return { id: null, taskId: null, reason: "unreadable_after_cleanup" };
@@ -168,15 +179,15 @@ export async function reconcileSurvivors(
   // entry to its basename so scoping is robust whether the caller passes basenames OR
   // project-relative paths — a path/basename mismatch here would silently drop a
   // target-only survivor to an advisory and UNDERCOUNT this phase's remaining loose.
-  const targetSet = new Set(target.map((t) => t.slice(t.lastIndexOf("/") + 1)));
-  const skipByPath = new Map(loopSkipped.map((s) => [s.path, s.reason]));
+  const targetSet = new Set(target.map(t => t.slice(t.lastIndexOf("/") + 1)));
+  const skipByPath = new Map(loopSkipped.map(s => [s.path, s.reason]));
 
-  const dir = eventsDir(cwd);
   let names: string[];
   try {
-    names = await readdir(dir);
+    names = await listOwned(await resolveEventsDir(cwd));
   } catch (err) {
-    if (isEnoent(err)) names = []; // no dir → nothing present
+    if (isEnoent(err))
+      names = []; // no dir → nothing present
     else throw err;
   }
 
@@ -195,7 +206,8 @@ export async function reconcileSurvivors(
     if (!parsedName) continue; // not an event-shaped file — not a loose event at all
 
     const relPath = looseEventRelPath(name);
-    const existingSkipReason: CleanupSkipReason | null = skipByPath.get(relPath) ?? null;
+    const existingSkipReason: CleanupSkipReason | null =
+      skipByPath.get(relPath) ?? null;
     // FILENAME-only R0 ties (i)/(ii)/(iv) — they need neither the content nor the
     // task_id, so they hold even for a file that has since vanished or gone unreadable.
     const filenameScoped =
@@ -203,7 +215,31 @@ export async function reconcileSurvivors(
       packIds.has(parsedName.id) || // (ii) filename id is in the verified pack
       existingSkipReason !== null; // (iv) carries a loop skip record
 
-    const survivor = await readSurvivorContent(join(dir, name));
+    let abs: ArchiveAuthorityPath;
+    try {
+      abs = await resolveArchiveAuthorityPath(cwd, relPath);
+    } catch {
+      if (filenameScoped) {
+        verdicts.push(
+          classifyPostRunSurvivor(
+            {
+              path: relPath,
+              contentEventId: null,
+              idUnknownReason: "unreadable_after_cleanup",
+              existingSkipReason,
+            },
+            { has: eventId => packIds.has(eventId) },
+          ),
+        );
+      } else {
+        advisories.push({
+          code: "unclassified_loose_after_cleanup",
+          path: relPath,
+        });
+      }
+      continue;
+    }
+    const survivor = await readSurvivorContent(abs);
     if (survivor === "gone") {
       // Vanished between the re-enumeration and the content read. NOT a present
       // survivor (so never in `skipped` / remaining), but if a filename/target/skip
@@ -217,12 +253,16 @@ export async function reconcileSurvivors(
     // R0 — in-scope for THIS phase: a filename tie, OR the content's task ∈ snapshot
     // (iii). (i)/(ii)/(iv) hold without the content; (iii) needs the parsed task_id.
     const inScope =
-      filenameScoped || (survivor.taskId !== null && snapshotTaskIds.has(survivor.taskId));
+      filenameScoped ||
+      (survivor.taskId !== null && snapshotTaskIds.has(survivor.taskId));
 
     if (!inScope) {
       // R5 — an event-looking file no phase cleanup owns. Surface it globally; never
       // count it in this phase's remaining-loose (that would make the result lie).
-      advisories.push({ code: "unclassified_loose_after_cleanup", path: relPath });
+      advisories.push({
+        code: "unclassified_loose_after_cleanup",
+        path: relPath,
+      });
       continue;
     }
 
@@ -234,7 +274,7 @@ export async function reconcileSurvivors(
           idUnknownReason: survivor.reason ?? undefined,
           existingSkipReason,
         },
-        { has: (eventId) => packIds.has(eventId) },
+        { has: eventId => packIds.has(eventId) },
       ),
     );
   }

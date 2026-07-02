@@ -36,6 +36,15 @@ export type DecisionDoc = {
   body: string;
 };
 
+function decisionHeading(filename: string): string {
+  const prefix = "design/decisions/";
+  const basename = filename.split("/").pop() ?? filename;
+  if (!filename.startsWith(prefix)) return basename;
+
+  const relative = filename.slice(prefix.length);
+  return relative.includes("/") ? filename : basename;
+}
+
 export type DependsOnEntry = {
   id: string;
   /**
@@ -231,7 +240,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   if (ctx.declaredDecisions && ctx.declaredDecisions.length > 0) {
     const lines: string[] = [`## Declared decisions`];
     for (const dec of ctx.declaredDecisions) {
-      lines.push(``, `### ${dec.filename}`, ``, dec.body.trim());
+      lines.push(``, `### ${decisionHeading(dec.filename)}`, ``, dec.body.trim());
     }
     lines.push(``);
     sections.push({
@@ -272,7 +281,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   if (relatedDecisions.length > 0) {
     const lines: string[] = [`## Related Decisions`];
     for (const dec of relatedDecisions) {
-      lines.push(``, `### ${dec.filename}`, ``, dec.body.trim());
+      lines.push(``, `### ${decisionHeading(dec.filename)}`, ``, dec.body.trim());
     }
     lines.push(``);
     sections.push({

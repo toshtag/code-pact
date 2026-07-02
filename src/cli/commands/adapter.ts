@@ -11,7 +11,13 @@
 
 import { parseArgs } from "node:util";
 import { messages, type Locale } from "../../i18n/index.ts";
-import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
+import {
+  clusterUsage,
+  emitUsage,
+  hasHelpFlag,
+  isHelpToken,
+  subcommandUsage,
+} from "../usage.ts";
 import { emitOk, emitError } from "../util.ts";
 import { isSupportedAgent } from "../../core/agents.ts";
 import {
@@ -27,7 +33,11 @@ import { runAdapterConformance } from "../../commands/adapter-conformance.ts";
 // Command: adapter
 // ---------------------------------------------------------------------------
 
-export async function cmdAdapter(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
+export async function cmdAdapter(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
   const sub = argv[0];
   const rest = argv.slice(1);
 
@@ -42,7 +52,13 @@ export async function cmdAdapter(argv: string[], locale: Locale, globalJson: boo
     return emitUsage(clusterUsage("adapter"));
   }
 
-  const KNOWN_SUBCOMMANDS = new Set(["list", "install", "upgrade", "doctor", "conformance"]);
+  const KNOWN_SUBCOMMANDS = new Set([
+    "list",
+    "install",
+    "upgrade",
+    "doctor",
+    "conformance",
+  ]);
   // `adapter <sub> --help` → per-subcommand usage (exit 0).
   if (sub !== undefined && KNOWN_SUBCOMMANDS.has(sub) && hasHelpFlag(rest)) {
     return emitUsage(subcommandUsage("adapter", sub));
@@ -66,12 +82,15 @@ export async function cmdAdapter(argv: string[], locale: Locale, globalJson: boo
   // mutates the project is exactly the "warning + side effect" hazard this
   // hardening pass is closing. Require the explicit subcommand. No side effects.
   const msg =
-    "adapter requires a subcommand — the bare form is removed. Use: code-pact adapter install <agent> (or list | upgrade | doctor | conformance). Run \"code-pact adapter --help\".";
+    'adapter requires a subcommand — the bare form is removed. Use: code-pact adapter install <agent> (or list | upgrade | doctor | conformance). Run "code-pact adapter --help".';
   emitError(effectiveJson, "CONFIG_ERROR", msg);
   return 2;
 }
 
-async function cmdAdapterList(argv: string[], globalJson: boolean): Promise<number> {
+async function cmdAdapterList(
+  argv: string[],
+  globalJson: boolean,
+): Promise<number> {
   const { values } = parseArgs({
     args: argv,
     options: { json: { type: "boolean" } },
@@ -90,7 +109,9 @@ async function cmdAdapterList(argv: string[], globalJson: boolean): Promise<numb
     const flags = [
       a.enabled ? "enabled" : "disabled",
       a.experimental ? "experimental" : null,
-      a.manifestPresent ? `manifest (${a.fileCount ?? 0} files)` : "no manifest",
+      a.manifestPresent
+        ? `manifest (${a.fileCount ?? 0} files)`
+        : "no manifest",
       a.manifestInvalid ? "INVALID" : null,
     ]
       .filter((s): s is string => s !== null)
@@ -125,7 +146,8 @@ async function cmdAdapterInstall(
   const regenSkills = values["regen-skills"] === true;
 
   if (!agentName) {
-    const msg = "adapter install requires an <agent> argument (e.g. claude-code).";
+    const msg =
+      "adapter install requires an <agent> argument (e.g. claude-code).";
     emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
@@ -180,7 +202,10 @@ async function cmdAdapterDoctor(
     }
     return result.ok ? 0 : 1;
   } catch (err: unknown) {
-    if (err instanceof Error && (err as NodeJS.ErrnoException).code === "AGENT_NOT_FOUND") {
+    if (
+      err instanceof Error &&
+      (err as NodeJS.ErrnoException).code === "AGENT_NOT_FOUND"
+    ) {
       const msg = messages[locale].adapter.agentNotFound(agentName ?? "");
       emitError(json, "AGENT_NOT_FOUND", msg);
       return 2;
@@ -225,9 +250,7 @@ async function cmdAdapterConformance(
     emitOk(result);
   } else {
     process.stdout.write(`Agent:     ${result.agent}\n`);
-    process.stdout.write(
-      `Compliant: ${result.compliant ? "yes" : "NO"}\n`,
-    );
+    process.stdout.write(`Compliant: ${result.compliant ? "yes" : "NO"}\n`);
     process.stdout.write(`Checks:\n`);
     for (const c of result.checks) {
       // A failing advisory check is a non-blocking warning (it keeps
@@ -249,6 +272,45 @@ async function cmdAdapterConformance(
     }
   }
   return result.compliant ? 0 : 1;
+}
+
+function adapterTransactionErrorData(err: Error): Record<string, unknown> {
+  return {
+    committed_paths: (err as { committedPaths?: readonly string[] })
+      .committedPaths,
+    rollback_failures: (err as { rollbackFailures?: readonly string[] })
+      .rollbackFailures,
+    cleanup_failures: (err as { cleanupFailures?: readonly string[] })
+      .cleanupFailures,
+    backup_paths: (err as { backupPaths?: readonly string[] }).backupPaths,
+    journal_path: (err as { journalPath?: string }).journalPath,
+  };
+}
+
+function emitAdapterTransactionError(
+  json: boolean,
+  err: Error,
+  code: string | undefined,
+): boolean {
+  if (code === "PARTIAL_MUTATION") {
+    emitError(json, "PARTIAL_MUTATION", err.message, {
+      data: adapterTransactionErrorData(err),
+    });
+    return true;
+  }
+  if (code === "TRANSACTION_CLEANUP_PENDING") {
+    emitError(json, "TRANSACTION_CLEANUP_PENDING", err.message, {
+      data: adapterTransactionErrorData(err),
+    });
+    return true;
+  }
+  if (code === "ADAPTER_TRANSACTION_RECOVERY_FAILED") {
+    emitError(json, "ADAPTER_TRANSACTION_RECOVERY_FAILED", err.message, {
+      data: adapterTransactionErrorData(err),
+    });
+    return true;
+  }
+  return false;
 }
 
 async function cmdAdapterUpgrade(
@@ -282,7 +344,8 @@ async function cmdAdapterUpgrade(
   const modelVersion = values.model as string | undefined;
 
   if (!agentName) {
-    const msg = "adapter upgrade requires an <agent> argument (e.g. claude-code).";
+    const msg =
+      "adapter upgrade requires an <agent> argument (e.g. claude-code).";
     emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
@@ -324,25 +387,103 @@ async function cmdAdapterUpgrade(
       emitOk(result);
     } else {
       for (const entry of result.plan) {
-        if (entry.action === "skip") continue;
+        // `warn` (unowned orphan) gets its own explained block below, so it is
+        // not surfaced as a bare action line here (it would read as a cryptic
+        // "warn <path>" with no reason or next step).
+        if (entry.action === "skip" || entry.action === "warn") continue;
         process.stderr.write(
           `  ${entry.action.padEnd(18)} ${entry.relPath} [${entry.local} × ${entry.desired}]\n`,
         );
       }
+
+      // Dynamic file warnings: existing files in the shared create namespace
+      // (e.g. `.claude/skills/*.md`) that were preserved without read/hash.
+      // These are NOT refused — the upgrade continues with other mutations.
+      const dynamicWarnings = result.plan.filter(
+        p => p.action === "warn" && p.reason === "dynamic_file_unverifiable",
+      );
+      if (dynamicWarnings.length > 0) {
+        const verb =
+          mode === "check" ? "are on disk" : "were preserved on disk";
+        process.stderr.write(
+          `${dynamicWarnings.length} existing dynamic file(s) ${verb} — not read, hashed, or overwritten ` +
+            `(shared namespace cannot prove ownership of existing bytes):\n`,
+        );
+        for (const w of dynamicWarnings)
+          process.stderr.write(`  ${w.relPath}\n`);
+        process.stderr.write(
+          `Review them by hand. To regenerate any of them, move or delete the file, then re-run\n` +
+            `  code-pact adapter upgrade ${agentName} --write\n`,
+        );
+      }
+
+      // Unowned orphans: files the manifest tracked but the generator no longer
+      // emits, whose path is NOT in this adapter's owned set. code-pact will not
+      // delete a file based on a project-supplied (unauthenticated) manifest
+      // alone, so it keeps them and tells the user exactly what to inspect.
+      const orphanWarnings = result.plan.filter(
+        p => p.action === "warn" && p.reason === "unowned_orphan_not_pruned",
+      );
+      if (orphanWarnings.length > 0) {
+        const verb =
+          mode === "check" ? "are still on disk" : "were kept on disk";
+        process.stderr.write(
+          `${orphanWarnings.length} orphaned file(s) ${verb} — no longer generated, but not auto-removed ` +
+            `(not in this adapter's owned path set, so deleting on a project-supplied manifest alone is unsafe):\n`,
+        );
+        for (const w of orphanWarnings)
+          process.stderr.write(`  ${w.relPath}\n`);
+        process.stderr.write(
+          `Review and delete them by hand if they are stale (e.g. \`rm <path>\`).\n`,
+        );
+      }
+
       if (mode === "check") {
         if (result.clean) {
           process.stderr.write("Clean — no upgrade actions needed.\n");
-        } else {
-          process.stderr.write(`Drift detected — run "code-pact adapter upgrade ${agentName} --write" to apply.\n`);
-        }
-      } else {
-        const refused = result.plan.filter((p) => p.action === "refuse").length;
-        if (refused > 0) {
+        } else if (
+          result.plan.some(p => p.action !== "skip" && p.action !== "warn")
+        ) {
           process.stderr.write(
-            `${refused} file(s) refused — re-run with --accept-modified to overwrite local changes.\n`,
+            `Drift detected — run "code-pact adapter upgrade ${agentName} --write" to apply.\n`,
           );
         } else {
-          process.stderr.write(`${m.adapter.done(agentName)} Manifest: ${result.manifestPath}\n`);
+          // warn-only: --write would not change anything (dynamic files are
+          // preserved, unowned orphans are never auto-removed), so the manual
+          // steps above are the only actions.
+          process.stderr.write(
+            `No automatic upgrade actions — review the file(s) listed above.\n`,
+          );
+        }
+      } else {
+        const refusedEntries = result.plan.filter(p => p.action === "refuse");
+        if (refusedEntries.length > 0) {
+          const reasons = new Set(refusedEntries.map(p => p.reason));
+          process.stderr.write(
+            `${refusedEntries.length} file(s) refused — review them.\n`,
+          );
+          if (reasons.has("managed_modified")) {
+            process.stderr.write(
+              `  - local edits: re-run with --accept-modified to overwrite them.\n`,
+            );
+          }
+          if (reasons.has("unowned_generated_path")) {
+            process.stderr.write(
+              `  - generated path outside this adapter's owned set — NOT auto-written;\n` +
+                `    --accept-modified will NOT override it. Inspect/remove it by hand.\n`,
+            );
+          }
+          if (reasons.has("symlink_traversal")) {
+            process.stderr.write(
+              `  - path reaches its real target through a symlink — refused so a write/delete\n` +
+                `    cannot escape the owned namespace; --accept-modified will NOT override it.\n` +
+                `    Replace the symlink with a real directory/file.\n`,
+            );
+          }
+        } else {
+          process.stderr.write(
+            `${m.adapter.done(agentName)} Manifest: ${result.manifestPath}\n`,
+          );
           // Human-only hint for the one advisory adapter upgrade intentionally
           // cannot fix: model_map pins may be deliberate, so upgrade never
           // rewrites them and a MODEL_MAP_STALE advisory survives a --write.
@@ -392,7 +533,7 @@ async function cmdAdapterUpgrade(
     if (mode === "check") {
       return result.clean ? 0 : 1;
     }
-    const hasRefused = result.plan.some((p) => p.action === "refuse");
+    const hasRefused = result.plan.some(p => p.action === "refuse");
     return hasRefused ? 1 : 0;
   } catch (err: unknown) {
     if (err instanceof Error) {
@@ -406,8 +547,23 @@ async function cmdAdapterUpgrade(
         emitError(json, "MANIFEST_NOT_FOUND", err.message);
         return 2;
       }
+      if (code === "ADAPTER_MANIFEST_INVALID") {
+        // A `.code-pact/adapters` symlink escape OR a malformed/schema-invalid
+        // manifest (both fail-closed in manifest I/O).
+        emitError(json, "ADAPTER_MANIFEST_INVALID", err.message);
+        return 2;
+      }
+      if (code === "PATH_OUTSIDE_PROJECT") {
+        // A symlinked placeholder dir (.context / .claude) or generated-file
+        // ancestor escaping the project — fail-closed in resolveWithinProject.
+        emitError(json, "CONFIG_ERROR", err.message);
+        return 2;
+      }
       if (code === "CONFIG_ERROR") {
         emitError(json, "CONFIG_ERROR", err.message);
+        return 2;
+      }
+      if (emitAdapterTransactionError(json, err, code)) {
         return 2;
       }
     }
@@ -440,14 +596,57 @@ async function runAdapterInstallAndEmit(args: {
     if (json) {
       emitOk(result);
     } else {
-      for (const f of result.created) process.stderr.write(`  created   ${f}\n`);
-      for (const f of result.adopted) process.stderr.write(`  adopted   ${f}\n`);
+      for (const f of result.created)
+        process.stderr.write(`  created   ${f}\n`);
+      for (const f of result.adopted)
+        process.stderr.write(`  adopted   ${f}\n`);
       for (const f of result.skipped)
         process.stderr.write(`  skipped   ${f} (already exists)\n`);
+      for (const f of result.preserved)
+        process.stderr.write(
+          `  preserved ${f} (existing dynamic file — not read or hashed)\n`,
+        );
+      for (const f of result.refused)
+        process.stderr.write(`  refused   ${f}\n`);
       process.stderr.write(`  manifest  ${result.manifestPath}\n`);
       process.stderr.write(`${m.adapter.done(agentName)}\n`);
+      if (result.refused.length > 0) {
+        // Remediation depends on WHY each file was refused — `--accept-modified`
+        // only resolves a genuine local edit (managed_modified); the security
+        // refusals (a generated path outside the trusted owned set, or one that
+        // reaches its real target through a symlink) are NOT overridable by it.
+        const reasons = new Set(
+          result.files.filter(f => f.action === "refuse").map(f => f.reason),
+        );
+        process.stderr.write(
+          `${result.refused.length} file(s) were NOT overwritten. Review them.\n`,
+        );
+        if (reasons.has("managed_modified")) {
+          process.stderr.write(
+            `  - local edits (differ from BOTH manifest and generator): to regenerate, run\n` +
+              `      code-pact adapter upgrade ${agentName} --write --accept-modified\n`,
+          );
+        }
+        if (reasons.has("unowned_generated_path")) {
+          process.stderr.write(
+            `  - a generated path OUTSIDE this adapter's owned set (e.g. a profile field or\n` +
+              `    manifest entry pointing at a non-adapter file). NOT auto-overwritten and\n` +
+              `    --accept-modified will NOT override it — inspect/remove it by hand.\n`,
+          );
+        }
+        if (reasons.has("symlink_traversal")) {
+          process.stderr.write(
+            `  - a path that reaches its real target through a SYMLINK. Refused so a write\n` +
+              `    cannot escape the owned namespace; --accept-modified will NOT override it —\n` +
+              `    replace the symlink with a real directory/file.\n`,
+          );
+        }
+      }
     }
-    return 0;
+    // A refused file is a divergence the operator must review, so install does
+    // not report unqualified success — exit 1 (mirrors `adapter upgrade`'s
+    // refuse → exit 1). Clean installs still exit 0.
+    return result.refused.length > 0 ? 1 : 0;
   } catch (err: unknown) {
     if (err instanceof Error) {
       const code = (err as NodeJS.ErrnoException).code;
@@ -456,8 +655,24 @@ async function runAdapterInstallAndEmit(args: {
         emitError(json, "AGENT_NOT_FOUND", msg);
         return 2;
       }
+      if (code === "ADAPTER_MANIFEST_INVALID") {
+        // A `.code-pact/adapters` symlink escape OR a malformed/schema-invalid
+        // manifest (both fail-closed in manifest I/O). Surface a structured
+        // envelope + exit 2, not an internal error.
+        emitError(json, "ADAPTER_MANIFEST_INVALID", err.message);
+        return 2;
+      }
+      if (code === "PATH_OUTSIDE_PROJECT") {
+        // A symlinked placeholder dir (.context / .claude) or generated-file
+        // ancestor escaping the project — fail-closed in resolveWithinProject.
+        emitError(json, "CONFIG_ERROR", err.message);
+        return 2;
+      }
       if (code === "CONFIG_ERROR") {
         emitError(json, "CONFIG_ERROR", err.message);
+        return 2;
+      }
+      if (emitAdapterTransactionError(json, err, code)) {
         return 2;
       }
     }

@@ -4,11 +4,11 @@
 
 Starting with `v1.0.0`, `code-pact` ships under the npm `latest` tag. Only the most recent release on `latest` receives security fixes. Past pre-1.0 alpha releases remain on the `@alpha` tag for reference but are no longer maintained.
 
-| Version | Supported |
-|---|---|
-| latest release on the `latest` tag | yes |
-| any release older than `latest` | no — upgrade to the current `latest` |
-| pre-1.0 alpha releases (`@alpha`) | no |
+| Version                            | Supported                            |
+| ---------------------------------- | ------------------------------------ |
+| latest release on the `latest` tag | yes                                  |
+| any release older than `latest`    | no — upgrade to the current `latest` |
+| pre-1.0 alpha releases (`@alpha`)  | no                                   |
 
 ## Reporting a vulnerability
 
@@ -33,13 +33,15 @@ In scope:
 
 - Command injection, path traversal, or arbitrary file write from any CLI command.
 - Issues that cause `code-pact` to leak secrets from the user's filesystem outside the project directory.
+- Cross-namespace observation or mutation of local untracked files from malicious tracked project/profile/manifest/roadmap/phase/task values.
+- Tracked symlinks and hostile tracked control-plane content.
 - Supply chain integrity of the published `code-pact` npm package (e.g. tampered tarball, unexpected `dependencies`).
 
 Out of scope:
 
 - Vulnerabilities in third-party dependencies — please report those upstream (`yaml`, `zod`, etc.).
-- Issues that require an attacker who already has write access to the user's `design/` directory or `.code-pact/` state.
 - `verify.commands` executing malicious commands from an untrusted project checkout. Verification commands are trusted local project configuration; do not run `code-pact verify` or `code-pact task complete` on a repository whose `design/` files you would not run as shell commands.
+- Attacks that require a separate local process to modify the filesystem during a command's execution.
 - Reports based on outdated releases when the issue is already fixed on the current `latest` tag.
 
 ## Supply chain notes
@@ -51,3 +53,78 @@ Out of scope:
 - 2FA (`auth-and-writes`) is enabled on the publisher's npm account.
 
 If a published version's registry-side shasum does not match the value in its release notes, please report it via the channel above with the highest priority.
+
+## Threat model: path safety and adapter write paths
+
+### Containment is not ownership
+
+`code-pact` distinguishes three levels of path safety:
+
+- **Containment** (`resolveWithinProject`): proves a path resolves to a location within the project root. In-project symlinks are allowed — the canonical target stays inside the project.
+- **Symlink-free containment** (`resolveSymlinkFreeProjectPath`): rejects ANY symlink component, including in-project aliases. This proves the path is inside the project and not reached through an alias, but it still does **not** prove semantic namespace authority.
+- **Semantic ownership**: a domain-specific resolver or validator proves the caller may use that exact namespace for the requested operation (for example agent-profile reads/writes, manifest writes, adapter-owned static paths, or explicitly user-selected input).
+
+All control-plane reads (`.code-pact/project.yaml`, agent profiles, model profiles, design files, phase YAMLs, decision ADRs, roadmap, archive records) and all automated writes (adapter install/upgrade, model pin) must have semantic ownership in addition to symlink-free containment. Containment-only resolution is reserved for explicit user-selected input paths (e.g. `--from-file` flags) where in-project symlinks are a legitimate convenience and the path is not attacker-controllable config.
+
+### Profile contract validation
+
+Before any filesystem operation, `validateAgentProfileForAdapter` checks the agent profile's path fields against the adapter descriptor's `profilePathContract` — a canonical set of exact values:
+
+- `instruction_filename` must **exactly match** the adapter's canonical instruction filename.
+- `skill_dir` (when present) must **exactly match** the adapter's canonical skill directory.
+- `hook_dir` (when present) must **exactly match** the adapter's canonical hook directory.
+
+This is an exact-equality check, not a prefix match — a hostile profile (e.g. `instruction_filename: .env`) is rejected at the contract boundary with `CONFIG_ERROR` — the target file is never read, hashed, or overwritten.
+
+Adapter install/upgrade use `loadValidatedAdapterProfile`, which performs symlink-free path resolution, YAML parsing, schema validation, and contract validation in a single function. Diagnostic paths may use lenient loaders, but they still resolve profile paths through the agent-profile namespace guard and must not inspect profile-derived filesystem targets unless the adapter descriptor proves authority.
+
+### Preflight and placeholder directories
+
+`context_dir` and `hook_dir` are **not** included in the `assertAdapterWritePathsContained` preflight. Instead:
+
+- `context_dir` is resolved symlink-free **before the model pin** and type-checked (must be a directory if it exists). It is **not** pre-created via `mkdir` — it is created lazily by `atomicWriteText`'s parent-dir creation when the first context pack is written. It is schema-constrained to `.context/**` (`ContextOutputDir`) and cannot be an arbitrary path.
+- `hook_dir` is resolved symlink-free **before the model pin** (to catch symlinks) but is **not** pre-created via `mkdir`. This prevents a hostile profile from forcing arbitrary directory creation. Parent directories for hook files are created by the write loop's `mkdir(dirname(absPath), { recursive: true })` only when a hook file is actually generated.
+
+The preflight itself only checks the manifest path (a fixed `.code-pact/adapters/` path). Generated-file targets are authorized individually via `authorizeAdapterMutationPath` before any stat/read/hash.
+
+### Model profile loading
+
+Model profiles (`.code-pact/model-profiles/*.yaml`) are loaded via two loaders:
+
+- `loadModelProfilesStrict`: used by adapter install/upgrade. Uses `resolveSymlinkFreeProjectPath` for both the directory and each entry. A symlinked or unreadable entry throws — it is **not** silently skipped. An empty array would cause the generator to produce model-unaware output, masking the configuration problem.
+- `loadModelProfilesSafe`: used by diagnostic surfaces. Uses `resolveSymlinkFreeProjectPath` for the directory and each entry. Symlinked or invalid entries fail closed into structured diagnostic issues instead of being treated as silently absent. Both loaders share the same symlink-free resolution primitive.
+
+### Control-plane config path
+
+`.code-pact/project.yaml` is read through `resolveProjectConfigPath`, a dedicated helper that wraps `resolveSymlinkFreeProjectPath`. This ensures the control-plane config file is always read with ownership resolution, never containment. The `readProjectYamlStrictOrNull` helper provides safe locale discovery with size and type checks.
+
+### TOCTOU safety
+
+`writeManifest` always re-resolves the manifest path via `resolveSymlinkFreeProjectPath` at write time, regardless of any earlier preflight check. A symlink planted between the preflight and the write is detected and refused.
+
+### Static analysis gates
+
+Two CI gates provide structural backstops for path safety:
+
+- **`check:fs-containment`** (`scripts/check-fs-containment.mjs`): flags lexical `join(...)` paths handed directly to fs functions across `src/commands/`, `src/core/`, and `src/cli/`.
+- **`check:fs-authority`** (`scripts/check-fs-authority.mjs`): an **AST-based** gate over `src/commands/**`, `src/core/**`, and `src/cli/**`. It verifies fs operation path arguments are sourced from approved imported authority helpers or a structured allowlist entry, tracks local variable provenance, tracks imported/projectFs/raw-fs sink aliases, and merges branch states conservatively so a variable is authorized only when every reachable branch assigns it from an approved helper. Generic symlink-free containment is not inferred as filesystem authority. It is a structural gate, not a whole-project semantic proof.
+
+Both are structural tripwires — exit 0 does not prove semantic invariants. The security regression tests (`control-plane-symlink-red.test.ts`, `control-plane-ownership-red.test.ts`, `adapter-preflight-atomicity.test.ts`, `adapter-fs-operation-proof.test.ts`, `filesystem-operation-proof.test.ts`) are the proof layer. With the `projectFs` seam centralization, operation proof tests mock a single import point (`project-fs/index.ts`) for exhaustive fs spying, including `FileHandle` methods accessed via `open()` (read, readFile, write, writeFile, truncate, appendFile, chmod, chown, utimes, sync, datasync, close).
+
+### Task reads
+
+`task.reads` is an agent-facing filename enumeration surface. It is matched only against `git ls-files -z` output. Untracked local files (for example `.env`, `.local/**`, scratch files, or ignored context output) are not walked and cannot appear in the context pack merely because a hostile task declares `reads: ["**"]`. A tracked file named `.env` is treated as intentionally repository-visible and can match. In a non-git project, `task.reads` fails closed with `TASK_READS_UNAVAILABLE`; there is no implicit untracked filesystem walk.
+
+### Dynamic generated-file handoff
+
+Dynamic skill files are generated with a `code-pact-` prefix (for example `.claude/skills/code-pact-verify-2.md`) within the shared `.claude/skills/` directory. The prefix is **not** strong provenance, and dynamic paths never become read authority.
+
+The adapter treats dynamic files as create-once. If code-pact creates the file, the manifest records `ownership: handed_off`; later doctor/conformance paths do not read, hash, update, prune, or repeatedly warn on that file. If a dynamic file already exists without a handoff manifest entry, install/upgrade preserve it with `dynamic_file_unverifiable`, and diagnostics may warn, but they still never read or hash the bytes.
+
+## Known technical debt
+
+- **`resolveWithinProject` in user-selected input paths**: `plan-constitution.ts`, `plan-brief.ts`, `plan-adopt.ts`, and `spec-import.ts` (input mode) still use `resolveWithinProject` for `--from-file` / `--from` user-selected input paths. These are containment-only (in-project symlinks allowed). This is acceptable because: (a) the paths are explicitly user-selected, not attacker-controllable config; (b) the content is user-authored design content, not control-plane config; (c) these are read-only operations with no write side effects. Each call site is annotated with `// fs-authority: containment-only` and `// reason: explicit user-selected input path`.
+- **`context_dir` lazy creation**: `adapter install` and `adapter upgrade` resolve `context_dir` symlink-free and type-check it (must be a directory if it exists) but do **not** pre-create it via `mkdir`. The directory is created lazily by `atomicWriteText`'s parent-dir creation when the first context pack is written. This eliminates an unnecessary side effect from the install/upgrade path.
+- **`projectFs` seam**: most `src/` modules import fs functions from `src/core/project-fs/index.ts` instead of `node:fs/promises` or `node:fs` directly. Raw fs imports are limited to primitive modules such as `project-fs/index.ts`, `io/atomic-text.ts`, and the adapter transaction state/recovery primitives. The seam exposes an explicit raw-fs allowlist rather than a wildcard re-export, and `check:fs-authority` rejects reintroducing `export * from "node:fs"` / `node:fs/promises`. This is still a central mocking/auditing point, not by itself a complete authority-enforcing API: many raw functions still accept strings. Branded path types (`SymlinkFreeContainedPath`, `OwnedReadPath`, `OwnedWritePath`, `OwnedDeletePath`) exist for domain-specific helpers, but the `check:fs-authority` AST gate and regression tests remain required until remaining raw call sites are migrated to branded wrappers.
+- **`check:fs-authority` scope**: the AST gate covers `src/commands/**`, `src/core/**`, and `src/cli/**`. False-negative test fixtures cover containment-only resolver misuse, generic owned-read misuse, mixed read/write branch merges, unchecked rename/copy destinations, aliased projectFs/raw fs sinks, namespace/dynamic/require raw fs calls, object property sink aliases, nested trusted-name functions, symlink/link-style sinks, imported resolver shadowing, unsafe reassignment, and arbitrary absPath property access. Some legacy symlink-free call sites remain documented in `.code-pact/fs-authority-allowlist.json`; stale allowlist entries fail CI.
+- **Adapter multi-file mutation transaction**: adapter install/upgrade stage the model-version profile pin, desired-file writes, orphan deletes, and manifest write via `FileTransaction`. Callers must pass typed transaction targets (`agent_profile`, `adapter_manifest`, `adapter_static_file`, or `adapter_dynamic_create`); public string-path staging is test-only. `addWrite()` records the plan in memory only. Before any project-side temp file is written, the transaction validates target authority, captures pre-state, chooses backup/temp names, and durably writes a private journal under the user state directory keyed by canonical project root. The state root must be absolute, non-symlink, owned by the current user on POSIX, and not group/other writable; journal files are `<UUID-v4>.json`, and the filename must match the body id. Legacy project-local journals under `.code-pact/state/adapter-transactions/` are rejected, not recovered. If a commit operation fails before the durable commit marker, recovery rolls back to the old state best-effort and retains the journal/backups on rollback failure. After the commit marker, backup/temp/journal cleanup failures do **not** roll back committed final files; they surface as `TRANSACTION_CLEANUP_PENDING` with journal/backup paths for the next install/upgrade recovery pass. This is a best-effort staged transaction with crash recovery, not an OS-level multi-file atomic commit, and it still does not protect against a separate concurrent writer mutating the same paths during the transaction.

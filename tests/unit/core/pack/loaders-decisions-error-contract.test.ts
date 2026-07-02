@@ -18,23 +18,50 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // and the positive-control reads must use the real impl, so default OFF.
 const fail = { readdir: false, readFile: false };
 
-vi.mock("node:fs/promises", async (importActual) => {
+vi.mock("node:fs/promises", async importActual => {
   const actual = await importActual<typeof import("node:fs/promises")>();
   const eacces = () =>
-    Promise.reject(Object.assign(new Error("permission denied"), { code: "EACCES" }));
+    Promise.reject(
+      Object.assign(new Error("permission denied"), { code: "EACCES" }),
+    );
   const inDecisions = (p: unknown) => /design[\\/]decisions/.test(String(p));
   return {
     ...actual,
     readdir: vi.fn((...args: Parameters<typeof actual.readdir>) => {
       if (fail.readdir && inDecisions(args[0])) return eacces();
-      return (actual.readdir as (...a: unknown[]) => unknown)(...(args as unknown[]));
-    }),
-    readFile: vi.fn((...args: Parameters<typeof actual.readFile>) => {
-      if (fail.readFile && inDecisions(args[0])) return eacces();
-      return (actual.readFile as (...a: unknown[]) => unknown)(...(args as unknown[]));
+      return (actual.readdir as (...a: unknown[]) => unknown)(
+        ...(args as unknown[]),
+      );
     }),
   };
 });
+
+vi.mock(
+  "../../../../src/core/project-fs/raw-internal.ts",
+  async importActual => {
+    const actual =
+      await importActual<
+        typeof import("../../../../src/core/project-fs/raw-internal.ts")
+      >();
+    const eacces = () =>
+      Object.assign(new Error("permission denied"), { code: "EACCES" });
+    const inDecisions = (p: unknown) => /design[\\/]decisions/.test(String(p));
+    return {
+      ...actual,
+      readdir: vi.fn((...args: Parameters<typeof actual.readdir>) => {
+        if (fail.readdir && inDecisions(args[0]))
+          return Promise.reject(eacces());
+        return (actual.readdir as (...a: unknown[]) => unknown)(
+          ...(args as unknown[]),
+        );
+      }),
+      readRegularOwnedText: vi.fn(async (path: string) => {
+        if (fail.readFile && inDecisions(path)) throw eacces();
+        return actual.readRegularOwnedText(path);
+      }),
+    };
+  },
+);
 
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -87,7 +114,7 @@ describe("loadDecisions — optional-source degradation (non-ENOENT)", () => {
 });
 
 describe("readLiveDecisionFile — fail-closed seam (the contract the loaders catch)", () => {
-  it("THROWS on a non-ENOENT read error (EACCES) rather than returning a result", async () => {
+  it("returns unreadable on a non-ENOENT read error (EACCES) rather than throwing raw errno", async () => {
     // This is the fail-closed behavior the gate relies on and the pack loaders
     // must wrap. ENOENT/ENOTDIR → missing (covered elsewhere); any other error
     // must propagate, NOT be swallowed into a missing/ok result.
@@ -98,7 +125,10 @@ describe("readLiveDecisionFile — fail-closed seam (the contract the loaders ca
     fail.readFile = true;
     await expect(
       readLiveDecisionFile(cwd, "design/decisions/a.md"),
-    ).rejects.toMatchObject({ code: "EACCES" });
+    ).resolves.toEqual({
+      kind: "unreadable",
+      errorCode: "EACCES",
+    });
   });
 });
 
@@ -118,7 +148,9 @@ describe("loadDeclaredDecisions — skip (no throw) on each non-ok read outcome"
         join(outside, "target.md"),
         join(cwd, "design", "decisions", "escape.md"),
       );
-      const docs = await loadDeclaredDecisions(cwd, ["design/decisions/escape.md"]);
+      const docs = await loadDeclaredDecisions(cwd, [
+        "design/decisions/escape.md",
+      ]);
       expect(docs).toEqual([]);
     } finally {
       await rm(outside, { recursive: true, force: true });
@@ -134,7 +166,9 @@ describe("loadDeclaredDecisions — skip (no throw) on each non-ok read outcome"
       "---\nstatus: accepted\n---\n\nbody text",
     );
     fail.readFile = true;
-    const docs = await loadDeclaredDecisions(cwd, ["design/decisions/P1-T1-rfc.md"]);
+    const docs = await loadDeclaredDecisions(cwd, [
+      "design/decisions/P1-T1-rfc.md",
+    ]);
     expect(docs).toEqual([]);
   });
 
@@ -143,9 +177,11 @@ describe("loadDeclaredDecisions — skip (no throw) on each non-ok read outcome"
       join(cwd, "design", "decisions", "P1-T1-rfc.md"),
       "---\nstatus: accepted\n---\n\nbody text",
     );
-    const docs = await loadDeclaredDecisions(cwd, ["design/decisions/P1-T1-rfc.md"]);
+    const docs = await loadDeclaredDecisions(cwd, [
+      "design/decisions/P1-T1-rfc.md",
+    ]);
     expect(docs).toHaveLength(1);
-    expect(docs[0]!.filename).toBe("P1-T1-rfc.md");
+    expect(docs[0]!.filename).toBe("design/decisions/P1-T1-rfc.md");
     expect(docs[0]!.body).toContain("body text");
   });
 });

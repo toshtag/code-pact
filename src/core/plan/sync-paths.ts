@@ -1,5 +1,9 @@
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readOwnedText, listOwned } from "../project-fs/operations.ts";
+import {
+  resolvePhaseReadPath,
+  resolvePhaseDirectoryReadPath,
+  resolvePhaseWritePath,
+} from "../project-fs/authority-resolvers.ts";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { Phase } from "../schemas/phase.ts";
@@ -98,12 +102,12 @@ export async function runSyncPaths(opts: {
   mode: SyncMode;
 }): Promise<SyncPathsResult> {
   const { cwd, renames, mode } = opts;
-  const renameMap = new Map(renames.map((r) => [r.from, r.to]));
+  const renameMap = new Map(renames.map(r => [r.from, r.to]));
 
-  const phasesDir = join(cwd, "design", "phases");
+  const phasesDir = await resolvePhaseDirectoryReadPath(cwd);
   let entries: string[] = [];
   try {
-    entries = await readdir(phasesDir);
+    entries = await listOwned(phasesDir);
   } catch {
     entries = [];
   }
@@ -116,7 +120,6 @@ export async function runSyncPaths(opts: {
 
   for (const entry of entries) {
     if (!entry.endsWith(".yaml")) continue;
-    const absPath = join(phasesDir, entry);
     const relPath = `design/phases/${entry}`;
 
     // READ-MODIFY-WRITE site — deliberately NOT routed through the
@@ -125,7 +128,7 @@ export async function runSyncPaths(opts: {
     // archive-fallback: you cannot rewrite a phase file you have archived /
     // deleted, so a missing/archived phase must surface here (skipped/failed),
     // never be silently synthesized from a snapshot.
-    const raw = await readFile(absPath, "utf8");
+    const raw = await readOwnedText(await resolvePhaseReadPath(cwd, relPath));
     let phase: Phase;
     try {
       phase = Phase.parse(parseYaml(raw) as unknown);
@@ -138,7 +141,7 @@ export async function runSyncPaths(opts: {
     }
 
     let fileChanged = false;
-    const tasks = (phase.tasks ?? []).map((task) => {
+    const tasks = (phase.tasks ?? []).map(task => {
       let next = task;
       for (const field of ["reads", "writes"] as const) {
         const list = task[field];
@@ -164,10 +167,20 @@ export async function runSyncPaths(opts: {
 
     if (mode === "write") {
       const updatedPhase: Phase = { ...phase, tasks };
-      await atomicWriteText(absPath, stringifyYaml(updatedPhase));
+      await atomicWriteText(
+        await resolvePhaseWritePath(cwd, relPath),
+        stringifyYaml(updatedPhase),
+      );
       written.push(relPath);
     }
   }
 
-  return { mode, renames, changes, files_changed: filesChanged, written, skipped };
+  return {
+    mode,
+    renames,
+    changes,
+    files_changed: filesChanged,
+    written,
+    skipped,
+  };
 }

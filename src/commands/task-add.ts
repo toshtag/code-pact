@@ -1,8 +1,9 @@
 import { loadPhase } from "../core/plan/load-phase.ts";
-import { join } from "node:path";
 import { stringify as toYaml } from "yaml";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { resolvePhaseInRoadmap } from "../core/plan/resolve-phase.ts";
+import { resolvePhaseWritePath } from "../core/project-fs/index.ts";
+import type { OwnedWritePath } from "../core/project-fs/branded-paths.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { TaskType, type Task } from "../core/schemas/task.ts";
 import { assertSafePlanId } from "../core/schemas/plan-id.ts";
@@ -70,7 +71,10 @@ function nextTaskId(phaseId: string, existing: Task[]): string {
   return `${phaseId}-T${n}`;
 }
 
-async function askRequired(prompter: Prompter, question: string): Promise<string> {
+async function askRequired(
+  prompter: Prompter,
+  question: string,
+): Promise<string> {
   for (;;) {
     const raw = await prompter.ask(question);
     if (raw.length > 0) return raw;
@@ -123,8 +127,27 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
 
   try {
     const ref = await resolvePhaseInRoadmap(opts.cwd, opts.phaseId);
+    let absPath: OwnedWritePath;
+    try {
+      absPath = await resolvePhaseWritePath(opts.cwd, ref.path);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+        const wrapped = new Error((err as Error).message);
+        (wrapped as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+        throw wrapped;
+      }
+      throw err;
+    }
 
     const phase = await loadPhase(opts.cwd, ref.path);
+    if (phase.id !== opts.phaseId) {
+      const err = new Error(
+        `phase reference "${opts.phaseId}" points at "${ref.path}", but that file declares phase "${phase.id}"`,
+      );
+      (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw err;
+    }
     const existingTasks = phase.tasks ?? [];
 
     const taskId = opts.id ?? nextTaskId(opts.phaseId, existingTasks);
@@ -135,8 +158,10 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
     // for defense-in-depth — it is a no-op for valid ids.
     assertSafePlanId(taskId, "Task id");
 
-    if (existingTasks.some((t) => t.id === taskId)) {
-      const err = new Error(`Task "${taskId}" already exists in phase "${opts.phaseId}".`);
+    if (existingTasks.some(t => t.id === taskId)) {
+      const err = new Error(
+        `Task "${taskId}" already exists in phase "${opts.phaseId}".`,
+      );
       (err as NodeJS.ErrnoException).code = "DUPLICATE_TASK_ID";
       throw err;
     }
@@ -147,7 +172,7 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
     } else {
       const description = await askRequired(prompter!, m.descriptionPrompt);
 
-      const typeLabels = TASK_TYPE_VALUES.map((v) => TASK_TYPE_LABELS[v] ?? v);
+      const typeLabels = TASK_TYPE_VALUES.map(v => TASK_TYPE_LABELS[v] ?? v);
       const typeIdx = await prompter!.askChoice(m.typePrompt, typeLabels);
       const type = TASK_TYPE_VALUES[typeIdx]!;
 
@@ -172,7 +197,6 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
       tasks: [...existingTasks, newTask],
     });
 
-    const absPath = join(opts.cwd, ref.path);
     await atomicWriteText(absPath, toYaml(updatedPhase));
 
     return { phaseId: opts.phaseId, taskId, phasePath: ref.path };

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
 import { seedDurableEvents } from "../helpers/seed-events.ts";
 import { writePhaseSnapshot } from "../../src/core/archive/phase-snapshot.ts";
@@ -191,6 +192,7 @@ function lintIssues(r: RunResult): LintIssue[] {
 async function scaffold(adr: string, p2: string = P2_DEP_DECISION): Promise<void> {
   const init = run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
   if (init.code !== 0) throw new Error(`init failed: ${init.stdout}${init.stderr}`);
+  execFileSync("git", ["init"], { cwd: tmpDir, stdio: "ignore" });
   await writeFile(join(tmpDir, "design", "roadmap.yaml"), ROADMAP, "utf8");
   await writeFile(join(tmpDir, "design", "phases", "P1-x.yaml"), P1_DONE, "utf8");
   await writeFile(join(tmpDir, "design", "phases", "P2-y.yaml"), p2, "utf8");

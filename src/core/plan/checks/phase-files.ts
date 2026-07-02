@@ -1,9 +1,8 @@
-import { readdir } from "node:fs/promises";
-import { join } from "node:path";
 import type { PlanIssue } from "../shared.ts";
 import type { Roadmap } from "../../schemas/roadmap.ts";
-import { phaseFilePresence } from "./fs.ts";
+import { projectPathPresence } from "./fs.ts";
 import { resolveMissingPhaseRef } from "../../archive/load-phase-snapshot.ts";
+import { listOwnedPhaseDirectory } from "../../project-fs/control-plane.ts";
 
 /**
  * Roadmap references a phase file that does not exist on disk. Both `plan lint`
@@ -25,8 +24,7 @@ export async function detectMissingPhaseFiles(
 ): Promise<PlanIssue[]> {
   const issues: PlanIssue[] = [];
   for (const ref of roadmap.phases) {
-    const absPath = join(cwd, ref.path);
-    const presence = await phaseFilePresence(absPath);
+    const presence = await projectPathPresence(cwd, ref.path);
     if (presence === "present") continue; // live-wins
     if (presence === "inaccessible") {
       // Present but unreadable (e.g. a non-searchable parent dir) — fail closed.
@@ -73,14 +71,23 @@ export async function detectOrphanPhaseFiles(
   cwd: string,
   roadmap: Roadmap,
 ): Promise<PlanIssue[]> {
-  const phasesDir = join(cwd, "design", "phases");
   let entries: string[] = [];
   try {
-    entries = await readdir(phasesDir);
-  } catch {
+    entries = await listOwnedPhaseDirectory(cwd);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      return [
+        {
+          code: "MISSING_PHASE_FILE",
+          severity: "error",
+          message: `design/phases cannot be safely enumerated: ${(err as Error).message}`,
+          file: "design/phases",
+        },
+      ];
+    }
     return [];
   }
-  const referenced = new Set(roadmap.phases.map((r) => r.path));
+  const referenced = new Set(roadmap.phases.map(r => r.path));
   const issues: PlanIssue[] = [];
   for (const entry of entries) {
     if (!entry.endsWith(".yaml")) continue;

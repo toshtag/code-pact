@@ -1,15 +1,13 @@
-import { readFile } from "node:fs/promises";
+import {
+  readOwnedText,
+  resolvePhaseReadPath,
+  resolvePhaseWritePath,
+} from "../project-fs/index.ts";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
-import {
-  assertSafeRelativePath,
-  resolveWithinProject,
-} from "../path-safety.ts";
+import { assertSafeRelativePath } from "../path-safety.ts";
 import { Phase, type PhaseStatus } from "../schemas/phase.ts";
-import {
-  computeTaskStatusDiff,
-  type TaskStatusDiff,
-} from "./diff.ts";
+import { computeTaskStatusDiff, type TaskStatusDiff } from "./diff.ts";
 
 // ---------------------------------------------------------------------------
 // Safe-write contract for Finalization & Reconciliation
@@ -34,7 +32,8 @@ import {
 //     leading `/`, etc.).
 //   - The target path must be under `design/phases/` and end with
 //     `.yaml`. design/roadmap.yaml is deliberately NOT writable.
-//   - `resolveWithinProject` must succeed (catches symlink escape).
+//   - `resolveSymlinkFreeProjectPath` must succeed (catches symlink escape and
+//     in-project symlink aliases).
 //   - The file must be readable and parseable as a Phase.
 //   - The task id must exist in the parsed phase's tasks[].
 //
@@ -50,7 +49,7 @@ export type WriteRefusalReason =
   | "outside_design_phases"
   /** The path does not end in `.yaml`. */
   | "not_yaml"
-  /** `resolveWithinProject` rejected the path (symlink escape). */
+  /** Owned path resolution rejected the path (symlink escape or alias). */
   | "symlink_escape"
   /** The file could not be read from disk. */
   | "unreadable"
@@ -150,11 +149,10 @@ export async function classifyWriteRequest(
     };
   }
 
-  // 3. Symlink-escape check (via realpath ancestor walk) and absolute
-  //    path resolution.
-  let absPath: string;
+  // 3. Owned path resolution: no symlink component is allowed for automated
+  //    phase mutation, including in-project aliases.
   try {
-    absPath = await resolveWithinProject(cwd, file);
+    await resolvePhaseReadPath(cwd, file);
   } catch (err) {
     return {
       kind: "refused",
@@ -167,7 +165,7 @@ export async function classifyWriteRequest(
   // 4. Read the phase YAML.
   let raw: string;
   try {
-    raw = await readFile(absPath, "utf8");
+    raw = await readOwnedText(await resolvePhaseReadPath(cwd, file));
   } catch (err) {
     return {
       kind: "refused",
@@ -191,7 +189,7 @@ export async function classifyWriteRequest(
   }
 
   // 6. Task must exist in this phase.
-  const task = (phase.tasks ?? []).find((t) => t.id === taskId);
+  const task = (phase.tasks ?? []).find(t => t.id === taskId);
   if (!task) {
     return {
       kind: "refused",
@@ -226,7 +224,7 @@ export async function classifyWriteRequest(
  * makes the mutation deterministic against the current on-disk state.
  *
  * Throws when:
- *   - `resolveWithinProject` fails (path safety changed since classify).
+ *   - owned path resolution fails (path safety changed since classify).
  *   - The file has been deleted or become unreadable since classify.
  *   - The file no longer parses as a Phase.
  *   - The task id no longer exists in `phase.tasks[]`.
@@ -239,11 +237,11 @@ export async function applyPlannedWrite(
   cwd: string,
   diff: TaskStatusDiff,
 ): Promise<void> {
-  const absPath = await resolveWithinProject(cwd, diff.file);
-  const raw = await readFile(absPath, "utf8");
+  const writePath = await resolvePhaseWritePath(cwd, diff.file);
+  const raw = await readOwnedText(await resolvePhaseReadPath(cwd, diff.file));
   const phase = Phase.parse(parseYaml(raw) as unknown);
   const tasks = phase.tasks ?? [];
-  const idx = tasks.findIndex((t) => t.id === diff.task_id);
+  const idx = tasks.findIndex(t => t.id === diff.task_id);
   if (idx === -1) {
     throw new Error(
       `task "${diff.task_id}" not found in "${diff.file}" at apply time`,
@@ -257,5 +255,5 @@ export async function applyPlannedWrite(
       ...tasks.slice(idx + 1),
     ],
   };
-  await atomicWriteText(absPath, stringifyYaml(updated));
+  await atomicWriteText(writePath, stringifyYaml(updated));
 }

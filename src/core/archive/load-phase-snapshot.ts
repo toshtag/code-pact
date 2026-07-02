@@ -1,13 +1,26 @@
-import { readdir, readFile } from "node:fs/promises";
+import { listOwnedDirents, readOwnedText } from "../project-fs/operations.ts";
+import type { OwnedReadPath } from "../project-fs/branded-paths.ts";
 import { basename } from "node:path";
 import { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
 import type { TerminalEvidence } from "../schemas/phase-snapshot.ts";
 import { isSafePlanId } from "../schemas/plan-id.ts";
-import { archivePhasesDir, phaseSnapshotPath, sha256Hex } from "./paths.ts";
+import {
+  archivePhasesRelDir,
+  phaseSnapshotRelPath,
+  resolveArchiveOwnedPath,
+  resolveArchiveOwnedListPath,
+  sha256Hex,
+} from "./paths.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
-import type { BundleIndexEntry, BundleMemberIndex } from "./archive-bundle-index.ts";
-import { resolveArchiveRecordBytes, type RawLooseRecord } from "./resolve-archive-record.ts";
+import type {
+  BundleIndexEntry,
+  BundleMemberIndex,
+} from "./archive-bundle-index.ts";
+import {
+  resolveArchiveRecordBytes,
+  type RawLooseRecord,
+} from "./resolve-archive-record.ts";
 import { readPendingDeleteFilters } from "./delete-intent-journal.ts";
 
 // The bundle store label for bundle-integrity error messages from this module.
@@ -54,16 +67,17 @@ export async function readLoosePhaseSnapshotRaw(
   cwd: string,
   phaseId: string,
 ): Promise<RawLooseRecord> {
-  let path: string;
+  let path: OwnedReadPath;
   try {
-    path = phaseSnapshotPath(cwd, phaseId);
+    path = await resolveArchiveOwnedPath(cwd, phaseSnapshotRelPath(phaseId));
   } catch (error) {
     return { kind: "invalid", error };
   }
   try {
-    return { kind: "present", bytes: await readFile(path, "utf8") };
+    return { kind: "present", bytes: await readOwnedText(path) };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kind: "absent" };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      return { kind: "absent" };
     return { kind: "invalid", error };
   }
 }
@@ -119,7 +133,8 @@ export async function resolvePhaseSnapshotRaw(
 ): Promise<ResolvedPhaseSnapshotRaw> {
   let resolved;
   try {
-    const { looseAbsentIds, bundleAbsentIds } = await readPendingDeleteFilters(cwd); // mid-deletion pair → logically absent (bundle-pair: bundle side only)
+    const { looseAbsentIds, bundleAbsentIds } =
+      await readPendingDeleteFilters(cwd); // mid-deletion pair → logically absent (bundle-pair: bundle side only)
     resolved = await resolveArchiveRecordBytes({
       kind: "phase_snapshot",
       id: phaseId,
@@ -133,7 +148,8 @@ export async function resolvePhaseSnapshotRaw(
     return { kind: "invalid", error };
   }
   if (resolved.kind === "absent") return { kind: "absent" };
-  if (resolved.kind === "invalid") return { kind: "invalid", error: resolved.error };
+  if (resolved.kind === "invalid")
+    return { kind: "invalid", error: resolved.error };
   try {
     const snapshot = PhaseSnapshot.parse(JSON.parse(resolved.bytes) as unknown);
     return { kind: "valid", raw: resolved.bytes, snapshot };
@@ -188,7 +204,8 @@ export async function resolveMissingPhaseRef(
   // maps to `fail_invalid`. A loose-read invalidity is returned, not thrown.
   let resolved;
   try {
-    const { looseAbsentIds, bundleAbsentIds } = await readPendingDeleteFilters(cwd); // a mid-deletion pair → logically absent (bundle-pair: bundle side only)
+    const { looseAbsentIds, bundleAbsentIds } =
+      await readPendingDeleteFilters(cwd); // a mid-deletion pair → logically absent (bundle-pair: bundle side only)
     resolved = await resolveArchiveRecordBytes({
       kind: "phase_snapshot",
       id: ref.id,
@@ -205,7 +222,10 @@ export async function resolveMissingPhaseRef(
     };
   }
   if (resolved.kind === "invalid") {
-    return { kind: "fail_invalid", reason: "archive snapshot is corrupt or unreadable" };
+    return {
+      kind: "fail_invalid",
+      reason: "archive snapshot is corrupt or unreadable",
+    };
   }
   // Referenced, but neither loose nor bundle has it → strict fail-closed missing.
   if (resolved.kind === "absent") return { kind: "fail_missing" };
@@ -214,7 +234,10 @@ export async function resolveMissingPhaseRef(
   try {
     s = PhaseSnapshot.parse(JSON.parse(resolved.bytes) as unknown);
   } catch {
-    return { kind: "fail_invalid", reason: "archive snapshot is corrupt or unreadable" };
+    return {
+      kind: "fail_invalid",
+      reason: "archive snapshot is corrupt or unreadable",
+    };
   }
 
   // Identity: the record must be for THIS ref, not a misfiled / foreign / renamed
@@ -265,8 +288,10 @@ export type ArchivedTaskEntry = {
 };
 
 /** Project a tolerated snapshot's tasks into archived task entries. */
-export function archivedEntriesFromSnapshot(s: PhaseSnapshot): ArchivedTaskEntry[] {
-  return s.tasks.map((t) => ({
+export function archivedEntriesFromSnapshot(
+  s: PhaseSnapshot,
+): ArchivedTaskEntry[] {
+  return s.tasks.map(t => ({
     phase_id: s.phase_id,
     original_path: s.original_path,
     task_id: t.id,
@@ -323,7 +348,8 @@ export function mergeArchivedTaskIndex(
   ) => {
     const existing = collidingIds.get(task_id);
     if (existing) {
-      if (!existing.phase_ids.includes(phaseId)) existing.phase_ids.push(phaseId);
+      if (!existing.phase_ids.includes(phaseId))
+        existing.phase_ids.push(phaseId);
       return;
     }
     collidingIds.set(task_id, { task_id, kind, phase_ids: [phaseId], reason });
@@ -366,7 +392,12 @@ export function mergeArchivedTaskIndex(
         prior.phase_id,
         `archived task id "${task_id}" is claimed by two snapshots ("${prior.phase_id}" and "${phase_id}")`,
       );
-      recordCollision(task_id, "cross_snapshot", phase_id, collidingIds.get(task_id)!.reason);
+      recordCollision(
+        task_id,
+        "cross_snapshot",
+        phase_id,
+        collidingIds.get(task_id)!.reason,
+      );
     }
     if (!seen.has(task_id)) seen.set(task_id, entry);
   }
@@ -432,10 +463,16 @@ export function resolveUnreferencedSnapshot(
   res: LoadPhaseSnapshotResult,
 ): UnreferencedSnapshotResolution {
   if (res.kind === "absent") {
-    return { kind: "fail_invalid", reason: "archive snapshot file vanished during discovery" };
+    return {
+      kind: "fail_invalid",
+      reason: "archive snapshot file vanished during discovery",
+    };
   }
   if (res.kind === "invalid") {
-    return { kind: "fail_invalid", reason: "archive snapshot is corrupt or unreadable" };
+    return {
+      kind: "fail_invalid",
+      reason: "archive snapshot is corrupt or unreadable",
+    };
   }
   const s = res.snapshot;
   if (s.phase_id !== fileStem) {
@@ -490,7 +527,8 @@ export async function discoverUnreferencedSnapshots(
   const entries: ArchivedTaskEntry[] = [];
   const invalid: UnreferencedSnapshotInvalid[] = [];
 
-  const { entries: enumerated, skipped } = await enumerateArchivedPhaseSnapshots(cwd);
+  const { entries: enumerated, skipped } =
+    await enumerateArchivedPhaseSnapshots(cwd);
   for (const s of skipped) {
     invalid.push(
       s.scope === "directory"
@@ -523,7 +561,10 @@ export async function discoverUnreferencedSnapshots(
 
 /** One enumerated archived phase snapshot + its load result (absent/invalid/valid).
  *  Callers reuse their existing branch on `res.kind` unchanged. */
-export type EnumeratedPhaseSnapshot = { fileStem: string; res: LoadPhaseSnapshotResult };
+export type EnumeratedPhaseSnapshot = {
+  fileStem: string;
+  res: LoadPhaseSnapshotResult;
+};
 
 /** A soft enumeration skip: a STORE that could not be read (the loose directory or
  *  the bundle store) or an unsafe id. The per-snapshot corrupt case is NOT a skip —
@@ -534,7 +575,10 @@ export type PhaseSnapshotEnumSkip =
 
 /** Bind one `phase_snapshot` bundle member into a `LoadPhaseSnapshotResult`: valid on
  *  self-bind success (schema + id↔phase_id + canonical bytes), invalid on any fault. */
-function bindBundlePhaseSnapshot(phaseId: string, entry: BundleIndexEntry): LoadPhaseSnapshotResult {
+function bindBundlePhaseSnapshot(
+  phaseId: string,
+  entry: BundleIndexEntry,
+): LoadPhaseSnapshotResult {
   try {
     const bound = bindBundleMember(
       "phase_snapshot",
@@ -542,7 +586,10 @@ function bindBundlePhaseSnapshot(phaseId: string, entry: BundleIndexEntry): Load
       ARCHIVE_BUNDLE_STORE_LABEL,
     );
     if (bound.kind !== "phase_snapshot") {
-      return { kind: "invalid", error: new Error("bundle member kind is not phase_snapshot") };
+      return {
+        kind: "invalid",
+        error: new Error("bundle member kind is not phase_snapshot"),
+      };
     }
     return { kind: "valid", snapshot: bound.record };
   } catch (error) {
@@ -561,21 +608,25 @@ function bindBundlePhaseSnapshot(phaseId: string, entry: BundleIndexEntry): Load
  * a per-entry `invalid` result. Deterministic order (loose sorted, then bundle-only
  * sorted) so advisory/collision reporting is environment-independent.
  */
-export async function enumerateArchivedPhaseSnapshots(
-  cwd: string,
-): Promise<{ entries: EnumeratedPhaseSnapshot[]; skipped: PhaseSnapshotEnumSkip[] }> {
+export async function enumerateArchivedPhaseSnapshots(cwd: string): Promise<{
+  entries: EnumeratedPhaseSnapshot[];
+  skipped: PhaseSnapshotEnumSkip[];
+}> {
   const entries: EnumeratedPhaseSnapshot[] = [];
   const skipped: PhaseSnapshotEnumSkip[] = [];
   const looseStems = new Set<string>();
   // A phase named in a pending LOOSE-pair intent is LOGICALLY ABSENT everywhere; a
   // phase named in a pending BUNDLE-pair intent is absent from the BUNDLE side only
   // (its loose copy, if any, still resolves). Read-only; the journal is untouched.
-  const { looseAbsentIds, bundleAbsentIds } = await readPendingDeleteFilters(cwd);
+  const { looseAbsentIds, bundleAbsentIds } =
+    await readPendingDeleteFilters(cwd);
 
   // 1. Loose snapshot files.
   let names: string[] = [];
   try {
-    names = await readdir(archivePhasesDir(cwd));
+    names = await listOwnedDirents(
+      await resolveArchiveOwnedListPath(cwd, archivePhasesRelDir()),
+    ).then(dirents => dirents.filter(e => e.isFile()).map(e => e.name));
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     // No archive dir is the normal untouched-project state — not even an advisory.
@@ -586,11 +637,15 @@ export async function enumerateArchivedPhaseSnapshots(
       });
     }
   }
-  for (const name of names.filter((n) => n.endsWith(".json")).sort()) {
+  for (const name of names.filter(n => n.endsWith(".json")).sort()) {
     const fileStem = basename(name, ".json");
     if (looseAbsentIds.has(fileStem)) continue; // loose-pair mid-deletion → absent
     if (!isSafePlanId(fileStem)) {
-      skipped.push({ scope: "file", fileStem, detail: "unsafe archive snapshot filename" });
+      skipped.push({
+        scope: "file",
+        fileStem,
+        detail: "unsafe archive snapshot filename",
+      });
       continue;
     }
     looseStems.add(fileStem);
@@ -611,14 +666,23 @@ export async function enumerateArchivedPhaseSnapshots(
   }
   const members = index?.get("phase_snapshot");
   if (members) {
-    for (const [phaseId, entry] of [...members].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) {
+    for (const [phaseId, entry] of [...members].sort((a, b) =>
+      a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0,
+    )) {
       if (looseStems.has(phaseId)) continue; // loose wins
       if (looseAbsentIds.has(phaseId) || bundleAbsentIds.has(phaseId)) continue; // mid-deletion pair → bundle member absent
       if (!isSafePlanId(phaseId)) {
-        skipped.push({ scope: "file", fileStem: phaseId, detail: "unsafe archive snapshot bundle member id" });
+        skipped.push({
+          scope: "file",
+          fileStem: phaseId,
+          detail: "unsafe archive snapshot bundle member id",
+        });
         continue;
       }
-      entries.push({ fileStem: phaseId, res: bindBundlePhaseSnapshot(phaseId, entry) });
+      entries.push({
+        fileStem: phaseId,
+        res: bindBundlePhaseSnapshot(phaseId, entry),
+      });
     }
   }
 

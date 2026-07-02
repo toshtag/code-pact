@@ -94,11 +94,17 @@ export async function runTaskComplete(
   // skipConsistencyChecks: true skips the progress_event + task_status
   // checks that task complete is itself about to produce. The remaining
   // checks (commands, decision) are the deterministic preconditions.
+  //
+  // Propagate the caller's `dryRun`: a `--dry-run` completion must NOT execute
+  // the project-controlled `verification.commands` (spawned with shell: true).
+  // With dryRun the commands check returns a "would execute" preview instead of
+  // running, so a dry run has no side effects. The decision gate is a read and
+  // still runs, so an unresolved-decision dry run still surfaces the gate.
   const verifyResult = await runVerify({
     cwd,
     phaseId,
     taskId,
-    dryRun: false,
+    dryRun,
     skipConsistencyChecks: true,
   });
 

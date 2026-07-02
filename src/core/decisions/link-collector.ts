@@ -1,6 +1,12 @@
-import { readFile, readdir } from "node:fs/promises";
+import {
+  listProjectTreeDirents,
+  readExplicitUserText,
+} from "../project-fs/operations.ts";
+import {
+  resolveExplicitUserReadPath,
+} from "../project-fs/index.ts";
+import { resolveProjectTreeListPath } from "../project-fs/authorities/project-config-authority.ts";
 import { posix } from "node:path";
-import { resolveWithinProject } from "../path-safety.ts";
 
 /**
  * One inbound reference considered by the prune write plan. `rewrite_action`
@@ -35,7 +41,10 @@ export type LinkScanIssue = {
   reason: "unreadable" | "unsupported_reference_style" | "protected_ledger";
 };
 
-export type InboundLinkScan = { items: LinkRewriteItem[]; issues: LinkScanIssue[] };
+export type InboundLinkScan = {
+  items: LinkRewriteItem[];
+  issues: LinkScanIssue[];
+};
 
 // EXTERNAL_RE / FENCE_RE / INLINE_CODE_RE are byte-identical to
 // scripts/check-doc-links.ts so the collector strips code and rejects external
@@ -53,7 +62,8 @@ const FENCE_RE = /^([ \t]*)(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\1\2[^\n]*$/gm;
 const INLINE_CODE_RE = /`[^`\n]*`/g;
 const INLINE =
   /\[([^\]]*)\]\(\s*(<[^>]+>|[^)\s]+)(?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g;
-const REF_DEF = /^[ \t]{0,3}\[[^\]]+\]:[ \t]*(<[^>]+>|\S+)(?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*$/;
+const REF_DEF =
+  /^[ \t]{0,3}\[[^\]]+\]:[ \t]*(<[^>]+>|\S+)(?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*$/;
 
 /** The append-only prune ledger — `--write` may only APPEND to it, never rewrite its rows. */
 const LEDGER = "design/decisions/PRUNED.md";
@@ -77,7 +87,9 @@ function stripAngleBrackets(raw: string): string {
 function resolveFrom(sourceFile: string, href: string): string {
   const dest = stripAngleBrackets(href).split("#")[0]!.trim();
   if (dest === "" || EXTERNAL_RE.test(dest)) return ""; // empty / external / protocol-relative
-  return posix.normalize(posix.join(posix.dirname(sourceFile), dest)).replace(/^(?:\.\/)+/, "");
+  return posix
+    .normalize(posix.join(posix.dirname(sourceFile), dest))
+    .replace(/^(?:\.\/)+/, "");
 }
 
 const ROOTS: { rel: string; recursive: boolean; exts: string[] }[] = [
@@ -93,17 +105,23 @@ const ROOTS: { rel: string; recursive: boolean; exts: string[] }[] = [
  * silently skipped — it becomes an `unreadable` issue so the plan can fail
  * closed. A genuinely absent root (ENOENT) is fine.
  */
-async function discoverSources(cwd: string): Promise<{ files: string[]; issues: LinkScanIssue[] }> {
+async function discoverSources(
+  cwd: string,
+): Promise<{ files: string[]; issues: LinkScanIssue[] }> {
   const files = new Set<string>();
   const issues: LinkScanIssue[] = [];
 
-  async function walk(rel: string, recursive: boolean, exts: string[]): Promise<void> {
-    let abs: string;
+  async function walk(
+    rel: string,
+    recursive: boolean,
+    exts: string[],
+  ): Promise<void> {
+    let abs;
     if (rel === ".") {
-      abs = cwd; // the project root itself is trusted
+      abs = await resolveProjectTreeListPath(cwd, "."); // the project root itself is trusted
     } else {
       try {
-        abs = await resolveWithinProject(cwd, rel); // symlink-escape guard
+        abs = await resolveProjectTreeListPath(cwd, rel); // symlink-free guard
       } catch {
         issues.push({ source_file: rel, line: null, reason: "unreadable" });
         return;
@@ -111,10 +129,14 @@ async function discoverSources(cwd: string): Promise<{ files: string[]; issues: 
     }
     let entries;
     try {
-      entries = await readdir(abs, { withFileTypes: true });
+      entries = await listProjectTreeDirents(abs);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return; // absent root/subdir is fine
-      issues.push({ source_file: rel === "." ? "." : rel, line: null, reason: "unreadable" });
+      issues.push({
+        source_file: rel === "." ? "." : rel,
+        line: null,
+        reason: "unreadable",
+      });
       return;
     }
     for (const e of entries) {
@@ -124,7 +146,7 @@ async function discoverSources(cwd: string): Promise<{ files: string[]; issues: 
         if (recursive) await walk(childRel, true, exts);
       } else if (e.isFile()) {
         if (childRel === "CHANGELOG.md") continue; // durable record, never rewritten
-        if (exts.some((x) => childRel.endsWith(x))) files.add(childRel);
+        if (exts.some(x => childRel.endsWith(x))) files.add(childRel);
       }
     }
   }
@@ -157,8 +179,8 @@ export async function collectInboundLinks(
     if (rel === target) continue; // the file being pruned itself
     let content: string;
     try {
-      const abs = await resolveWithinProject(cwd, rel); // symlink-escape guard
-      content = await readFile(abs, "utf8");
+      const abs = await resolveExplicitUserReadPath(cwd, rel); // symlink-free guard
+      content = await readExplicitUserText(abs);
     } catch {
       issues.push({ source_file: rel, line: null, reason: "unreadable" });
       continue;
@@ -192,10 +214,15 @@ export async function collectInboundLinks(
         if (resolveFrom(rel, m[2]!) !== target) continue;
         if (isLedger) {
           // The ledger is append-only — never delink/rewrite an existing row.
-          issues.push({ source_file: rel, line: i + 1, reason: "protected_ledger" });
+          issues.push({
+            source_file: rel,
+            line: i + 1,
+            reason: "protected_ledger",
+          });
           continue;
         }
-        const isIndexRow = rel === "design/decisions/README.md" && /^\s*\|/.test(oLine);
+        const isIndexRow =
+          rel === "design/decisions/README.md" && /^\s*\|/.test(oLine);
         items.push({
           source_file: rel,
           line: i + 1,
@@ -223,7 +250,11 @@ export async function collectInboundLinks(
         : a.column - b.column,
   );
   issues.sort((a, b) =>
-    a.source_file !== b.source_file ? (a.source_file < b.source_file ? -1 : 1) : (a.line ?? 0) - (b.line ?? 0),
+    a.source_file !== b.source_file
+      ? a.source_file < b.source_file
+        ? -1
+        : 1
+      : (a.line ?? 0) - (b.line ?? 0),
   );
   return { items, issues };
 }

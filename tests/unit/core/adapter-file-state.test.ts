@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, symlink, realpath } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  assertAdapterWritePathsContained,
   assertSafeRelativePath,
   classifyFileState,
   decideAction,
@@ -109,10 +111,178 @@ describe("resolveWithinProject", () => {
     expect(got).toBe(join(dir, "linked/file.md"));
   });
 
+  // SECURITY (CWE-59): realpath() reports a DANGLING symlink as a bare ENOENT,
+  // indistinguishable from a not-yet-created path. A walk that trusts realpath
+  // would mistake `.ctx -> /outside/does-not-exist` for a safe missing path and
+  // let a later mkdir/write escape. resolveWithinProject must follow the link to
+  // where it POINTS (lstat/readlink), target existence irrelevant.
+  it("rejects an ANCESTOR dangling symlink pointing outside the project", async () => {
+    // `.ctx` points at a path under `outside` that does NOT exist.
+    await symlink(join(outside, "does-not-exist"), join(dir, ".ctx"), "dir");
+    await expect(
+      resolveWithinProject(dir, ".ctx/claude-code"),
+    ).rejects.toMatchObject({ code: "PATH_OUTSIDE_PROJECT" });
+  });
+
+  it("rejects a FINAL dangling symlink pointing outside the project", async () => {
+    await symlink(join(outside, "missing.md"), join(dir, "leak.md"), "file");
+    await expect(
+      resolveWithinProject(dir, "leak.md"),
+    ).rejects.toMatchObject({ code: "PATH_OUTSIDE_PROJECT" });
+  });
+
+  it("tags a dangling-outside escape with the PATH_OUTSIDE_PROJECT code", async () => {
+    await symlink(join(outside, "does-not-exist"), join(dir, ".ctx"), "dir");
+    await expect(
+      resolveWithinProject(dir, ".ctx/x"),
+    ).rejects.toMatchObject({ code: "PATH_OUTSIDE_PROJECT" });
+  });
+
+  it("rejects an in-project DANGLING symlink (write-safe preflight refuses broken links)", async () => {
+    // Points within the project but at a not-yet-created dir. A `mkdir`/write
+    // through a dangling symlink fails (ENOENT) — accepting it in the preflight
+    // would strand a partial side effect (e.g. a persisted --model pin) when the
+    // later write fails. A write-safe containment check refuses ALL dangling
+    // symlinks; only a PLAIN (non-symlink) missing path is a create target.
+    await symlink(join(dir, "real-DNE"), join(dir, ".inlink"), "dir");
+    await expect(
+      resolveWithinProject(dir, ".inlink/file.md"),
+    ).rejects.toMatchObject({ code: "PATH_OUTSIDE_PROJECT" });
+  });
+
+  it("rejects an unresolvable symlink cycle with a stable path-safety code", async () => {
+    await symlink(join(dir, ".loopb"), join(dir, ".loopa"), "dir");
+    await symlink(join(dir, ".loopa"), join(dir, ".loopb"), "dir");
+    await expect(
+      resolveWithinProject(dir, ".loopa/file"),
+    ).rejects.toMatchObject({ code: "PATH_OUTSIDE_PROJECT" });
+  });
+
+  it("still accepts an ordinary deep non-existent path (no symlink)", async () => {
+    const got = await resolveWithinProject(dir, ".new/a/b/c.md");
+    expect(got).toBe(join(dir, ".new/a/b/c.md"));
+  });
+
   it("resolves paths whose ancestor only exists at the project root", async () => {
     // No intermediate directories — entire suffix is non-existent.
     const got = await resolveWithinProject(dir, "a/b/c/d/e.md");
     expect(got).toBe(join(dir, "a/b/c/d/e.md"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assertAdapterWritePathsContained — typed write preflight
+//
+// A forged agent profile / manifest can point a write at an EXISTING on-disk
+// entry of the WRONG type (a regular file where a directory is expected, or a
+// directory where a file is expected). The later mkdir/write fails AFTER the
+// caller's --model pin, stranding a partial side effect. The preflight catches
+// the type mismatch as CONFIG_ERROR before any mutation.
+// ---------------------------------------------------------------------------
+
+describe("assertAdapterWritePathsContained", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await realpath(await mkdtemp(join(tmpdir(), "code-pact-preflight-")));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("accepts non-existent paths for both kinds (the create case)", async () => {
+    const resolved = await assertAdapterWritePathsContained(dir, [
+      { path: ".context/claude", kind: "directory" },
+      { path: "CLAUDE.md", kind: "file" },
+      { path: ".claude/skills/x.md", kind: "file" },
+    ]);
+    expect(resolved.map((p) => p.absPath)).toEqual([
+      join(dir, ".context/claude"),
+      join(dir, "CLAUDE.md"),
+      join(dir, ".claude/skills/x.md"),
+    ]);
+  });
+
+  it("accepts existing entries of the matching type", async () => {
+    await mkdir(join(dir, ".context", "claude"), { recursive: true });
+    await writeFile(join(dir, "CLAUDE.md"), "ok", "utf8");
+    const resolved = await assertAdapterWritePathsContained(dir, [
+      { path: ".context/claude", kind: "directory" },
+      { path: "CLAUDE.md", kind: "file" },
+    ]);
+    expect(resolved).toHaveLength(2);
+  });
+
+  it("rejects a directory spec that is actually a regular file (mkdir would EEXIST)", async () => {
+    await mkdir(join(dir, ".context"), { recursive: true });
+    await writeFile(join(dir, ".context", "claude"), "not a dir", "utf8");
+    await expect(
+      assertAdapterWritePathsContained(dir, [{ path: ".context/claude", kind: "directory" }]),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
+
+  it("rejects a file spec that is actually a directory (write would EISDIR)", async () => {
+    await mkdir(join(dir, "CLAUDE.md"), { recursive: true });
+    await expect(
+      assertAdapterWritePathsContained(dir, [{ path: "CLAUDE.md", kind: "file" }]),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
+
+  it("rejects a path whose intermediate component is a regular file (ENOTDIR)", async () => {
+    await writeFile(join(dir, "blocker"), "i am a file", "utf8");
+    await expect(
+      assertAdapterWritePathsContained(dir, [{ path: "blocker/child.md", kind: "file" }]),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
+
+  it("maps an escaping symlink to CONFIG_ERROR under strict ownership preflight", async () => {
+    const outside = await realpath(await mkdtemp(join(tmpdir(), "code-pact-preflight-out-")));
+    try {
+      await symlink(outside, join(dir, ".context"), "dir");
+      await expect(
+        assertAdapterWritePathsContained(dir, [{ path: ".context/claude", kind: "directory" }]),
+      ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a final in-project directory symlink", async () => {
+    await mkdir(join(dir, "alt-context"));
+    await mkdir(join(dir, ".context"));
+    await symlink("../alt-context", join(dir, ".context", "claude"), "dir");
+    await expect(
+      assertAdapterWritePathsContained(dir, [
+        { path: ".context/claude", kind: "directory" },
+      ]),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
+
+  it("rejects an in-project symlink in a parent component", async () => {
+    await mkdir(join(dir, "alt-context"));
+    await symlink("alt-context", join(dir, ".context"), "dir");
+    await expect(
+      assertAdapterWritePathsContained(dir, [
+        { path: ".context/claude", kind: "directory" },
+      ]),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
+
+  it("rejects a `file` spec that is a FIFO/special file (a later read would BLOCK)", async () => {
+    // A non-regular file (FIFO) where a generated file is written: readFile on a
+    // FIFO blocks forever waiting for a writer, which after the --model pin would
+    // hang the command. The preflight must refuse it (regular files only).
+    let madeFifo = false;
+    try {
+      execFileSync("mkfifo", [join(dir, "CLAUDE.md")]);
+      madeFifo = true;
+    } catch {
+      return; // mkfifo unavailable on this platform — skip
+    }
+    if (madeFifo) {
+      await expect(
+        assertAdapterWritePathsContained(dir, [{ path: "CLAUDE.md", kind: "file" }]),
+      ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+    }
   });
 });
 
@@ -242,15 +412,26 @@ describe("decideAction — install", () => {
     expect(decide({ local: "managed-clean", desired: "current", mode })).toBe("skip");
   });
 
-  it("managed-clean × stale → skip (install does not update)", () => {
-    expect(decide({ local: "managed-clean", desired: "stale", mode })).toBe("skip");
+  it("managed-clean × stale → update (re-render verbatim generator output; no manifest trust)", () => {
+    // SECURITY: install must NOT trust a project-shipped manifest hash to keep a
+    // stale (or forged-to-match-malicious) managed-clean file. The file is
+    // verbatim generator output, so refreshing it to current desired content
+    // destroys no edits and self-heals poisoned instructions.
+    expect(decide({ local: "managed-clean", desired: "stale", mode })).toBe("update");
   });
 
-  it("managed-modified × current → skip (install is hands-off)", () => {
+  it("managed-modified × current → skip (install is hands-off for local edits)", () => {
     expect(decide({ local: "managed-modified", desired: "current", mode })).toBe("skip");
   });
 
-  it("managed-modified × stale → skip even with --accept-modified", () => {
+  it("managed-modified × stale → refuse (surfaced, not silently skipped; not overwritten)", () => {
+    // SECURITY: content matches NEITHER the manifest nor the generator. Install
+    // does not overwrite (possible local edit) but must not silently pass over
+    // it either — a hostile repo could ship exactly this shape. --accept-modified
+    // is not an install flag, so it is irrelevant here.
+    expect(
+      decide({ local: "managed-modified", desired: "stale", mode }),
+    ).toBe("refuse");
     expect(
       decide({
         local: "managed-modified",
@@ -258,7 +439,7 @@ describe("decideAction — install", () => {
         mode,
         acceptModified: true,
       }),
-    ).toBe("skip");
+    ).toBe("refuse");
   });
 });
 

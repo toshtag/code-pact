@@ -1,5 +1,9 @@
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdirOwned } from "../project-fs/operations.ts";
+import {
+  resolvePhaseWritePath,
+  resolveRoadmapWritePath,
+} from "../project-fs/authority-resolvers.ts";
+import { resolveProjectScaffoldWritePath } from "../project-fs/authorities/project-config-authority.ts";
 import { stringify as toYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { Phase } from "../schemas/phase.ts";
@@ -58,7 +62,8 @@ export type CreatePhaseResult = {
 };
 
 async function saveRoadmap(cwd: string, roadmap: Roadmap): Promise<void> {
-  await atomicWriteText(join(cwd, "design", "roadmap.yaml"), toYaml(roadmap));
+  const path = await resolveRoadmapWritePath(cwd);
+  await atomicWriteText(path, toYaml(roadmap));
 }
 
 function slugify(name: string): string {
@@ -77,7 +82,9 @@ function slugify(name: string): string {
  * Throws an Error with `.code === "DUPLICATE_PHASE_ID"` when the id is
  * already present in roadmap.yaml.
  */
-export async function createPhase(opts: CreatePhaseInput): Promise<CreatePhaseResult> {
+export async function createPhase(
+  opts: CreatePhaseInput,
+): Promise<CreatePhaseResult> {
   const {
     cwd,
     id,
@@ -110,7 +117,7 @@ export async function createPhase(opts: CreatePhaseInput): Promise<CreatePhaseRe
 
   const roadmap = await loadRoadmap(cwd);
 
-  if (roadmap.phases.some((p) => p.id === id)) {
+  if (roadmap.phases.some(p => p.id === id)) {
     const err = new Error(`Phase "${id}" already exists in roadmap.yaml.`);
     (err as NodeJS.ErrnoException).code = "DUPLICATE_PHASE_ID";
     throw err;
@@ -119,7 +126,6 @@ export async function createPhase(opts: CreatePhaseInput): Promise<CreatePhaseRe
   const slug = slugify(name);
   const filename = `${id}-${slug}.yaml`;
   const relPath = `design/phases/${filename}`;
-  const absPath = join(cwd, relPath);
 
   // Parse the assembled phase before writing so no invalid plan state (e.g. an
   // unsafe id smuggled in via an embedded imported task) is ever persisted.
@@ -133,13 +139,20 @@ export async function createPhase(opts: CreatePhaseInput): Promise<CreatePhaseRe
     objective,
     definition_of_done: doneCriteria,
     verification: { commands: verifyCommands },
-    ...(opts.nonGoals && opts.nonGoals.length > 0 ? { non_goals: opts.nonGoals } : {}),
+    ...(opts.nonGoals && opts.nonGoals.length > 0
+      ? { non_goals: opts.nonGoals }
+      : {}),
     ...(opts.requiresDecision === true ? { requires_decision: true } : {}),
     ...(opts.tasks && opts.tasks.length > 0 ? { tasks: opts.tasks } : {}),
   });
 
-  await mkdir(join(cwd, "design", "phases"), { recursive: true });
-  await atomicWriteText(absPath, toYaml(phase));
+  await mkdirOwned(await resolveProjectScaffoldWritePath(cwd, "design/phases"), {
+    recursive: true,
+  });
+  await atomicWriteText(
+    await resolvePhaseWritePath(cwd, relPath),
+    toYaml(phase),
+  );
 
   const ref: PhaseRef = PhaseRef.parse({ id, path: relPath, weight });
   roadmap.phases.push(ref);

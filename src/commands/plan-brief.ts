@@ -1,5 +1,14 @@
-import { readFile, mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import {
+  readOwnedText,
+  readExplicitUserText,
+  resolveExplicitUserReadPath,
+  resolveInstructionReadPath,
+  resolveProjectScaffoldWritePath,
+} from "../core/project-fs/index.ts";
+import {
+  unbrand,
+  type OwnedWritePath,
+} from "../core/project-fs/branded-paths.ts";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { atomicWriteText } from "../io/atomic-text.ts";
@@ -105,10 +114,21 @@ export async function loadBriefFromFile(
     );
   }
 
-  const absPath = join(cwd, relPath);
+  // fs-authority: containment-only
+  // reason: explicit user-selected input path (--from-file)
+  let absPath;
+  try {
+    absPath = await resolveExplicitUserReadPath(cwd, relPath);
+  } catch (err) {
+    throw new PlanBriefFromFileError(
+      "unsafe_path",
+      relPath,
+      `plan brief --from-file: path "${relPath}" is not a safe repo-root-relative path: ${(err as Error).message}`,
+    );
+  }
   let raw: string;
   try {
-    raw = await readFile(absPath, "utf8");
+    raw = await readExplicitUserText(absPath);
   } catch (err) {
     throw new PlanBriefFromFileError(
       "unreadable",
@@ -130,10 +150,7 @@ export class PlanBriefFromStdinError extends Error {
   readonly code = "CONFIG_ERROR";
   readonly detail: PlanCaptureStdinDetail;
 
-  constructor(
-    detail: PlanBriefFromStdinError["detail"],
-    message: string,
-  ) {
+  constructor(detail: PlanBriefFromStdinError["detail"], message: string) {
     super(message);
     this.name = "PlanBriefFromStdinError";
     this.detail = detail;
@@ -161,9 +178,7 @@ export async function loadBriefFromStdin(
   try {
     const chunks: string[] = [];
     for await (const chunk of stdin) {
-      chunks.push(
-        typeof chunk === "string" ? chunk : chunk.toString("utf8"),
-      );
+      chunks.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
     }
     raw = chunks.join("");
   } catch (err) {
@@ -216,7 +231,7 @@ function parseBriefSource(
   const result = BriefFileSchema.safeParse(parsed);
   if (!result.success) {
     const summary = result.error.issues
-      .map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`)
+      .map(i => `${i.path.join(".") || "<root>"}: ${i.message}`)
       .join("; ");
     throwError(
       "schema_invalid",
@@ -238,27 +253,31 @@ function parseBriefSource(
 export function generateBriefMd(answers: BriefAnswers, locale: Locale): string {
   const t = messageCatalog[locale].templates.brief;
   const diff =
-    answers.differentiator.length > 0 ? answers.differentiator : t.differentiatorPlaceholder;
+    answers.differentiator.length > 0
+      ? answers.differentiator
+      : t.differentiatorPlaceholder;
 
-  return [
-    `# ${t.header}`,
-    ``,
-    `## ${t.whatHeader}`,
-    ``,
-    answers.what,
-    ``,
-    `## ${t.whoHeader}`,
-    ``,
-    answers.who,
-    ``,
-    `## ${t.differentiatorHeader}`,
-    ``,
-    diff,
-    ``,
-    `---`,
-    ``,
-    t.footer,
-  ].join("\n") + "\n";
+  return (
+    [
+      `# ${t.header}`,
+      ``,
+      `## ${t.whatHeader}`,
+      ``,
+      answers.what,
+      ``,
+      `## ${t.whoHeader}`,
+      ``,
+      answers.who,
+      ``,
+      `## ${t.differentiatorHeader}`,
+      ``,
+      diff,
+      ``,
+      `---`,
+      ``,
+      t.footer,
+    ].join("\n") + "\n"
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -281,18 +300,38 @@ export async function runBriefWizard(
   return { what, who, differentiator };
 }
 
+async function resolveBriefOutputPath(cwd: string): Promise<OwnedWritePath> {
+  try {
+    return await resolveProjectScaffoldWritePath(cwd, "design/brief.md");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      const e = new Error(
+        `design/brief.md is not a safe project-contained write path: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Main command
 // ---------------------------------------------------------------------------
 
-export async function runPlanBrief(opts: PlanBriefOptions): Promise<PlanBriefResult> {
+export async function runPlanBrief(
+  opts: PlanBriefOptions,
+): Promise<PlanBriefResult> {
   const { cwd, locale, force } = opts;
-  const briefPath = join(cwd, "design", "brief.md");
+  const briefPath = await resolveBriefOutputPath(cwd);
 
   if (!force) {
     try {
-      await readFile(briefPath);
-      return { path: briefPath, skipped: true };
+      await readOwnedText(
+        await resolveInstructionReadPath(cwd, "design/brief.md"),
+      );
+      return { path: unbrand(briefPath), skipped: true };
     } catch {
       // file doesn't exist — proceed
     }
@@ -315,9 +354,8 @@ export async function runPlanBrief(opts: PlanBriefOptions): Promise<PlanBriefRes
 
   try {
     const content = generateBriefMd(answers, locale);
-    await mkdir(dirname(briefPath), { recursive: true });
     await atomicWriteText(briefPath, content);
-    return { path: briefPath, skipped: false };
+    return { path: unbrand(briefPath), skipped: false };
   } finally {
     cleanupPrompter?.();
   }

@@ -1,7 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { readOwnedText, resolveDecisionReadPath } from "../project-fs/index.ts";
 import { posix } from "node:path";
 import type { PhaseEntry } from "../plan/state.ts";
-import { resolveWithinProject } from "../path-safety.ts";
 import { normalizePrunedDecisionPath } from "./pruned-ledger.ts";
 import {
   type AdrAcceptance,
@@ -22,7 +21,11 @@ export type PruneBlock =
   | { gate: "target_invalid"; detail: string }
   | { gate: "target_missing"; detail: string }
   | { gate: "target_unreadable"; detail: string }
-  | { gate: "target_not_accepted"; acceptance: AdrAcceptance; status: string | null }
+  | {
+      gate: "target_not_accepted";
+      acceptance: AdrAcceptance;
+      status: string | null;
+    }
   | {
       gate: "referencing_task_not_done";
       task_id: string;
@@ -32,7 +35,11 @@ export type PruneBlock =
     }
   | { gate: "open_commitments"; open_items: number }
   | { gate: "live_decision_depends"; decision: string; status: string }
-  | { gate: "dependency_status_unknown"; decision: string; status: string | null }
+  | {
+      gate: "dependency_status_unknown";
+      decision: string;
+      status: string | null;
+    }
   | { gate: "dependency_unreadable"; decision: string }
   | { gate: "decision_scan_unreadable"; detail: string }
   | { gate: "plan_artifacts_unreadable"; detail: string }
@@ -130,8 +137,8 @@ export function decisionLinksTo(content: string, target: string): boolean {
  *  3. **No live decision depends on it** — no `proposed`/`draft` decision links
  *     to it (a decision still being made may build on this rationale).
  *
- * The target must be a **readable, top-level `design/decisions/<name>.md`**
- * record (not README/PRUNED, not an outside/traversing/nested path) that is an
+ * The target must be a **readable `.md` decision record under `design/decisions/`**
+ * record (not README/PRUNED, not an outside/traversing path) that is an
  * **accepted** decision — `decision prune` retires *settled* records, never a
  * `proposed`/`draft`/`rejected`/`superseded`/empty/unknown one. A status-less
  * ADR is treated as accepted, per the existing lenient classifier.
@@ -149,7 +156,7 @@ export async function evaluatePrune(
       blocks: [
         {
           gate: "target_invalid",
-          detail: `"${rawTarget}" is not a prunable decision — expected a design/decisions/<name>.md record (not README.md / PRUNED.md, not an outside or traversing path)`,
+          detail: `"${rawTarget}" is not a prunable decision — expected a design/decisions/**/*.md record (not README.md / PRUNED.md, not an outside or traversing path)`,
         },
       ],
       referencing_tasks: [],
@@ -172,14 +179,23 @@ export async function evaluatePrune(
   // accepted or commitment-free.
   let content: string | null = null;
   try {
-    const absTarget = await resolveWithinProject(cwd, decision);
-    content = await readFile(absTarget, "utf8");
+    content = await readOwnedText(await resolveDecisionReadPath(cwd, decision));
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
-      blocks.push({ gate: "target_missing", detail: `${decision} does not exist on disk` });
-    } else if (code === undefined) {
-      // resolveWithinProject throws a plain Error (no errno) on a path escape.
+      blocks.push({
+        gate: "target_missing",
+        detail: `${decision} does not exist on disk`,
+      });
+    } else if (
+      code === "PATH_OUTSIDE_PROJECT" ||
+      code === "PATH_NOT_OWNED" ||
+      code === undefined
+    ) {
+      // resolveSymlinkFreeProjectPath tags a symlink traversal `PATH_NOT_OWNED`;
+      // resolveWithinProject tags a containment escape `PATH_OUTSIDE_PROJECT`;
+      // a structural rejection (assertSafeRelativePath's code-less ZodError) is
+      // the `code === undefined` case. All are path-validity failures → invalid.
       blocks.push({
         gate: "target_invalid",
         detail: `${decision} escapes the project root (symlink or unsafe path)`,
@@ -220,14 +236,25 @@ export async function evaluatePrune(
   for (const { phase } of phases) {
     for (const task of phase.tasks ?? []) {
       const explicit = (task.decision_refs ?? []).some(
-        (r) => normalizePrunedDecisionPath(r) === decision,
+        r => normalizePrunedDecisionPath(r) === decision,
       );
       let viaGate = false;
-      if (!explicit && resolver !== null && isDecisionRequiredForTask(phase, task)) {
+      if (
+        !explicit &&
+        resolver !== null &&
+        isDecisionRequiredForTask(phase, task)
+      ) {
         try {
           const res = await resolver.resolve(task.id, task.decision_refs);
+          if (res.reason.startsWith("Unable to scan design/decisions/")) {
+            blocks.push({
+              gate: "decision_scan_unreadable",
+              detail: res.reason,
+            });
+            continue;
+          }
           viaGate = res.considered.some(
-            (c) => normalizePrunedDecisionPath(c.path) === decision,
+            c => normalizePrunedDecisionPath(c.path) === decision,
           );
         } catch (err) {
           blocks.push({
@@ -238,7 +265,12 @@ export async function evaluatePrune(
       }
       if (!explicit && !viaGate) continue;
       const via = explicit ? "decision_refs" : "decision_gate";
-      referencing.push({ task_id: task.id, phase_id: phase.id, status: task.status, via });
+      referencing.push({
+        task_id: task.id,
+        phase_id: phase.id,
+        status: task.status,
+        via,
+      });
       if (task.status !== "done") {
         blocks.push({
           gate: "referencing_task_not_done",
@@ -256,8 +288,9 @@ export async function evaluatePrune(
   // already a block).
   if (content !== null) {
     const { hasSection, items } = parseAdrCommitments(content);
-    const open = items.filter((i) => !i.done).length;
-    if (hasSection && open > 0) blocks.push({ gate: "open_commitments", open_items: open });
+    const open = items.filter(i => !i.done).length;
+    if (hasSection && open > 0)
+      blocks.push({ gate: "open_commitments", open_items: open });
   }
 
   // Gate 3 — no decision that LINKS to the target can be a live (or unverifiable)
@@ -277,12 +310,13 @@ export async function evaluatePrune(
   }
   for (const name of decisionNames) {
     if (!name.endsWith(".md")) continue;
-    const otherPath = `design/decisions/${name}`;
+    const otherPath = name;
     if (otherPath === decision) continue;
     let other: string;
     try {
-      const absOther = await resolveWithinProject(cwd, otherPath);
-      other = await readFile(absOther, "utf8");
+      other = await readOwnedText(
+        await resolveDecisionReadPath(cwd, otherPath),
+      );
     } catch (err) {
       // ENOENT = raced away between readdir and read → cannot be a dependant; skip.
       // Anything else (escape, EACCES, EISDIR) → cannot verify → fail closed.

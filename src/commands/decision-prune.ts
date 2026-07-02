@@ -87,7 +87,7 @@ export async function runDecisionPrune(
   }
 
   // Build the rewrite plan from the shared collector. Run it whenever the TARGET
-  // itself is valid (a readable, top-level, accepted record) — even if the core
+  // itself is valid (a readable, accepted decision record) — even if the core
   // verdict already failed on another gate — so `data.blocks[]` lists EVERY
   // failing gate at once (the user shouldn't fix one and hit the next). Fail
   // CLOSED on any scan issue (an unreadable doc source, or a reference-style

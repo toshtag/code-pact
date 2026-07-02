@@ -1,21 +1,60 @@
-import { readFile, readdir, unlink } from "node:fs/promises";
-import { basename, join } from "node:path";
+import {
+  readOwnedText,
+  listOwned,
+  unlinkOwned,
+} from "../project-fs/operations.ts";
+import {
+  archiveReadPath,
+  archiveDeletePath,
+  type ArchiveAuthorityPath,
+} from "../project-fs/authorities/archive-authority.ts";
+import { basename } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
 import { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
 import { DecisionStateRecord } from "../schemas/decision-state-record.ts";
 import { loadRoadmap } from "../plan/roadmap.ts";
-import { resolveWithinProject } from "../path-safety.ts";
-import { ARCHIVE_DECISIONS_DIR_SEGMENTS, ARCHIVE_EVENT_PACKS_DIR_SEGMENTS, ARCHIVE_PHASES_DIR_SEGMENTS } from "./paths.ts";
+import { resolvePhaseReadPath } from "../project-fs/authority-resolvers.ts";
+import {
+  ARCHIVE_DECISIONS_DIR_SEGMENTS,
+  ARCHIVE_EVENT_PACKS_DIR_SEGMENTS,
+  ARCHIVE_PHASES_DIR_SEGMENTS,
+} from "./paths.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
-import { enumerateArchivedPhaseSnapshots, resolveUnreferencedSnapshot } from "./load-phase-snapshot.ts";
-import { bindBundleMember, decisionRecordStem } from "./archive-bundle-binding.ts";
+import {
+  enumerateArchivedPhaseSnapshots,
+  resolveUnreferencedSnapshot,
+} from "./load-phase-snapshot.ts";
+import {
+  bindBundleMember,
+  decisionRecordStem,
+} from "./archive-bundle-binding.ts";
 import { validateEventPackTier1 } from "./event-pack-reader.ts";
-import { DeleteIntentDurabilityError, readPendingDeleteFilters, recoverPendingDeletes, type RecoveryOutcome } from "./delete-intent-journal.ts";
-import { deleteLoosePairsJournaled, type LoosePairToDelete, type PairDeleteOutcome, type PairMemberRetain } from "./retention-pair-delete.ts";
-import { deleteBundlePairsJournaled, type BundlePairDeleteOutcome } from "./retention-bundle-pair-delete.ts";
+import {
+  DeleteIntentDurabilityError,
+  readPendingDeleteFilters,
+  recoverPendingDeletes,
+  type RecoveryOutcome,
+} from "./delete-intent-journal.ts";
+import {
+  deleteLoosePairsJournaled,
+  type LoosePairToDelete,
+  type PairDeleteOutcome,
+  type PairMemberRetain,
+} from "./retention-pair-delete.ts";
+import {
+  deleteBundlePairsJournaled,
+  type BundlePairDeleteOutcome,
+} from "./retention-bundle-pair-delete.ts";
 import { removeBundleMembers } from "./bundle-member-removal.ts";
-import { archiveDecisionsDir, archiveEventPacksDir, archivePhasesDir, normalizeDecisionRef, sha256Hex } from "./paths.ts";
+import {
+  archiveDecisionsRelDir,
+  archiveEventPacksRelDir,
+  archivePhasesRelDir,
+  normalizeDecisionRef,
+  resolveArchiveOwnedPath,
+  sha256Hex,
+} from "./paths.ts";
 import type { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 
 // ---------------------------------------------------------------------------
@@ -48,8 +87,16 @@ const ARCHIVE_EVENT_PACK_LABEL = ".code-pact/state/archive/event-packs";
  *  (never delete a phase snapshot whose dependent pack we could not even enumerate). */
 const STORE_BLOCK_ID = "(store)";
 
-export type RetentionReferenceType = "roadmap_phase" | "task_depends_on" | "decision_ref" | "acceptance_ref";
-export type RetentionReference = { type: RetentionReferenceType; from: string; to: string };
+export type RetentionReferenceType =
+  | "roadmap_phase"
+  | "task_depends_on"
+  | "decision_ref"
+  | "acceptance_ref";
+export type RetentionReference = {
+  type: RetentionReferenceType;
+  from: string;
+  to: string;
+};
 
 export type RetentionAction = "would_keep" | "would_drop" | "blocked";
 export type RetentionReason =
@@ -111,7 +158,10 @@ export function assertKeepLatest(n: number): number {
 /** Parse + validate the CLI `--keep-latest` value (a non-negative integer string ≥ 1). */
 export function resolveKeepLatest(raw: string | undefined): number {
   if (raw === undefined) return DEFAULT_KEEP_LATEST;
-  if (!/^\d+$/.test(raw)) throw new RetentionConfigError(`--keep-latest must be a positive integer (≥ 1), got "${raw}"`);
+  if (!/^\d+$/.test(raw))
+    throw new RetentionConfigError(
+      `--keep-latest must be a positive integer (≥ 1), got "${raw}"`,
+    );
   return assertKeepLatest(Number(raw));
 }
 
@@ -125,7 +175,9 @@ type LiveGraph = {
   decisionRefs: ReadonlyMap<string, RetentionReference[]>;
 };
 
-type LiveGraphResult = { ok: true; graph: LiveGraph } | { ok: false; detail: string };
+type LiveGraphResult =
+  | { ok: true; graph: LiveGraph }
+  | { ok: false; detail: string };
 
 function pushTo<K, V>(m: Map<K, V[]>, k: K, v: V): void {
   const arr = m.get(k);
@@ -145,33 +197,52 @@ async function buildLiveGraph(cwd: string): Promise<LiveGraphResult> {
   try {
     roadmap = await loadRoadmap(cwd);
   } catch (err) {
-    return { ok: false, detail: `roadmap unreadable: ${(err as Error).message}` };
+    return {
+      ok: false,
+      detail: `roadmap unreadable: ${(err as Error).message}`,
+    };
   }
-  const roadmapPhaseIds = new Set(roadmap.phases.map((p) => p.id));
+  const roadmapPhaseIds = new Set(roadmap.phases.map(p => p.id));
   const dependsOn = new Map<string, string[]>();
   const decisionRefs = new Map<string, RetentionReference[]>();
 
   for (const p of roadmap.phases) {
     let raw: string;
     try {
-      raw = await readFile(await resolveWithinProject(cwd, p.path), "utf8");
+      raw = await readOwnedText(
+        await resolvePhaseReadPath(cwd, p.path),
+      );
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") continue; // archived phase — not a live ref source
-      return { ok: false, detail: `live phase "${p.id}" (${p.path}) unreadable: ${(err as Error).message}` };
+      return {
+        ok: false,
+        detail: `live phase "${p.id}" (${p.path}) unreadable: ${(err as Error).message}`,
+      };
     }
     let phase;
     try {
       phase = Phase.parse(parseYaml(raw));
     } catch (err) {
-      return { ok: false, detail: `live phase "${p.id}" (${p.path}) invalid: ${(err as Error).message}` };
+      return {
+        ok: false,
+        detail: `live phase "${p.id}" (${p.path}) invalid: ${(err as Error).message}`,
+      };
     }
     for (const t of phase.tasks ?? []) {
       for (const dep of t.depends_on ?? []) pushTo(dependsOn, dep, t.id);
       for (const ref of t.decision_refs ?? []) {
-        pushTo(decisionRefs, normalizeDecisionRef(ref) ?? ref, { type: "decision_ref", from: t.id, to: ref });
+        pushTo(decisionRefs, normalizeDecisionRef(ref) ?? ref, {
+          type: "decision_ref",
+          from: t.id,
+          to: ref,
+        });
       }
       for (const ref of t.acceptance_refs ?? []) {
-        pushTo(decisionRefs, normalizeDecisionRef(ref) ?? ref, { type: "acceptance_ref", from: t.id, to: ref });
+        pushTo(decisionRefs, normalizeDecisionRef(ref) ?? ref, {
+          type: "acceptance_ref",
+          from: t.id,
+          to: ref,
+        });
       }
     }
   }
@@ -197,23 +268,29 @@ type SourceResult =
     }
   | { ok: false; detail: string };
 
-function looseDirFor(cwd: string, kind: ArchiveBundleKind): string {
+function looseRelDirFor(kind: ArchiveBundleKind): string {
   return kind === "phase_snapshot"
-    ? archivePhasesDir(cwd)
+    ? archivePhasesRelDir()
     : kind === "event_pack"
-      ? archiveEventPacksDir(cwd)
-      : archiveDecisionsDir(cwd);
+      ? archiveEventPacksRelDir()
+      : archiveDecisionsRelDir();
 }
 
 /** Map every record id of `kind` to whether it lives loose-only / bundle-only / both.
  *  Loads the bundle store STRICT — a corrupt store is a fail-closed `{ ok: false }`
  *  (the planner must not under-count members and mis-rank/mis-drop). */
-async function buildSourceMap(cwd: string, kind: ArchiveBundleKind): Promise<SourceResult> {
+async function buildSourceMap(
+  cwd: string,
+  kind: ArchiveBundleKind,
+): Promise<SourceResult> {
   let members: ReadonlyMap<string, { sha256: string; bytes: string }>;
   try {
     members = loadArchiveBundles(cwd).index.get(kind) ?? new Map();
   } catch (err) {
-    return { ok: false, detail: `bundle store unreadable: ${(err as Error).message}` };
+    return {
+      ok: false,
+      detail: `bundle store unreadable: ${(err as Error).message}`,
+    };
   }
   // A phase_snapshot / event_pack named in a pending LOOSE-pair intent is mid-deletion
   // (both copies being unlinked) → LOGICALLY ABSENT everywhere; one named in a pending
@@ -223,25 +300,39 @@ async function buildSourceMap(cwd: string, kind: ArchiveBundleKind): Promise<Sou
   // re-plans a record already mid-removal. (Decisions are never in the journal.)
   const { looseAbsentIds, bundleAbsentIds } =
     kind === "decision_record"
-      ? { looseAbsentIds: new Set<string>(), bundleAbsentIds: new Set<string>() }
+      ? {
+          looseAbsentIds: new Set<string>(),
+          bundleAbsentIds: new Set<string>(),
+        }
       : await readPendingDeleteFilters(cwd);
   let looseIds: string[];
   try {
-    looseIds = (await readdir(looseDirFor(cwd, kind)))
-      .filter((n) => n.endsWith(".json"))
-      .map((n) => basename(n, ".json"))
-      .filter((id) => !looseAbsentIds.has(id));
+    looseIds = (
+      await listOwned(await resolveArchiveOwnedPath(cwd, looseRelDirFor(kind)))
+    )
+      .filter(n => n.endsWith(".json"))
+      .map(n => basename(n, ".json"))
+      .filter(id => !looseAbsentIds.has(id));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") looseIds = [];
-    else return { ok: false, detail: `loose ${kind} dir unreadable: ${(err as Error).message}` };
+    else
+      return {
+        ok: false,
+        detail: `loose ${kind} dir unreadable: ${(err as Error).message}`,
+      };
   }
   const looseSet = new Set(looseIds);
   const source = new Map<string, "loose" | "bundle" | "both">();
   // A pending bundle-pair member is absent from the bundle side: a loose id with a
   // mid-removal bundle member reads as `loose` (not `both`).
-  for (const id of looseSet) source.set(id, members.has(id) && !bundleAbsentIds.has(id) ? "both" : "loose");
+  for (const id of looseSet)
+    source.set(
+      id,
+      members.has(id) && !bundleAbsentIds.has(id) ? "both" : "loose",
+    );
   for (const id of members.keys()) {
-    if (looseSet.has(id) || looseAbsentIds.has(id) || bundleAbsentIds.has(id)) continue; // loose handled above / loose-pair absent / bundle member mid-removal
+    if (looseSet.has(id) || looseAbsentIds.has(id) || bundleAbsentIds.has(id))
+      continue; // loose handled above / loose-pair absent / bundle member mid-removal
     source.set(id, "bundle");
   }
 
@@ -254,7 +345,9 @@ async function buildSourceMap(cwd: string, kind: ArchiveBundleKind): Promise<Sou
     if (src === "bundle") continue; // no loose copy
     let looseRaw: string | null = null;
     try {
-      looseRaw = await readFile(join(looseDirFor(cwd, kind), `${id}.json`), "utf8");
+      looseRaw = await readOwnedText(
+        await resolveArchiveOwnedPath(cwd, looseRelPath(kind, id)),
+      );
     } catch {
       looseRaw = null;
     }
@@ -263,7 +356,8 @@ async function buildSourceMap(cwd: string, kind: ArchiveBundleKind): Promise<Sou
       continue;
     }
     looseSha256.set(id, sha256Hex(looseRaw));
-    if (src === "both" && looseRaw !== members.get(id)!.bytes) divergedBoth.add(id);
+    if (src === "both" && looseRaw !== members.get(id)!.bytes)
+      divergedBoth.add(id);
   }
   return { ok: true, source, divergedBoth, looseSha256 };
 }
@@ -272,7 +366,10 @@ async function buildSourceMap(cwd: string, kind: ArchiveBundleKind): Promise<Sou
 
 /** Partition unreferenced items by keep-latest N: sort by snapshotted_at DESC then id
  *  ASC (deterministic), keep the first N, drop the rest. */
-function applyKeepLatest(unreferenced: RetentionItem[], keepLatest: number): void {
+function applyKeepLatest(
+  unreferenced: RetentionItem[],
+  keepLatest: number,
+): void {
   unreferenced.sort((a, b) => {
     const at = a.snapshotted_at ?? "";
     const bt = b.snapshotted_at ?? "";
@@ -290,12 +387,15 @@ function applyKeepLatest(unreferenced: RetentionItem[], keepLatest: number): voi
   });
 }
 
-function partition(kind: ArchiveBundleKind, items: RetentionItem[]): RetentionPlan {
+function partition(
+  kind: ArchiveBundleKind,
+  items: RetentionItem[],
+): RetentionPlan {
   return {
     kind,
-    would_keep: items.filter((i) => i.action === "would_keep"),
-    would_drop: items.filter((i) => i.action === "would_drop"),
-    blocked: items.filter((i) => i.action === "blocked"),
+    would_keep: items.filter(i => i.action === "would_keep"),
+    would_drop: items.filter(i => i.action === "would_drop"),
+    blocked: items.filter(i => i.action === "blocked"),
   };
 }
 
@@ -312,21 +412,38 @@ async function planPhaseRetention(
 ): Promise<{ plan: RetentionPlan; verdict: PhaseVerdict }> {
   const items: RetentionItem[] = [];
   const verdict = new Map<string, RetentionAction>();
-  const srcOf = (id: string): "loose" | "bundle" | "both" => (source.ok ? source.source.get(id) ?? "loose" : "loose");
+  const srcOf = (id: string): "loose" | "bundle" | "both" =>
+    source.ok ? (source.source.get(id) ?? "loose") : "loose";
 
   const { entries, skipped } = await enumerateArchivedPhaseSnapshots(cwd);
   // A DIRECTORY/STORE-level enumeration skip (loose dir or bundle store unreadable) OR a
   // corrupt bundle SOURCE means the enumeration is INCOMPLETE — bundle-only snapshots may be
   // invisible, so any "unreferenced" verdict is on a PARTIAL view. Fail closed: every record
   // is then `blocked` (never ranked/dropped). A per-FILE skip is a single-record fault only.
-  const storeFailed = !source.ok || skipped.some((sk) => sk.scope === "directory");
+  const storeFailed =
+    !source.ok || skipped.some(sk => sk.scope === "directory");
   for (const sk of skipped) {
     const id = sk.scope === "file" ? sk.fileStem : STORE_BLOCK_ID;
-    const reason: RetentionReason = sk.scope === "file" ? "invalid" : "reference_scan_failed";
-    items.push({ kind: "phase_snapshot", id, snapshotted_at: null, source: srcOf(id), action: "blocked", reason });
+    const reason: RetentionReason =
+      sk.scope === "file" ? "invalid" : "reference_scan_failed";
+    items.push({
+      kind: "phase_snapshot",
+      id,
+      snapshotted_at: null,
+      source: srcOf(id),
+      action: "blocked",
+      reason,
+    });
   }
   if (!source.ok) {
-    items.push({ kind: "phase_snapshot", id: STORE_BLOCK_ID, snapshotted_at: null, source: "loose", action: "blocked", reason: "reference_scan_failed" });
+    items.push({
+      kind: "phase_snapshot",
+      id: STORE_BLOCK_ID,
+      snapshotted_at: null,
+      source: "loose",
+      action: "blocked",
+      reason: "reference_scan_failed",
+    });
   }
 
   // Collect AUTHORITY-valid snapshots; build taskId → owning phase ids for ambiguity. A
@@ -341,16 +458,26 @@ async function planPhaseRetention(
     const resolved = resolveUnreferencedSnapshot(fileStem, res);
     if (resolved.kind === "tolerated") {
       valid.push({ phaseId: fileStem, snapshot: resolved.snapshot });
-      for (const t of resolved.snapshot.tasks) pushTo(taskToPhases, t.id, fileStem);
+      for (const t of resolved.snapshot.tasks)
+        pushTo(taskToPhases, t.id, fileStem);
     } else {
-      items.push({ kind: "phase_snapshot", id: fileStem, snapshotted_at: null, source: srcOf(fileStem), action: "blocked", reason: "invalid" });
+      items.push({
+        kind: "phase_snapshot",
+        id: fileStem,
+        snapshotted_at: null,
+        source: srcOf(fileStem),
+        action: "blocked",
+        reason: "invalid",
+      });
     }
   }
   const ambiguous = new Set<string>();
-  for (const [, phases] of taskToPhases) if (phases.length > 1) for (const ph of phases) ambiguous.add(ph);
+  for (const [, phases] of taskToPhases)
+    if (phases.length > 1) for (const ph of phases) ambiguous.add(ph);
 
   const unreferenced: RetentionItem[] = [];
-  const shaOf = (id: string): string | undefined => (source.ok ? source.looseSha256.get(id) : undefined);
+  const shaOf = (id: string): string | undefined =>
+    source.ok ? source.looseSha256.get(id) : undefined;
   for (const { phaseId, snapshot } of valid) {
     const base = {
       kind: "phase_snapshot" as const,
@@ -362,7 +489,11 @@ async function planPhaseRetention(
     // Fail-closed: the live graph could not be built, OR the archive enumeration was a
     // partial view (store/source unreadable) → cannot prove this record is unreferenced.
     if (!live.ok || storeFailed) {
-      items.push({ ...base, action: "blocked", reason: "reference_scan_failed" });
+      items.push({
+        ...base,
+        action: "blocked",
+        reason: "reference_scan_failed",
+      });
       continue;
     }
     // A `both` record whose loose and shadowed bundle copies DIVERGE is unsafe to delete
@@ -378,20 +509,37 @@ async function planPhaseRetention(
     }
     // Referenced by the live roadmap.
     if (live.graph.roadmapPhaseIds.has(snapshot.phase_id)) {
-      items.push({ ...base, action: "blocked", reason: "referenced_by_roadmap", references: [{ type: "roadmap_phase", from: "roadmap", to: snapshot.phase_id }] });
+      items.push({
+        ...base,
+        action: "blocked",
+        reason: "referenced_by_roadmap",
+        references: [
+          { type: "roadmap_phase", from: "roadmap", to: snapshot.phase_id },
+        ],
+      });
       continue;
     }
     // Referenced by a live task that depends_on one of this snapshot's archived task ids.
     const depRefs: RetentionReference[] = [];
     for (const t of snapshot.tasks) {
-      for (const from of live.graph.dependsOn.get(t.id) ?? []) depRefs.push({ type: "task_depends_on", from, to: t.id });
+      for (const from of live.graph.dependsOn.get(t.id) ?? [])
+        depRefs.push({ type: "task_depends_on", from, to: t.id });
     }
     if (depRefs.length > 0) {
-      items.push({ ...base, action: "blocked", reason: "referenced_by_live_task_dependency", references: depRefs });
+      items.push({
+        ...base,
+        action: "blocked",
+        reason: "referenced_by_live_task_dependency",
+        references: depRefs,
+      });
       continue;
     }
     // Unreferenced → subject to keep-latest N.
-    unreferenced.push({ ...base, action: "blocked", reason: "older_than_keep_latest" });
+    unreferenced.push({
+      ...base,
+      action: "blocked",
+      reason: "older_than_keep_latest",
+    });
   }
   applyKeepLatest(unreferenced, keepLatest);
   items.push(...unreferenced);
@@ -402,26 +550,42 @@ async function planPhaseRetention(
 
 // --- decision_record retention -----------------------------------------------
 
-async function enumerateArchivedDecisions(
-  cwd: string,
-): Promise<{ records: { id: string; record: DecisionStateRecord }[]; invalid: string[]; storeError: string | null }> {
+async function enumerateArchivedDecisions(cwd: string): Promise<{
+  records: { id: string; record: DecisionStateRecord }[];
+  invalid: string[];
+  storeError: string | null;
+}> {
   const records: { id: string; record: DecisionStateRecord }[] = [];
   const invalid: string[] = [];
   let bundleMembers: ReadonlyMap<string, { bytes: string }>;
   let storeError: string | null = null;
   try {
-    bundleMembers = loadArchiveBundles(cwd).index.get("decision_record") ?? new Map();
+    bundleMembers =
+      loadArchiveBundles(cwd).index.get("decision_record") ?? new Map();
   } catch (err) {
-    return { records: [], invalid: [], storeError: `bundle store unreadable: ${(err as Error).message}` };
+    return {
+      records: [],
+      invalid: [],
+      storeError: `bundle store unreadable: ${(err as Error).message}`,
+    };
   }
   const seen = new Set<string>();
   // Loose decisions win over bundle members (reader-loose-wins).
   let looseNames: string[];
   try {
-    looseNames = (await readdir(archiveDecisionsDir(cwd))).filter((n) => n.endsWith(".json"));
+    looseNames = (
+      await listOwned(
+        await resolveArchiveOwnedPath(cwd, archiveDecisionsRelDir()),
+      )
+    ).filter(n => n.endsWith(".json"));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") looseNames = [];
-    else return { records: [], invalid: [], storeError: `loose decisions dir unreadable: ${(err as Error).message}` };
+    else
+      return {
+        records: [],
+        invalid: [],
+        storeError: `loose decisions dir unreadable: ${(err as Error).message}`,
+      };
   }
   const parseInto = (id: string, bytes: string): void => {
     if (seen.has(id)) return;
@@ -450,7 +614,15 @@ async function enumerateArchivedDecisions(
   for (const name of looseNames.sort()) {
     const id = basename(name, ".json");
     try {
-      parseInto(id, await readFile(await resolveWithinProject(cwd, `.code-pact/state/archive/decisions/${name}`), "utf8"));
+      parseInto(
+        id,
+        await readOwnedText(
+          await resolveArchiveOwnedPath(
+            cwd,
+            `${archiveDecisionsRelDir()}/${name}`,
+          ),
+        ),
+      );
     } catch {
       invalid.push(id);
       seen.add(id);
@@ -467,18 +639,34 @@ async function planDecisionRetention(
   source: SourceResult,
 ): Promise<RetentionPlan> {
   const items: RetentionItem[] = [];
-  const srcOf = (id: string): "loose" | "bundle" | "both" => (source.ok ? source.source.get(id) ?? "loose" : "loose");
-  const { records, invalid, storeError } = await enumerateArchivedDecisions(cwd);
+  const srcOf = (id: string): "loose" | "bundle" | "both" =>
+    source.ok ? (source.source.get(id) ?? "loose") : "loose";
+  const { records, invalid, storeError } =
+    await enumerateArchivedDecisions(cwd);
 
   for (const id of invalid) {
-    items.push({ kind: "decision_record", id, snapshotted_at: null, source: srcOf(id), action: "blocked", reason: "invalid" });
+    items.push({
+      kind: "decision_record",
+      id,
+      snapshotted_at: null,
+      source: srcOf(id),
+      action: "blocked",
+      reason: "invalid",
+    });
   }
   // A store-read failure (bundle store / loose dir) means a PARTIAL view → block EVERY record
   // fail-closed, never rank/drop on it (defends against any future enumerator that returns
   // records alongside a storeError).
   const storeFailed = storeError !== null || !source.ok;
   if (storeFailed) {
-    items.push({ kind: "decision_record", id: STORE_BLOCK_ID, snapshotted_at: null, source: "loose", action: "blocked", reason: storeError ? "invalid" : "reference_scan_failed" });
+    items.push({
+      kind: "decision_record",
+      id: STORE_BLOCK_ID,
+      snapshotted_at: null,
+      source: "loose",
+      action: "blocked",
+      reason: storeError ? "invalid" : "reference_scan_failed",
+    });
   }
 
   const unreferenced: RetentionItem[] = [];
@@ -491,7 +679,11 @@ async function planDecisionRetention(
       loose_sha256: source.ok ? source.looseSha256.get(id) : undefined,
     };
     if (!live.ok || storeFailed) {
-      items.push({ ...base, action: "blocked", reason: "reference_scan_failed" });
+      items.push({
+        ...base,
+        action: "blocked",
+        reason: "reference_scan_failed",
+      });
       continue;
     }
     // A `both` decision whose loose and shadowed bundle copies diverge → unsafe to delete.
@@ -501,10 +693,19 @@ async function planDecisionRetention(
     }
     const refs = live.graph.decisionRefs.get(record.canonical_ref);
     if (refs && refs.length > 0) {
-      items.push({ ...base, action: "blocked", reason: "referenced_by_decision_link", references: refs });
+      items.push({
+        ...base,
+        action: "blocked",
+        reason: "referenced_by_decision_link",
+        references: refs,
+      });
       continue;
     }
-    unreferenced.push({ ...base, action: "blocked", reason: "older_than_keep_latest" });
+    unreferenced.push({
+      ...base,
+      action: "blocked",
+      reason: "older_than_keep_latest",
+    });
   }
   applyKeepLatest(unreferenced, keepLatest);
   items.push(...unreferenced);
@@ -522,21 +723,42 @@ async function planEventPackRetention(
   // A partial store/source view is fail-closed: a single blocked diagnostic, no pack dropped.
   if (!source.ok) {
     return partition("event_pack", [
-      { kind: "event_pack", id: STORE_BLOCK_ID, snapshotted_at: null, source: "loose", action: "blocked", reason: "reference_scan_failed" },
+      {
+        kind: "event_pack",
+        id: STORE_BLOCK_ID,
+        snapshotted_at: null,
+        source: "loose",
+        action: "blocked",
+        reason: "reference_scan_failed",
+      },
     ]);
   }
   let bundleMembers: ReadonlyMap<string, { sha256: string; bytes: string }>;
   try {
-    bundleMembers = loadArchiveBundles(cwd).index.get("event_pack") ?? new Map();
+    bundleMembers =
+      loadArchiveBundles(cwd).index.get("event_pack") ?? new Map();
   } catch {
     return partition("event_pack", [
-      { kind: "event_pack", id: STORE_BLOCK_ID, snapshotted_at: null, source: "loose", action: "blocked", reason: "invalid" },
+      {
+        kind: "event_pack",
+        id: STORE_BLOCK_ID,
+        snapshotted_at: null,
+        source: "loose",
+        action: "blocked",
+        reason: "invalid",
+      },
     ]);
   }
 
   for (const id of [...source.source.keys()].sort()) {
     const src = source.source.get(id)!;
-    const base = { kind: "event_pack" as const, id, snapshotted_at: null, source: src, loose_sha256: source.looseSha256.get(id) };
+    const base = {
+      kind: "event_pack" as const,
+      id,
+      snapshotted_at: null,
+      source: src,
+      loose_sha256: source.looseSha256.get(id),
+    };
     // AUTHORITY-validate the pack bytes (loose-wins) BEFORE trusting the parent verdict — a
     // schema/Tier-1-invalid OR MISFILED pack (filename id ≠ its body phase_id) must NEVER be
     // dropped just because its FILENAME's phase snapshot is being dropped (it may be another
@@ -546,8 +768,13 @@ async function planEventPackRetention(
     try {
       bytes =
         src === "bundle"
-          ? bundleMembers.get(id)?.bytes ?? null
-          : await readFile(join(archiveEventPacksDir(cwd), `${id}.json`), "utf8");
+          ? (bundleMembers.get(id)?.bytes ?? null)
+          : await readOwnedText(
+              await resolveArchiveOwnedPath(
+                cwd,
+                looseRelPath("event_pack", id),
+              ),
+            );
     } catch {
       bytes = null;
     }
@@ -557,7 +784,11 @@ async function planEventPackRetention(
         validateEventPackTier1(id, bytes, ARCHIVE_EVENT_PACK_LABEL);
         if (src === "bundle") {
           const m = bundleMembers.get(id)!;
-          bindBundleMember("event_pack", { id, sha256: m.sha256, bytes: m.bytes }, ARCHIVE_EVENT_PACK_LABEL);
+          bindBundleMember(
+            "event_pack",
+            { id, sha256: m.sha256, bytes: m.bytes },
+            ARCHIVE_EVENT_PACK_LABEL,
+          );
         }
         valid = true;
       } catch {
@@ -577,11 +808,19 @@ async function planEventPackRetention(
     // anomaly → kept (blocked invalid), never dropped on a parent we cannot locate.
     const parent = phaseVerdict.get(id);
     if (parent === "would_drop") {
-      items.push({ ...base, action: "would_drop", reason: "older_than_keep_latest" });
+      items.push({
+        ...base,
+        action: "would_drop",
+        reason: "older_than_keep_latest",
+      });
     } else if (parent === undefined) {
       items.push({ ...base, action: "blocked", reason: "invalid" });
     } else {
-      items.push({ ...base, action: "blocked", reason: "dependent_on_kept_phase_snapshot" });
+      items.push({
+        ...base,
+        action: "blocked",
+        reason: "dependent_on_kept_phase_snapshot",
+      });
     }
   }
   return partition("event_pack", items);
@@ -607,8 +846,18 @@ export async function planArchiveRetention(
   const decisionSource = await buildSourceMap(cwd, "decision_record");
   const eventSource = await buildSourceMap(cwd, "event_pack");
 
-  const { plan: phasePlan, verdict } = await planPhaseRetention(cwd, keepLatest, live, phaseSource);
-  const decisionPlan = await planDecisionRetention(cwd, keepLatest, live, decisionSource);
+  const { plan: phasePlan, verdict } = await planPhaseRetention(
+    cwd,
+    keepLatest,
+    live,
+    phaseSource,
+  );
+  const decisionPlan = await planDecisionRetention(
+    cwd,
+    keepLatest,
+    live,
+    decisionSource,
+  );
   const eventPlan = await planEventPackRetention(cwd, eventSource, verdict);
 
   return [phasePlan, eventPlan, decisionPlan];
@@ -668,11 +917,18 @@ function looseRelPath(kind: ArchiveBundleKind, id: string): string {
 /** Re-validate a loose record's ARCHIVE AUTHORITY from its current on-disk bytes (the same
  *  checks the planner ran) — so a file that changed between plan and unlink is not deleted on
  *  a stale verdict. */
-export function looseStillAuthorityValid(kind: ArchiveBundleKind, id: string, raw: string): boolean {
+export function looseStillAuthorityValid(
+  kind: ArchiveBundleKind,
+  id: string,
+  raw: string,
+): boolean {
   try {
     if (kind === "phase_snapshot") {
       const snapshot = PhaseSnapshot.parse(JSON.parse(raw));
-      return resolveUnreferencedSnapshot(id, { kind: "valid", snapshot }).kind === "tolerated";
+      return (
+        resolveUnreferencedSnapshot(id, { kind: "valid", snapshot }).kind ===
+        "tolerated"
+      );
     }
     if (kind === "decision_record") {
       const r = DecisionStateRecord.parse(JSON.parse(raw));
@@ -689,7 +945,10 @@ export function looseStillAuthorityValid(kind: ArchiveBundleKind, id: string, ra
   }
 }
 
-export type LooseDeleteVerdict = { kind: "delete"; abs: string } | { kind: "vanished" } | { kind: "skip"; reason: RetentionDeleteSkipReason };
+export type LooseDeleteVerdict =
+  | { kind: "delete"; abs: ArchiveAuthorityPath }
+  | { kind: "vanished" }
+  | { kind: "skip"; reason: RetentionDeleteSkipReason };
 
 /** Gate ONE loose record for deletion: path-in-project + fresh re-read + re-authority-validate.
  *  No unlink (the caller does it). Reads disk fresh to narrow the plan→unlink TOCTOU. It
@@ -706,17 +965,18 @@ export async function gateLooseDelete(
   id: string,
   expectedSha256: string | undefined,
 ): Promise<LooseDeleteVerdict> {
-  let abs: string;
+  let abs: ArchiveAuthorityPath;
   try {
-    abs = await resolveWithinProject(cwd, looseRelPath(kind, id));
+    abs = await resolveArchiveOwnedPath(cwd, looseRelPath(kind, id));
   } catch {
     return { kind: "skip", reason: "path_escape" };
   }
   let raw: string;
   try {
-    raw = await readFile(abs, "utf8");
+    raw = await readOwnedText(archiveReadPath(abs));
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { kind: "vanished" };
+    if ((err as NodeJS.ErrnoException).code === "ENOENT")
+      return { kind: "vanished" };
     return { kind: "skip", reason: "unreadable" };
   }
   // Delete EXACTLY the bytes the plan decided to drop, not merely "a valid record at this path":
@@ -727,7 +987,8 @@ export async function gateLooseDelete(
   if (expectedSha256 === undefined || sha256Hex(raw) !== expectedSha256) {
     return { kind: "skip", reason: "authority_changed" };
   }
-  if (!looseStillAuthorityValid(kind, id, raw)) return { kind: "skip", reason: "authority_invalid" };
+  if (!looseStillAuthorityValid(kind, id, raw))
+    return { kind: "skip", reason: "authority_invalid" };
   return { kind: "delete", abs };
 }
 
@@ -738,7 +999,10 @@ export async function gateLooseDelete(
  *  `beforeGate` (a journal pair never goes through the per-record gate). */
 export type RetentionApplyHooks = {
   beforeGate?: (kind: ArchiveBundleKind, id: string) => Promise<void> | void;
-  beforePairGate?: (kind: ArchiveBundleKind, id: string) => Promise<void> | void;
+  beforePairGate?: (
+    kind: ArchiveBundleKind,
+    id: string,
+  ) => Promise<void> | void;
 };
 
 /** Remove INDEPENDENT bundle-backed records of one kind (a decision, or a phase_snapshot with NO
@@ -752,24 +1016,38 @@ async function removeIndependentBundleRecords(
   cwd: string,
   kind: ArchiveBundleKind,
   ids: string[],
-): Promise<{ deleted: string[]; bundle_member_removed: string[]; skipped: { id: string; reason: RetentionDeleteSkipReason }[] }> {
-  if (ids.length === 0) return { deleted: [], bundle_member_removed: [], skipped: [] };
+): Promise<{
+  deleted: string[];
+  bundle_member_removed: string[];
+  skipped: { id: string; reason: RetentionDeleteSkipReason }[];
+}> {
+  if (ids.length === 0)
+    return { deleted: [], bundle_member_removed: [], skipped: [] };
   const out = await removeBundleMembers(cwd, kind, ids);
   const deleted: string[] = [];
   const bundle_member_removed: string[] = [];
   const skipped: { id: string; reason: RetentionDeleteSkipReason }[] = [];
-  for (const r of out.removed) (r.outcome === "deleted" ? deleted : bundle_member_removed).push(r.id);
+  for (const r of out.removed)
+    (r.outcome === "deleted" ? deleted : bundle_member_removed).push(r.id);
   // Anything not removed this run stays deferred to the bundle-member-removal layer (a stale bundle,
   // an unsupported platform, an `unsafe_kind` fail-close, or a non-member) — reported per requested id.
   // `out.unsafe_invalid` is NOT mapped here: it is a DIAGNOSTIC list of the OFFENDING members, not the
   // requested ids' outcome (a requested-and-invalid id already appears in `out.skipped: unsafe_kind`).
-  for (const s of out.skipped) skipped.push({ id: s.id, reason: "needs_bundle_member_removal" });
-  for (const id of out.not_member) skipped.push({ id, reason: "needs_bundle_member_removal" });
+  for (const s of out.skipped)
+    skipped.push({ id: s.id, reason: "needs_bundle_member_removal" });
+  for (const id of out.not_member)
+    skipped.push({ id, reason: "needs_bundle_member_removal" });
   // REQUESTED-ID ACCOUNTING GUARD (the destructive output's last safety net): every requested id MUST
   // reach exactly one terminal bucket. Any id the primitive's outcome did not account for → defer it,
   // never let a `would_drop` id we excluded from the per-record loops vanish from the output.
-  const accounted = new Set([...deleted, ...bundle_member_removed, ...skipped.map((s) => s.id)]);
-  for (const id of ids) if (!accounted.has(id)) skipped.push({ id, reason: "needs_bundle_member_removal" });
+  const accounted = new Set([
+    ...deleted,
+    ...bundle_member_removed,
+    ...skipped.map(s => s.id),
+  ]);
+  for (const id of ids)
+    if (!accounted.has(id))
+      skipped.push({ id, reason: "needs_bundle_member_removal" });
   return { deleted, bundle_member_removed, skipped };
 }
 
@@ -779,7 +1057,14 @@ async function deleteLooseDropped(
   preSkip: ReadonlyMap<string, RetentionDeleteSkipReason> | null,
   hooks: RetentionApplyHooks,
 ): Promise<RetentionDeleteOutcome> {
-  const out: RetentionDeleteOutcome = { kind: plan.kind, deleted: [], bundle_member_removed: [], vanished: [], skipped: [], recovered: [] };
+  const out: RetentionDeleteOutcome = {
+    kind: plan.kind,
+    deleted: [],
+    bundle_member_removed: [],
+    vanished: [],
+    skipped: [],
+    recovered: [],
+  };
   for (const item of plan.would_drop) {
     // PR-2a deletes loose-only; a bundle-only / both copy is the bundle-member-removal layer.
     if (item.source !== "loose") {
@@ -795,7 +1080,12 @@ async function deleteLooseDropped(
       continue;
     }
     if (hooks.beforeGate) await hooks.beforeGate(plan.kind, item.id);
-    const verdict = await gateLooseDelete(cwd, plan.kind, item.id, item.loose_sha256);
+    const verdict = await gateLooseDelete(
+      cwd,
+      plan.kind,
+      item.id,
+      item.loose_sha256,
+    );
     if (verdict.kind === "vanished") {
       out.vanished.push(item.id);
       continue;
@@ -805,10 +1095,11 @@ async function deleteLooseDropped(
       continue;
     }
     try {
-      await unlink(verdict.abs);
+      await unlinkOwned(archiveDeletePath(verdict.abs));
       out.deleted.push(item.id);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") out.vanished.push(item.id);
+      if ((err as NodeJS.ErrnoException).code === "ENOENT")
+        out.vanished.push(item.id);
       else out.skipped.push({ id: item.id, reason: "unlink_failed" });
     }
   }
@@ -855,8 +1146,13 @@ export async function applyArchiveRetention(
   const recovery = opts.preRecovered ?? (await recoverPendingDeletes(cwd));
 
   const plans = await planArchiveRetention(cwd, opts);
-  const byKind = new Map(plans.map((p) => [p.kind, p]));
-  const empty = (kind: ArchiveBundleKind): RetentionPlan => ({ kind, would_keep: [], would_drop: [], blocked: [] });
+  const byKind = new Map(plans.map(p => [p.kind, p]));
+  const empty = (kind: ArchiveBundleKind): RetentionPlan => ({
+    kind,
+    would_keep: [],
+    would_drop: [],
+    blocked: [],
+  });
   // A recovered BUNDLE pair already had its bundle members retired THIS run (reported `recovered`). If
   // the record was `both`, its LOOSE copy survives and the fresh plan now sees it as a `source: loose`
   // would_drop — but acting on it this run would put the id in TWO buckets (recovered AND deleted). So
@@ -867,19 +1163,32 @@ export async function applyArchiveRetention(
   const recoveredBundleIds = new Set(recovery.bundle_pairs);
   const planFor = (kind: ArchiveBundleKind): RetentionPlan => {
     const p = byKind.get(kind) ?? empty(kind);
-    return recoveredBundleIds.size === 0 ? p : { ...p, would_drop: p.would_drop.filter((i) => !recoveredBundleIds.has(i.id)) };
+    return recoveredBundleIds.size === 0
+      ? p
+      : {
+          ...p,
+          would_drop: p.would_drop.filter(i => !recoveredBundleIds.has(i.id)),
+        };
   };
   const eventPlan = planFor("event_pack");
   const phasePlan = planFor("phase_snapshot");
 
   // The `(store)` block marks a PARTIAL event_pack view — we cannot prove a phase has no pack, so
   // we cannot form pairs and must defer fail-closed. `packIds` are the real pack ids the planner saw.
-  const eventItems = [...eventPlan.would_keep, ...eventPlan.would_drop, ...eventPlan.blocked];
-  const eventStoreUncertain = eventItems.some((i) => i.id === STORE_BLOCK_ID);
-  const looseDropPackById = new Map(eventPlan.would_drop.filter((p) => p.source === "loose").map((p) => [p.id, p]));
+  const eventItems = [
+    ...eventPlan.would_keep,
+    ...eventPlan.would_drop,
+    ...eventPlan.blocked,
+  ];
+  const eventStoreUncertain = eventItems.some(i => i.id === STORE_BLOCK_ID);
+  const looseDropPackById = new Map(
+    eventPlan.would_drop.filter(p => p.source === "loose").map(p => [p.id, p]),
+  );
   // A pack `would_drop` whose member lives in a bundle (source `bundle` or `both`) — the other half
   // of a candidate BUNDLE pair.
-  const bundleDropPackIds = new Set(eventPlan.would_drop.filter((p) => p.source !== "loose").map((p) => p.id));
+  const bundleDropPackIds = new Set(
+    eventPlan.would_drop.filter(p => p.source !== "loose").map(p => p.id),
+  );
 
   // The loose-loose pairs to journal-delete (both members loose `would_drop`, digests captured,
   // store fully visible). Their ids are EXCLUDED from the per-record loops below (the journal owns
@@ -896,9 +1205,18 @@ export async function applyArchiveRetention(
     for (const phase of phasePlan.would_drop) {
       if (phase.source === "loose") {
         const pack = looseDropPackById.get(phase.id);
-        if (!pack || phase.loose_sha256 === undefined || pack.loose_sha256 === undefined) continue;
+        if (
+          !pack ||
+          phase.loose_sha256 === undefined ||
+          pack.loose_sha256 === undefined
+        )
+          continue;
         pairedIds.add(phase.id);
-        pairs.push({ phase_id: phase.id, phase_sha256: phase.loose_sha256, pack_sha256: pack.loose_sha256 });
+        pairs.push({
+          phase_id: phase.id,
+          phase_sha256: phase.loose_sha256,
+          pack_sha256: pack.loose_sha256,
+        });
       } else if (bundleDropPackIds.has(phase.id)) {
         // phase AND pack both bundle-backed would_drop → a bundle pair (the journal re-checks membership).
         bundlePairedIds.add(phase.id);
@@ -910,11 +1228,26 @@ export async function applyArchiveRetention(
   // 1. Journal-delete the LOOSE pairs (both-or-neither). On `unsupported` defer them; `failed` propagates.
   let pairOutcome: PairDeleteOutcome;
   try {
-    pairOutcome = await deleteLoosePairsJournaled(cwd, pairs, { beforeGate: hooks.beforePairGate });
+    pairOutcome = await deleteLoosePairsJournaled(cwd, pairs, {
+      beforeGate: hooks.beforePairGate,
+    });
   } catch (err) {
-    if (err instanceof DeleteIntentDurabilityError && err.reason === "unsupported") {
-      const deferred: PairMemberRetain = { kind: "skip", reason: "requires_atomic_pair_removal" };
-      pairOutcome = { deleted: [], retained: pairs.map((p) => ({ phase_id: p.phase_id, phase: deferred, pack: deferred })) };
+    if (
+      err instanceof DeleteIntentDurabilityError &&
+      err.reason === "unsupported"
+    ) {
+      const deferred: PairMemberRetain = {
+        kind: "skip",
+        reason: "requires_atomic_pair_removal",
+      };
+      pairOutcome = {
+        deleted: [],
+        retained: pairs.map(p => ({
+          phase_id: p.phase_id,
+          phase: deferred,
+          pack: deferred,
+        })),
+      };
     } else {
       throw err; // a real durability failure, or a recovery/other error — fail-closed
     }
@@ -927,7 +1260,10 @@ export async function applyArchiveRetention(
   //     which need not exist in a loose-only store.
   const bundlePairOutcome: BundlePairDeleteOutcome =
     bundlePairPhaseIds.length > 0
-      ? await deleteBundlePairsJournaled(cwd, bundlePairPhaseIds.map((phase_id) => ({ phase_id })))
+      ? await deleteBundlePairsJournaled(
+          cwd,
+          bundlePairPhaseIds.map(phase_id => ({ phase_id })),
+        )
       : { removed: [], skipped: [] };
 
   // 1c. INDEPENDENT bundle records (single-kind Layer-1 removal, no journal): a bundle-backed
@@ -935,18 +1271,43 @@ export async function applyArchiveRetention(
   //     event_pack (nothing binds to it either — a pack-less snapshot is its own evidence referencer).
   //     A bundle phase WITH any pack is a pair (handled above) or a mixed/unpairable case (deferred by
   //     the per-record loop). These ids are EXCLUDED from the per-record loops below.
-  const decisionPlan = byKind.get("decision_record") ?? empty("decision_record");
-  const independentDecisionIds = decisionPlan.would_drop.filter((i) => i.source !== "loose").map((i) => i.id);
+  const decisionPlan =
+    byKind.get("decision_record") ?? empty("decision_record");
+  const independentDecisionIds = decisionPlan.would_drop
+    .filter(i => i.source !== "loose")
+    .map(i => i.id);
   const independentPhaseIds = phasePlan.would_drop
-    .filter((i) => i.source !== "loose" && !bundlePairedIds.has(i.id) && !eventStoreUncertain && !hasAnyPack(eventItems, i.id))
-    .map((i) => i.id);
-  const independentSet = new Set([...independentDecisionIds, ...independentPhaseIds]);
-  const decisionLayer1 = await removeIndependentBundleRecords(cwd, "decision_record", independentDecisionIds);
-  const phaseLayer1 = await removeIndependentBundleRecords(cwd, "phase_snapshot", independentPhaseIds);
+    .filter(
+      i =>
+        i.source !== "loose" &&
+        !bundlePairedIds.has(i.id) &&
+        !eventStoreUncertain &&
+        !hasAnyPack(eventItems, i.id),
+    )
+    .map(i => i.id);
+  const independentSet = new Set([
+    ...independentDecisionIds,
+    ...independentPhaseIds,
+  ]);
+  const decisionLayer1 = await removeIndependentBundleRecords(
+    cwd,
+    "decision_record",
+    independentDecisionIds,
+  );
+  const phaseLayer1 = await removeIndependentBundleRecords(
+    cwd,
+    "phase_snapshot",
+    independentPhaseIds,
+  );
   // Exclude the loose/bundle paired ids AND the Layer-1-handled independent ids from the per-record loops.
   const withoutHandled = (p: RetentionPlan): RetentionPlan => ({
     ...p,
-    would_drop: p.would_drop.filter((i) => !pairedIds.has(i.id) && !bundlePairedIds.has(i.id) && !independentSet.has(i.id)),
+    would_drop: p.would_drop.filter(
+      i =>
+        !pairedIds.has(i.id) &&
+        !bundlePairedIds.has(i.id) &&
+        !independentSet.has(i.id),
+    ),
   });
 
   // 2. Non-paired event packs: every remaining loose `would_drop` pack is NOT journal-able (its
@@ -954,25 +1315,48 @@ export async function applyArchiveRetention(
   //    needs_bundle_member_removal by its source.
   const eventPreSkip = new Map<string, RetentionDeleteSkipReason>();
   for (const pack of eventPlan.would_drop) {
-    if (pack.source === "loose" && !pairedIds.has(pack.id)) eventPreSkip.set(pack.id, "requires_atomic_pair_removal");
+    if (pack.source === "loose" && !pairedIds.has(pack.id))
+      eventPreSkip.set(pack.id, "requires_atomic_pair_removal");
   }
-  const eventOut = await deleteLooseDropped(cwd, withoutHandled(eventPlan), eventPreSkip, hooks);
+  const eventOut = await deleteLooseDropped(
+    cwd,
+    withoutHandled(eventPlan),
+    eventPreSkip,
+    hooks,
+  );
 
   // 3. Non-paired phase snapshots: delete a loose-only snapshot with NO event_pack (independent);
   //    a snapshot with a pack we could not pair, or an uncertain store, is deferred.
   const phasePreSkip = new Map<string, RetentionDeleteSkipReason>();
   for (const phase of phasePlan.would_drop) {
     if (phase.source !== "loose" || pairedIds.has(phase.id)) continue;
-    if (eventStoreUncertain || looseDropPackById.has(phase.id) || hasAnyPack(eventItems, phase.id)) {
+    if (
+      eventStoreUncertain ||
+      looseDropPackById.has(phase.id) ||
+      hasAnyPack(eventItems, phase.id)
+    ) {
       phasePreSkip.set(phase.id, "requires_atomic_pair_removal");
     }
   }
-  const phaseOut = await deleteLooseDropped(cwd, withoutHandled(phasePlan), phasePreSkip, hooks);
+  const phaseOut = await deleteLooseDropped(
+    cwd,
+    withoutHandled(phasePlan),
+    phasePreSkip,
+    hooks,
+  );
 
   // 4. Decisions are independent — delete last (loose ones here; bundle ones handled in 1c).
-  const decisionOut = await deleteLooseDropped(cwd, withoutHandled(decisionPlan), null, hooks);
+  const decisionOut = await deleteLooseDropped(
+    cwd,
+    withoutHandled(decisionPlan),
+    null,
+    hooks,
+  );
   // Merge the Layer-1 independent-bundle results into their kinds.
-  for (const [out, layer1] of [[phaseOut, phaseLayer1], [decisionOut, decisionLayer1]] as const) {
+  for (const [out, layer1] of [
+    [phaseOut, phaseLayer1],
+    [decisionOut, decisionLayer1],
+  ] as const) {
     out.deleted.push(...layer1.deleted);
     out.bundle_member_removed.push(...layer1.bundle_member_removed);
     out.skipped.push(...layer1.skipped);
@@ -986,7 +1370,11 @@ export async function applyArchiveRetention(
     phaseOut.deleted.push(id);
     eventOut.deleted.push(id);
   }
-  const applyMember = (out: RetentionDeleteOutcome, id: string, m: PairMemberRetain): void => {
+  const applyMember = (
+    out: RetentionDeleteOutcome,
+    id: string,
+    m: PairMemberRetain,
+  ): void => {
     if (m.kind === "vanished") out.vanished.push(id);
     else out.skipped.push({ id, reason: m.reason });
   };
@@ -1000,7 +1388,11 @@ export async function applyArchiveRetention(
   // next run, ≤2-run convergence). A skipped bundle pair (not a current bundle member / authority-
   // invalid / unsupported platform) is deferred WHOLE → `needs_bundle_member_removal` on BOTH kinds
   // (never silently dropped — those ids were excluded from the per-record loops).
-  const applyBundleSide = (out: RetentionDeleteOutcome, id: string, side: "deleted" | "bundle_member_removed"): void => {
+  const applyBundleSide = (
+    out: RetentionDeleteOutcome,
+    id: string,
+    side: "deleted" | "bundle_member_removed",
+  ): void => {
     if (side === "deleted") out.deleted.push(id);
     else out.bundle_member_removed.push(id);
   };
@@ -1009,8 +1401,14 @@ export async function applyArchiveRetention(
     applyBundleSide(eventOut, r.phase_id, r.event_pack);
   }
   for (const s of bundlePairOutcome.skipped) {
-    phaseOut.skipped.push({ id: s.phase_id, reason: "needs_bundle_member_removal" });
-    eventOut.skipped.push({ id: s.phase_id, reason: "needs_bundle_member_removal" });
+    phaseOut.skipped.push({
+      id: s.phase_id,
+      reason: "needs_bundle_member_removal",
+    });
+    eventOut.skipped.push({
+      id: s.phase_id,
+      reason: "needs_bundle_member_removal",
+    });
   }
 
   // Surface the recovery-completed pair ids (a prior run's committed delete this run finished) on
@@ -1019,8 +1417,14 @@ export async function applyArchiveRetention(
   // still a completed recovery, not this run's `deleted`). The two are NOT flattened (the #480 P2.1
   // contract): a reader must distinguish "old truth fully gone" from "the bundle half was completed".
   const recoveredEntries = [
-    ...recovery.loose_pairs.map((id) => ({ id, intent_kind: "loose_pair" as const })),
-    ...recovery.bundle_pairs.map((id) => ({ id, intent_kind: "bundle_pair" as const })),
+    ...recovery.loose_pairs.map(id => ({
+      id,
+      intent_kind: "loose_pair" as const,
+    })),
+    ...recovery.bundle_pairs.map(id => ({
+      id,
+      intent_kind: "bundle_pair" as const,
+    })),
   ];
   phaseOut.recovered = recoveredEntries;
   eventOut.recovered = recoveredEntries;
@@ -1032,5 +1436,5 @@ export async function applyArchiveRetention(
  *  could not pair (bundle/both pack, or a missing digest) must not be deleted alone (it would
  *  orphan or strand the pack), so it is deferred. */
 function hasAnyPack(eventItems: readonly RetentionItem[], id: string): boolean {
-  return eventItems.some((i) => i.id === id && i.id !== STORE_BLOCK_ID);
+  return eventItems.some(i => i.id === id && i.id !== STORE_BLOCK_ID);
 }

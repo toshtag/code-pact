@@ -2,6 +2,8 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import {
   detectDuplicatePhaseIds,
   detectDuplicateTaskIds,
@@ -289,6 +291,27 @@ describe("detectTaskDecisionRefUnsafePath", () => {
   it("error for traversal attempts", () => {
     const entries = [
       entry(phase("P1", [task("P1-T1", { decision_refs: ["../etc/passwd"] })])),
+    ];
+    const issues = detectTaskDecisionRefUnsafePath(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_DECISION_REF_UNSAFE_PATH");
+    expect(issues[0]?.severity).toBe("error");
+  });
+
+  // Security (Blocker 1): the lint layer of the multi-layer defense. A safe
+  // repo-relative path that is OUTSIDE the decision namespace (.env, a doc,
+  // README/PRUNED) is still an error — the detector shares the schema's
+  // `decisionRefPathReason`, so a value reaching lint by a non-schema route
+  // is reported precisely.
+  it.each([
+    [".env", "in-project non-decision file"],
+    ["docs/cli-contract.md", "doc outside the namespace"],
+    ["design/decisions/README.md", "the index"],
+    ["design/decisions/PRUNED.md", "the tombstone"],
+    ["design/decisions/notes.txt", "not a .md"],
+  ])("error for %s (%s)", (badRef) => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { decision_refs: [badRef] })])),
     ];
     const issues = detectTaskDecisionRefUnsafePath(entries);
     expect(issues).toHaveLength(1);
@@ -585,11 +608,17 @@ describe("detectTaskAcceptanceRefUnsafePath", () => {
 // ---------------------------------------------------------------------------
 
 let cwd: string;
+const execFileAsync = promisify(execFile);
 
 async function makeFile(p: string, content = ""): Promise<void> {
   const abs = join(cwd, p);
   await mkdir(join(abs, ".."), { recursive: true });
   await writeFile(abs, content, "utf8");
+}
+
+async function trackFiles(paths: string[]): Promise<void> {
+  await execFileAsync("git", ["init"], { cwd });
+  if (paths.length > 0) await execFileAsync("git", ["add", ...paths], { cwd });
 }
 
 beforeEach(async () => {
@@ -780,6 +809,7 @@ describe("detectTaskDecisionRefNotFound (fs-backed)", () => {
 describe("detectTaskReadsNoMatch (fs-backed)", () => {
   it("no issue when the glob matches at least one file", async () => {
     await makeFile("src/commands/foo.ts", "stub");
+    await trackFiles(["src/commands/foo.ts"]);
     const entries = [
       entry(phase("P1", [task("P1-T1", { reads: ["src/commands/*.ts"] })])),
     ];
@@ -788,6 +818,7 @@ describe("detectTaskReadsNoMatch (fs-backed)", () => {
   });
 
   it("warning when the glob matches nothing", async () => {
+    await trackFiles([]);
     const entries = [
       entry(phase("P1", [task("P1-T1", { reads: ["src/commands/*.ts"] })])),
     ];

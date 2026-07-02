@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { PlanId } from "./plan-id.ts";
-import { RelativePosixPath } from "./relative-path.ts";
+import { PhasePath } from "./phase-path.ts";
 
 // ---------------------------------------------------------------------------
 // Phase snapshot record — `.code-pact/state/archive/phases/<phase-id>.json`.
@@ -97,12 +97,7 @@ export const PhaseSnapshot = z.strictObject({
   schema_version: z.literal(PHASE_SNAPSHOT_SCHEMA_VERSION),
   phase_id: PlanId,
   phase_name: z.string().min(1),
-  original_path: RelativePosixPath.refine(
-    (s) => s.startsWith("design/phases/"),
-    "phase path must be under design/phases/",
-  )
-    .refine((s) => s.endsWith(".yaml"), "phase path must end with .yaml")
-    .refine((s) => s !== "design/phases/.yaml", "phase path must name a file"),
+  original_path: PhasePath,
   // Terminal-only by construction: a snapshot of a planned/in_progress phase is
   // schema-invalid, not merely writer-refused.
   phase_status: z.enum(["done", "cancelled"]),

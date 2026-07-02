@@ -1,8 +1,23 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readOwnedText } from "./project-fs/operations.ts";
+import {
+  resolveProjectConfigReadPath,
+} from "./project-fs/authority-resolvers.ts";
+import { unbrand } from "./project-fs/authorities/profile-authority.ts";
 import { parse as parseYaml } from "yaml";
-import { RelativePosixPath } from "./schemas/relative-path.ts";
+import { AgentProfileRefPath } from "./schemas/agent-profile-ref-path.ts";
 import { assertSafePlanId } from "./schemas/plan-id.ts";
+import {
+  resolveProfileWritePath,
+  resolveProfileReadPath,
+  type OwnedWritePath,
+  type OwnedReadPath,
+} from "./project-fs/authorities/profile-authority.ts";
+import {
+  AgentProfile,
+  type AgentProfile as AgentProfileType,
+} from "./schemas/agent-profile.ts";
+import type { AdapterDescriptor } from "./adapters/types.ts";
+import { validateAgentProfileForAdapter } from "./adapters/profile-contract.ts";
 
 // Single source of truth for where an agent's profile lives.
 //
@@ -24,6 +39,107 @@ import { assertSafePlanId } from "./schemas/plan-id.ts";
 /** The conventional profile path (relative to `.code-pact/`), POSIX-separated. */
 function defaultProfileRel(agentName: string): string {
   return `agent-profiles/${agentName}.yaml`;
+}
+
+const WRITABLE_AGENT_PROFILE_PREFIX = "agent-profiles/";
+
+function profileConfigError(message: string): Error {
+  const err = new Error(message);
+  (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+  return err;
+}
+
+function shouldMapPathErrorToConfig(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException).code;
+  return (
+    code === "PATH_OUTSIDE_PROJECT" ||
+    code === "PATH_NOT_OWNED" ||
+    code === "ENOTDIR" ||
+    code === "EISDIR" ||
+    code === "ELOOP" ||
+    code === "EACCES" ||
+    code === "EPERM" ||
+    code === "FS_AUTHORITY_FAILURE"
+  );
+}
+
+function assertWritableProfileRel(agentName: string, rel: string): void {
+  if (rel.startsWith(WRITABLE_AGENT_PROFILE_PREFIX)) return;
+  throw profileConfigError(
+    `Agent profile path for "${agentName}" is read-compatible but not writable by automation: ".code-pact/${rel}". Automatic profile writes are limited to ".code-pact/${WRITABLE_AGENT_PROFILE_PREFIX}**".`,
+  );
+}
+
+function assertOwnedProfileRel(agentName: string, rel: string): void {
+  if (rel.startsWith(WRITABLE_AGENT_PROFILE_PREFIX)) return;
+  throw profileConfigError(
+    `Agent profile path for "${agentName}" is outside the owned profile namespace: ".code-pact/${rel}". Agent profile reads are limited to ".code-pact/${WRITABLE_AGENT_PROFILE_PREFIX}**".`,
+  );
+}
+
+async function readProjectYamlForProfileChecks(
+  cwd: string,
+): Promise<unknown | null> {
+  try {
+    const raw = await readOwnedText(await resolveProjectConfigReadPath(cwd));
+    return parseYaml(raw) as unknown;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw profileConfigError(
+      `Cannot read .code-pact/project.yaml while checking writable agent profile paths.`,
+    );
+  }
+}
+
+async function assertProfileRelNotShared(
+  cwd: string,
+  agentName: string,
+  rel: string,
+): Promise<void> {
+  const doc = await readProjectYamlForProfileChecks(cwd);
+  const agents = (doc as { agents?: unknown } | null)?.agents;
+  if (!Array.isArray(agents)) return;
+  for (const a of agents) {
+    if (!a || typeof a !== "object") continue;
+    const name = (a as { name?: unknown }).name;
+    if (typeof name !== "string" || name === agentName) continue;
+    const parsed = AgentProfileRefPath.safeParse(
+      (a as { profile?: unknown }).profile,
+    );
+    if (parsed.success && parsed.data === rel) {
+      throw profileConfigError(
+        `Agent profile path ".code-pact/${rel}" is shared by "${agentName}" and "${name}". Automatic profile writes require a dedicated profile per agent.`,
+      );
+    }
+  }
+}
+
+async function assertProfileNameMatches(
+  path: OwnedReadPath,
+  agentName: string,
+): Promise<void> {
+  let raw: string;
+  try {
+    raw = await readOwnedText(path);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw profileConfigError(
+      `Agent profile for "${agentName}" at ${unbrand(path)} cannot be read before writing.`,
+    );
+  }
+  try {
+    const profile = AgentProfile.parse(parseYaml(raw) as unknown);
+    if (profile.name !== agentName) {
+      throw profileConfigError(
+        `Agent profile at ${unbrand(path)} declares name "${profile.name}", but "${agentName}" was requested. Automatic profile writes require the profile name to match the target agent.`,
+      );
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "CONFIG_ERROR") throw err;
+    throw profileConfigError(
+      `Agent profile for "${agentName}" at ${unbrand(path)} is malformed and cannot be safely written.`,
+    );
+  }
 }
 
 /**
@@ -51,7 +167,7 @@ export async function resolveAgentProfileRel(
   assertSafePlanId(agentName, "Agent");
   let raw: string;
   try {
-    raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
+    raw = await readOwnedText(await resolveProjectConfigReadPath(cwd));
   } catch (err) {
     // Absent project.yaml → convention. But a present-but-unreadable file
     // (EACCES, EISDIR, transient I/O) is a real problem: surface it rather than
@@ -90,9 +206,18 @@ export async function resolveAgentProfileRel(
     throw err;
   }
   for (const a of agents) {
-    if (a && typeof a === "object" && (a as { name?: unknown }).name === agentName) {
-      const parsed = RelativePosixPath.safeParse((a as { profile?: unknown }).profile);
-      if (parsed.success) return parsed.data;
+    if (
+      a &&
+      typeof a === "object" &&
+      (a as { name?: unknown }).name === agentName
+    ) {
+      const parsed = AgentProfileRefPath.safeParse(
+        (a as { profile?: unknown }).profile,
+      );
+      if (parsed.success) {
+        assertOwnedProfileRel(agentName, parsed.data);
+        return parsed.data;
+      }
       // Matched the agent but its declared profile is an invalid path —
       // surface it instead of silently reading/writing the default file.
       const err = new Error(
@@ -106,10 +231,169 @@ export async function resolveAgentProfileRel(
   return defaultProfileRel(agentName);
 }
 
-/** Absolute path form of {@link resolveAgentProfileRel}. */
+/**
+ * Absolute path form of {@link resolveAgentProfileRel}, symlink-free.
+ *
+ * `resolveAgentProfileRel` validates the path lexically (`RelativePosixPath`: no
+ * `..`/absolute/backslash), but a lexical `join` cannot stop a symlinked
+ * `.code-pact/agent-profiles` (or a symlinked profile file) from resolving
+ * to an in-project alias. Every profile READ and — critically — the `--model`
+ * pin's WRITE flow through this single resolver, so the containment belongs here:
+ * route through {@link resolveSymlinkFreeProjectPath} so ANY symlink component
+ * (in-project alias or out-of-project escape) fails closed before any I/O.
+ *
+ * Security contract: profile reads AND writes reject in-project symlink aliases.
+ * A symlinked `.code-pact/agent-profiles -> ../alt` is refused with CONFIG_ERROR
+ * before any file is read or written — containment is not ownership.
+ *
+ * The escape is mapped to `CONFIG_ERROR` (a project/profile configuration
+ * problem — consistent with this resolver's other throws) so every caller's
+ * existing CONFIG_ERROR handling applies unchanged, with no new code to map
+ * at each of the ~9 call sites.
+ */
 export async function resolveAgentProfilePath(
   cwd: string,
   agentName: string,
-): Promise<string> {
-  return join(cwd, ".code-pact", await resolveAgentProfileRel(cwd, agentName));
+): Promise<OwnedReadPath> {
+  const rel = await resolveAgentProfileRel(cwd, agentName);
+  try {
+    return await resolveProfileReadPath(cwd, [".code-pact", rel].join("/"));
+  } catch (err) {
+    if (shouldMapPathErrorToConfig(err)) {
+      throw profileConfigError(
+        `Agent profile path for "${agentName}" resolves through a symlink or outside the project root and was refused: ${(err as Error).message}`,
+      );
+    }
+    throw err;
+  }
+}
+
+export function assertAgentProfileNameMatches(
+  profile: AgentProfileType,
+  agentName: string,
+  path?: string,
+): void {
+  if (profile.name === agentName) return;
+  const location = path ? ` at ${path}` : "";
+  throw profileConfigError(
+    `Agent profile${location} declares name "${profile.name}", but "${agentName}" was requested.`,
+  );
+}
+
+/**
+ * Absolute path for PERSISTING an agent profile. Both reads and writes reject
+ * in-project symlink aliases — use this for automatic writes such as
+ * `adapter install --model`. An in-project symlink alias (for example
+ * `.code-pact/agent-profiles -> ../alt`) is refused with CONFIG_ERROR before
+ * any pin is written.
+ */
+export async function resolveOwnedAgentProfilePath(
+  cwd: string,
+  agentName: string,
+): Promise<OwnedWritePath> {
+  const rel = await resolveAgentProfileRel(cwd, agentName);
+  assertWritableProfileRel(agentName, rel);
+  await assertProfileRelNotShared(cwd, agentName, rel);
+  try {
+    const relPath = [".code-pact", rel].join("/");
+    await assertProfileNameMatches(
+      await resolveProfileReadPath(cwd, relPath),
+      agentName,
+    );
+    return await resolveProfileWritePath(cwd, relPath);
+  } catch (err) {
+    if (shouldMapPathErrorToConfig(err)) {
+      throw profileConfigError(
+        `Agent profile path for "${agentName}" is not an owned project path and was refused: ${(err as Error).message}`,
+      );
+    }
+    throw err;
+  }
+}
+
+/**
+ * Single source of truth for loading, parsing, schema-validating, and
+ * contract-validating an agent profile. Used by adapter install, upgrade,
+ * and adapter-doctor to eliminate duplicated loadAgentProfile implementations.
+ *
+ * 1. Resolves the profile path symlink-free (ownership).
+ * 2. Reads the file (ENOENT → AGENT_NOT_FOUND, other → CONFIG_ERROR).
+ * 3. Parses + schema-validates (CONFIG_ERROR on failure).
+ * 4. Validates the profile's path fields against the adapter descriptor's
+ *    profilePathContract (CONFIG_ERROR on mismatch).
+ *
+ * The contract validation runs BEFORE any filesystem operation beyond the
+ * profile read itself — a hostile profile (e.g. `instruction_filename: .env`)
+ * is refused at the contract boundary.
+ */
+export type AdapterProfileLoadResult =
+  | { kind: "ok"; path: string; profile: AgentProfileType }
+  | { kind: "missing"; path: string; message: string }
+  | {
+      kind: "invalid";
+      path: string;
+      message: string;
+      reason: "malformed" | "contract_violation";
+    };
+
+export async function loadAdapterProfileForAdapter(
+  cwd: string,
+  agentName: string,
+  descriptor: AdapterDescriptor,
+): Promise<AdapterProfileLoadResult> {
+  const path = await resolveAgentProfilePath(cwd, agentName);
+  let raw: string;
+  try {
+    raw = await readOwnedText(path);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return {
+        kind: "missing",
+        path,
+        message: `Agent profile for "${agentName}" not found at ${path}.`,
+      };
+    }
+    return {
+      kind: "invalid",
+      path,
+      message: `Agent profile for "${agentName}" at ${path} cannot be read: ${(err as Error).message}`,
+      reason: "malformed",
+    };
+  }
+  let profile: AgentProfileType;
+  try {
+    profile = AgentProfile.parse(parseYaml(raw) as unknown);
+    assertAgentProfileNameMatches(profile, agentName, path);
+  } catch (err) {
+    return {
+      kind: "invalid",
+      path,
+      message: `Agent profile for "${agentName}" at ${path} is invalid: ${(err as Error).message}`,
+      reason: "malformed",
+    };
+  }
+  try {
+    validateAgentProfileForAdapter(profile, descriptor);
+  } catch (err) {
+    return {
+      kind: "invalid",
+      path,
+      message: (err as Error).message,
+      reason: "contract_violation",
+    };
+  }
+  return { kind: "ok", path, profile };
+}
+
+export async function loadValidatedAdapterProfile(
+  cwd: string,
+  agentName: string,
+  descriptor: AdapterDescriptor,
+): Promise<AgentProfileType> {
+  const result = await loadAdapterProfileForAdapter(cwd, agentName, descriptor);
+  if (result.kind === "ok") return result.profile;
+  const e = new Error(result.message);
+  (e as NodeJS.ErrnoException).code =
+    result.kind === "missing" ? "AGENT_NOT_FOUND" : "CONFIG_ERROR";
+  throw e;
 }

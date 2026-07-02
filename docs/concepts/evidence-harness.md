@@ -8,20 +8,20 @@ Many design decisions in code-pact are made on qualitative judgement: "this feel
 
 The harness is the path out. It captures a small set of deterministic metrics from the corpus and emits CSV that an RFC can cite as "the baseline shows X". Move design judgement from "感覚" to "measurement", one row at a time.
 
-The full rationale and alternatives considered are in the **evidence-harness RFC** — now retired, so its text lives in git history and the `.code-pact/state` archive decision record rather than as a live `design/decisions/*.md`.
+The full rationale and alternatives considered are in the **evidence-harness RFC** — now retired, so its text lives in git history and the `.code-pact/state` archive decision record rather than as a live `design/decisions/**/*.md`.
 
 ## What it measures
 
 Six CSV files plus a manifest and an aggregate summary, under `docs/maintainers/measurements/`:
 
-| File | One row per | What it tells you |
-| --- | --- | --- |
-| `pack-size-by-task.csv` | task | The "context bandwidth" each task asks of an agent (byte count + line count + section count of the `task context` pack). Cardinalities of `reads` / `writes` / `decision_refs` / `acceptance_refs` give a sense of how richly each task is wired into the corpus. |
-| `verify-success-rate.csv` | task with a `done` event | First-pass vs retry counts. Quantifies how strong verification commands are at catching real failures vs how often agents have to retry. |
-| `task-event-density.csv` | task with ≥ 1 event | Progress event histogram (started / blocked / resumed / done / failed) + `event_span_days`. Quantifies how often tasks bounce vs flow linearly. |
-| `lint-issue-histogram.csv` | (phase, code) pair | Count of each `plan lint --include-quality` diagnostic across the corpus. Quantifies the "noise floor" of the lint surface — a row count of 0 means the strict-clean dogfood regime is holding. |
-| `lifecycle-adherence-by-task.csv` | task with ≥ 1 event | Per-task booleans: `started_before_done` (earliest started precedes earliest done), `had_retry`, `had_block`, `legacy_planned_to_done_shortcut`. Quantifies how often the recommended lifecycle is followed. |
-| `adapter-drift-by-agent.csv` | agent referenced in any issue or progress event | `doctor_ok` + per-`ADAPTER_*`-code counts. Quantifies how often `adapter doctor` surfaces real drift. |
+| File                              | One row per                                     | What it tells you                                                                                                                                                                                                                                                 |
+| --------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pack-size-by-task.csv`           | task                                            | The "context bandwidth" each task asks of an agent (byte count + line count + section count of the `task context` pack). Cardinalities of `reads` / `writes` / `decision_refs` / `acceptance_refs` give a sense of how richly each task is wired into the corpus. |
+| `verify-success-rate.csv`         | task with a `done` event                        | First-pass vs retry counts. Quantifies how strong verification commands are at catching real failures vs how often agents have to retry.                                                                                                                          |
+| `task-event-density.csv`          | task with ≥ 1 event                             | Progress event histogram (started / blocked / resumed / done / failed) + `event_span_days`. Quantifies how often tasks bounce vs flow linearly.                                                                                                                   |
+| `lint-issue-histogram.csv`        | (phase, code) pair                              | Count of each `plan lint --include-quality` diagnostic across the corpus. Quantifies the "noise floor" of the lint surface — a row count of 0 means the strict-clean dogfood regime is holding.                                                                   |
+| `lifecycle-adherence-by-task.csv` | task with ≥ 1 event                             | Per-task booleans: `started_before_done` (earliest started precedes earliest done), `had_retry`, `had_block`, `legacy_planned_to_done_shortcut`. Quantifies how often the recommended lifecycle is followed.                                                      |
+| `adapter-drift-by-agent.csv`      | agent referenced in any issue or progress event | `doctor_ok` + per-`ADAPTER_*`-code counts. Quantifies how often `adapter doctor` surfaces real drift.                                                                                                                                                             |
 
 The sibling `measurements.manifest.json` records the harness version, the corpus git SHA, the cli version, the generation date (date only, no clock time), and the CSV file list.
 
@@ -99,7 +99,7 @@ This determinism is asserted by an integration test (`tests/integration/harness.
 
 ## Citing rows in RFCs
 
-Once the CSVs are committed under `docs/maintainers/measurements/`, future `design/decisions/*.md` can reference specific rows verbatim:
+Once the CSVs are committed under `docs/maintainers/measurements/`, future `design/decisions/**/*.md` can reference specific rows verbatim:
 
 ```markdown
 > The baseline shows P14-T5 has the largest context pack

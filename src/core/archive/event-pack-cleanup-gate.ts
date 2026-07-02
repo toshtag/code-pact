@@ -17,25 +17,33 @@
 // gate table (G0–G8) is the binding source for every disposition here.
 // ---------------------------------------------------------------------------
 
-import { open, lstat, type FileHandle } from "node:fs/promises";
-import { constants } from "node:fs";
+import { lstatOwned, readOwnedText } from "../project-fs/operations.ts";
+import {
+  archiveReadPath,
+  type ArchiveAuthorityPath,
+} from "../project-fs/authorities/archive-authority.ts";
 import {
   planEventPack,
   findLiveTaskOwnersByTaskId,
   type EventPackBlock,
 } from "./event-pack.ts";
 import { resolvePhaseSnapshotRaw } from "./load-phase-snapshot.ts";
-import { validateEventPackTier1, resolveEventPackRaw } from "./event-pack-reader.ts";
+import {
+  validateEventPackTier1,
+  resolveEventPackRaw,
+} from "./event-pack-reader.ts";
 import { bindPackToSnapshot } from "./event-pack-binding.ts";
 import { readPackSources } from "../progress/all-sources.ts";
-import { resolveWithinProject } from "../path-safety.ts";
 import {
   EVENTS_DIR_SEGMENTS,
   parseEventFileName,
   validateEventFileContent,
 } from "../progress/events-io.ts";
-import { eventPackPath, sha256Hex } from "./paths.ts";
-import { classifyLoosePackRelationship, type CleanupSkipReason } from "./event-pack-cleanup.ts";
+import { eventPackPath, resolveArchiveAuthorityPath, sha256Hex } from "./paths.ts";
+import {
+  classifyLoosePackRelationship,
+  type CleanupSkipReason,
+} from "./event-pack-cleanup.ts";
 
 /** Project-relative path of a loose event file (matches CleanupSkip.path). */
 export function looseEventRelPath(file: string): string {
@@ -45,10 +53,6 @@ export function looseEventRelPath(file: string): string {
 function isEnoent(err: unknown): boolean {
   return (err as NodeJS.ErrnoException)?.code === "ENOENT";
 }
-
-/** Open read-only WITHOUT following a final-component symlink, where the platform
- *  supports it (`O_NOFOLLOW` falls back to 0 — follow — where it is absent). */
-const O_NOFOLLOW_READONLY = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0);
 
 /**
  * Read a loose event file as a REGULAR file, never reading or accepting a symlink's
@@ -69,45 +73,36 @@ const O_NOFOLLOW_READONLY = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0);
  * writers, not a hostile local filesystem racing the read.
  */
 async function readRegularEventFileNoSymlink(
-  abs: string,
+  abs: ArchiveAuthorityPath,
 ): Promise<{ raw: string } | DeleteGateVerdict> {
   // (1) lstat — does NOT follow a symlink, so this rejects a symlink on every
   // platform, before any open that could follow it.
   let pre;
   try {
-    pre = await lstat(abs);
+    pre = await lstatOwned(archiveReadPath(abs));
   } catch (err) {
     if (isEnoent(err)) return { disposition: "vanished" };
     return { disposition: "skip", reason: "unreadable" };
   }
   if (!pre.isFile()) return { disposition: "skip", reason: "not_regular_file" };
 
-  // (2) open with O_NOFOLLOW (where supported); (3) fstat + inode identity check.
-  let fh: FileHandle;
+  // (2) read with O_NOFOLLOW + fstat. The async read primitive refuses final
+  // symlinks and non-regular files without returning a raw handle.
   try {
-    fh = await open(abs, O_NOFOLLOW_READONLY);
+    return { raw: await readOwnedText(archiveReadPath(abs)) };
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return { disposition: "vanished" };
     // ELOOP = O_NOFOLLOW refused a symlink; EISDIR/ENOTDIR = not a regular file.
-    if (code === "ELOOP" || code === "EISDIR" || code === "ENOTDIR") {
+    if (
+      code === "ELOOP" ||
+      code === "EISDIR" ||
+      code === "ENOTDIR" ||
+      code === "ENOTFILE"
+    ) {
       return { disposition: "skip", reason: "not_regular_file" };
     }
     return { disposition: "skip", reason: "unreadable" };
-  }
-  try {
-    const st = await fh.stat();
-    // Not a regular file, OR a different inode than lstat saw (the path was swapped
-    // between lstat and open) → refuse to read it.
-    if (!st.isFile() || st.ino !== pre.ino || st.dev !== pre.dev) {
-      return { disposition: "skip", reason: "not_regular_file" };
-    }
-    return { raw: await fh.readFile("utf8") };
-  } catch (err) {
-    if (isEnoent(err)) return { disposition: "vanished" };
-    return { disposition: "skip", reason: "unreadable" };
-  } finally {
-    await fh.close();
   }
 }
 
@@ -151,7 +146,7 @@ export type DeleteGateVerdict =
       /** The project-resolved absolute path the gate VERIFIED. The unlink loop
        *  removes exactly this path — it does NOT re-resolve, so it cannot diverge
        *  from what was gated and cannot mislabel a re-resolve failure. */
-      abs: string;
+      abs: ArchiveAuthorityPath;
     }
   | { disposition: "skip"; reason: CleanupSkipReason }
   | { disposition: "vanished" }
@@ -175,9 +170,9 @@ export async function evaluateDeleteGate(
 ): Promise<DeleteGateVerdict> {
   // G1 — the path resolves WITHIN the project (no symlink/`..` escape). First, per
   // the RFC's locked order.
-  let abs: string;
+  let abs: ArchiveAuthorityPath;
   try {
-    abs = await resolveWithinProject(cwd, looseEventRelPath(file));
+    abs = await resolveArchiveAuthorityPath(cwd, looseEventRelPath(file));
   } catch {
     return { disposition: "skip", reason: "path_escape" };
   }
@@ -208,7 +203,8 @@ export async function evaluateDeleteGate(
     const code = (err as NodeJS.ErrnoException).code;
     return {
       disposition: "skip",
-      reason: code === "EVENT_FILE_ID_MISMATCH" ? "id_mismatch" : "parse_failed",
+      reason:
+        code === "EVENT_FILE_ID_MISMATCH" ? "id_mismatch" : "parse_failed",
     };
   }
 
@@ -234,7 +230,7 @@ export async function evaluateDeleteGate(
       disposition: "abort",
       reason: "live_task_owner",
       detail: `task "${loaded.event.task_id}" is owned by live phase(s): ${owners.owners
-        .map((o) => o.phase_path)
+        .map(o => o.phase_path)
         .join(", ")}`,
     };
   }
@@ -367,7 +363,8 @@ export async function prepareLooseCleanup(
   // relationship is RE-DERIVED from the re-read below, NOT from G0's snapshot — so a
   // loose-set change between G0 and the re-read cannot make the result lie.
   const plan = await planEventPack(cwd, phaseId);
-  if (plan.kind === "ineligible") return { kind: "ineligible", block: plan.block };
+  if (plan.kind === "ineligible")
+    return { kind: "ineligible", block: plan.block };
   if (plan.kind === "noop_no_events") return { kind: "noop_no_events" };
   if (plan.kind === "write") return { kind: "needs_pack_write" };
   // plan.kind === "noop_already_packed" — proceed to the authoritative re-read.
@@ -390,7 +387,7 @@ export async function prepareLooseCleanup(
   }
   const snapshot = snapRes.snapshot;
   const snapshotRaw = snapRes.raw;
-  const snapshotTaskIds = new Set(snapshot.tasks.map((t) => t.id));
+  const snapshotTaskIds = new Set(snapshot.tasks.map(t => t.id));
 
   // The cleanup TARGET SET — the loose files for the snapshot's tasks (the set the
   // pack covers), the same selection Layer 2 packs. Read leniently so an unrelated
@@ -400,8 +397,10 @@ export async function prepareLooseCleanup(
   // Layer 2; tolerating an out-of-scope broken loose file is the reconciliation
   // layer's job, not this prepare's.)
   const sources = await readPackSources(cwd, "lenient");
-  const targetFiles = sources.looseFiles.filter((f) => snapshotTaskIds.has(f.event.task_id));
-  const looseEventsById = new Map(targetFiles.map((f) => [f.id, f] as const));
+  const targetFiles = sources.looseFiles.filter(f =>
+    snapshotTaskIds.has(f.event.task_id),
+  );
+  const looseEventsById = new Map(targetFiles.map(f => [f.id, f] as const));
 
   // Load the pack for the gate ctx and RE-BIND it (Tier-1 + Tier-2) against the
   // snapshot. NOTE this is a SECOND read of the pack (G0's `planEventPack` already
@@ -420,21 +419,36 @@ export async function prepareLooseCleanup(
     if (packRaw.kind !== "present") {
       return {
         kind: "ineligible",
-        block: { kind: "pack_invalid", detail: packRaw.kind === "absent" ? "pack vanished" : String(packRaw.error) },
+        block: {
+          kind: "pack_invalid",
+          detail:
+            packRaw.kind === "absent" ? "pack vanished" : String(packRaw.error),
+        },
       };
     }
     const loadedPack = validateEventPackTier1(phaseId, packRaw.bytes, packPath);
-    const bindIssues = bindPackToSnapshot(loadedPack, snapshot, snapshotRaw, looseEventsById);
+    const bindIssues = bindPackToSnapshot(
+      loadedPack,
+      snapshot,
+      snapshotRaw,
+      looseEventsById,
+    );
     if (bindIssues.length > 0) {
       return {
         kind: "ineligible",
-        block: { kind: "pack_invalid", detail: bindIssues.map((i) => i.message).join("; ") },
+        block: {
+          kind: "pack_invalid",
+          detail: bindIssues.map(i => i.message).join("; "),
+        },
       };
     }
-    packIds = new Set(loadedPack.pack.events.map((e) => e.id));
+    packIds = new Set(loadedPack.pack.events.map(e => e.id));
     packSnapshotSha256 = loadedPack.pack.snapshot_sha256;
   } catch (err) {
-    return { kind: "ineligible", block: { kind: "pack_invalid", detail: (err as Error).message } };
+    return {
+      kind: "ineligible",
+      block: { kind: "pack_invalid", detail: (err as Error).message },
+    };
   }
 
   // RE-DERIVE the loose↔pack relationship from the RE-READ target + pack — never
@@ -444,14 +458,17 @@ export async function prepareLooseCleanup(
   // re-read loose id not in the pack as `pack_invalid`, so `diverged` is unreachable
   // here — kept as a defensive, fail-closed guard reported as `pack_invalid`.
   const currentRelationship = classifyLoosePackRelationship(
-    new Set(targetFiles.map((f) => f.id)),
+    new Set(targetFiles.map(f => f.id)),
     packIds,
   );
   if (currentRelationship === "empty") return { kind: "already_clean" };
   if (currentRelationship === "diverged") {
     return {
       kind: "ineligible",
-      block: { kind: "pack_invalid", detail: "re-read loose set diverged from the pack" },
+      block: {
+        kind: "pack_invalid",
+        detail: "re-read loose set diverged from the pack",
+      },
     };
   }
 
@@ -465,7 +482,7 @@ export async function prepareLooseCleanup(
       cwd,
       phaseId,
     },
-    target: targetFiles.map((f) => f.file),
+    target: targetFiles.map(f => f.file),
   };
 }
 
@@ -501,7 +518,11 @@ export async function planLooseCleanup(
         skipped.push({ path: looseEventRelPath(file), reason: verdict.reason });
         break;
       case "abort":
-        aborts.push({ path: looseEventRelPath(file), reason: verdict.reason, detail: verdict.detail });
+        aborts.push({
+          path: looseEventRelPath(file),
+          reason: verdict.reason,
+          detail: verdict.detail,
+        });
         break;
     }
   }

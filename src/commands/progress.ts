@@ -1,5 +1,7 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  readOwnedText,
+  resolveProgressReadPath,
+} from "../core/project-fs/index.ts";
 import { loadRoadmap } from "../core/plan/roadmap.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
 import { BaselineSnapshot } from "../core/schemas/baseline-snapshot.ts";
@@ -46,16 +48,21 @@ function throwBaselineNotFound(name: string): never {
   throw err;
 }
 
-async function loadBaseline(cwd: string, name: string): Promise<BaselineSnapshot> {
+async function loadBaseline(
+  cwd: string,
+  name: string,
+): Promise<BaselineSnapshot> {
   // `name` is interpolated into `baselines/${name}.json`, so a value like
   // `../../../../outside` would escape the baselines dir. Baseline names are
   // identifiers (default "initial"), so constrain to the PlanId charset.
   assertSafePlanId(name, "Baseline name");
   let raw: string;
   try {
-    raw = await readFile(
-      join(cwd, ".code-pact", "state", "baselines", `${name}.json`),
-      "utf8",
+    raw = await readOwnedText(
+      await resolveProgressReadPath(
+        cwd,
+        `.code-pact/state/baselines/${name}.json`,
+      ),
     );
   } catch {
     throwBaselineNotFound(name);
@@ -74,7 +81,9 @@ async function loadBaseline(cwd: string, name: string): Promise<BaselineSnapshot
 // Main
 // ---------------------------------------------------------------------------
 
-export async function runProgress(opts: ProgressOptions): Promise<ProgressResult> {
+export async function runProgress(
+  opts: ProgressOptions,
+): Promise<ProgressResult> {
   const { cwd, baseline: baselineName } = opts;
 
   const [roadmap, baseline] = await Promise.all([
@@ -83,7 +92,9 @@ export async function runProgress(opts: ProgressOptions): Promise<ProgressResult
   ]);
 
   // Load all current phases
-  const phases = await Promise.all(roadmap.phases.map((ref) => loadPhase(cwd, ref.path)));
+  const phases = await Promise.all(
+    roadmap.phases.map(ref => loadPhase(cwd, ref.path)),
+  );
 
   // Current total weight (may have grown since baseline)
   const current_total_weight = phases.reduce((s, p) => s + p.weight, 0);
@@ -96,8 +107,10 @@ export async function runProgress(opts: ProgressOptions): Promise<ProgressResult
 
   // High-risk unfinished phases
   const high_risk_unfinished = phases
-    .filter((p) => p.risk === "high" && p.status !== "done" && p.status !== "cancelled")
-    .map((p) => p.id);
+    .filter(
+      p => p.risk === "high" && p.status !== "done" && p.status !== "cancelled",
+    )
+    .map(p => p.id);
 
   const baseline_total_weight = baseline.total_weight;
 
@@ -141,7 +154,9 @@ export function formatProgress(r: ProgressResult): string {
   ];
   if (r.expanded_work !== 0) {
     const sign = r.expanded_work > 0 ? "+" : "";
-    lines.push(`Expanded work:     ${sign}${r.expanded_work} pts since baseline`);
+    lines.push(
+      `Expanded work:     ${sign}${r.expanded_work} pts since baseline`,
+    );
   }
   if (r.high_risk_unfinished.length > 0) {
     lines.push(`High-risk unfinished: ${r.high_risk_unfinished.join(", ")}`);

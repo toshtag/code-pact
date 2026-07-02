@@ -49,7 +49,10 @@ function cursorMdc(profile: AgentProfile, locale: Locale): string {
     `> and \`.cursor/rules/\` placement may shift across Cursor releases.`,
     `> Source: https://cursor.com/docs/context/rules`,
     ``,
-    ...renderWorkflowSection(t, "cursor", { step0: false, validateNote: false }),
+    ...renderWorkflowSection(t, "cursor", {
+      step0: false,
+      validateNote: false,
+    }),
     ``,
     ...renderContextDirectorySection(profile),
     ``,
@@ -78,6 +81,9 @@ export async function generateCursorDesiredFiles(
 export const cursorAdapterDescriptor: AdapterDescriptor = {
   generateDesiredFiles: generateCursorDesiredFiles,
   capabilities: ["rules_file", "context_dir"] as const,
-  ownedPathGlobs: [".cursor/rules/code-pact.mdc"] as const,
+  ownedPathRoles: { ".cursor/rules/code-pact.mdc": "rule" } as const,
+  profilePathContract: {
+    instructionFilename: ".cursor/rules/code-pact.mdc",
+  },
   adapterSchemaVersion: 1,
 };

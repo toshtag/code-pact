@@ -81,8 +81,16 @@ describe("e2e: full agent-facing loop (init → adapter install → recommend �
     //    (Stable (human-output)), so e2e must hand-edit the YAML the same
     //    way phase import / phase-wizard does for non-interactive flows.
     {
-      const phasePath = join(project.dir, "design", "phases", "P1-foundation.yaml");
-      const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
+      const phasePath = join(
+        project.dir,
+        "design",
+        "phases",
+        "P1-foundation.yaml",
+      );
+      const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+        string,
+        unknown
+      >;
       doc.tasks = [
         {
           id: "P1-T1",
@@ -111,7 +119,9 @@ describe("e2e: full agent-facing loop (init → adapter install → recommend �
       expect(env.ok).toBe(true);
       if (env.ok) {
         expect(env.data.agentName).toBe("claude-code");
-        expect(env.data.manifestPath).toContain(".code-pact/adapters/claude-code.manifest.yaml");
+        expect(env.data.manifestPath).toContain(
+          ".code-pact/adapters/claude-code.manifest.yaml",
+        );
         expect(env.data.files.length).toBeGreaterThan(0);
       }
     }
@@ -138,7 +148,14 @@ describe("e2e: full agent-facing loop (init → adapter install → recommend �
 
     // 5. task context — returns a markdown pack on stdout.
     {
-      const res = project.run(["task", "context", "P1-T1", "--agent", "claude-code", "--json"]);
+      const res = project.run([
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--json",
+      ]);
       const env = expectJsonOk<{ markdown?: string; char_count?: number }>(res);
       // Be tolerant of the exact field name — pack shape has shifted historically.
       expect(res.code).toBe(0);
@@ -176,14 +193,10 @@ describe("e2e: full agent-facing loop (init → adapter install → recommend �
 
     // 8. task complete — runs verify, appends done event.
     {
-      const env = project.runJson<{ task_id: string; event: { agent: string } }>([
-        "task",
-        "complete",
-        "P1-T1",
-        "--agent",
-        "claude-code",
-        "--json",
-      ]);
+      const env = project.runJson<{
+        task_id: string;
+        event: { agent: string };
+      }>(["task", "complete", "P1-T1", "--agent", "claude-code", "--json"]);
       expect(env.ok).toBe(true);
       if (env.ok) {
         expect(env.data.task_id).toBe("P1-T1");
@@ -236,27 +249,30 @@ describe("e2e: full agent-facing loop (init → adapter install → recommend �
         };
       };
       const driftKinds = env.data.issues
-        .filter((i) => i.code === "STATUS_DRIFT")
-        .map((i) => i.details?.kind);
+        .filter(i => i.code === "STATUS_DRIFT")
+        .map(i => i.details?.kind);
       expect(driftKinds).toContain("done-but-design-not-done");
     }
 
-    // 12. adapter upgrade --check — fresh install, no drift expected.
+    // 12. adapter upgrade --check — static files are clean, and the dynamic
+    //     command skill created by code-pact is a handoff output: it is not
+    //     read/hashed again and does not keep the plan dirty.
     {
-      const env = project.runJson<{ clean: boolean; plan: { action: string }[] }>([
-        "adapter",
-        "upgrade",
-        "claude-code",
-        "--check",
-        "--json",
-      ]);
+      const env = project.runJson<{
+        clean: boolean;
+        plan: {
+          relPath: string;
+          action: string;
+          reason?: string;
+          local: string;
+        }[];
+      }>(["adapter", "upgrade", "claude-code", "--check", "--json"]);
       expect(env.ok).toBe(true);
       if (env.ok) {
         expect(env.data.clean).toBe(true);
-        // Every entry should be action: skip when clean.
-        for (const p of env.data.plan) {
-          expect(["skip", "update_manifest"]).toContain(p.action);
-        }
+        expect(
+          env.data.plan.some(p => p.reason === "dynamic_file_unverifiable"),
+        ).toBe(false);
       }
     }
 
@@ -271,7 +287,7 @@ describe("e2e: full agent-facing loop (init → adapter install → recommend �
       }>(["doctor", "--json"]);
       expect(env.ok).toBe(true);
       if (env.ok) {
-        const errors = env.data.issues.filter((i) => i.severity === "error");
+        const errors = env.data.issues.filter(i => i.severity === "error");
         expect(errors).toEqual([]);
       }
     }
@@ -312,12 +328,14 @@ describe("e2e: pre-v0.9 migration path (no manifest → install → manifest-awa
       }>(["doctor", "--json"]);
       expect(env.ok).toBe(true);
       if (env.ok) {
-        const adapterMissing = env.data.issues.find((i) => i.code === "ADAPTER_MISSING");
+        const adapterMissing = env.data.issues.find(
+          i => i.code === "ADAPTER_MISSING",
+        );
         expect(adapterMissing).toBeDefined();
         expect(adapterMissing?.severity).toBe("warning");
         // No manifest-aware codes should appear yet — they're gated on
         // manifest presence.
-        const manifestAware = env.data.issues.filter((i) =>
+        const manifestAware = env.data.issues.filter(i =>
           [
             "ADAPTER_FILE_MISSING",
             "ADAPTER_FILE_DRIFT",
@@ -340,7 +358,7 @@ describe("e2e: pre-v0.9 migration path (no manifest → install → manifest-awa
       }>(["adapter", "list", "--json"]);
       expect(env.ok).toBe(true);
       if (env.ok) {
-        const claude = env.data.agents.find((a) => a.name === "claude-code");
+        const claude = env.data.agents.find(a => a.name === "claude-code");
         expect(claude).toBeDefined();
         expect(claude?.manifestPresent).toBe(false);
       }
@@ -349,7 +367,13 @@ describe("e2e: pre-v0.9 migration path (no manifest → install → manifest-awa
     // Step 3 — adapter upgrade --check before install must surface a
     // config-level error (no manifest to upgrade).
     {
-      const res = project.run(["adapter", "upgrade", "claude-code", "--check", "--json"]);
+      const res = project.run([
+        "adapter",
+        "upgrade",
+        "claude-code",
+        "--check",
+        "--json",
+      ]);
       expect(res.code).toBe(2);
       const env = expectJsonErr(res);
       expect(["MANIFEST_NOT_FOUND", "CONFIG_ERROR"]).toContain(env.error.code);
@@ -363,7 +387,9 @@ describe("e2e: pre-v0.9 migration path (no manifest → install → manifest-awa
       }>(["adapter", "install", "claude-code", "--json"]);
       expect(env.ok).toBe(true);
       if (env.ok) {
-        expect(env.data.manifestPath).toContain(".code-pact/adapters/claude-code.manifest.yaml");
+        expect(env.data.manifestPath).toContain(
+          ".code-pact/adapters/claude-code.manifest.yaml",
+        );
         expect(env.data.files.length).toBeGreaterThan(0);
       }
     }
@@ -377,9 +403,11 @@ describe("e2e: pre-v0.9 migration path (no manifest → install → manifest-awa
       }>(["doctor", "--json"]);
       expect(env.ok).toBe(true);
       if (env.ok) {
-        const adapterMissing = env.data.issues.find((i) => i.code === "ADAPTER_MISSING");
+        const adapterMissing = env.data.issues.find(
+          i => i.code === "ADAPTER_MISSING",
+        );
         expect(adapterMissing).toBeUndefined();
-        const errors = env.data.issues.filter((i) => i.severity === "error");
+        const errors = env.data.issues.filter(i => i.severity === "error");
         expect(errors).toEqual([]);
       }
     }

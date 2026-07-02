@@ -47,7 +47,10 @@ const srcRoot = join(repoRoot, "src");
 //                   Emitted by adapter doctor and (manifest-aware) global
 //                   doctor. Severity error|warning.
 // - "internal":     Reserved for unhandled exceptions and contract drift.
-const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "internal"> = {
+const KNOWN_CODES: Record<
+  string,
+  "public" | "plan" | "doctor" | "adapter" | "internal"
+> = {
   // Public
   AGENT_NOT_ENABLED: "public",
   AGENT_NOT_FOUND: "public",
@@ -80,6 +83,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   DECISION_RETIRE_STALE: "public",
   DECISION_REQUIRED: "public",
   DUPLICATE_PHASE_ID: "public",
+  FS_AUTHORITY_FAILURE: "public",
   INVALID_TASK_TRANSITION: "public",
   LOCK_HELD: "public",
   MANIFEST_NOT_FOUND: "public",
@@ -165,6 +169,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   ADR_STATUS_UNRECOGNIZED: "plan",
   PHASE_CONFIDENCE_LOW: "plan",
   TASK_DECISION_UNRESOLVED: "plan",
+  DECISION_SCAN_UNREADABLE: "plan",
   TASK_DESCRIPTION_MISSING: "plan",
   // P36 — ADR quality advisory (affects_exit: false, --include-quality).
   ADR_ACCEPTED_BODY_THIN: "plan",
@@ -191,6 +196,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   TASK_DEPENDS_ON_UNRESOLVED: "plan",
   TASK_READS_GLOB_INVALID: "plan",
   TASK_READS_NO_MATCH: "plan",
+  TASK_READS_UNAVAILABLE: "plan",
   TASK_READS_UNSAFE_PATH: "plan",
   TASK_WRITES_AUDIT_DECLARED_UNUSED: "plan",
   TASK_WRITES_AUDIT_OUTSIDE_DECLARED: "plan",
@@ -220,16 +226,48 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   ADAPTER_DESIRED_STALE: "adapter",
   ADAPTER_FILE_DRIFT: "adapter",
   ADAPTER_FILE_MISSING: "adapter",
+  ADAPTER_FILE_PATH_UNSAFE: "adapter",
+  ADAPTER_FILE_UNVERIFIABLE: "adapter",
   ADAPTER_GENERATOR_STALE: "adapter",
   ADAPTER_MANIFEST_INVALID: "adapter",
   ADAPTER_MANIFEST_MISSING: "adapter",
   ADAPTER_MISSING: "adapter",
+  ADAPTER_PROFILE_INVALID: "adapter",
+  ADAPTER_PROFILE_MISSING: "adapter",
+  ADAPTER_UNVERIFIABLE: "adapter",
   ADAPTER_PROFILE_DRIFT: "adapter",
+  ADAPTER_PROFILE_CONTRACT_VIOLATION: "adapter",
+  MODEL_PROFILES_INVALID: "adapter",
+  MODEL_PROFILES_UNSAFE: "adapter",
   ADAPTER_SCHEMA_DRIFT: "adapter",
   ADAPTER_UNMANAGED_FILE: "adapter",
+  ADAPTER_TRANSACTION_RECOVERY_FAILED: "adapter",
+  PARTIAL_MUTATION: "adapter",
+  TRANSACTION_CLEANUP_PENDING: "adapter",
 
   // Internal
   INTERNAL_ERROR: "internal",
+  // Path-safety escape: `resolveWithinProject` tags a symlink/unsafe-path escape
+  // with this code so command layers can map it to a structured envelope
+  // (e.g. adapter install/upgrade → ADAPTER_MANIFEST_INVALID for the manifest
+  // path, CONFIG_ERROR for placeholder dirs) and the decision prune/retire gates
+  // classify it as `target_invalid`. It is always caught + remapped, so it never
+  // reaches an agent as a top-level `error.code` — hence "internal".
+  PATH_OUTSIDE_PROJECT: "internal",
+  // Path-ownership refusal: `resolveSymlinkFreeProjectPath` tags an in-project symlink
+  // alias with this code so write/delete call sites can distinguish "contained"
+  // from "owned". Command layers map it to CONFIG_ERROR / ADAPTER_MANIFEST_INVALID.
+  // It is internal, not a top-level public envelope.
+  PATH_NOT_OWNED: "internal",
+  // Emitted by readRegularOwnedText (raw-internal.ts) when O_NOFOLLOW is
+  // not supported on the platform. Always caught and remapped by callers.
+  ENOSYS: "internal",
+  // Emitted by readRegularOwnedText (raw-internal.ts) when a path that
+  // should be a regular file is not. Always caught and remapped by callers.
+  ENOTFILE: "internal",
+  // Emitted by pruned-ledger.ts when a serialized row has a path that
+  // fails decision ref validation. Surfaced as an unhandled exception.
+  INVALID_PRUNED_DECISION_PATH: "internal",
   // Defense-in-depth invariant: an adapter generator produced two desired
   // files at the same path with differing content. Should never fire (each
   // adapter uniquifies its own paths); surfaced as an unhandled exception
@@ -335,14 +373,22 @@ describe("error code surface (v1.0 contract anchor)", () => {
   it("every code emitted by src/ is categorized in KNOWN_CODES", async () => {
     const found = await collectCodes();
     const expected = new Set(Object.keys(KNOWN_CODES));
-    const missing = [...found].filter((c) => !expected.has(c)).sort();
-    expect(missing, `New error code(s) found in src/ but not categorized in KNOWN_CODES. Add them here AND in docs/cli-contract.md — and, if the code is user-recoverable, add a recovery entry to docs/troubleshooting.md (see docs/maintainers/docs-maintenance.md ownership map).`).toEqual([]);
+    const missing = [...found].filter(c => !expected.has(c)).sort();
+    expect(
+      missing,
+      `New error code(s) found in src/ but not categorized in KNOWN_CODES. Add them here AND in docs/cli-contract.md — and, if the code is user-recoverable, add a recovery entry to docs/troubleshooting.md (see docs/maintainers/docs-maintenance.md ownership map).`,
+    ).toEqual([]);
   });
 
   it("every code in KNOWN_CODES is still emitted somewhere in src/", async () => {
     const found = await collectCodes();
-    const stale = Object.keys(KNOWN_CODES).filter((c) => !found.has(c)).sort();
-    expect(stale, `Code(s) in KNOWN_CODES are no longer emitted by src/. Remove them here AND from docs/cli-contract.md.`).toEqual([]);
+    const stale = Object.keys(KNOWN_CODES)
+      .filter(c => !found.has(c))
+      .sort();
+    expect(
+      stale,
+      `Code(s) in KNOWN_CODES are no longer emitted by src/. Remove them here AND from docs/cli-contract.md.`,
+    ).toEqual([]);
   });
 
   it("KNOWN_CODES has no duplicate categories per code", () => {
@@ -357,9 +403,17 @@ describe("error code surface (v1.0 contract anchor)", () => {
   });
 
   it("public + plan + doctor + adapter + internal partition is total", () => {
-    const allowed = new Set(["public", "plan", "doctor", "adapter", "internal"]);
+    const allowed = new Set([
+      "public",
+      "plan",
+      "doctor",
+      "adapter",
+      "internal",
+    ]);
     for (const [code, cat] of Object.entries(KNOWN_CODES)) {
-      expect(allowed.has(cat), `code ${code} has unknown category ${cat}`).toBe(true);
+      expect(allowed.has(cat), `code ${code} has unknown category ${cat}`).toBe(
+        true,
+      );
     }
   });
 });

@@ -1,10 +1,15 @@
-import { readFile, readdir, access } from "node:fs/promises";
 import { join, basename, extname } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
-import { ProgressLog, type ProgressEvent } from "../core/schemas/progress-event.ts";
-import { loadMergedProgress, mergeProgressStreams } from "../core/progress/io.ts";
+import {
+  ProgressLog,
+  type ProgressEvent,
+} from "../core/schemas/progress-event.ts";
+import {
+  loadMergedProgress,
+  mergeProgressStreams,
+} from "../core/progress/io.ts";
 import { computeEventId } from "../core/progress/event-id.ts";
 import {
   type LoadedEventFile,
@@ -19,8 +24,26 @@ import {
 import { validateSnapshotEventEvidence } from "../core/archive/snapshot-evidence.ts";
 import { Project } from "../core/schemas/project.ts";
 import {
+  readOwnedText,
+  listOwned,
+  accessOwned,
+  resolvePhaseReadPath,
+  resolveProgressReadPath,
+  resolveGitignoreReadPath,
+  resolveInstructionReadPath,
+  resolveModelProfileDirectoryReadPath,
+  resolveOwnedDirectoryReadPath,
+  resolveContextDirectoryReadPath,
+  resolveProjectConfigReadPath,
+  resolveRoadmapReadPath,
+  resolveModelProfileReadPath,
+  type OwnedReadPath,
+} from "../core/project-fs/index.ts";
+import { ownedPathPresence } from "../core/project-fs/control-plane.ts";
+import {
   ACCEPTED_MODEL_VERSION_INPUTS,
   AgentProfile,
+  type AgentProfile as AgentProfileType,
   normalizeModelVersion,
 } from "../core/schemas/agent-profile.ts";
 import {
@@ -49,13 +72,18 @@ import {
 import { validateEventPackTier1 } from "../core/archive/event-pack-reader.ts";
 import { bindPackToSnapshot } from "../core/archive/event-pack-binding.ts";
 import { PhaseSnapshot } from "../core/schemas/phase-snapshot.ts";
-import { phaseFilePresence } from "../core/plan/checks/fs.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
+import { adapterRegistry } from "../core/adapters/index.ts";
+import { validateAgentProfileForAdapter } from "../core/adapters/profile-contract.ts";
+import {
+  assertAgentProfileNameMatches,
+  resolveAgentProfilePath,
+} from "../core/agent-profile-path.ts";
 import { CONSTITUTION_PLACEHOLDER_MARKERS } from "../core/constitution.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
 import { auditWrites, runGit } from "../core/audit/index.ts";
 import { gitIgnoredControlPlaneAreas } from "../core/control-plane-ignore.ts";
-import { globToRegex, validateGlobSyntax } from "../core/glob.ts";
+import { matchGlob, validateGlobSyntax } from "../core/glob.ts";
 import { inspectAgent, type AdapterDoctorIssue } from "./adapter-doctor.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import type { Locale } from "../i18n/index.ts";
@@ -125,33 +153,136 @@ export type DoctorResult = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function fileExists(p: string): Promise<boolean> {
+type SafeYamlResult =
+  | { ok: true; data: unknown }
+  | {
+      ok: false;
+      code: "PATH_OUTSIDE_PROJECT" | "PATH_NOT_OWNED" | "INVALID_YAML";
+    };
+
+async function safeReadProjectYaml(
+  path: OwnedReadPath,
+): Promise<SafeYamlResult> {
   try {
-    await access(p);
-    return true;
-  } catch {
-    return false;
+    const raw = await readOwnedText(path);
+    return { ok: true, data: parseYaml(raw) };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_NOT_OWNED") return { ok: false, code: "PATH_NOT_OWNED" };
+    if (code === "PATH_OUTSIDE_PROJECT")
+      return { ok: false, code: "PATH_OUTSIDE_PROJECT" };
+    return { ok: false, code: "INVALID_YAML" };
   }
 }
 
-async function safeReadYaml(p: string): Promise<{ ok: true; data: unknown } | { ok: false }> {
+function pushPathIssue(issues: DoctorIssue[], relPath: string): void {
+  issues.push({
+    code: "PATH_OUTSIDE_PROJECT",
+    severity: "error",
+    message: `${relPath} resolves outside the project root or through an unsafe symlink and was not read`,
+  });
+}
+
+async function projectFileExists(
+  cwd: string,
+  relPath: string,
+): Promise<boolean> {
+  const presence = await ownedPathPresence(cwd, relPath);
+  return presence === "present";
+}
+
+type DoctorAgentProfileResult =
+  | { ok: true; path: string; profile: AgentProfileType }
+  | { ok: false; code: string; message: string };
+
+async function loadDoctorAgentProfile(
+  cwd: string,
+  agentName: string,
+  reportedProfileRel: string,
+): Promise<DoctorAgentProfileResult> {
+  let profilePath: OwnedReadPath;
   try {
-    const raw = await readFile(p, "utf8");
-    return { ok: true, data: parseYaml(raw) };
-  } catch {
-    return { ok: false };
+    profilePath = await resolveAgentProfilePath(cwd, agentName);
+  } catch (err) {
+    return {
+      ok: false,
+      code: "ADAPTER_PROFILE_INVALID",
+      message: `Agent profile "${reportedProfileRel}" for "${agentName}" is not in the owned profile namespace or is otherwise unsafe: ${(err as Error).message}`,
+    };
   }
+
+  let raw: string;
+  try {
+    raw = await readOwnedText(profilePath);
+  } catch {
+    return {
+      ok: false,
+      code: "AGENT_NOT_FOUND",
+      message: `Agent profile "${reportedProfileRel}" cannot be read`,
+    };
+  }
+
+  const parsedYaml = (() => {
+    try {
+      return { ok: true as const, data: parseYaml(raw) as unknown };
+    } catch {
+      return { ok: false as const };
+    }
+  })();
+  if (!parsedYaml.ok) {
+    return {
+      ok: false,
+      code: "INVALID_YAML",
+      message: `Agent profile "${reportedProfileRel}" cannot be parsed`,
+    };
+  }
+
+  const parsed = AgentProfile.safeParse(parsedYaml.data);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      code: "SCHEMA_ERROR",
+      message: `${reportedProfileRel} failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+    };
+  }
+
+  try {
+    assertAgentProfileNameMatches(parsed.data, agentName);
+  } catch (err) {
+    return {
+      ok: false,
+      code: "ADAPTER_PROFILE_INVALID",
+      message: `${reportedProfileRel}: ${(err as Error).message}`,
+    };
+  }
+
+  return { ok: true, path: profilePath, profile: parsed.data };
 }
 
 // ---------------------------------------------------------------------------
 // Individual check groups
 // ---------------------------------------------------------------------------
 
-async function checkProjectYaml(cwd: string, issues: DoctorIssue[]): Promise<Project | null> {
-  const path = join(cwd, ".code-pact", "project.yaml");
-  const result = await safeReadYaml(path);
+async function checkProjectYaml(
+  cwd: string,
+  issues: DoctorIssue[],
+): Promise<Project | null> {
+  const path = ".code-pact/project.yaml";
+  const result = await safeReadProjectYaml(
+    await resolveProjectConfigReadPath(cwd),
+  );
   if (!result.ok) {
-    issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
+    if (
+      result.code === "PATH_OUTSIDE_PROJECT" ||
+      result.code === "PATH_NOT_OWNED"
+    )
+      pushPathIssue(issues, path);
+    else
+      issues.push({
+        code: "INVALID_YAML",
+        severity: "error",
+        message: `Cannot read ${path}`,
+      });
     return null;
   }
   const parsed = Project.safeParse(result.data);
@@ -166,11 +297,24 @@ async function checkProjectYaml(cwd: string, issues: DoctorIssue[]): Promise<Pro
   return parsed.data;
 }
 
-async function checkRoadmap(cwd: string, issues: DoctorIssue[]): Promise<Roadmap | null> {
-  const path = join(cwd, "design", "roadmap.yaml");
-  const result = await safeReadYaml(path);
+async function checkRoadmap(
+  cwd: string,
+  issues: DoctorIssue[],
+): Promise<Roadmap | null> {
+  const path = "design/roadmap.yaml";
+  const result = await safeReadProjectYaml(await resolveRoadmapReadPath(cwd));
   if (!result.ok) {
-    issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
+    if (
+      result.code === "PATH_OUTSIDE_PROJECT" ||
+      result.code === "PATH_NOT_OWNED"
+    )
+      pushPathIssue(issues, path);
+    else
+      issues.push({
+        code: "INVALID_YAML",
+        severity: "error",
+        message: `Cannot read ${path}`,
+      });
     return null;
   }
   const parsed = Roadmap.safeParse(result.data);
@@ -207,7 +351,19 @@ async function checkPhases(
 
   for (const ref of roadmap.phases) {
     const absPath = join(cwd, ref.path);
-    const presence = await phaseFilePresence(absPath);
+    let presence: "present" | "absent" | "inaccessible";
+    try {
+      const phasePath = await resolvePhaseReadPath(cwd, ref.path);
+      await accessOwned(phasePath);
+      presence = "present";
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+        pushPathIssue(issues, ref.path);
+        continue;
+      }
+      presence = code === "ENOENT" ? "absent" : "inaccessible";
+    }
     if (presence === "inaccessible") {
       // Present but unreadable (e.g. a non-searchable parent dir) — fail closed.
       // The snapshot must NOT release a live file that is actually on disk.
@@ -243,13 +399,22 @@ async function checkPhases(
       });
       continue;
     }
-    const result = await safeReadYaml(absPath);
+    const result = await safeReadProjectYaml(
+      await resolvePhaseReadPath(cwd, ref.path),
+    );
     if (!result.ok) {
-      issues.push({
-        code: "INVALID_YAML",
-        severity: "error",
-        message: `Cannot parse phase file: ${ref.path}`,
-      });
+      if (
+        result.code === "PATH_OUTSIDE_PROJECT" ||
+        result.code === "PATH_NOT_OWNED"
+      )
+        pushPathIssue(issues, ref.path);
+      else {
+        issues.push({
+          code: "INVALID_YAML",
+          severity: "error",
+          message: `Cannot parse phase file: ${ref.path}`,
+        });
+      }
       continue;
     }
     const parsed = Phase.safeParse(result.data);
@@ -275,14 +440,17 @@ async function checkPhases(
   }
 
   // Check for phase YAML files in design/phases/ not referenced in roadmap
-  const phasesDir = join(cwd, "design", "phases");
   let phaseFiles: string[] = [];
   try {
-    phaseFiles = await readdir(phasesDir);
-  } catch {
-    // directory may not exist
+    const phasesDir = await resolveOwnedDirectoryReadPath(cwd, "design/phases");
+    phaseFiles = await listOwned(phasesDir);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      pushPathIssue(issues, "design/phases");
+    }
   }
-  const referencedPaths = new Set(roadmap.phases.map((r) => r.path));
+  const referencedPaths = new Set(roadmap.phases.map(r => r.path));
   for (const file of phaseFiles) {
     if (!file.endsWith(".yaml")) continue;
     const relPath = `design/phases/${file}`;
@@ -308,7 +476,7 @@ async function checkPhases(
   // `validate --strict` fails on THAT, not on PHASE_SNAPSHOT_INVALID.
   const discovered = await discoverUnreferencedSnapshots(
     cwd,
-    new Set(roadmap.phases.map((r) => r.id)),
+    new Set(roadmap.phases.map(r => r.id)),
   );
   archivedCandidates.push(...discovered.entries);
 
@@ -329,7 +497,11 @@ async function checkPhases(
     });
   }
 
-  return { phases, phaseEntries, archivedKnownTaskIds: new Set(merge.index.keys()) };
+  return {
+    phases,
+    phaseEntries,
+    archivedKnownTaskIds: new Set(merge.index.keys()),
+  };
 }
 
 async function checkProgressLog(
@@ -338,18 +510,22 @@ async function checkProgressLog(
   archivedKnownTaskIds: Set<string>,
   issues: DoctorIssue[],
 ): Promise<void> {
-  const path = join(cwd, ".code-pact", "state", "progress.yaml");
+  const path = ".code-pact/state/progress.yaml";
   // A missing progress.yaml is NOT an error — event files may still supply
   // events (the post-migration / events-only state). Only an existing but
   // unreadable / schema-invalid legacy file is INVALID_YAML / SCHEMA_ERROR.
   let legacyEvents: ProgressEvent[] = [];
   try {
-    const raw = await readFile(path, "utf8");
+    const raw = await readOwnedText(await resolveProgressReadPath(cwd, path));
     let doc: unknown;
     try {
       doc = parseYaml(raw);
     } catch {
-      issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
+      issues.push({
+        code: "INVALID_YAML",
+        severity: "error",
+        message: `Cannot read ${path}`,
+      });
       return;
     }
     const parsed = ProgressLog.safeParse(doc);
@@ -363,8 +539,19 @@ async function checkProgressLog(
     }
     legacyEvents = parsed.data.events;
   } catch (err) {
+    if (
+      (err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT" ||
+      (err as NodeJS.ErrnoException).code === "PATH_NOT_OWNED"
+    ) {
+      pushPathIssue(issues, path);
+      return;
+    }
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
+      issues.push({
+        code: "INVALID_YAML",
+        severity: "error",
+        message: `Cannot read ${path}`,
+      });
       return;
     }
     // ENOENT → missing legacy file; fall through with empty legacy events.
@@ -380,7 +567,9 @@ async function checkProgressLog(
   } catch (err) {
     const tag = (err as NodeJS.ErrnoException).code;
     const code =
-      tag === "EVENT_FILE_ID_MISMATCH" || tag === "INVALID_YAML" || tag === "EVENT_PACK_INVALID"
+      tag === "EVENT_FILE_ID_MISMATCH" ||
+      tag === "INVALID_YAML" ||
+      tag === "EVENT_PACK_INVALID"
         ? tag
         : "SCHEMA_ERROR";
     issues.push({ code, severity: "error", message: (err as Error).message });
@@ -388,22 +577,31 @@ async function checkProgressLog(
   }
   let returnAfterIssues = false;
   for (const issue of packSources.issues) {
-    issues.push({ code: issue.code, severity: "error", message: issue.message });
+    issues.push({
+      code: issue.code,
+      severity: "error",
+      message: issue.message,
+    });
     returnAfterIssues = true;
   }
   if (returnAfterIssues) return; // a corrupt/unbound pack: stop before orphan logic
   // Archived-task legacy conflict gate (lenient: collect + exclude from merge).
   const { durableIds, archivedTaskIds, archivedEnumerationComplete } =
     await durableIdsAndArchivedTasks(cwd, packSources);
-  const { mergeableLegacyEvents, issues: legacyIssues } = filterArchivedTaskLegacyConflicts(
-    legacyEvents,
-    durableIds,
-    archivedTaskIds,
-    "lenient",
-    archivedEnumerationComplete,
-  );
+  const { mergeableLegacyEvents, issues: legacyIssues } =
+    filterArchivedTaskLegacyConflicts(
+      legacyEvents,
+      durableIds,
+      archivedTaskIds,
+      "lenient",
+      archivedEnumerationComplete,
+    );
   for (const issue of legacyIssues) {
-    issues.push({ code: issue.code, severity: "error", message: issue.message });
+    issues.push({
+      code: issue.code,
+      severity: "error",
+      message: issue.message,
+    });
   }
   const events = mergeProgressStreams(mergeableLegacyEvents, [
     ...packSources.looseFiles,
@@ -417,7 +615,9 @@ async function checkProgressLog(
   for (const phase of phases) {
     for (const task of phase.tasks ?? []) taskIndex.add(task.id);
   }
-  const known = { has: (id: string) => taskIndex.has(id) || archivedKnownTaskIds.has(id) };
+  const known = {
+    has: (id: string) => taskIndex.has(id) || archivedKnownTaskIds.has(id),
+  };
   for (const planIssue of detectOrphanProgressEvents(events, known)) {
     issues.push(planIssueToDoctor(planIssue));
   }
@@ -433,7 +633,10 @@ async function checkProgressLog(
  * the fail-soft discovery contract. A corrupt pack read entirely also skips
  * (checkProgressLog owns that error code).
  */
-async function checkSnapshotEventEvidence(cwd: string, issues: DoctorIssue[]): Promise<void> {
+async function checkSnapshotEventEvidence(
+  cwd: string,
+  issues: DoctorIssue[],
+): Promise<void> {
   let packSources;
   try {
     packSources = await readPackSources(cwd, "lenient");
@@ -475,7 +678,6 @@ function planIssueToDoctor(issue: PlanIssue): DoctorIssue {
   };
 }
 
-
 async function checkAgentProfiles(
   cwd: string,
   project: Project,
@@ -484,32 +686,42 @@ async function checkAgentProfiles(
   const knownTiers = new Set(ModelTier.options);
 
   for (const agentRef of project.agents) {
-    const profilePath = join(cwd, ".code-pact", agentRef.profile);
-    const result = await safeReadYaml(profilePath);
-    if (!result.ok) {
+    const loaded = await loadDoctorAgentProfile(
+      cwd,
+      agentRef.name,
+      agentRef.profile,
+    );
+    if (!loaded.ok) {
       issues.push({
-        code: "AGENT_NOT_FOUND",
+        code: loaded.code,
         severity: "error",
-        message: `Agent profile "${agentRef.profile}" cannot be read`,
+        message: loaded.message,
       });
       continue;
     }
-    const parsed = AgentProfile.safeParse(result.data);
-    if (!parsed.success) {
-      issues.push({
-        code: "SCHEMA_ERROR",
-        severity: "error",
-        message: `${agentRef.profile} failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
-      });
-      continue;
+    const profile = loaded.profile;
+    // Profile contract: validate path fields against the adapter descriptor's
+    // canonical values. A hostile profile (e.g. instruction_filename: .env) is
+    // surfaced as a structured issue, not an uncoded throw.
+    if (isSupportedAgent(agentRef.name)) {
+      try {
+        validateAgentProfileForAdapter(profile, adapterRegistry[agentRef.name]);
+      } catch (err) {
+        issues.push({
+          code: "ADAPTER_PROFILE_CONTRACT_VIOLATION",
+          severity: "error",
+          message: `${agentRef.profile}: ${(err as Error).message}`,
+        });
+        continue;
+      }
     }
     // Check all tiers are present in model_map
     for (const tier of knownTiers) {
-      if (!parsed.data.model_map[tier]) {
+      if (!profile.model_map[tier]) {
         issues.push({
           code: "MISSING_MODEL_TIER",
           severity: "warning",
-          message: `Agent "${parsed.data.name}" is missing model_map entry for tier "${tier}"`,
+          message: `Agent "${agentRef.name}" is missing model_map entry for tier "${tier}"`,
         });
       }
     }
@@ -518,17 +730,17 @@ async function checkAgentProfiles(
     // the catalog describes Claude ids only, so comparing codex (gpt-5.x)
     // or other agents against it would emit false positives. Offline — these
     // compare against the bundled catalog, never the network.
-    if (parsed.data.name === "claude-code") {
+    if (agentRef.name === "claude-code") {
       const knownVendorIds = new Set(CLAUDE_KNOWN_VENDOR_MODEL_IDS);
       // The MODEL_MAP_STALE *condition* is owned by detectModelMapDrift so
       // `adapter upgrade --write`'s remaining-advisory hint can never disagree
       // with doctor about whether a profile is stale. The message text stays
       // here (doctor's full remediation differs from the upgrade hint).
       const staleByTier = new Map(
-        detectModelMapDrift(parsed.data.model_map).map((d) => [d.tier, d]),
+        detectModelMapDrift(profile.model_map).map(d => [d.tier, d]),
       );
       for (const tier of knownTiers) {
-        const id = parsed.data.model_map[tier];
+        const id = profile.model_map[tier];
         if (!id) continue; // absence already reported as MISSING_MODEL_TIER
         if (!knownVendorIds.has(id)) {
           // Unknown vendor id: a typo, or a model id not represented in the
@@ -537,7 +749,7 @@ async function checkAgentProfiles(
           issues.push({
             code: "MODEL_ID_UNKNOWN",
             severity: "warning",
-            message: `Agent "${parsed.data.name}" model_map.${tier} is "${id}", which is not in the bundled Claude catalog (known: ${CLAUDE_KNOWN_VENDOR_MODEL_IDS.join(", ")}). Check for a typo, or a model id code-pact does not track yet.`,
+            message: `Agent "${agentRef.name}" model_map.${tier} is "${id}", which is not in the bundled Claude catalog (known: ${CLAUDE_KNOWN_VENDOR_MODEL_IDS.join(", ")}). Check for a typo, or a model id code-pact does not track yet.`,
           });
         } else if (staleByTier.has(tier)) {
           // Known but not the current catalog default — i.e. the profile was
@@ -549,31 +761,42 @@ async function checkAgentProfiles(
           issues.push({
             code: "MODEL_MAP_STALE",
             severity: "warning",
-            message: `Agent "${parsed.data.name}" model_map.${tier} is "${id}", but the current catalog default is "${CLAUDE_TIER_MODEL_IDS[tier]}" — a difference from the default, not an invalid value. To follow it, set model_map.${tier} to "${CLAUDE_TIER_MODEL_IDS[tier]}" in .code-pact/${agentRef.profile}, then run "code-pact adapter upgrade ${agentRef.name} --write" to regenerate the instruction file. Keep it if the pin is intentional, or silence via .code-pact/doctor.yaml (disabled_checks: [MODEL_MAP_STALE]).`,
+            message: `Agent "${agentRef.name}" model_map.${tier} is "${id}", but the current catalog default is "${CLAUDE_TIER_MODEL_IDS[tier]}" — a difference from the default, not an invalid value. To follow it, set model_map.${tier} to "${CLAUDE_TIER_MODEL_IDS[tier]}" in .code-pact/${agentRef.profile}, then run "code-pact adapter upgrade ${agentRef.name} --write" to regenerate the instruction file. Keep it if the pin is intentional, or silence via .code-pact/doctor.yaml (disabled_checks: [MODEL_MAP_STALE]).`,
           });
         }
       }
       // model_version is a deliberate user pin (set via --model). Flag only a
       // truly unrecognized value; never treat an older-but-known version as
       // "stale" — that would nag a user who explicitly pinned it.
-      const mv = parsed.data.model_version;
+      const mv = profile.model_version;
       if (mv !== undefined && normalizeModelVersion(mv) === null) {
         issues.push({
           code: "MODEL_ID_UNKNOWN",
           severity: "warning",
-          message: `Agent "${parsed.data.name}" model_version is "${mv}", which is not a recognized Claude model version (accepted: ${ACCEPTED_MODEL_VERSION_INPUTS.join(", ")}).`,
+          message: `Agent "${agentRef.name}" model_version is "${mv}", which is not a recognized Claude model version (accepted: ${ACCEPTED_MODEL_VERSION_INPUTS.join(", ")}).`,
         });
       }
     }
   }
 }
 
-async function checkModelProfiles(cwd: string, issues: DoctorIssue[]): Promise<void> {
-  const dir = join(cwd, ".code-pact", "model-profiles");
+async function checkModelProfiles(
+  cwd: string,
+  issues: DoctorIssue[],
+): Promise<void> {
+  const dirRel = ".code-pact/model-profiles";
   let entries: string[] = [];
   try {
-    entries = await readdir(dir);
-  } catch {
+    const dir = await resolveModelProfileDirectoryReadPath(cwd);
+    entries = await listOwned(dir);
+  } catch (err) {
+    if (
+      (err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT" ||
+      (err as NodeJS.ErrnoException).code === "PATH_NOT_OWNED"
+    ) {
+      pushPathIssue(issues, dirRel);
+      return;
+    }
     issues.push({
       code: "MISSING_DIR",
       severity: "warning",
@@ -584,13 +807,23 @@ async function checkModelProfiles(cwd: string, issues: DoctorIssue[]): Promise<v
 
   for (const entry of entries) {
     if (!entry.endsWith(".yaml")) continue;
-    const result = await safeReadYaml(join(dir, entry));
+    const relPath = `${dirRel}/${entry}`;
+    const result = await safeReadProjectYaml(
+      await resolveModelProfileReadPath(cwd, relPath),
+    );
     if (!result.ok) {
-      issues.push({
-        code: "INVALID_YAML",
-        severity: "error",
-        message: `.code-pact/model-profiles/${entry} cannot be parsed`,
-      });
+      if (
+        result.code === "PATH_OUTSIDE_PROJECT" ||
+        result.code === "PATH_NOT_OWNED"
+      )
+        pushPathIssue(issues, relPath);
+      else {
+        issues.push({
+          code: "INVALID_YAML",
+          severity: "error",
+          message: `.code-pact/model-profiles/${entry} cannot be parsed`,
+        });
+      }
       continue;
     }
     const parsed = ModelProfile.safeParse(result.data);
@@ -604,17 +837,24 @@ async function checkModelProfiles(cwd: string, issues: DoctorIssue[]): Promise<v
   }
 }
 
-async function checkBakFiles(cwd: string, issues: DoctorIssue[]): Promise<void> {
+async function checkBakFiles(
+  cwd: string,
+  issues: DoctorIssue[],
+): Promise<void> {
   // Check design/ tree for .bak files
-  const dirs = [
-    join(cwd, "design"),
-    join(cwd, ".code-pact"),
-  ];
-  for (const dir of dirs) {
+  const dirs = ["design", ".code-pact"];
+  for (const relDir of dirs) {
     let entries: string[] = [];
     try {
-      entries = await readdir(dir);
-    } catch {
+      const dir = await resolveOwnedDirectoryReadPath(cwd, relDir);
+      entries = await listOwned(dir);
+    } catch (err) {
+      if (
+        (err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT" ||
+        (err as NodeJS.ErrnoException).code === "PATH_NOT_OWNED"
+      ) {
+        pushPathIssue(issues, relDir);
+      }
       continue;
     }
     for (const entry of entries) {
@@ -622,7 +862,7 @@ async function checkBakFiles(cwd: string, issues: DoctorIssue[]): Promise<void> 
         issues.push({
           code: "BAK_FILE",
           severity: "warning",
-          message: `Backup file found: ${dir.replace(cwd + "/", "")}/${entry} — safe to delete`,
+          message: `Backup file found: ${relDir}/${entry} — safe to delete`,
         });
       }
     }
@@ -634,7 +874,10 @@ async function checkBakFiles(cwd: string, issues: DoctorIssue[]): Promise<void> 
 // SAME conflict diagnostics (and the same `recovery`). Uses the real PhaseEntry[]
 // (with roadmap ref + path) so DUPLICATE_PHASE_ID can name the colliding files —
 // the clean-but-wrong merge where two phase files both claim `P1`.
-function checkDuplicateIds(phaseEntries: PhaseEntry[], issues: DoctorIssue[]): void {
+function checkDuplicateIds(
+  phaseEntries: PhaseEntry[],
+  issues: DoctorIssue[],
+): void {
   for (const planIssue of detectDuplicatePhaseIds(phaseEntries)) {
     issues.push(planIssueToDoctor(planIssue));
   }
@@ -644,27 +887,37 @@ function checkDuplicateIds(phaseEntries: PhaseEntry[], issues: DoctorIssue[]): v
 }
 
 // Check 10: .local/ is gitignored
-async function checkLocalGitignored(cwd: string, issues: DoctorIssue[]): Promise<void> {
+async function checkLocalGitignored(
+  cwd: string,
+  issues: DoctorIssue[],
+): Promise<void> {
   let content: string;
   try {
-    content = await readFile(join(cwd, ".gitignore"), "utf8");
+    content = await readOwnedText(await resolveGitignoreReadPath(cwd));
   } catch {
     issues.push({
       code: "LOCAL_NOT_GITIGNORED",
       severity: "warning",
-      message: ".gitignore not found — add \".local/\" to avoid committing sensitive planning notes",
+      message:
+        '.gitignore not found — add ".local/" to avoid committing sensitive planning notes',
     });
     return;
   }
-  const lines = content.split("\n").map((l) => l.trim());
+  const lines = content.split("\n").map(l => l.trim());
   const isIgnored = lines.some(
-    (l) => l === ".local" || l === ".local/" || l === "/.local" || l === "/.local/" || l.startsWith(".local/"),
+    l =>
+      l === ".local" ||
+      l === ".local/" ||
+      l === "/.local" ||
+      l === "/.local/" ||
+      l.startsWith(".local/"),
   );
   if (!isIgnored) {
     issues.push({
       code: "LOCAL_NOT_GITIGNORED",
       severity: "warning",
-      message: ".local/ is not in .gitignore — add \".local/\" to avoid committing sensitive planning notes",
+      message:
+        '.local/ is not in .gitignore — add ".local/" to avoid committing sensitive planning notes',
     });
   }
 }
@@ -682,28 +935,58 @@ async function checkAdapterMissing(
   for (const agentRef of project.agents) {
     if (agentRef.enabled === false) continue;
 
-    if (isSupportedAgent(agentRef.name)) {
-      // Skip legacy check when a manifest exists OR is invalid — the
-      // manifest-aware path will surface the appropriate finding.
-      try {
-        const m = await readManifest(cwd, agentRef.name);
-        if (m !== null) continue;
-      } catch {
-        continue;
-      }
+    if (!isSupportedAgent(agentRef.name)) {
+      issues.push({
+        code: "ADAPTER_UNVERIFIABLE",
+        severity: "warning",
+        message:
+          `Agent "${agentRef.name}" has no registered adapter descriptor; ` +
+          "its instruction path was not inspected.",
+      });
+      continue;
     }
 
-    const profilePath = join(cwd, ".code-pact", agentRef.profile);
-    const result = await safeReadYaml(profilePath);
-    if (!result.ok) continue; // already reported by checkAgentProfiles
-    const parsed = AgentProfile.safeParse(result.data);
-    if (!parsed.success) continue;
-    const instructionFile = join(cwd, parsed.data.instruction_filename);
-    if (!(await fileExists(instructionFile))) {
+    // Skip legacy check when a manifest exists OR is invalid — the
+    // manifest-aware path will surface the appropriate finding.
+    try {
+      const m = await readManifest(cwd, agentRef.name);
+      if (m !== null) continue;
+    } catch {
+      continue;
+    }
+
+    const loaded = await loadDoctorAgentProfile(
+      cwd,
+      agentRef.name,
+      agentRef.profile,
+    );
+    if (!loaded.ok) continue; // already reported by checkAgentProfiles
+    const profile = loaded.profile;
+    // Guard: skip the existence check if the profile contract is violated —
+    // checkAgentProfiles already reported the contract issue. This prevents
+    // checkAdapterMissing from stat'ing an unowned instruction_filename (e.g.
+    // .env) and leaking an existence oracle.
+    const descriptor = adapterRegistry[agentRef.name];
+    try {
+      validateAgentProfileForAdapter(profile, descriptor);
+    } catch {
+      continue;
+    }
+    const instructionPath = descriptor.profilePathContract.instructionFilename;
+    const role = descriptor.ownedPathRoles[instructionPath];
+    if (role !== "instruction" && role !== "rule") {
+      issues.push({
+        code: "ADAPTER_PROFILE_CONTRACT_VIOLATION",
+        severity: "error",
+        message: `Adapter descriptor for "${agentRef.name}" does not grant instruction read authority for "${instructionPath}".`,
+      });
+      continue;
+    }
+    if (!(await projectFileExists(cwd, instructionPath))) {
       issues.push({
         code: "ADAPTER_MISSING",
         severity: "warning",
-        message: `Agent "${parsed.data.name}" is enabled but "${parsed.data.instruction_filename}" does not exist — run "code-pact adapter install ${agentRef.name}"`,
+        message: `Agent "${agentRef.name}" is enabled but "${instructionPath}" does not exist — run "code-pact adapter install ${agentRef.name}"`,
       });
     }
   }
@@ -780,14 +1063,15 @@ async function checkBriefMissing(
   phases: Phase[],
   issues: DoctorIssue[],
 ): Promise<void> {
-  const hasRealPhase = phases.some((p) => p.id !== "TUTORIAL");
+  const hasRealPhase = phases.some(p => p.id !== "TUTORIAL");
   if (!hasRealPhase) return;
 
-  if (!(await fileExists(join(cwd, "design", "brief.md")))) {
+  if (!(await projectFileExists(cwd, "design/brief.md"))) {
     issues.push({
       code: "BRIEF_MISSING",
       severity: "warning",
-      message: "design/brief.md does not exist — run \"code-pact plan brief\" to create a project overview",
+      message:
+        'design/brief.md does not exist — run "code-pact plan brief" to create a project overview',
     });
   }
 }
@@ -804,22 +1088,25 @@ async function checkConstitutionPlaceholder(
   phases: Phase[],
   issues: DoctorIssue[],
 ): Promise<void> {
-  const hasRealPhase = phases.some((p) => p.id !== "TUTORIAL");
+  const hasRealPhase = phases.some(p => p.id !== "TUTORIAL");
   if (!hasRealPhase) return;
 
-  const path = join(cwd, "design", "constitution.md");
+  const path = "design/constitution.md";
   let content: string;
   try {
-    content = await readFile(path, "utf8");
+    content = await readOwnedText(await resolveInstructionReadPath(cwd, path));
   } catch {
     return; // file absent — BRIEF_MISSING or similar handles the design dir; skip here
   }
-  const isPlaceholder = CONSTITUTION_PLACEHOLDER_MARKERS.some((m) => content.includes(m));
+  const isPlaceholder = CONSTITUTION_PLACEHOLDER_MARKERS.some(m =>
+    content.includes(m),
+  );
   if (isPlaceholder) {
     issues.push({
       code: "CONSTITUTION_PLACEHOLDER",
       severity: "warning",
-      message: "design/constitution.md still contains the initial template text — edit it or run \"code-pact plan constitution\"",
+      message:
+        'design/constitution.md still contains the initial template text — edit it or run "code-pact plan constitution"',
     });
   }
 }
@@ -845,16 +1132,17 @@ async function checkAdapterStale(
 ): Promise<void> {
   for (const agentRef of project.agents) {
     if (agentRef.enabled === false) continue;
-    const profilePath = join(cwd, ".code-pact", agentRef.profile);
-    const result = await safeReadYaml(profilePath);
-    if (!result.ok) continue; // already reported elsewhere
-    const parsed = AgentProfile.safeParse(result.data);
-    if (!parsed.success) continue;
-    if (!parsed.data.model_version) {
+    const loaded = await loadDoctorAgentProfile(
+      cwd,
+      agentRef.name,
+      agentRef.profile,
+    );
+    if (!loaded.ok) continue; // already reported elsewhere
+    if (!loaded.profile.model_version) {
       issues.push({
         code: "ADAPTER_STALE",
         severity: "warning",
-        message: `Agent "${parsed.data.name}" has no model_version set — run "code-pact adapter install ${agentRef.name} --model <version>" to pin a model (accepted: ${ACCEPTED_MODEL_VERSION_INPUTS.join(", ")})`,
+        message: `Agent "${agentRef.name}" has no model_version set — run "code-pact adapter install ${agentRef.name} --model <version>" to pin a model (accepted: ${ACCEPTED_MODEL_VERSION_INPUTS.join(", ")})`,
       });
     }
   }
@@ -866,21 +1154,34 @@ async function checkStaleContext(
   project: Project,
   issues: DoctorIssue[],
 ): Promise<void> {
-  const knownTaskIds = new Set(phases.flatMap((p) => (p.tasks ?? []).map((t) => t.id)));
+  const knownTaskIds = new Set(
+    phases.flatMap(p => (p.tasks ?? []).map(t => t.id)),
+  );
 
   for (const agentRef of project.agents) {
     // Derive context dir from agent profile
-    const profilePath = join(cwd, ".code-pact", agentRef.profile);
-    const result = await safeReadYaml(profilePath);
-    if (!result.ok) continue;
-    const parsed = AgentProfile.safeParse(result.data);
-    if (!parsed.success) continue;
+    const loaded = await loadDoctorAgentProfile(
+      cwd,
+      agentRef.name,
+      agentRef.profile,
+    );
+    if (!loaded.ok) continue;
+    const profile = loaded.profile;
 
-    const contextDir = join(cwd, parsed.data.context_dir);
     let entries: string[] = [];
     try {
-      entries = await readdir(contextDir);
-    } catch {
+      const contextDir = await resolveContextDirectoryReadPath(
+        cwd,
+        profile.context_dir,
+      );
+      entries = await listOwned(contextDir);
+    } catch (err) {
+      if (
+        (err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT" ||
+        (err as NodeJS.ErrnoException).code === "PATH_NOT_OWNED"
+      ) {
+        pushPathIssue(issues, profile.context_dir);
+      }
       continue;
     }
     for (const entry of entries) {
@@ -890,7 +1191,7 @@ async function checkStaleContext(
         issues.push({
           code: "STALE_CONTEXT",
           severity: "warning",
-          message: `${parsed.data.context_dir}/${entry} exists but task "${taskId}" is not in any phase`,
+          message: `${profile.context_dir}/${entry} exists but task "${taskId}" is not in any phase`,
         });
       }
     }
@@ -909,7 +1210,7 @@ async function checkControlPlaneNotDriven(
 ): Promise<void> {
   // Gate 1: at least one non-TUTORIAL task is planned.
   const realTasks = phases
-    .filter((p) => p.id !== "TUTORIAL")
+    .filter(p => p.id !== "TUTORIAL")
     .reduce((n, p) => n + (p.tasks?.length ?? 0), 0);
   if (realTasks === 0) return;
 
@@ -925,7 +1226,7 @@ async function checkControlPlaneNotDriven(
     return;
   }
   const drivenForReal = events.some(
-    (e) =>
+    e =>
       (e.status === "started" || e.status === "done") &&
       !e.task_id.startsWith("TUTORIAL-"),
   );
@@ -942,12 +1243,13 @@ async function checkControlPlaneNotDriven(
     severity: "warning",
     message:
       `${realTasks} task(s) are planned and git has uncommitted changes, but the progress ledger has no started/done event for a non-TUTORIAL task — the code-pact scaffold exists but isn't being driven. ` +
-      "Start a task with `code-pact task prepare <id> --agent <agent>`, or record out-of-loop work with `code-pact task record-done <id> --evidence \"...\"`. " +
+      'Start a task with `code-pact task prepare <id> --agent <agent>`, or record out-of-loop work with `code-pact task record-done <id> --evidence "..."`. ' +
       "Silence via .code-pact/doctor.yaml (disabled_checks: [CONTROL_PLANE_NOT_DRIVEN]).",
     recovery: {
       primary: "code-pact task prepare <id> --agent <agent>",
       alternatives: ['code-pact task record-done <id> --evidence "..."'],
-      reference: ".code-pact/doctor.yaml (disabled_checks: [CONTROL_PLANE_NOT_DRIVEN])",
+      reference:
+        ".code-pact/doctor.yaml (disabled_checks: [CONTROL_PLANE_NOT_DRIVEN])",
     },
   });
 }
@@ -978,7 +1280,7 @@ async function checkControlPlaneGitignored(
   issues: DoctorIssue[],
 ): Promise<void> {
   // Only meaningful for a real, initialized project.
-  if (!(await fileExists(join(cwd, ".code-pact", "project.yaml")))) return;
+  if (!(await projectFileExists(cwd, ".code-pact/project.yaml"))) return;
   const ignoredAreas = await gitIgnoredControlPlaneAreas(cwd);
   if (ignoredAreas.length === 0) return; // none ignored, or git could not answer
 
@@ -1045,8 +1347,8 @@ async function readEventFilesAtRev(
   if (!ls.ok) return []; // no events tree at this revision
   const paths = ls.stdout
     .split("\n")
-    .map((s) => s.trim())
-    .filter((p) => p.length > 0 && parseEventFileName(basename(p)) !== null);
+    .map(s => s.trim())
+    .filter(p => p.length > 0 && parseEventFileName(basename(p)) !== null);
   const out: LoadedEventFile[] = [];
   for (const p of paths) {
     const show = await runGit(cwd, ["show", `${rev}:${p}`]);
@@ -1082,8 +1384,8 @@ async function readEventPacksAtRev(
   if (!ls.ok) return []; // no packs tree at this revision
   const paths = ls.stdout
     .split("\n")
-    .map((s) => s.trim())
-    .filter((p) => p.length > 0 && p.endsWith(".json"));
+    .map(s => s.trim())
+    .filter(p => p.length > 0 && p.endsWith(".json"));
   const looseById = new Map<string, LoadedEventFile>();
   for (const f of looseAtRev) looseById.set(f.id, f);
   const out: LoadedEventFile[] = [];
@@ -1112,7 +1414,12 @@ async function readEventPacksAtRev(
     // FULL Tier-2 binding at the rev (identity + membership + evidence + semantic
     // replay) via the shared pure core — so the rev reader can never accept a pack
     // the workspace reader would reject (Finding C). loose ∪ ownPack at the rev.
-    const issues = bindPackToSnapshot(loaded, snapshot, snapShow.stdout, looseById);
+    const issues = bindPackToSnapshot(
+      loaded,
+      snapshot,
+      snapShow.stdout,
+      looseById,
+    );
     if (issues.length > 0) return null; // unbound/forged committed pack
     out.push(...loaded.entries);
   }
@@ -1136,7 +1443,10 @@ async function readMergedEventsAtRev(
   const packs = await readEventPacksAtRev(cwd, rev, events);
   if (packs === null) return null;
   // Rev-level legacy-conflict exclusion, scoped to archived task_ids at the rev.
-  const { ids: archivedTaskIds, complete } = await readArchivedTaskIdsAtRev(cwd, rev);
+  const { ids: archivedTaskIds, complete } = await readArchivedTaskIdsAtRev(
+    cwd,
+    rev,
+  );
   // FAIL CLOSED (the rev twin of the workspace gate): a corrupt snapshot at the
   // rev shrinks the archived-task set, so a committed legacy event for a
   // now-invisible archived task could slip through. With the set known-incomplete
@@ -1146,7 +1456,7 @@ async function readMergedEventsAtRev(
   const durableIds = new Set<string>();
   for (const f of events) durableIds.add(f.id);
   for (const f of packs) durableIds.add(f.id);
-  const mergeableLegacy = legacy.filter((e) => {
+  const mergeableLegacy = legacy.filter(e => {
     if (!archivedTaskIds.has(e.task_id)) return true;
     return durableIds.has(computeEventId(e));
   });
@@ -1175,8 +1485,8 @@ async function readArchivedTaskIdsAtRev(
   if (!ls.ok) return { ids, complete: true };
   const paths = ls.stdout
     .split("\n")
-    .map((s) => s.trim())
-    .filter((p) => p.length > 0 && p.endsWith(".json"));
+    .map(s => s.trim())
+    .filter(p => p.length > 0 && p.endsWith(".json"));
   let complete = true;
   for (const p of paths) {
     const show = await runGit(cwd, ["show", `${rev}:${p}`]);
@@ -1230,11 +1540,11 @@ async function checkControlPlaneBranchNotDriven(
 
   // files_touched already excludes code-pact runtime state. Drop team-declared
   // exclude_globs (default empty). If nothing real remains → skip.
-  const compiled = excludeGlobs
-    .filter((g) => validateGlobSyntax(g) === null)
-    .map((g) => globToRegex(g));
+  const validExcludeGlobs = excludeGlobs.filter(
+    g => validateGlobSyntax(g) === null,
+  );
   const realChanged = audit.files_touched.filter(
-    (f) => !compiled.some((re) => re.test(f)),
+    f => !validExcludeGlobs.some(g => matchGlob(g, f)),
   );
   if (realChanged.length === 0) return;
 
@@ -1247,7 +1557,10 @@ async function checkControlPlaneBranchNotDriven(
     "--error-unmatch",
     ".code-pact/state/progress.yaml",
   ]);
-  const trackedEvents = await runGit(cwd, ["ls-files", ".code-pact/state/events/"]);
+  const trackedEvents = await runGit(cwd, [
+    "ls-files",
+    ".code-pact/state/events/",
+  ]);
   const trackedEventPacks = await runGit(cwd, [
     "ls-files",
     ".code-pact/state/archive/event-packs/",
@@ -1273,7 +1586,7 @@ async function checkControlPlaneBranchNotDriven(
   if (baseEvents === null) return;
   const baseKeys = new Set(baseEvents.map(eventKey));
   const driven = headEvents.some(
-    (e) =>
+    e =>
       !baseKeys.has(eventKey(e)) &&
       (e.status === "started" || e.status === "done") &&
       !e.task_id.startsWith("TUTORIAL-") &&
@@ -1286,7 +1599,7 @@ async function checkControlPlaneBranchNotDriven(
     severity: "warning",
     message:
       `This branch changed real files vs ${baseRef} but added no started/done event for a known non-TUTORIAL task in the committed ledger (state/events/**, state/archive/event-packs/**, and legacy progress.yaml) — code changed without driving the control plane. ` +
-      "Drive a task with `code-pact task prepare <id> --agent <agent>` (or record out-of-loop work with `code-pact task record-done <id> --evidence \"...\"`) and commit the new event file(s) under .code-pact/state/events/. " +
+      'Drive a task with `code-pact task prepare <id> --agent <agent>` (or record out-of-loop work with `code-pact task record-done <id> --evidence "..."`) and commit the new event file(s) under .code-pact/state/events/. ' +
       "Exempt docs/config-only paths via .code-pact/doctor.yaml (control_plane_branch_not_driven.exclude_globs), or silence via disabled_checks: [CONTROL_PLANE_BRANCH_NOT_DRIVEN].",
     recovery: {
       primary: "code-pact task prepare <id> --agent <agent>",
@@ -1412,11 +1725,12 @@ export async function runDoctor(
   }
 
   // Apply disabled_checks filter
-  const issues = disabled.size > 0
-    ? allIssues.filter((i) => !disabled.has(i.code))
-    : allIssues;
+  const issues =
+    disabled.size > 0
+      ? allIssues.filter(i => !disabled.has(i.code))
+      : allIssues;
 
-  const ok = issues.every((i) => i.severity !== "error");
+  const ok = issues.every(i => i.severity !== "error");
   return { ok, issues };
 }
 
@@ -1428,12 +1742,12 @@ export function formatDoctor(result: DoctorResult): string {
   if (result.issues.length === 0) {
     return "No issues found. Project is healthy.";
   }
-  const lines = result.issues.map((i) => {
+  const lines = result.issues.map(i => {
     const mark = i.severity === "error" ? "[error]" : "[warn] ";
     return `  ${mark} ${i.code}: ${i.message}`;
   });
   const summary = result.ok
     ? `${result.issues.length} warning(s) found.`
-    : `${result.issues.filter((i) => i.severity === "error").length} error(s), ${result.issues.filter((i) => i.severity === "warning").length} warning(s) found.`;
+    : `${result.issues.filter(i => i.severity === "error").length} error(s), ${result.issues.filter(i => i.severity === "warning").length} warning(s) found.`;
   return [summary, ...lines].join("\n");
 }

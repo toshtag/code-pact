@@ -25,7 +25,9 @@ export const ACCEPTED_MODEL_VERSION_INPUTS: readonly string[] = [
  * (`opus-4.7`) pass through; vendor ids (`claude-opus-4-7`) map via alias.
  * Callers translate `null` into a CONFIG_ERROR — there is no silent fallback.
  */
-export function normalizeModelVersion(input: string): ClaudeModelVersion | null {
+export function normalizeModelVersion(
+  input: string,
+): ClaudeModelVersion | null {
   const trimmed = input.trim();
   if ((CLAUDE_MODEL_VERSIONS as readonly string[]).includes(trimmed)) {
     return trimmed as ClaudeModelVersion;
@@ -66,12 +68,12 @@ export const ContextBudgetProfiles = z
         ContextBudgetProfileName,
         z.object({ max_bytes: z.number().int().positive() }),
       )
-      .refine((p) => Object.keys(p).length > 0, {
+      .refine(p => Object.keys(p).length > 0, {
         message: "context_budget.profiles must declare at least one profile",
       }),
   })
   .refine(
-    (cb) =>
+    cb =>
       cb.default_profile === undefined ||
       Object.prototype.hasOwnProperty.call(cb.profiles, cb.default_profile),
     {
@@ -81,6 +83,22 @@ export const ContextBudgetProfiles = z
     },
   );
 export type ContextBudgetProfiles = z.infer<typeof ContextBudgetProfiles>;
+
+/**
+ * Context pack output directory — a project-relative POSIX path constrained to
+ * the reserved `.context` generated namespace. Profile `context_dir` MUST be
+ * `.context` or a directory below `.context/`; arbitrary project directories
+ * (`design`, `docs`, `src`, …) are rejected at the schema boundary so a
+ * hostile profile cannot redirect context pack writes into unowned project
+ * files (e.g. `context_dir: design` + `taskId: constitution` → overwrite
+ * `design/constitution.md`).
+ */
+export const ContextOutputDir = RelativePosixPath.refine(
+  value => value === ".context" || value.startsWith(".context/"),
+  {
+    message: "context_dir must be .context or a directory below .context/",
+  },
+);
 
 export const AgentProfile = z.object({
   // Same charset constraint as AgentRef.name (project.ts): the profile name
@@ -93,7 +111,7 @@ export const AgentProfile = z.object({
   // schema boundary — the same "paths use a path schema" rule the read
   // schemas (roadmap PhaseRef.path) already follow.
   instruction_filename: RelativePosixPath,
-  context_dir: RelativePosixPath,
+  context_dir: ContextOutputDir,
   skill_dir: RelativePosixPath.optional(),
   hook_dir: RelativePosixPath.optional(),
   // Maps abstract model tiers to concrete vendor model IDs.

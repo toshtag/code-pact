@@ -22,12 +22,9 @@
 // array on ambiguity, so the migration is a pure refactor — every
 // per-command unit test passes unchanged.
 
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { type Phase as PhaseT } from "../schemas/phase.ts";
-import { Roadmap } from "../schemas/roadmap.ts";
 import { loadPhase } from "./load-phase.ts";
+import { loadRoadmap } from "./roadmap.ts";
 import type { Task as TaskT } from "../schemas/task.ts";
 import type { PlanState } from "./state.ts";
 import { PhaseSnapshotInvalidError } from "./state.ts";
@@ -85,11 +82,11 @@ export async function resolveTaskInRoadmap(
   cwd: string,
   taskId: string,
 ): Promise<ResolvedTask> {
-  const roadmapRaw = await readFile(
-    join(cwd, "design", "roadmap.yaml"),
-    "utf8",
-  );
-  const roadmap = Roadmap.parse(parseYaml(roadmapRaw) as unknown);
+  // The shared, project-CONTAINED roadmap seam — a `..`/symlinked
+  // `design/roadmap.yaml` cannot make these (many) `task *` commands read an
+  // out-of-project roadmap as the control plane, and a malformed/EISDIR roadmap
+  // surfaces as CONFIG_ERROR rather than an uncoded exit-3.
+  const roadmap = await loadRoadmap(cwd);
 
   const hits: ResolvedTask[] = [];
   // design-docs-ephemeral (step 4a): collect ALL live task ids + the archived

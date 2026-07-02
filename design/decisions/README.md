@@ -3,7 +3,7 @@
 Every significant change to `code-pact` is recorded here as an RFC before it
 ships. Each file states a **Status**, **Scope**, **Owners**, and **Related**
 decisions; the longer ones open with a plain-language **Summary**. These are
-the *why* behind the code — the user-facing *how* lives in [`docs/`](../../docs/README.md).
+the _why_ behind the code — the user-facing _how_ lives in [`docs/`](../../docs/README.md).
 
 > **Active / live decisions stay in `design/decisions/`.** A decision named by a
 > live task reference — a `decision_refs` or `acceptance_refs` in
@@ -13,7 +13,7 @@ the *why* behind the code — the user-facing *how* lives in [`docs/`](../../doc
 > thing: `decision_refs` is a live **gate** (a missing live file fails closed
 > unless an accepted record satisfies it — see below), while `acceptance_refs` is
 > a reference-integrity **annotation**, not a gate (when the target is a
-> `design/decisions/*.md`, a valid record of any status can soften its lint — but a
+> `design/decisions/**/*.md`, a valid record of any status can soften its lint — but a
 > non-decision target like `docs/cli-contract.md` stays strict, and it never
 > releases a gate either way). A non-gate history record —
 > one no `decision_refs` / `acceptance_refs` points at — may be moved out after you
@@ -39,9 +39,9 @@ Only a decision still in flight — or `accepted` but holding an open
 `## Implementation commitments` — keeps a file here. The list stays short by
 construction, so it never drifts as decisions retire:
 
-| Decision | Status |
-| --- | --- |
-| [Decision record lifecycle](decision-lifecycle-rfc.md) | **Accepted** — the `decision compress` form (PR-D2) is still open (lossy; unbuilt). |
+| Decision                                                            | Status                                                                                                |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| [Decision record lifecycle](decision-lifecycle-rfc.md)              | **Accepted** — the `decision compress` form (PR-D2) is still open (lossy; unbuilt).                   |
 | [Task-prepare lifecycle-aware](task-prepare-lifecycle-aware-rfc.md) | **Accepted** — `task record-done` shipped; the RFC's closing commitments are not all checked off yet. |
 
 ### Retired decisions
@@ -53,7 +53,7 @@ and the [`CHANGELOG`](../../CHANGELOG.md). This index deliberately tracks **only
 decisions**: enumerating retired ones would 404 on GitHub the moment a file is
 removed and would need an edit on every retire (exactly the maintenance cost the
 ephemeral model exists to remove). To read a retired decision, run
-`git log --follow -- design/decisions/<name>.md`, or inspect its record under
+`git log --follow -- design/decisions/<path>.md`, or inspect its record under
 `.code-pact/state/archive`.
 
 ## What belongs here (and what does not)
@@ -68,10 +68,10 @@ decisions retired by `decision prune` (see [decision-lifecycle-rfc.md](decision-
 **Put here:**
 
 - An RFC for any significant, durable design decision and its rationale.
-- *Negative-space* decisions — a cancellation, deferral, or supersession that a
-  future contributor would otherwise re-litigate (e.g. P22 *cancelled adapter
-  schema v2*, P37 *deferred outcome audit* — both now retired). These stay `accepted` (the
-  decision *to not build* was made and approved) and say so in their title and
+- _Negative-space_ decisions — a cancellation, deferral, or supersession that a
+  future contributor would otherwise re-litigate (e.g. P22 _cancelled adapter
+  schema v2_, P37 _deferred outcome audit_ — both now retired). These stay `accepted` (the
+  decision _to not build_ was made and approved) and say so in their title and
   first line, so they read as closed, not as live commitments.
 
 **Do not put here** — move these to [`docs/maintainers/history/`](../../docs/maintainers/history/) instead:
@@ -113,21 +113,21 @@ YAML frontmatter is also recognized (`status: accepted` between `---` delimiters
 
 The status word governs the [decision gate](../../docs/cli-contract.md#error-codes) that protects `requires_decision` tasks (since v1.22, RFC §3-C):
 
-| Word | Gate verdict |
-| --- | --- |
-| `accepted` | resolves the gate |
-| `proposed` / `draft` / `rejected` / `superseded` | does **not** resolve |
-| empty file | does **not** resolve |
-| explicit unknown word (e.g. a typo) | does **not** resolve |
-| **no status line** (non-empty body) | resolves as accepted — the only lenient case, for backward compat with projects that pre-date status-aware parsing |
+| Word                                             | Gate verdict                                                                                                       |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `accepted`                                       | resolves the gate                                                                                                  |
+| `proposed` / `draft` / `rejected` / `superseded` | does **not** resolve                                                                                               |
+| empty file                                       | does **not** resolve                                                                                               |
+| explicit unknown word (e.g. a typo)              | does **not** resolve                                                                                               |
+| **no status line** (non-empty body)              | resolves as accepted — the only lenient case, for backward compat with projects that pre-date status-aware parsing |
 
 **Status answers one question only: is this record live and gate-resolving?**
-It deliberately does *not* say what was decided. A decision to **cancel** or
+It deliberately does _not_ say what was decided. A decision to **cancel** or
 **defer** a feature is still a real, approved decision, so it stays `accepted`
 (so the gate resolves and it never reads as unfinished work) and records the
 cancellation/deferral in its title and first line — as P22 (cancelled) and P37
 (deferred) did before they were retired. Use `status: superseded` (which does
-*not* resolve the gate) only when you genuinely want the gate to stop resolving
+_not_ resolve the gate) only when you genuinely want the gate to stop resolving
 against an ADR a later one replaces. There is no separate machine-read `outcome`
 field today: with cancellations and deferrals this rare, the human-readable
 title plus this index's "What it decided" column carry the distinction. Add a
@@ -146,8 +146,8 @@ When a decision is intentionally not yet settled, leave the ADR at `proposed`. `
 
 Enforcement rules referenced by the CLI live alongside the decisions:
 
-| Doc | What it covers |
-| --- | --- |
-| [rules/json-output.md](../rules/json-output.md) | JSON output formatting rules. |
-| [rules/protected-paths.md](../rules/protected-paths.md) | Protected-path enforcement rules. |
-| [rules/doc-authoring.md](../rules/doc-authoring.md) | Generate enumerable contract facts from code; the CI-burden contract every new check must satisfy. |
+| Doc                                                     | What it covers                                                                                     |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| [rules/json-output.md](../rules/json-output.md)         | JSON output formatting rules.                                                                      |
+| [rules/protected-paths.md](../rules/protected-paths.md) | Protected-path enforcement rules.                                                                  |
+| [rules/doc-authoring.md](../rules/doc-authoring.md)     | Generate enumerable contract facts from code; the CI-burden contract every new check must satisfy. |

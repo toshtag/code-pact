@@ -1,5 +1,17 @@
-import { readFile, lstat, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  listOwnedDirents,
+  readOwnedText,
+  lstatOwned,
+} from "../project-fs/operations.ts";
+import {
+  resolvePhaseReadPath,
+  resolvePhaseDirectoryReadPath,
+} from "../project-fs/index.ts";
+import { resolveArchiveOwnedWritePath } from "./paths.ts";
+import type {
+  OwnedReadPath,
+  OwnedWritePath,
+} from "../project-fs/authorities/archive-authority.ts";
 import { parse as parseYaml } from "yaml";
 import {
   EventPack,
@@ -13,7 +25,6 @@ import { atCompact } from "../progress/event-id.ts";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
 import { loadRoadmap } from "../plan/roadmap.ts";
 import { resolvePhaseRef } from "../plan/resolve-phase.ts";
-import { resolveWithinProject } from "../path-safety.ts";
 import { readPackSources } from "../progress/all-sources.ts";
 import { resolvePhaseSnapshotRaw } from "./load-phase-snapshot.ts";
 import {
@@ -34,7 +45,7 @@ import {
   classifyLoosePackRelationship,
   type CoveredLooseRelationship,
 } from "./event-pack-cleanup.ts";
-import { eventPackPath, sha256Hex } from "./paths.ts";
+import { eventPackRelPath, sha256Hex } from "./paths.ts";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 
 // ---------------------------------------------------------------------------
@@ -57,7 +68,11 @@ export type EventPackBlock =
   | { kind: "snapshot_missing" }
   | { kind: "snapshot_invalid"; detail: string }
   | { kind: "snapshot_evidence_broken"; issues: SnapshotEvidenceIssue[] }
-  | { kind: "pack_stale"; existing_event_ids_sha256: string; expected_event_ids_sha256: string }
+  | {
+      kind: "pack_stale";
+      existing_event_ids_sha256: string;
+      expected_event_ids_sha256: string;
+    }
   | { kind: "pack_invalid"; detail: string }
   | { kind: "candidate_bind_failed"; binding_issues: EventPackBindingIssue[] };
 
@@ -65,7 +80,7 @@ export type EventPackPlan =
   | {
       kind: "write";
       phaseId: string;
-      packPath: string;
+      packPath: OwnedWritePath;
       pack: EventPack;
       /** Count of loose files for the phase's tasks (for loose_remaining_count).
        *  The snapshot, its raw bytes, and the per-id loose map are NOT carried on
@@ -77,7 +92,7 @@ export type EventPackPlan =
   | {
       kind: "noop_already_packed";
       phaseId: string;
-      packPath: string;
+      packPath: OwnedWritePath;
       loose_remaining_count: number;
       cleanup_pending: boolean;
       /** Which loose↔pack relationship this verdict reflects — `empty` (fully
@@ -94,14 +109,14 @@ export type EventPackApplyOutcome =
   | {
       kind: "written";
       phaseId: string;
-      packPath: string;
+      packPath: OwnedWritePath;
       pack: EventPack;
       loose_count: number;
     }
   | {
       kind: "noop_already_packed";
       phaseId: string;
-      packPath: string;
+      packPath: OwnedWritePath;
       loose_remaining_count: number;
       cleanup_pending: boolean;
       /** Which loose↔pack relationship this verdict reflects — `empty` (fully
@@ -120,8 +135,14 @@ export class EventPackWriteError extends Error {
   readonly phase: "write_pack" | "verify_pack";
   readonly partial_applied: boolean;
   readonly detail: string;
-  constructor(phase: "write_pack" | "verify_pack", partial_applied: boolean, detail: string) {
-    super(`event pack ${phase} failed (partial_applied=${partial_applied}): ${detail}`);
+  constructor(
+    phase: "write_pack" | "verify_pack",
+    partial_applied: boolean,
+    detail: string,
+  ) {
+    super(
+      `event pack ${phase} failed (partial_applied=${partial_applied}): ${detail}`,
+    );
     this.name = "EventPackWriteError";
     this.phase = phase;
     this.partial_applied = partial_applied;
@@ -144,11 +165,21 @@ function isEnoent(err: unknown): boolean {
 }
 
 /** Sort loose files by (atCompact(at), id) — the canonical pack order. */
-function sortLooseForPack(files: readonly LoadedEventFile[]): LoadedEventFile[] {
+function sortLooseForPack(
+  files: readonly LoadedEventFile[],
+): LoadedEventFile[] {
   return [...files].sort((a, b) => {
     const aAt = atCompact(a.event.at);
     const bAt = atCompact(b.event.at);
-    return aAt < bAt ? -1 : aAt > bAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    return aAt < bAt
+      ? -1
+      : aAt > bAt
+        ? 1
+        : a.id < b.id
+          ? -1
+          : a.id > b.id
+            ? 1
+            : 0;
   });
 }
 
@@ -171,33 +202,44 @@ async function findLivePhaseYamlsById(
   cwd: string,
   phaseId: string,
 ): Promise<{ paths: string[]; incomplete: string | null }> {
-  const phasesDir = join(cwd, "design", "phases");
   let entries: string[];
   try {
-    entries = await readdir(phasesDir);
+    const phasesDir = await resolvePhaseDirectoryReadPath(cwd);
+    entries = await listOwnedDirents(phasesDir).then(dirents =>
+      dirents.filter(e => e.isFile() || e.isSymbolicLink()).map(e => e.name),
+    );
   } catch (err) {
     if (isEnoent(err)) return { paths: [], incomplete: null }; // no dir → nothing live
-    return { paths: [], incomplete: `design/phases/ could not be enumerated (${(err as NodeJS.ErrnoException).code ?? "unknown"})` };
+    return {
+      paths: [],
+      incomplete: `design/phases/ could not be enumerated (${(err as NodeJS.ErrnoException).code ?? "unknown"})`,
+    };
   }
   const matches: string[] = [];
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".yaml")) continue;
     const rel = `design/phases/${entry}`;
-    let abs: string;
+    let abs: OwnedReadPath;
     try {
-      abs = await resolveWithinProject(cwd, rel);
+      abs = await resolvePhaseReadPath(cwd, rel);
     } catch {
-      // A symlink escaping the project: fail closed — we cannot read it to prove
+      // A symlink (in-project or escaping): fail closed — we cannot read it to prove
       // it is NOT a live YAML with the target id.
-      return { paths: [], incomplete: `${rel} escapes the project (symlink) — cannot prove no live phase exists` };
+      return {
+        paths: [],
+        incomplete: `${rel} is a symlink or escapes the project — cannot prove no live phase exists`,
+      };
     }
     let raw: string;
     try {
-      raw = await readFile(abs, "utf8");
+      raw = await readOwnedText(abs);
     } catch {
       // A YAML in design/phases/ we cannot read could be the live target phase —
       // fail closed rather than assume it is not.
-      return { paths: [], incomplete: `${rel} is unreadable — cannot prove no live phase "${phaseId}" exists` };
+      return {
+        paths: [],
+        incomplete: `${rel} is unreadable — cannot prove no live phase "${phaseId}" exists`,
+      };
     }
     let parsed: unknown;
     try {
@@ -205,7 +247,10 @@ async function findLivePhaseYamlsById(
     } catch {
       // An unparseable / non-Phase YAML in design/phases/ could be a broken live
       // target phase doc — fail closed.
-      return { paths: [], incomplete: `${rel} is not a parseable phase YAML — cannot prove no live phase "${phaseId}" exists` };
+      return {
+        paths: [],
+        incomplete: `${rel} is not a parseable phase YAML — cannot prove no live phase "${phaseId}" exists`,
+      };
     }
     if ((parsed as { id: string }).id === phaseId) matches.push(rel);
   }
@@ -238,10 +283,12 @@ export async function findLiveTaskOwnersByTaskId(
   cwd: string,
   taskId: string,
 ): Promise<{ owners: LiveTaskOwner[]; incomplete: string | null }> {
-  const phasesDir = join(cwd, "design", "phases");
   let entries: string[];
   try {
-    entries = await readdir(phasesDir);
+    const phasesDir = await resolvePhaseDirectoryReadPath(cwd);
+    entries = await listOwnedDirents(phasesDir).then(dirents =>
+      dirents.filter(e => e.isFile() || e.isSymbolicLink()).map(e => e.name),
+    );
   } catch (err) {
     if (isEnoent(err)) return { owners: [], incomplete: null }; // no dir → nothing live
     return {
@@ -253,27 +300,36 @@ export async function findLiveTaskOwnersByTaskId(
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".yaml")) continue;
     const rel = `design/phases/${entry}`;
-    let abs: string;
+    let abs: OwnedReadPath;
     try {
-      abs = await resolveWithinProject(cwd, rel);
+      abs = await resolvePhaseReadPath(cwd, rel);
     } catch {
-      // A symlink escaping the project: fail closed — we cannot read it to prove
+      // A symlink (in-project or escaping): fail closed — we cannot read it to prove
       // it does NOT own the task_id.
-      return { owners: [], incomplete: `${rel} escapes the project (symlink) — cannot prove no live phase owns task "${taskId}"` };
+      return {
+        owners: [],
+        incomplete: `${rel} is a symlink or escapes the project — cannot prove no live phase owns task "${taskId}"`,
+      };
     }
     let raw: string;
     try {
-      raw = await readFile(abs, "utf8");
+      raw = await readOwnedText(abs);
     } catch {
-      return { owners: [], incomplete: `${rel} is unreadable — cannot prove no live phase owns task "${taskId}"` };
+      return {
+        owners: [],
+        incomplete: `${rel} is unreadable — cannot prove no live phase owns task "${taskId}"`,
+      };
     }
     let parsed: Phase;
     try {
       parsed = Phase.parse(parseYaml(raw) as unknown);
     } catch {
-      return { owners: [], incomplete: `${rel} is not a parseable phase YAML — cannot prove no live phase owns task "${taskId}"` };
+      return {
+        owners: [],
+        incomplete: `${rel} is not a parseable phase YAML — cannot prove no live phase owns task "${taskId}"`,
+      };
     }
-    if ((parsed.tasks ?? []).some((t) => t.id === taskId)) {
+    if ((parsed.tasks ?? []).some(t => t.id === taskId)) {
       owners.push({ phase_id: parsed.id, phase_path: rel });
     }
   }
@@ -307,7 +363,8 @@ async function phaseFileStillPresent(
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "AMBIGUOUS_PHASE_ID") {
-      const phases = (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+      const phases =
+        (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
       return { kind: "ambiguous", phase_paths: phases };
     }
     // ENOENT (no roadmap) / PHASE_NOT_FOUND (id not referenced): the roadmap is
@@ -318,7 +375,7 @@ async function phaseFileStillPresent(
 
   if (roadmapPath !== null) {
     try {
-      await lstat(await resolveWithinProject(cwd, roadmapPath));
+      await lstatOwned(await resolvePhaseReadPath(cwd, roadmapPath));
       return { kind: "present", phase_path: roadmapPath }; // the referenced file is on disk
     } catch (err) {
       if (!isEnoent(err)) {
@@ -337,17 +394,25 @@ async function phaseFileStillPresent(
   if (scan.incomplete !== null) {
     return { kind: "discovery_incomplete", detail: scan.incomplete };
   }
-  if (scan.paths.length === 1) return { kind: "present", phase_path: scan.paths[0]! };
-  if (scan.paths.length > 1) return { kind: "ambiguous", phase_paths: scan.paths };
+  if (scan.paths.length === 1)
+    return { kind: "present", phase_path: scan.paths[0]! };
+  if (scan.paths.length > 1)
+    return { kind: "ambiguous", phase_paths: scan.paths };
   return { kind: "absent" };
 }
 
 /**
  * Pure verdict: classify what `state compact <phaseId>` would do. No writes.
  */
-export async function planEventPack(cwd: string, phaseId: string): Promise<EventPackPlan> {
+export async function planEventPack(
+  cwd: string,
+  phaseId: string,
+): Promise<EventPackPlan> {
   assertSafePlanId(phaseId, "Phase id");
-  const packPath = eventPackPath(cwd, phaseId);
+  const packPath = await resolveArchiveOwnedWritePath(
+    cwd,
+    eventPackRelPath(phaseId),
+  );
 
   // 1. The live phase YAML must be gone (compact follows archive). A duplicate
   //    phase id (AMBIGUOUS_PHASE_ID) is control-plane corruption with likely-live
@@ -414,7 +479,11 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
   }
   if (existingPackRaw.kind === "present") {
     try {
-      existing = validateEventPackTier1(phaseId, existingPackRaw.bytes, packPath);
+      existing = validateEventPackTier1(
+        phaseId,
+        existingPackRaw.bytes,
+        packPath,
+      );
     } catch (err) {
       return {
         kind: "ineligible",
@@ -432,8 +501,8 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
   // 5. The phase's loose files (ALL statuses for the snapshot's task_ids) — the
   //    binding's own-pack resolution set. Built BEFORE the evidence check because
   //    the target pack's Tier-2 binding (step 6) needs it.
-  const snapshotTaskIds = new Set(snapshot.tasks.map((t) => t.id));
-  const phaseLooseFiles = packSources.looseFiles.filter((f) =>
+  const snapshotTaskIds = new Set(snapshot.tasks.map(t => t.id));
+  const phaseLooseFiles = packSources.looseFiles.filter(f =>
     snapshotTaskIds.has(f.event.task_id),
   );
   const looseEventsById = new Map<string, LoadedEventFile>();
@@ -449,12 +518,20 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
   //    broken. Binding it here pins the verdict to `pack_invalid`. (Tier-1
   //    corruption was already caught in step 3; this closes the Tier-2 path.)
   if (existing !== null) {
-    const bindIssues = bindPackToSnapshot(existing, snapshot, snapshotRaw, looseEventsById);
+    const bindIssues = bindPackToSnapshot(
+      existing,
+      snapshot,
+      snapshotRaw,
+      looseEventsById,
+    );
     if (bindIssues.length > 0) {
       return {
         kind: "ineligible",
         phaseId,
-        block: { kind: "pack_invalid", detail: bindIssues.map((i) => i.message).join("; ") },
+        block: {
+          kind: "pack_invalid",
+          detail: bindIssues.map(i => i.message).join("; "),
+        },
       };
     }
   }
@@ -465,13 +542,19 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
   //    entries when it bound cleanly above (do not depend on the lenient read
   //    having re-admitted it — make the target's contribution explicit).
   const resolved = new Map<string, ProgressEvent>();
-  for (const f of [...packSources.looseFiles, ...packSources.validatedPackFiles]) {
+  for (const f of [
+    ...packSources.looseFiles,
+    ...packSources.validatedPackFiles,
+  ]) {
     resolved.set(f.id, f.event);
   }
   if (existing !== null) {
     for (const f of existing.entries) resolved.set(f.id, f.event);
   }
-  const evidence = validateSnapshotEventEvidenceForSnapshot({ snapshot, resolved });
+  const evidence = validateSnapshotEventEvidenceForSnapshot({
+    snapshot,
+    resolved,
+  });
   if (!evidence.ok) {
     return {
       kind: "ineligible",
@@ -494,8 +577,8 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
   //    without touching the hash, preserving the "never hash an empty loose set"
   //    invariant — only `diverged` recomputes the hash, and only to fill the block.)
   if (existing !== null) {
-    const packIds = new Set(existing.pack.events.map((e) => e.id));
-    const looseIds = new Set(phaseLooseFiles.map((f) => f.id));
+    const packIds = new Set(existing.pack.events.map(e => e.id));
+    const looseIds = new Set(phaseLooseFiles.map(f => f.id));
     const relationship = classifyLoosePackRelationship(looseIds, packIds);
     if (relationship === "diverged") {
       return {
@@ -528,7 +611,11 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
 
   // 10. Build the candidate pack from the COMPLETE loose set.
   const sorted = sortLooseForPack(phaseLooseFiles);
-  const packedEvents: PackedEvent[] = sorted.map((f) => ({ id: f.id, file: f.file, event: f.event }));
+  const packedEvents: PackedEvent[] = sorted.map(f => ({
+    id: f.id,
+    file: f.file,
+    event: f.event,
+  }));
   const candidate = EventPack.parse({
     schema_version: EVENT_PACK_SCHEMA_VERSION,
     phase_id: phaseId,
@@ -545,7 +632,12 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
     pack: candidate,
     entries: sorted,
   };
-  const candidateIssues = bindPackToSnapshot(candidateLoaded, snapshot, snapshotRaw, looseEventsById);
+  const candidateIssues = bindPackToSnapshot(
+    candidateLoaded,
+    snapshot,
+    snapshotRaw,
+    looseEventsById,
+  );
   if (candidateIssues.length > 0) {
     return {
       kind: "ineligible",
@@ -587,7 +679,12 @@ export async function applyEventPackPlan(
 
   if (hooks.beforeWrite) await hooks.beforeWrite();
   try {
-    await atomicWriteText(packPath, serializeEventPack(pack), { kind: "absent" }, { mkdir: true });
+    await atomicWriteText(
+      packPath,
+      serializeEventPack(pack),
+      { kind: "absent" },
+      { mkdir: true },
+    );
   } catch (err) {
     // A concurrent create between re-plan and rename → "destination appeared".
     // The pack is NOT on disk (the rename never happened).
@@ -608,14 +705,22 @@ export async function applyEventPackPlan(
   try {
     verifyPlan = await planEventPack(cwd, phaseId);
   } catch (err) {
-    throw new EventPackWriteError("verify_pack", true, `readback re-plan threw: ${(err as Error).message}`);
+    throw new EventPackWriteError(
+      "verify_pack",
+      true,
+      `readback re-plan threw: ${(err as Error).message}`,
+    );
   }
   if (verifyPlan.kind !== "noop_already_packed") {
     const detail =
       verifyPlan.kind === "ineligible"
         ? `re-plan is ${verifyPlan.kind}(${verifyPlan.block.kind})`
         : `re-plan is ${verifyPlan.kind} (expected noop_already_packed)`;
-    throw new EventPackWriteError("verify_pack", true, `readback verification failed: ${detail}`);
+    throw new EventPackWriteError(
+      "verify_pack",
+      true,
+      `readback verification failed: ${detail}`,
+    );
   }
   // Option A — the verify verdict must match the write we just performed: Layer 2
   // does NOT unlink, so a faithful write leaves EXACTLY the loose set it packed
@@ -625,7 +730,10 @@ export async function applyEventPackPlan(
   // pack no longer reflects the on-disk state, so fail closed rather than return a
   // stale `loose_count`. The returned count is taken from the VERIFIED verdict, not
   // the pre-write plan.
-  if (verifyPlan.cleanup_pending !== true || verifyPlan.loose_remaining_count !== loose_count) {
+  if (
+    verifyPlan.cleanup_pending !== true ||
+    verifyPlan.loose_remaining_count !== loose_count
+  ) {
     throw new EventPackWriteError(
       "verify_pack",
       true,
@@ -635,5 +743,11 @@ export async function applyEventPackPlan(
     );
   }
 
-  return { kind: "written", phaseId, packPath, pack, loose_count: verifyPlan.loose_remaining_count };
+  return {
+    kind: "written",
+    phaseId,
+    packPath,
+    pack,
+    loose_count: verifyPlan.loose_remaining_count,
+  };
 }

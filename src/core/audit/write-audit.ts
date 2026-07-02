@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { globToRegex, validateGlobSyntax } from "../glob.ts";
+import { matchGlob, validateGlobSyntax } from "../glob.ts";
 
 // ---------------------------------------------------------------------------
 // Declared-writes audit
@@ -200,17 +200,14 @@ export async function auditWrites(
   const validGlobs = declaredWrites.filter(
     (glob) => validateGlobSyntax(glob) === null,
   );
-  const compiledGlobs = validGlobs.map((glob) => ({
-    glob,
-    regex: globToRegex(glob),
-  }));
 
   const outsideDeclared: string[] = [];
   const matchedGlobIdx = new Set<number>();
   for (const file of filesTouched) {
     let matched = false;
-    for (let i = 0; i < compiledGlobs.length; i += 1) {
-      if (compiledGlobs[i]!.regex.test(file)) {
+    for (let i = 0; i < validGlobs.length; i += 1) {
+      // Linear matcher (no catastrophic backtracking on `**`-heavy globs).
+      if (matchGlob(validGlobs[i]!, file)) {
         matched = true;
         matchedGlobIdx.add(i);
       }
@@ -218,9 +215,7 @@ export async function auditWrites(
     if (!matched) outsideDeclared.push(file);
   }
 
-  const declaredUnused = compiledGlobs
-    .filter((_, idx) => !matchedGlobIdx.has(idx))
-    .map((entry) => entry.glob);
+  const declaredUnused = validGlobs.filter((_, idx) => !matchedGlobIdx.has(idx));
 
   const warnings: WriteAuditWarning[] = [];
   if (outsideDeclared.length > 0) {

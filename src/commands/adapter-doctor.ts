@@ -1,12 +1,21 @@
-import { readFile, readdir } from "node:fs/promises";
+import {
+  readOwnedText,
+  readExplicitUserText,
+  statExplicitUser,
+  resolveProjectConfigReadPath,
+  resolveExplicitUserReadPath,
+  type ExplicitUserReadPath,
+} from "../core/project-fs/index.ts";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { AgentProfile } from "../core/schemas/agent-profile.ts";
+import type { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { Project } from "../core/schemas/project.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
+import { classifyManifestFileForRead } from "../core/adapters/manifest-file-ownership.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
-import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
+import { loadAdapterProfileForAdapter } from "../core/agent-profile-path.ts";
+import { loadModelProfilesSafe } from "../core/models/load-model-profiles.ts";
 import {
   computeContentHash,
   manifestPath,
@@ -57,7 +66,7 @@ export type AdapterDoctorOptions = {
 };
 
 // ---------------------------------------------------------------------------
-// Loaders (lenient — doctor never throws on absence)
+// Loaders (diagnostic: absence/malformed input becomes a structured issue)
 // ---------------------------------------------------------------------------
 
 // Missing project.yaml → null (adapter doctor is a no-op without a project).
@@ -65,70 +74,113 @@ export type AdapterDoctorOptions = {
 // schema-invalid) is surfaced as CONFIG_ERROR rather than masked as "no
 // project", so `adapter doctor` doesn't report a clean bill on a broken config.
 async function loadProjectSafe(cwd: string): Promise<Project | null> {
-  const path = join(cwd, ".code-pact", "project.yaml");
   let raw: string;
   try {
-    raw = await readFile(path, "utf8");
+    const ownedPath = await resolveProjectConfigReadPath(cwd);
+    raw = await readOwnedText(ownedPath);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    const e = new Error(`Cannot read ${path}.`);
+    const e = new Error(`Cannot read .code-pact/project.yaml.`);
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
   try {
     return Project.parse(parseYaml(raw) as unknown);
   } catch (err) {
-    const e = new Error(`Cannot parse or validate ${path}: ${(err as Error).message}`);
+    const e = new Error(
+      `Cannot parse or validate .code-pact/project.yaml: ${(err as Error).message}`,
+    );
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
 }
 
-async function loadAgentProfileSafe(
-  cwd: string,
-  agentName: string,
-): Promise<AgentProfile | null> {
-  // Resolve OUTSIDE the try so a CONFIG_ERROR (unparseable project.yaml or an
-  // invalid `agents[].profile`) propagates — consistent with the other commands
-  // rather than masked as "no profile". Missing/malformed profile *content* is
-  // still lenient (null), which the adapter doctor checks surface as issues.
-  const path = await resolveAgentProfilePath(cwd, agentName);
+async function loadModelProfilesForDoctor(cwd: string): Promise<{
+  profiles: ModelProfile[];
+  issue?: Omit<AdapterDoctorIssue, "agent">;
+}> {
   try {
-    const raw = await readFile(path, "utf8");
-    return AgentProfile.parse(parseYaml(raw) as unknown);
-  } catch {
-    return null;
-  }
-}
-
-async function loadModelProfilesSafe(cwd: string): Promise<ModelProfile[]> {
-  const dir = join(cwd, ".code-pact", "model-profiles");
-  let entries: string[];
-  try {
-    entries = await readdir(dir);
-  } catch {
-    return [];
-  }
-  const profiles: ModelProfile[] = [];
-  for (const entry of entries.sort()) {
-    if (!entry.endsWith(".yaml")) continue;
-    try {
-      const raw = await readFile(join(dir, entry), "utf8");
-      profiles.push(ModelProfile.parse(parseYaml(raw) as unknown));
-    } catch {
-      // skip malformed
-    }
-  }
-  return profiles;
-}
-
-async function readFileMaybe(absPath: string): Promise<string | null> {
-  try {
-    return await readFile(absPath, "utf8");
+    const profiles = await loadModelProfilesSafe(cwd);
+    return { profiles };
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
+    const errCode = (err as NodeJS.ErrnoException).code;
+    if (errCode === "PATH_NOT_OWNED" || errCode === "PATH_OUTSIDE_PROJECT") {
+      return {
+        profiles: [],
+        issue: {
+          code: "MODEL_PROFILES_UNSAFE",
+          severity: "error",
+          message:
+            ".code-pact/model-profiles is a symlink or escapes the project root; profiles were not read.",
+        },
+      };
+    }
+    return {
+      profiles: [],
+      issue: {
+        code: "MODEL_PROFILES_INVALID",
+        severity: "error",
+        message: `.code-pact/model-profiles could not be safely loaded: ${(err as Error).message}`,
+      },
+    };
   }
+}
+
+type ProjectReadResult =
+  | { kind: "content"; absPath: string; content: string }
+  | { kind: "missing"; absPath: string }
+  | { kind: "unsafe"; absPath: string; message: string };
+
+async function readProjectFileForDoctor(
+  cwd: string,
+  relPath: string,
+): Promise<ProjectReadResult> {
+  const absPath = join(cwd, relPath);
+  let ownedPath: ExplicitUserReadPath;
+  try {
+    ownedPath = await resolveExplicitUserReadPath(cwd, relPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { kind: "missing", absPath };
+    }
+    return { kind: "unsafe", absPath, message: (err as Error).message };
+  }
+
+  try {
+    const s = await statExplicitUser(ownedPath);
+    if (!s.isFile()) return { kind: "missing", absPath };
+    return {
+      kind: "content",
+      absPath,
+      content: await readExplicitUserText(ownedPath),
+    };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { kind: "missing", absPath };
+    }
+    // Best-effort DIAGNOSTIC read: any failure degrades to null. ENOENT is a
+    // missing file; EISDIR (a manifest-declared path that is actually a directory,
+    // planted by a hostile repo), ENOTDIR, EACCES, etc. are likewise treated as
+    // "not a readable managed file" — surfaced via the existing FILE_MISSING /
+    // DRIFT advisories, never re-thrown as an uncoded errno that crashes doctor
+    // (exit 3). doctor must report problems, not abort on them.
+    return { kind: "missing", absPath };
+  }
+}
+
+function unsafeAdapterFileIssue(
+  agentName: SupportedAgent,
+  relPath: string,
+  absPath: string,
+  message: string,
+): AdapterDoctorIssue {
+  return {
+    code: "ADAPTER_FILE_PATH_UNSAFE",
+    severity: "error",
+    message: `Managed file "${relPath}" is not a safe project-contained path and was not read: ${message}`,
+    agent: agentName,
+    path: absPath,
+  };
 }
 
 function buildCurrentFingerprint(
@@ -145,7 +197,10 @@ function buildCurrentFingerprint(
   return fp;
 }
 
-function fingerprintsEqual(a: ProfileFingerprint, b: ProfileFingerprint): boolean {
+function fingerprintsEqual(
+  a: ProfileFingerprint,
+  b: ProfileFingerprint,
+): boolean {
   return (
     a.instruction_filename === b.instruction_filename &&
     a.context_dir === b.context_dir &&
@@ -198,7 +253,7 @@ function detectContractDrift(
   }
 
   const missing = AGENT_CONTRACT_AXIS_HEADINGS.filter(
-    (heading) => !diskContent.includes(heading),
+    heading => !diskContent.includes(heading),
   );
   if (missing.length > 0) {
     return {
@@ -256,7 +311,7 @@ function desiredEquivalentToManifest(
   if (deduped.length !== manifest.files.length) return false;
 
   const manifestHashByPath = new Map(
-    manifest.files.map((f) => [f.path, f.sha256]),
+    manifest.files.map(f => [f.path, f.sha256]),
   );
   if (manifestHashByPath.size !== manifest.files.length) return false; // dup paths
 
@@ -341,10 +396,44 @@ export async function inspectAgent(
     });
   }
 
-  const profile = await loadAgentProfileSafe(cwd, agentName);
+  const profileLoad = await loadAdapterProfileForAdapter(
+    cwd,
+    agentName,
+    descriptor,
+  );
 
-  if (profile) {
-    const modelProfiles = await loadModelProfilesSafe(cwd);
+  if (profileLoad.kind === "missing") {
+    issues.push({
+      code: "ADAPTER_PROFILE_MISSING",
+      severity: "error",
+      message: profileLoad.message,
+      agent: agentName,
+      path: profileLoad.path,
+    });
+    return issues;
+  }
+  if (profileLoad.kind === "invalid") {
+    issues.push({
+      code:
+        profileLoad.reason === "contract_violation"
+          ? "ADAPTER_PROFILE_CONTRACT_VIOLATION"
+          : "ADAPTER_PROFILE_INVALID",
+      severity: "error",
+      message: profileLoad.message,
+      agent: agentName,
+      path: profileLoad.path,
+    });
+    return issues;
+  }
+
+  const { profile } = profileLoad;
+  {
+    const { profiles: modelProfiles, issue: modelProfilesIssue } =
+      await loadModelProfilesForDoctor(cwd);
+    if (modelProfilesIssue) {
+      issues.push({ ...modelProfilesIssue, agent: agentName });
+      return issues;
+    }
     const resolvedModel = profile.model_version;
     const currentFP = buildCurrentFingerprint(profile, resolvedModel);
     if (!fingerprintsEqual(manifest.profile_fingerprint, currentFP)) {
@@ -381,11 +470,59 @@ export async function inspectAgent(
       });
     }
 
-    const desiredByPath = new Map(desiredFiles.map((f) => [f.path, f]));
-
+    const desiredByPath = new Map(desiredFiles.map(f => [f.path, f]));
+    // SECURITY (forged-manifest content/SHA oracle): generator output proves
+    // write intent, not ownership of bytes already present at that path. Read
+    // authority therefore comes only from the adapter's narrow static owned
+    // paths, with a matching role and symlink-free resolution. Dynamic desired
+    // paths remain unverifiable even when the current generator emits them.
     for (const entry of manifest.files) {
-      const absPath = join(cwd, entry.path);
-      const diskContent = await readFileMaybe(absPath);
+      const ownership = await classifyManifestFileForRead(
+        cwd,
+        descriptor,
+        entry.path,
+        entry.role,
+      );
+      if (ownership.kind === "unowned" || ownership.kind === "unsafe") {
+        issues.push(
+          unsafeAdapterFileIssue(
+            agentName as SupportedAgent,
+            entry.path,
+            join(cwd, entry.path),
+            ownership.kind === "unsafe"
+              ? "resolves through a symlink or escapes the project root"
+              : "is not a statically owned path/role for this adapter (forged-manifest guard) — refusing to read",
+          ),
+        );
+        continue;
+      }
+      if (ownership.kind === "unverifiable_dynamic") {
+        if (entry.ownership === "handed_off") {
+          continue;
+        }
+        issues.push({
+          code: "ADAPTER_FILE_UNVERIFIABLE",
+          severity: "warning",
+          message: `Managed file "${entry.path}" is in a shared dynamic namespace — current generator output does not prove ownership of existing bytes, so it was not read or verified. Review the file. To regenerate it, move or delete it, then run "adapter upgrade ${agentName} --write".`,
+          agent: agentName,
+          path: join(cwd, entry.path),
+        });
+        continue;
+      }
+      const diskRead = await readProjectFileForDoctor(cwd, entry.path);
+      const absPath = diskRead.absPath;
+      if (diskRead.kind === "unsafe") {
+        issues.push(
+          unsafeAdapterFileIssue(
+            agentName as SupportedAgent,
+            entry.path,
+            absPath,
+            diskRead.message,
+          ),
+        );
+        continue;
+      }
+      const diskContent = diskRead.kind === "content" ? diskRead.content : null;
       const diskHash =
         diskContent === null ? null : computeContentHash(diskContent);
       const desired = desiredByPath.get(entry.path);
@@ -438,6 +575,9 @@ export async function inspectAgent(
       // signal). Resolution: `code-pact adapter upgrade <agent>
       // --write --accept-modified` reinstates the section while
       // preserving any user edits.
+      // SECURITY: the heading/substring inspection IS a content oracle, so it
+      // runs ONLY after classifyManifestFileForRead returned `owned` — never on
+      // a dynamic write-namespace member that forged `role: instruction`.
       if (entry.role === "instruction" && diskContent !== null) {
         const contractIssue = detectContractDrift(
           agentName as SupportedAgent,
@@ -450,76 +590,26 @@ export async function inspectAgent(
     }
 
     // ---- Orphan scan ----
-    const manifestPaths = new Set(manifest.files.map((f) => f.path));
-    for (const glob of descriptor.ownedPathGlobs) {
-      const candidates = await listOwnedCandidates(cwd, glob);
-      for (const rel of candidates) {
-        if (manifestPaths.has(rel)) continue;
+    // ownedPathRoles keys are exact paths (no globs), so the scan is a simple
+    // existence check per static owned path. A file that exists on disk but is
+    // NOT in the manifest is flagged as ADAPTER_UNMANAGED_FILE.
+    const manifestPaths = new Set(manifest.files.map(f => f.path));
+    for (const ownedPath of Object.keys(descriptor.ownedPathRoles)) {
+      if (manifestPaths.has(ownedPath)) continue;
+      const exists = await readProjectFileForDoctor(cwd, ownedPath);
+      if (exists.kind === "content") {
         issues.push({
           code: "ADAPTER_UNMANAGED_FILE",
           severity: "warning",
-          message: `"${rel}" sits under a code-pact-owned namespace but is not in the manifest`,
+          message: `"${ownedPath}" sits under a code-pact-owned namespace but is not in the manifest`,
           agent: agentName,
-          path: join(cwd, rel),
+          path: join(cwd, ownedPath),
         });
       }
     }
-  } else if (versionStale) {
-    // No agent profile → the generator cannot produce desired files, so we
-    // cannot prove the output is byte-identical. Stay conservative (Issue #340)
-    // and keep the legacy version-stamp warning rather than silently suppress.
-    issues.push({
-      code: "ADAPTER_GENERATOR_STALE",
-      severity: "warning",
-      message: `Manifest generator_version is "${manifest.generator_version}" but the current code-pact version is "${packageVersion}".`,
-      agent: agentName,
-      path: manifestPath(cwd, agentName),
-    });
   }
 
   return issues;
-}
-
-/**
- * Resolves `ownedPathGlobs` entries to project-relative POSIX paths that
- * exist on disk. Two forms are supported intentionally:
- *  - exact path: returned if the file exists
- *  - single-wildcard basename: directory part listed and entries matched
- *    by prefix+suffix around the `*` (e.g. `.claude/skills/code-pact-*.md`)
- *
- * Broad multi-segment globs (`.claude/skills/**`) are not supported, by
- * design — narrow ownedPathGlobs is the safety invariant that keeps
- * doctor from flagging user-created files like `.claude/skills/custom.md`.
- */
-async function listOwnedCandidates(
-  cwd: string,
-  glob: string,
-): Promise<string[]> {
-  if (!glob.includes("*")) {
-    const exists = await readFileMaybe(join(cwd, glob));
-    return exists !== null ? [glob] : [];
-  }
-  const slash = glob.lastIndexOf("/");
-  const dir = slash >= 0 ? glob.slice(0, slash) : ".";
-  const pattern = slash >= 0 ? glob.slice(slash + 1) : glob;
-  const star = pattern.indexOf("*");
-  if (star < 0) return [];
-  const prefix = pattern.slice(0, star);
-  const suffix = pattern.slice(star + 1);
-
-  let entries: string[];
-  try {
-    entries = await readdir(join(cwd, dir));
-  } catch {
-    return [];
-  }
-  const out: string[] = [];
-  for (const entry of entries) {
-    if (!entry.startsWith(prefix) || !entry.endsWith(suffix)) continue;
-    if (entry.length < prefix.length + suffix.length) continue; // overlap
-    out.push(dir === "." ? entry : `${dir}/${entry}`);
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -532,7 +622,9 @@ export async function runAdapterDoctor(
   const { cwd, agentName, locale } = opts;
 
   if (agentName !== undefined && !isSupportedAgent(agentName)) {
-    const err = new Error(`No adapter implementation for agent "${agentName}".`);
+    const err = new Error(
+      `No adapter implementation for agent "${agentName}".`,
+    );
     (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
     throw err;
   }
@@ -570,6 +662,6 @@ export async function runAdapterDoctor(
     issues.push(...found);
   }
 
-  const ok = issues.every((i) => i.severity !== "error");
+  const ok = issues.every(i => i.severity !== "error");
   return { ok, issues };
 }

@@ -28,6 +28,7 @@ export const ManifestFile = z
       .regex(/^[0-9a-f]{64}$/, "sha256 must be 64 lowercase hex characters"),
     managed: z.boolean(),
     role: ManifestFileRole,
+    ownership: z.enum(["managed", "handed_off"]).optional(),
   })
   .strict();
 export type ManifestFile = z.infer<typeof ManifestFile>;

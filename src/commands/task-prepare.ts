@@ -1,11 +1,14 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  readOwnedText,
+  resolveDecisionReadPath,
+} from "../core/project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import {
   resolveRecommendation,
   type RecommendResult,
 } from "../core/recommend/index.ts";
 import { buildContextPack, writeContextPack } from "../core/pack/index.ts";
+import { resolveProfileContextOutputPath } from "../core/pack/context-output-path.ts";
 import {
   isDecisionRequiredForTask,
   resolveDecisionGate,
@@ -18,7 +21,10 @@ import {
   type TaskCurrentState,
 } from "../core/progress/task-state.ts";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
-import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
+import {
+  assertAgentProfileNameMatches,
+  resolveAgentProfilePath,
+} from "../core/agent-profile-path.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
 import { loadProject, resolveEnabledAgent } from "../core/project.ts";
 import type { Task as TaskT } from "../core/schemas/task.ts";
@@ -122,7 +128,7 @@ async function loadAgentProfile(
   const path = await resolveAgentProfilePath(cwd, agentName);
   let raw: string;
   try {
-    raw = await readFile(path, "utf8");
+    raw = await readOwnedText(path);
   } catch {
     const err = new Error(`Agent profile for "${agentName}" not found.`);
     (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
@@ -133,7 +139,9 @@ async function loadAgentProfile(
   // unclassified YAML/Zod throw, so `task prepare --context-budget …` matches
   // the documented error contract and the CLI renders a clean envelope.
   try {
-    return AgentProfile.parse(parseYaml(raw) as unknown);
+    const profile = AgentProfile.parse(parseYaml(raw) as unknown);
+    assertAgentProfileNameMatches(profile, agentName, path);
+    return profile;
   } catch (cause) {
     const err = new Error(
       `Agent profile for "${agentName}" is invalid: ${
@@ -149,7 +157,11 @@ async function loadAgentProfile(
 // Helpers
 // ---------------------------------------------------------------------------
 
-function buildCommands(agent: string, phaseId: string, taskId: string): TaskPrepareCommands {
+function buildCommands(
+  agent: string,
+  phaseId: string,
+  taskId: string,
+): TaskPrepareCommands {
   return {
     context: `code-pact task context ${taskId} --agent ${agent}`,
     start: `code-pact task start ${taskId} --agent ${agent}`,
@@ -259,7 +271,7 @@ export async function runTaskPrepare(
   ]);
 
   // 4. Find task entry within the phase.
-  const task: TaskT | undefined = phase.tasks?.find((t) => t.id === taskId);
+  const task: TaskT | undefined = phase.tasks?.find(t => t.id === taskId);
   if (!task) {
     // This should be unreachable because resolveTaskInRoadmap already
     // confirmed the task exists in this phase, but guard anyway so a
@@ -335,7 +347,9 @@ export async function runTaskPrepare(
     task,
     agentName,
     agentProfile,
-    decisionContext: { phaseRequiresDecision: phase.requires_decision === true },
+    decisionContext: {
+      phaseRequiresDecision: phase.requires_decision === true,
+    },
   });
 
   // 8b. Decision commitments. For a requires_decision task, resolve the
@@ -348,10 +362,18 @@ export async function runTaskPrepare(
   // enforcement (task complete / verify own that). Unlike the
   // ADR_COMMITMENTS_EMPTY lint advisory, this does NOT require res.resolved.
   let decisionCommitments:
-    | { adr: string; has_section: boolean; items: { text: string; done: boolean }[] }[]
+    | {
+        adr: string;
+        has_section: boolean;
+        items: { text: string; done: boolean }[];
+      }[]
     | undefined;
   if (isDecisionRequiredForTask(phase, task)) {
-    const resolution = await resolveDecisionGate(cwd, taskId, task.decision_refs);
+    const resolution = await resolveDecisionGate(
+      cwd,
+      taskId,
+      task.decision_refs,
+    );
     decisionCommitments = [];
     for (const considered of resolution.considered) {
       if (!considered.accepted) continue;
@@ -363,12 +385,18 @@ export async function runTaskPrepare(
       // `accepted`), so this read cannot escape the project root.
       let adrContent: string;
       try {
-        adrContent = await readFile(join(cwd, considered.path), "utf8");
+        adrContent = await readOwnedText(
+          await resolveDecisionReadPath(cwd, considered.path),
+        );
       } catch {
         continue;
       }
       const { hasSection, items } = parseAdrCommitments(adrContent);
-      decisionCommitments.push({ adr: considered.path, has_section: hasSection, items });
+      decisionCommitments.push({
+        adr: considered.path,
+        has_section: hasSection,
+        items,
+      });
     }
   }
 
@@ -393,9 +421,14 @@ export async function runTaskPrepare(
   let contextPackPath: string | null = null;
   let wouldWritePath: string | undefined;
   if (dryRun) {
-    // Mirror writeContextPack()'s output path computation so the
-    // would-write hint matches what an actual write would produce.
-    wouldWritePath = join(cwd, agentProfile.context_dir, `${taskId}.md`);
+    // Use the same resolver as the actual write so the would-write hint
+    // matches what an actual write would produce, and the same .context/**
+    // namespace + symlink-free containment rules apply.
+    wouldWritePath = await resolveProfileContextOutputPath(
+      cwd,
+      agentProfile.context_dir,
+      taskId,
+    );
   } else {
     const written = await writeContextPack(pack, { cwd, agentName });
     contextPackPath = written.outputPath;

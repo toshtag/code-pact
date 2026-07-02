@@ -26,9 +26,9 @@ decision in this project.
   retired / settled decision outcomes** resolve from `.code-pact/state` plus
   generated, deterministic control snapshots/records. The **active roadmap and
   not-yet-archived phase / task definitions remain `design/` inputs** — relocating
-  *those* into `.code-pact/state` is a separate future step, explicitly out of
-  v2.0 scope. `design/` is the human authoring surface for *active* control-plane
-  docs; **completed** `design/phases/*.yaml` and **retired** `design/decisions/*.md`
+  _those_ into `.code-pact/state` is a separate future step, explicitly out of
+  v2.0 scope. `design/` is the human authoring surface for _active_ control-plane
+  docs; **completed** `design/phases/*.yaml` and **retired** `design/decisions/**/*.md`
   are **ephemeral** (removable / `.gitignore`-able), with these locked rules:
   - **Completed/retired truth is snapshot/record-backed.** A completed phase's
     terminal state survives in a validated archive snapshot
@@ -38,7 +38,7 @@ decision in this project.
     legacy/prune ledger — a read-only backward-compat input, **not** the durable
     v2.0 retire truth; the decision-state record is.
   - **Hand-delete is allowed only after the snapshot/record exists.** A completed
-    `design/phases/*.yaml` or any `design/decisions/*.md` — up to and including the
+    `design/phases/*.yaml` or any `design/decisions/**/*.md` — up to and including the
     whole `design/decisions/` directory — may be deleted by hand (or via the
     `phase archive --write` / `decision retire --write` verbs) **once** its
     snapshot/record is written.
@@ -46,12 +46,12 @@ decision in this project.
     live-wins, fail-closed.** When the live doc is present it always wins; the
     record/snapshot is consulted **only on a true (symlink-safe) absence**. A
     record-backed retired decision releases a live gate **only** when it is an
-    accepted record that may satisfy that gate. **Missing *active* control docs
+    accepted record that may satisfy that gate. **Missing _active_ control docs
     (an active phase YAML, a live decision gate with no satisfying record) still
     fail closed** — never silently swallowed. The doc-link checker resolves a link
-    to a hand-deleted, record-backed decision as *retired*, not broken.
-  This model **supersedes** the pre-v2.0 rule that "`design/` is the source of
-  truth. Always."
+    to a hand-deleted, record-backed decision as _retired_, not broken.
+    This model **supersedes** the pre-v2.0 rule that "`design/` is the source of
+    truth. Always."
 
 - **Small surfaces, clear contracts.** Each command does one thing.
   Options that modify behavior must be explicit flags — no ambient magic.

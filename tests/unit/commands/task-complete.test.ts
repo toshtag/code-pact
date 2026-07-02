@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runTaskComplete } from "../../../src/commands/task-complete.ts";
@@ -43,7 +44,9 @@ agents:
     enabled: false
 `;
 
-const PHASE_YAML = (opts: { failingCommand?: boolean; status?: string } = {}) =>
+const PHASE_YAML = (
+  opts: { failingCommand?: boolean; status?: string; command?: string } = {},
+) =>
   [
     "id: P1",
     "name: Foundation",
@@ -59,7 +62,11 @@ const PHASE_YAML = (opts: { failingCommand?: boolean; status?: string } = {}) =>
     // Quote "false" so YAML keeps it as a string (otherwise it parses
      // as boolean and Phase schema rejects). When spawned, the literal
      // bin name "false" exits 1 on macOS/Linux.
-     opts.failingCommand ? '    - "false"' : "    - echo ok",
+     opts.command
+       ? `    - ${opts.command}`
+       : opts.failingCommand
+         ? '    - "false"'
+         : "    - echo ok",
     "tasks:",
     "  - id: P1-T1",
     "    type: feature",
@@ -81,6 +88,7 @@ async function setupProject(
     taskStatus?: string;
     projectYaml?: string;
     progressYaml?: string;
+    command?: string;
   } = {},
 ): Promise<void> {
   await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
@@ -101,6 +109,7 @@ async function setupProject(
     PHASE_YAML({
       failingCommand: opts.failingCommand,
       status: opts.taskStatus,
+      command: opts.command,
     }),
     "utf8",
   );
@@ -304,6 +313,55 @@ describe("runTaskComplete — dry run", () => {
       "utf8",
     );
     expect(after).toBe(before);
+  });
+
+  it("SECURITY: --dry-run does NOT execute verification commands (no side effects)", async () => {
+    // The verification command would create a marker file IF executed. A
+    // dry-run completion must only PREVIEW verification, never run the
+    // project-controlled (shell: true) commands.
+    const marker = join(dir, "dryrun-marker");
+    await setupProject(dir, { command: `touch ${JSON.stringify(marker)}` });
+    const progressBefore = await readFile(
+      join(dir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+
+    const result = await runTaskComplete({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+    });
+
+    expect(result.kind).toBe("dry_run");
+    // The command never ran → no marker, and the commands check is a preview.
+    expect(existsSync(marker)).toBe(false);
+    if (result.kind === "dry_run") {
+      const commands = result.verify.checks.find((c) => c.name === "commands");
+      expect(commands?.ok).toBe(true);
+      expect(commands?.reason ?? "").toContain("dry-run");
+    }
+    // Ledger untouched.
+    const progressAfter = await readFile(
+      join(dir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    expect(progressAfter).toBe(progressBefore);
+  });
+
+  it("contrast: a real (non-dry-run) completion DOES execute verification commands", async () => {
+    const marker = join(dir, "real-marker");
+    await setupProject(dir, { command: `touch ${JSON.stringify(marker)}` });
+
+    const result = await runTaskComplete({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+
+    expect(result.kind).toBe("done");
+    // The command ran → marker exists.
+    expect(existsSync(marker)).toBe(true);
   });
 
   it("would_append carries author (dry-run preview matches what would be written)", async () => {

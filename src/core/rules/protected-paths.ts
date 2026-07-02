@@ -1,5 +1,4 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readOwnedText, resolveRulesReadPath } from "../project-fs/index.ts";
 import {
   PROTECTED_PATHS,
   synthesizeSample,
@@ -53,10 +52,11 @@ export type LoadProtectedPathsResult = {
 export async function loadProtectedPaths(
   cwd: string,
 ): Promise<LoadProtectedPathsResult> {
-  const abs = join(cwd, PROTECTED_PATHS_RULE_FILE);
   let raw: string;
   try {
-    raw = await readFile(abs, "utf8");
+    raw = await readOwnedText(
+      await resolveRulesReadPath(cwd, PROTECTED_PATHS_RULE_FILE),
+    );
   } catch {
     return { paths: PROTECTED_PATHS, source: "fallback" };
   }

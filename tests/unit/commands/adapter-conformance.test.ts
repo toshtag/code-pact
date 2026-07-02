@@ -127,7 +127,7 @@ describe("runAdapterConformance — happy path", () => {
     });
     expect(result.compliant).toBe(true);
     expect(result.agent).toBe("claude-code");
-    expect(result.checks.every((c) => c.status === "pass")).toBe(true);
+    expect(result.checks.every(c => c.status === "pass")).toBe(true);
   });
 
   it("emits both manifest_present and instruction_file_present checks", async () => {
@@ -136,7 +136,7 @@ describe("runAdapterConformance — happy path", () => {
       cwd: dir,
       agentName: "claude-code",
     });
-    const ids = result.checks.map((c) => c.id);
+    const ids = result.checks.map(c => c.id);
     expect(ids).toContain("manifest_present");
     expect(ids).toContain("instruction_file_present");
   });
@@ -148,7 +148,7 @@ describe("runAdapterConformance — happy path", () => {
       agentName: "claude-code",
     });
     const checksumChecks = result.checks.filter(
-      (c) => c.id === "file_checksum_match",
+      c => c.id === "file_checksum_match",
     );
     // One file in the manifest.
     expect(checksumChecks).toHaveLength(1);
@@ -172,17 +172,14 @@ describe("runAdapterConformance — missing manifest", () => {
 
 describe("runAdapterConformance — required CLI surface mentions", () => {
   it("fails when a lifecycle surface is missing", async () => {
-    const body = VALID_CONTRACT_BODY.replace(
-      /code-pact task prepare.*\n/g,
-      "",
-    );
+    const body = VALID_CONTRACT_BODY.replace(/code-pact task prepare.*\n/g, "");
     await setupAdapter(dir, { instructionContent: body });
     const result = await runAdapterConformance({
       cwd: dir,
       agentName: "claude-code",
     });
     const surfaceCheck = result.checks.find(
-      (c) => c.id === "required_cli_surface_mentions",
+      c => c.id === "required_cli_surface_mentions",
     );
     expect(surfaceCheck?.status).toBe("fail");
     expect(
@@ -198,7 +195,7 @@ describe("runAdapterConformance — required CLI surface mentions", () => {
       agentName: "claude-code",
     });
     const surfaceCheck = result.checks.find(
-      (c) => c.id === "required_cli_surface_mentions",
+      c => c.id === "required_cli_surface_mentions",
     );
     expect(surfaceCheck?.status).toBe("fail");
     expect(
@@ -209,19 +206,22 @@ describe("runAdapterConformance — required CLI surface mentions", () => {
 
 describe("runAdapterConformance — required failure guidance", () => {
   it("fails when a required failure keyword is missing", async () => {
-    const body = VALID_CONTRACT_BODY.replace(/blocked dependency/g, "blocked deps");
+    const body = VALID_CONTRACT_BODY.replace(
+      /blocked dependency/g,
+      "blocked deps",
+    );
     await setupAdapter(dir, { instructionContent: body });
     const result = await runAdapterConformance({
       cwd: dir,
       agentName: "claude-code",
     });
     const guidanceCheck = result.checks.find(
-      (c) => c.id === "required_failure_guidance",
+      c => c.id === "required_failure_guidance",
     );
     expect(guidanceCheck?.status).toBe("fail");
-    expect(
-      (guidanceCheck?.details?.missing as string[]) ?? [],
-    ).toContain("blocked dependency");
+    expect((guidanceCheck?.details?.missing as string[]) ?? []).toContain(
+      "blocked dependency",
+    );
   });
 });
 
@@ -238,7 +238,7 @@ describe("runAdapterConformance — agent contract section + axes", () => {
     });
     expect(result.compliant).toBe(false);
     const sectionCheck = result.checks.find(
-      (c) => c.id === "contract_section_present",
+      c => c.id === "contract_section_present",
     );
     expect(sectionCheck?.status).toBe("fail");
   });
@@ -254,9 +254,7 @@ describe("runAdapterConformance — agent contract section + axes", () => {
       agentName: "claude-code",
     });
     expect(result.compliant).toBe(false);
-    const axisCheck = result.checks.find(
-      (c) => c.id === "axis_how_to_handle",
-    );
+    const axisCheck = result.checks.find(c => c.id === "axis_how_to_handle");
     expect(axisCheck?.status).toBe("fail");
   });
 });
@@ -277,7 +275,7 @@ describe("runAdapterConformance — checksum drift", () => {
     });
     expect(result.compliant).toBe(false);
     const checksumCheck = result.checks.find(
-      (c) => c.id === "file_checksum_match",
+      c => c.id === "file_checksum_match",
     );
     expect(checksumCheck?.status).toBe("fail");
     const details = checksumCheck?.details as
@@ -286,5 +284,130 @@ describe("runAdapterConformance — checksum drift", () => {
     expect(details?.expected_sha256).toBeDefined();
     expect(details?.actual_sha256).toBeDefined();
     expect(details?.expected_sha256).not.toBe(details?.actual_sha256);
+  });
+});
+
+describe("runAdapterConformance — role swap security", () => {
+  it("rejects CLAUDE.md with role: skill (no instruction entry → early fail, no read)", async () => {
+    // Forged manifest: CLAUDE.md is owned as role: instruction, but the
+    // manifest declares role: skill. findInstructionFile returns null
+    // (no file with role: instruction), so conformance fails early with
+    // instruction_file_present — no heading/substring inspection occurs.
+    await mkdir(join(dir, ".code-pact", "adapters"), { recursive: true });
+    await writeFile(join(dir, "CLAUDE.md"), VALID_CONTRACT_BODY, "utf8");
+    const yaml = [
+      `schema_version: 1`,
+      `agent_name: claude-code`,
+      `generator_version: 1.11.0`,
+      `adapter_schema_version: 1`,
+      `generated_at: "2026-05-22T00:00:00+00:00"`,
+      `profile_fingerprint:`,
+      `  instruction_filename: CLAUDE.md`,
+      `  context_dir: .context/claude-code`,
+      `files:`,
+      `  - path: CLAUDE.md`,
+      `    sha256: ${sha256(VALID_CONTRACT_BODY)}`,
+      `    managed: true`,
+      `    role: skill`,
+      ``,
+    ].join("\n");
+    await writeFile(
+      join(dir, ".code-pact", "adapters", "claude-code.manifest.yaml"),
+      yaml,
+      "utf8",
+    );
+
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    // Conformance must be false — no instruction file found.
+    expect(result.compliant).toBe(false);
+
+    // The instruction_file_present check must fail.
+    const instrCheck = result.checks.find(
+      c => c.id === "instruction_file_present",
+    );
+    expect(instrCheck).toBeDefined();
+    expect(instrCheck?.status).toBe("fail");
+
+    // No contract section / axis / surface checks should have run —
+    // the instruction read was never attempted.
+    const contractCheck = result.checks.find(
+      c => c.id === "contract_section_present",
+    );
+    expect(contractCheck).toBeUndefined();
+
+    // No checksum check should have run for CLAUDE.md.
+    const checksumCheck = result.checks.find(
+      c => c.id === "file_checksum_match" && c.file === "CLAUDE.md",
+    );
+    expect(checksumCheck).toBeUndefined();
+  });
+
+  it("rejects .claude/skills/context.md with role: instruction (role mismatch → unowned)", async () => {
+    // Forged manifest: .claude/skills/context.md is owned as role: skill,
+    // but the manifest declares role: instruction. Must be `unowned`.
+    await mkdir(join(dir, ".code-pact", "adapters"), { recursive: true });
+    await mkdir(join(dir, ".claude", "skills"), { recursive: true });
+    const skillContent = "# Context Skill\n\nManaged file.\n";
+    await writeFile(
+      join(dir, ".claude", "skills", "context.md"),
+      skillContent,
+      "utf8",
+    );
+    // Also need a valid instruction file for conformance to proceed past the
+    // instruction check.
+    await writeFile(join(dir, "CLAUDE.md"), VALID_CONTRACT_BODY, "utf8");
+    const yaml = [
+      `schema_version: 1`,
+      `agent_name: claude-code`,
+      `generator_version: 1.11.0`,
+      `adapter_schema_version: 1`,
+      `generated_at: "2026-05-22T00:00:00+00:00"`,
+      `profile_fingerprint:`,
+      `  instruction_filename: CLAUDE.md`,
+      `  context_dir: .context/claude-code`,
+      `files:`,
+      `  - path: CLAUDE.md`,
+      `    sha256: ${sha256(VALID_CONTRACT_BODY)}`,
+      `    managed: true`,
+      `    role: instruction`,
+      `  - path: .claude/skills/context.md`,
+      `    sha256: ${sha256(skillContent)}`,
+      `    managed: true`,
+      `    role: instruction`,
+      ``,
+    ].join("\n");
+    await writeFile(
+      join(dir, ".code-pact", "adapters", "claude-code.manifest.yaml"),
+      yaml,
+      "utf8",
+    );
+
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    expect(result.compliant).toBe(false);
+
+    // The skill file with wrong role must be flagged as unowned.
+    const unownedCheck = result.checks.find(
+      c =>
+        c.id === "adapter_file_path_unowned" &&
+        c.file === ".claude/skills/context.md",
+    );
+    expect(unownedCheck).toBeDefined();
+    expect(unownedCheck?.status).toBe("fail");
+
+    // No checksum check should have run for the role-swapped skill.
+    const checksumCheck = result.checks.find(
+      c =>
+        c.id === "file_checksum_match" &&
+        c.file === ".claude/skills/context.md",
+    );
+    expect(checksumCheck).toBeUndefined();
   });
 });

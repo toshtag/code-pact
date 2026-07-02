@@ -2,7 +2,7 @@
 
 A finished project accumulates completed phases and settled decisions. code-pact
 lets you **remove** those historical design docs — a completed
-`design/phases/*.yaml` or a retired `design/decisions/*.md` — without breaking
+`design/phases/*.yaml` or a retired `design/decisions/**/*.md` — without breaking
 anything that still points at them. This page is the user-facing walkthrough of
 **how to do it safely**. The exact command contracts (JSON envelopes, error codes)
 live in [`cli-contract.md`](../cli-contract.md#phase-archive); each verb's full
@@ -22,15 +22,15 @@ the snapshot/record is durable:
 - `code-pact phase archive <id> --write` — writes the snapshot **and** deletes the
   phase's `design/phases/*.yaml` file.
 - `code-pact decision retire <path> --write` — writes the record **and** deletes
-  the `design/decisions/*.md` file.
+  the `design/decisions/**/*.md` file.
 
 ## Three states of a design doc
 
-| State | Where the truth lives | What you can do |
-| --- | --- | --- |
-| **Live** | `design/phases/*.yaml` / `design/decisions/*.md` — the editable source | Edit it; it is the authoring surface |
-| **Archived / retired** | a snapshot/record under `.code-pact/state/archive/` (the source file may still be present, or already deleted by `--write`) | Refs resolve from the snapshot/record |
-| **Deleted** | the source file is gone; the snapshot/record remains | Everything still resolves; the file is reclaimable from git history if needed |
+| State                  | Where the truth lives                                                                                                       | What you can do                                                               |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| **Live**               | `design/phases/*.yaml` / `design/decisions/**/*.md` — the editable source                                                   | Edit it; it is the authoring surface                                          |
+| **Archived / retired** | a snapshot/record under `.code-pact/state/archive/` (the source file may still be present, or already deleted by `--write`) | Refs resolve from the snapshot/record                                         |
+| **Deleted**            | the source file is gone; the snapshot/record remains                                                                        | Everything still resolves; the file is reclaimable from git history if needed |
 
 The reader is **live-wins**: while the source file is present it always takes
 precedence; the snapshot/record is consulted only when the file is genuinely
@@ -62,8 +62,8 @@ it, the record must be able to carry that need:
   the record **cannot** carry it, and retire refuses. Migrate the task to an
   explicit, accepted `decision_refs` first.
 - An `acceptance_refs` (a reference-integrity annotation, not a gate) is softened by
-  a valid decision-state record **only when it points at a top-level
-  `design/decisions/*.md`**; an `acceptance_refs` to a non-decision target (an
+  a valid decision-state record **only when it points at a `.md` decision record
+  under `design/decisions/`**; an `acceptance_refs` to a non-decision target (an
   ordinary doc like `docs/cli-contract.md`) stays strict and is never softened by a
   record.
 
@@ -90,7 +90,7 @@ code-pact decision retire design/decisions/foo-rfc.md --write --json  # writes r
 
 This is the part that trips people up.
 
-**Bare `rm` *before* archive/retire → fail-closed (this is the safety, not a bug).**
+**Bare `rm` _before_ archive/retire → fail-closed (this is the safety, not a bug).**
 If you delete a live completed phase file by hand with no snapshot yet, the gates
 refuse. `plan lint` reports it as an error:
 
@@ -99,18 +99,27 @@ refuse. `plan lint` reports it as an error:
 // code-pact plan lint --json
 {
   "ok": false,
-  "error": { "code": "PLAN_LINT_FAILED", "message": "plan lint failed: 2 error(s), 0 warning(s)" },
+  "error": {
+    "code": "PLAN_LINT_FAILED",
+    "message": "plan lint failed: 2 error(s), 0 warning(s)",
+  },
   "data": {
     "errors": 2,
     "warnings": 0,
     "issues": [
-      { "code": "MISSING_PHASE_FILE", "severity": "error",
-        "message": "roadmap.yaml references \"design/phases/P2.yaml\" but the file does not exist" },
-      { "code": "INVALID_YAML", "severity": "error",
-        "message": "Cannot read or parse design/phases/P2.yaml: ENOENT ..." }
+      {
+        "code": "MISSING_PHASE_FILE",
+        "severity": "error",
+        "message": "roadmap.yaml references \"design/phases/P2.yaml\" but the file does not exist",
+      },
+      {
+        "code": "INVALID_YAML",
+        "severity": "error",
+        "message": "Cannot read or parse design/phases/P2.yaml: ENOENT ...",
+      },
       // (both errors stem from the one missing file)
-    ]
-  }
+    ],
+  },
 }
 ```
 
@@ -120,7 +129,7 @@ plane is refusing to lose the phase's task set silently — exactly the guarante
 lifecycle is built on. Run
 `phase archive --write` instead and the same deletion is safe.
 
-**Bare `rm` *after* archive/retire → safe.** Once every relevant file is
+**Bare `rm` _after_ archive/retire → safe.** Once every relevant file is
 snapshot/record-backed, a later bare `rm` of what is left — for example the whole
 now-empty `design/decisions/` directory — keeps every gate green, because the
 records resolve the references. (This composite hand-delete is pinned by the
@@ -131,7 +140,7 @@ real decision this way.)
 
 - **Dry-run by default** — nothing is written or deleted until you pass `--write`.
 - **Record-then-delete order** — the snapshot/record is written and readback-verified
-  *before* the source file is deleted, so a failure never leaves you with neither.
+  _before_ the source file is deleted, so a failure never leaves you with neither.
 - **Writer-not-trusted readback** — after writing, code-pact re-loads the
   snapshot/record through the reader and checks its `source_sha256` against the live
   file before authorizing the delete.
@@ -141,13 +150,13 @@ real decision this way.)
   error and **the source file is left untouched**.
 - **Live-wins** — a present source file is never overridden by a snapshot/record.
 - **Doc links stay green** — an inbound `.md` link to a retired decision resolves as
-  *retired* via the record, not as a broken link.
+  _retired_ via the record, not as a broken link.
 - **Archive maintenance never touches a live `design/` doc** — `state archive-maintain`
   (and the low-level `state compact-archive` / `state archive-retention` it orchestrates)
   bounds **only** `.code-pact/state/archive`. It folds the loose archive tail into bundles
   and removes unreferenced **archived** truth; it never deletes, rewrites, or resurrects a
-  `design/decisions/*.md`, `design/phases/*.yaml`, `design/rules/`, or `design/roadmap.yaml`.
-  A doc you safely removed *after* archiving stays removed — maintenance reads the archive,
+  `design/decisions/**/*.md`, `design/phases/*.yaml`, `design/rules/`, or `design/roadmap.yaml`.
+  A doc you safely removed _after_ archiving stays removed — maintenance reads the archive,
   not the authoring surface. (Pinned by the `state-archive-maintain` integration tests:
   the live `design/` tree is byte-identical before and after `--write`, and the
   `hand-delete`-style safe-delete gates stay green.)

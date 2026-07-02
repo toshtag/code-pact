@@ -8,8 +8,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { buildContextPack } from "../../../src/core/pack/index.ts";
+
+const execFileAsync = promisify(execFile);
 
 let work: string;
 
@@ -70,8 +74,9 @@ async function setupProject(opts: FixtureOpts = {}): Promise<void> {
     "utf8",
   );
   for (const [filename, body] of Object.entries(opts.decisions ?? {})) {
-    await mkdir(join(work, "design", "decisions"), { recursive: true });
-    await writeFile(join(work, "design", "decisions", filename), body, "utf8");
+    const target = join(work, "design", "decisions", filename);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, body, "utf8");
   }
   for (const [relPath, body] of Object.entries(opts.extraFiles ?? {})) {
     await mkdir(join(work, relPath, ".."), { recursive: true });
@@ -130,6 +135,11 @@ async function buildPack(): Promise<string> {
   return pack.content;
 }
 
+async function trackFiles(paths: string[]): Promise<void> {
+  await execFileAsync("git", ["init"], { cwd: work });
+  await execFileAsync("git", ["add", ...paths], { cwd: work });
+}
+
 describe("buildContextPack — Depends on section", () => {
   it("omits the section when depends_on is undefined", async () => {
     await setupProject();
@@ -186,8 +196,10 @@ describe("buildContextPack — Declared read surface", () => {
         "src/foo.ts": "// foo",
         "src/bar/baz.ts": "// baz",
         "src/bar/qux.ts": "// qux",
+        "src/bar/local.ts": "// local",
       },
     });
+    await trackFiles(["src/foo.ts", "src/bar/baz.ts", "src/bar/qux.ts"]);
     const out = await buildPack();
     expect(out).toContain("## Declared read surface");
     expect(out).toContain("- `src/foo.ts`");
@@ -195,12 +207,14 @@ describe("buildContextPack — Declared read surface", () => {
     expect(out).toContain("- `src/bar/*.ts`");
     expect(out).toContain("  - `src/bar/baz.ts`");
     expect(out).toContain("  - `src/bar/qux.ts`");
+    expect(out).not.toContain("src/bar/local.ts");
   });
 
   it("renders a 'no current matches' note when nothing matches", async () => {
     await setupProject({
       taskExtras: { reads: ["src/*.ts"] },
     });
+    await trackFiles(["design/roadmap.yaml"]);
     const out = await buildPack();
     expect(out).toContain("- `src/*.ts`");
     expect(out).toContain("_(no current matches on disk)_");
@@ -249,18 +263,34 @@ describe("buildContextPack — Declared decisions", () => {
     expect(out).toContain("body of the decision");
   });
 
-  // Security: a decision_ref is loaded YAML content read into the pack body, so
-  // a traversal value must NOT be read (it would otherwise exfiltrate an
-  // arbitrary file into the context pack shown to the agent).
-  it("does NOT read a decision_ref that escapes the project root", async () => {
-    const secretName = `pack-traversal-secret-${Date.now()}.md`;
+  it("shows nested decision paths without collapsing duplicate-looking basenames", async () => {
+    await setupProject({
+      taskExtras: {
+        decision_refs: ["design/decisions/security/P1-T1-rfc.md"],
+      },
+      decisions: {
+        "security/P1-T1-rfc.md": "# Security\n\nbody of the nested decision",
+      },
+    });
+    const out = await buildPack();
+    expect(out).toContain("### design/decisions/security/P1-T1-rfc.md");
+    expect(out).toContain("body of the nested decision");
+  });
+
+  // Security (Blocker 1): a decision_ref is loaded YAML content read into the
+  // pack body, so a traversal value must NOT be read (it would otherwise
+  // exfiltrate an arbitrary file into the context pack shown to the agent).
+  // The namespace contract (DecisionRefPath) now hard-fails such a value at
+  // PHASE LOAD — even earlier and more strongly than the prior load-then-skip:
+  // the plan is rejected (CONFIG_ERROR) before any pack body is built, so the
+  // secret can never be reached at all.
+  it("rejects a decision_ref that escapes the project root at phase load", async () => {
+    const secretName = `pack-traversal-secret-9f3a.md`;
     const secretAbs = join(work, "..", secretName);
     await writeFile(secretAbs, "**Status:** accepted\n\nLEAKED-SECRET-MARKER-9f3a", "utf8");
     try {
       await setupProject({ taskExtras: { decision_refs: [`../${secretName}`] } });
-      const out = await buildPack();
-      expect(out).not.toContain("LEAKED-SECRET-MARKER-9f3a");
-      expect(out).not.toContain("## Declared decisions");
+      await expect(buildPack()).rejects.toThrow(/malformed|CONFIG_ERROR/i);
     } finally {
       await rm(secretAbs, { force: true });
     }
@@ -334,6 +364,7 @@ describe("buildContextPack — section ordering when multiple fields declared", 
         "docs/cli-contract.md": "doc",
       },
     });
+    await trackFiles(["src/foo.ts"]);
     const out = await buildPack();
     const idx = (heading: string): number => out.indexOf(heading);
     const order = [

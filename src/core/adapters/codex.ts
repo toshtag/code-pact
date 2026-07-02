@@ -18,7 +18,11 @@ import {
 // AGENTS.md template
 // ---------------------------------------------------------------------------
 
-function agentsMd(profile: AgentProfile, modelProfiles: ModelProfile[], locale: Locale): string {
+function agentsMd(
+  profile: AgentProfile,
+  modelProfiles: ModelProfile[],
+  locale: Locale,
+): string {
   const t = adapterCommon(locale);
   return [
     `# Codex — Project Instructions`,
@@ -55,6 +59,9 @@ export async function generateCodexDesiredFiles(
 export const codexAdapterDescriptor: AdapterDescriptor = {
   generateDesiredFiles: generateCodexDesiredFiles,
   capabilities: ["instructions_file", "context_dir"] as const,
-  ownedPathGlobs: ["AGENTS.md"] as const,
+  ownedPathRoles: { "AGENTS.md": "instruction" } as const,
+  profilePathContract: {
+    instructionFilename: "AGENTS.md",
+  },
   adapterSchemaVersion: 1,
 };

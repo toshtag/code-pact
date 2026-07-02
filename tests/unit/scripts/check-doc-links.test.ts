@@ -1,23 +1,35 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { checkDocLinks } from "../../../scripts/check-doc-links.ts";
 import { writeDecisionRecord } from "../../../src/core/archive/decision-record.ts";
-import { decisionRecordPath, sha256Hex } from "../../../src/core/archive/paths.ts";
+import {
+  decisionRecordPath,
+  sha256Hex,
+} from "../../../src/core/archive/paths.ts";
 
 // design-docs-ephemeral step 7 PR-A. check-doc-links resolves a link to a
-// hand-deleted `design/decisions/*.md` as RETIRED (not broken) IFF a valid,
+// hand-deleted `design/decisions/**/*.md` as RETIRED (not broken) IFF a valid,
 // identity-checked decision-state record backs it — the judgement delegated whole
 // to the step-5 `decisionRecordSoftensMissingRef` predicate. These tests drive
 // `checkDocLinks({ repoRoot })` over a temp tree and assert the exit code + output.
 
 const NOW = new Date("2026-06-10T00:00:00.000Z");
 const XREF = "design/decisions/x-rfc.md";
-const ACCEPTED = "# RFC: X\n\n**Status:** accepted (P9, 2026-06)\n\n## Decision\n\nSettled.\n";
+const ACCEPTED =
+  "# RFC: X\n\n**Status:** accepted (P9, 2026-06)\n\n## Decision\n\nSettled.\n";
 // `**Status:** proposed` → classifyAdr → adr_status_at_snapshot "blocked"
 // (a schema-valid NON-accepted record; never a literal `proposed` in the record).
-const BLOCKED = "# RFC: X\n\n**Status:** proposed\n\n## Decision\n\nNot yet settled.\n";
+const BLOCKED =
+  "# RFC: X\n\n**Status:** proposed\n\n## Decision\n\nNot yet settled.\n";
 
 /** Capture stdout/stderr writes so we can assert on the report text. */
 function makeSink() {
@@ -29,7 +41,9 @@ let cwd: string;
 beforeEach(async () => {
   cwd = await mkdtemp(join(tmpdir(), "check-doc-links-"));
   await mkdir(join(cwd, "design", "decisions"), { recursive: true });
-  await mkdir(join(cwd, ".code-pact", "state", "archive", "decisions"), { recursive: true });
+  await mkdir(join(cwd, ".code-pact", "state", "archive", "decisions"), {
+    recursive: true,
+  });
 });
 afterEach(async () => {
   if (cwd) await rm(cwd, { recursive: true, force: true });
@@ -47,14 +61,20 @@ async function writeReadmeLinking(target = XREF): Promise<void> {
 /** Write the ADR + its decision-state record, then retire (delete the live .md). */
 async function retireWithRecord(adr: string): Promise<void> {
   await writeFile(join(cwd, XREF), adr, "utf8");
-  expect((await writeDecisionRecord(cwd, XREF, { now: NOW })).kind).toBe("written");
+  expect((await writeDecisionRecord(cwd, XREF, { now: NOW })).kind).toBe(
+    "written",
+  );
   await rm(join(cwd, XREF));
 }
 
 async function run(): Promise<{ code: number; out: string; err: string }> {
   const o = makeSink();
   const e = makeSink();
-  const code = await checkDocLinks({ repoRoot: cwd, stdout: o.sink, stderr: e.sink });
+  const code = await checkDocLinks({
+    repoRoot: cwd,
+    stdout: o.sink,
+    stderr: e.sink,
+  });
   return { code, out: o.lines.join(""), err: e.lines.join("") };
 }
 
@@ -120,8 +140,13 @@ describe("checkDocLinks — archive-record-aware (step 7 PR-A)", () => {
     // looked-up ref, so this identity-mismatched record must NOT retire the link.
     const otherRef = "design/decisions/other-rfc.md";
     await writeFile(join(cwd, otherRef), ACCEPTED, "utf8");
-    expect((await writeDecisionRecord(cwd, otherRef, { now: NOW })).kind).toBe("written");
-    const otherRecord = await readFile(decisionRecordPath(cwd, otherRef), "utf8");
+    expect((await writeDecisionRecord(cwd, otherRef, { now: NOW })).kind).toBe(
+      "written",
+    );
+    const otherRecord = await readFile(
+      decisionRecordPath(cwd, otherRef),
+      "utf8",
+    );
     // Place the OTHER decision's record at x-rfc's expected record path verbatim.
     await writeFile(decisionRecordPath(cwd, XREF), otherRecord, "utf8");
     await rm(join(cwd, XREF), { force: true }); // x-rfc.md never existed; ensure absent
@@ -178,7 +203,10 @@ describe("checkDocLinks — archive-record-aware (step 7 PR-A)", () => {
     await retireWithRecord(ACCEPTED); // record written; live .md deleted
     const outside = await mkdtemp(join(tmpdir(), "check-doc-links-outside-"));
     try {
-      await rm(join(cwd, "design", "decisions"), { recursive: true, force: true });
+      await rm(join(cwd, "design", "decisions"), {
+        recursive: true,
+        force: true,
+      });
       await symlink(outside, join(cwd, "design", "decisions"));
       await writeReadmeLinking();
       const r = await run();
@@ -192,8 +220,14 @@ describe("checkDocLinks — archive-record-aware (step 7 PR-A)", () => {
 
 describe("checkDocLinks — archived CHANGELOG history is excluded as a SOURCE (verbatim point-in-time content)", () => {
   async function writeHistory(rel: string, body: string): Promise<void> {
-    await mkdir(join(cwd, "docs", "maintainers", "history"), { recursive: true });
-    await writeFile(join(cwd, "docs", "maintainers", "history", rel), body, "utf8");
+    await mkdir(join(cwd, "docs", "maintainers", "history"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(cwd, "docs", "maintainers", "history", rel),
+      body,
+      "utf8",
+    );
   }
 
   it("a broken link INSIDE CHANGELOG-<major>.md does not fail (the archive is not scanned as a source)", async () => {
@@ -207,7 +241,10 @@ describe("checkDocLinks — archived CHANGELOG history is excluded as a SOURCE (
   });
 
   it("a link TO an archived CHANGELOG still resolves (excluded as source, valid as target)", async () => {
-    await writeHistory("CHANGELOG-1.md", "# Changelog (v1.x)\n\nArchived verbatim.\n");
+    await writeHistory(
+      "CHANGELOG-1.md",
+      "# Changelog (v1.x)\n\nArchived verbatim.\n",
+    );
     await writeFile(
       join(cwd, "README.md"),
       "# P\n\nOlder releases: [v1.x](docs/maintainers/history/CHANGELOG-1.md).\n",
@@ -219,7 +256,10 @@ describe("checkDocLinks — archived CHANGELOG history is excluded as a SOURCE (
   });
 
   it("a NON-CHANGELOG history doc IS still scanned (the exclusion is narrow, not all of history/)", async () => {
-    await writeHistory("some-backlog.md", "# Backlog\n\nSee [a gone target](nope.md).\n");
+    await writeHistory(
+      "some-backlog.md",
+      "# Backlog\n\nSee [a gone target](nope.md).\n",
+    );
     const r = await run();
     expect(r.code).toBe(1);
     expect(r.err).toContain("nope.md");

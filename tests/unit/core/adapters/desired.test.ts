@@ -19,14 +19,41 @@ describe("dedupeDesiredFiles", () => {
   });
 
   it("drops an identical-content duplicate path", () => {
-    const out = dedupeDesiredFiles([skill("a.md", "A"), skill("a.md", "A"), skill("b.md", "B")]);
-    expect(out.map((f) => f.path)).toEqual(["a.md", "b.md"]);
+    const out = dedupeDesiredFiles([
+      skill("a.md", "A"),
+      skill("a.md", "A"),
+      skill("b.md", "B"),
+    ]);
+    expect(out.map(f => f.path)).toEqual(["a.md", "b.md"]);
   });
 
   it("throws ADAPTER_DESIRED_PATH_CONFLICT on same path with different content", () => {
-    expect(() => dedupeDesiredFiles([skill("a.md", "A"), skill("a.md", "DIFFERENT")])).toThrow(
+    expect(() =>
+      dedupeDesiredFiles([skill("a.md", "A"), skill("a.md", "DIFFERENT")]),
+    ).toThrow(
       expect.objectContaining({ code: "ADAPTER_DESIRED_PATH_CONFLICT" }),
     );
+  });
+
+  it("throws ADAPTER_DESIRED_PATH_CONFLICT on same path + same content but different roles", () => {
+    const instruction = (
+      path: string,
+      content: string,
+    ): DesiredAdapterFile => ({
+      path,
+      role: "instruction",
+      content,
+    });
+    expect(() =>
+      dedupeDesiredFiles([skill("a.md", "A"), instruction("a.md", "A")]),
+    ).toThrow(
+      expect.objectContaining({ code: "ADAPTER_DESIRED_PATH_CONFLICT" }),
+    );
+  });
+
+  it("drops an identical duplicate with same role", () => {
+    const out = dedupeDesiredFiles([skill("a.md", "A"), skill("a.md", "A")]);
+    expect(out.map(f => f.path)).toEqual(["a.md"]);
   });
 });
 
@@ -37,7 +64,10 @@ describe("AdapterManifest duplicate-path constraint", () => {
     generator_version: "1.20.0",
     adapter_schema_version: 0,
     generated_at: "2026-05-27T00:00:00.000Z",
-    profile_fingerprint: { instruction_filename: "CLAUDE.md", context_dir: ".context/claude-code" },
+    profile_fingerprint: {
+      instruction_filename: "CLAUDE.md",
+      context_dir: ".context/claude-code",
+    },
   };
   const file = (path: string) => ({
     path,
@@ -49,7 +79,10 @@ describe("AdapterManifest duplicate-path constraint", () => {
   it("strict schema rejects duplicate files[].path", () => {
     const result = AdapterManifest.safeParse({
       ...base,
-      files: [file(".claude/skills/verify.md"), file(".claude/skills/verify.md")],
+      files: [
+        file(".claude/skills/verify.md"),
+        file(".claude/skills/verify.md"),
+      ],
     });
     expect(result.success).toBe(false);
   });
@@ -57,7 +90,10 @@ describe("AdapterManifest duplicate-path constraint", () => {
   it("strict schema accepts a unique file set", () => {
     const result = AdapterManifest.safeParse({
       ...base,
-      files: [file(".claude/skills/verify.md"), file(".claude/skills/verify-2.md")],
+      files: [
+        file(".claude/skills/verify.md"),
+        file(".claude/skills/verify-2.md"),
+      ],
     });
     expect(result.success).toBe(true);
   });
@@ -65,7 +101,10 @@ describe("AdapterManifest duplicate-path constraint", () => {
   it("lenient schema tolerates duplicate paths (repair-read only)", () => {
     const result = AdapterManifestLenient.safeParse({
       ...base,
-      files: [file(".claude/skills/verify.md"), file(".claude/skills/verify.md")],
+      files: [
+        file(".claude/skills/verify.md"),
+        file(".claude/skills/verify.md"),
+      ],
     });
     expect(result.success).toBe(true);
   });

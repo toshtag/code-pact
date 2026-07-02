@@ -1,5 +1,8 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  readOwnedText,
+  statOwned,
+  resolveDoctorConfigReadPath,
+} from "./project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
@@ -24,15 +27,20 @@ export const DoctorConfig = z.object({
 });
 export type DoctorConfig = z.infer<typeof DoctorConfig>;
 
+const DOCTOR_CONFIG_MAX_BYTES = 128 * 1024;
+
 /**
  * Read `.code-pact/doctor.yaml`. Tolerant: an absent, unreadable, or invalid
  * file yields the all-default config (no checks disabled), matching how a
  * project with no doctor.yaml behaves.
  */
 export async function loadDoctorConfig(cwd: string): Promise<DoctorConfig> {
-  const path = join(cwd, ".code-pact", "doctor.yaml");
   try {
-    const raw = await readFile(path, "utf8");
+    const path = await resolveDoctorConfigReadPath(cwd);
+    const s = await statOwned(path);
+    if (!s.isFile()) return { disabled_checks: [] };
+    if (s.size > DOCTOR_CONFIG_MAX_BYTES) return { disabled_checks: [] };
+    const raw = await readOwnedText(path);
     const parsed = DoctorConfig.safeParse(parseYaml(raw));
     if (parsed.success) return parsed.data;
   } catch {

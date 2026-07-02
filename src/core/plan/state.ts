@@ -1,19 +1,29 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readOwnedText, listOwned } from "../project-fs/operations.ts";
+import {
+  resolveProgressReadPath,
+  resolvePhaseDirectoryReadPath,
+  resolvePhaseReadPath,
+  resolveRoadmapReadPath,
+} from "../project-fs/authority-resolvers.ts";
+import { unbrand } from "../project-fs/branded-paths.ts";
+import type { OwnedReadPath } from "../project-fs/branded-paths.ts";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadYaml, ParseError } from "../../io/load.ts";
 import { Phase, type Phase as PhaseT } from "../schemas/phase.ts";
+import { ProgressLog, type ProgressEvent } from "../schemas/progress-event.ts";
 import {
-  ProgressLog,
-  type ProgressEvent,
-} from "../schemas/progress-event.ts";
-import { Roadmap, type PhaseRef, type Roadmap as RoadmapT } from "../schemas/roadmap.ts";
+  Roadmap,
+  type PhaseRef,
+  type Roadmap as RoadmapT,
+} from "../schemas/roadmap.ts";
 import type { Task as TaskT } from "../schemas/task.ts";
-import { mergeProgressStreams, progressPath } from "../progress/io.ts";
 import {
-  eventsDir,
-  type LoadedEventFile,
-} from "../progress/events-io.ts";
+  mergeProgressStreams,
+  progressPath,
+  PROGRESS_PATH_SEGMENTS,
+} from "../progress/io.ts";
+import { eventsDir, type LoadedEventFile } from "../progress/events-io.ts";
 import {
   readAllProgressEventSources,
   readPackSources,
@@ -84,14 +94,9 @@ export type LenientLoadResult = {
 };
 
 const ROADMAP_REL_PATH = ["design", "roadmap.yaml"] as const;
-const PHASES_DIR_SEGMENTS = ["design", "phases"] as const;
 
 function roadmapPath(cwd: string): string {
   return join(cwd, ...ROADMAP_REL_PATH);
-}
-
-function phasesDirPath(cwd: string): string {
-  return join(cwd, ...PHASES_DIR_SEGMENTS);
 }
 
 /**
@@ -113,8 +118,64 @@ function phasesDirPath(cwd: string): string {
  * missing file still surfaces as raw ENOENT here, same as the other seam, which
  * is the natural place such a wrapper would intercept.)
  */
-function loadPlanStatePhase(absPath: string): Promise<PhaseT> {
-  return loadYaml(absPath, Phase);
+function loadPlanStatePhase(path: OwnedReadPath): Promise<PhaseT> {
+  return loadYaml(path, Phase);
+}
+
+function planStateConfigError(file: string, err: unknown): Error {
+  if ((err as NodeJS.ErrnoException).code === "CONFIG_ERROR")
+    return err as Error;
+  const msg = err instanceof Error ? err.message : String(err);
+  const e = new Error(`${file} cannot be read or parsed as plan state: ${msg}`);
+  (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+  return e;
+}
+
+async function loadPlanStateRoadmap(path: OwnedReadPath): Promise<RoadmapT> {
+  try {
+    return await loadYaml(path, Roadmap);
+  } catch (err) {
+    throw planStateConfigError("design/roadmap.yaml", err);
+  }
+}
+
+async function loadPlanStatePhaseStrict(
+  ref: PhaseRef,
+  path: OwnedReadPath,
+): Promise<PhaseT> {
+  try {
+    return await loadPlanStatePhase(path);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") throw err;
+    throw planStateConfigError(ref.path, err);
+  }
+}
+
+/**
+ * Resolve a project-relative control-plane path (the roadmap, or a roadmap-
+ * referenced phase) to an OWNED absolute path for the STRICT loader. A `..` /
+ * symlink component is mapped to CONFIG_ERROR (fail-closed) so a hostile repo
+ * cannot point the roadmap/phase graph at another project file or an external
+ * target and have it read as the control plane. The actual `loadYaml` then
+ * operates on the owned path, so its ParseError-on-malformed contract is
+ * unchanged. (CWE-59.)
+ */
+async function resolveGraphPathStrict(
+  cwd: string,
+  relPath: string,
+): Promise<OwnedReadPath> {
+  try {
+    if (relPath === "design/roadmap.yaml") {
+      return await resolveRoadmapReadPath(cwd);
+    }
+    return await resolvePhaseReadPath(cwd, relPath);
+  } catch (err) {
+    const e = new Error(
+      `"${relPath}" is not a safe project-relative path: ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
 }
 
 /**
@@ -149,9 +210,13 @@ async function resolveDeletedPhaseRef(
 > {
   const res = await resolveMissingPhaseRef(cwd, ref);
   if (res.kind === "tolerated") {
-    return { tolerated: true, entries: archivedEntriesFromSnapshot(res.snapshot) };
+    return {
+      tolerated: true,
+      entries: archivedEntriesFromSnapshot(res.snapshot),
+    };
   }
-  if (res.kind === "fail_invalid") return { tolerated: false, invalid: res.reason };
+  if (res.kind === "fail_invalid")
+    return { tolerated: false, invalid: res.reason };
   return { tolerated: false };
 }
 
@@ -171,7 +236,9 @@ async function resolveDeletedPhaseRef(
  * dependency / progress-ledger drift), so `validate --strict` is green only when no
  * such independent issue remains.
  */
-function unreferencedInvalidToFileIssue(inv: UnreferencedSnapshotInvalid): FileIssue {
+function unreferencedInvalidToFileIssue(
+  inv: UnreferencedSnapshotInvalid,
+): FileIssue {
   return {
     code: "PHASE_SNAPSHOT_INVALID",
     severity: "warning",
@@ -208,19 +275,28 @@ function buildTaskIndex(
  * and analyze treats every task as historical / planned.
  */
 export async function loadPlanState(cwd: string): Promise<PlanState> {
-  const rmPath = roadmapPath(cwd);
-  const roadmap = await loadYaml(rmPath, Roadmap);
+  // Contained roadmap read (CONFIG_ERROR on `..`/symlink escape) so this strict
+  // graph — behind task/phase runbook, status, plan analyze — can never be read
+  // from an out-of-project roadmap.
+  const rmPath = await resolveGraphPathStrict(cwd, "design/roadmap.yaml");
+  const roadmap = await loadPlanStateRoadmap(rmPath);
 
   const phases: PhaseEntry[] = [];
   const archivedCandidates: ArchivedTaskEntry[] = [];
   for (const ref of roadmap.phases) {
-    const absPath = join(cwd, ref.path);
+    // Contain each roadmap-referenced phase path too; a symlink-escaping ref is a
+    // hard CONFIG_ERROR (NOT an ENOENT archive-toleration candidate).
+    const absPath = await resolveGraphPathStrict(cwd, ref.path);
     try {
-      phases.push({ ref, absPath, phase: await loadPlanStatePhase(absPath) });
+      phases.push({
+        ref,
+        absPath,
+        phase: await loadPlanStatePhaseStrict(ref, absPath),
+      });
     } catch (err) {
       // design-docs-ephemeral (step 4a): ONLY a missing file (ENOENT) is a
       // candidate for archive toleration; a ParseError (schema-invalid live file)
-      // keeps propagating unchanged.
+      // is already mapped to CONFIG_ERROR by loadPlanStatePhaseStrict.
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
       const r = await resolveDeletedPhaseRef(cwd, ref);
       if (r.tolerated) {
@@ -245,18 +321,21 @@ export async function loadPlanState(cwd: string): Promise<PlanState> {
   // caught by the merge below.
   const discovered = await discoverUnreferencedSnapshots(
     cwd,
-    new Set(roadmap.phases.map((r) => r.id)),
+    new Set(roadmap.phases.map(r => r.id)),
   );
   archivedCandidates.push(...discovered.entries);
 
   const taskIndex = buildTaskIndex(phases);
   // Collision-checked merge: an archived id that collides with a live id or
   // another snapshot is excluded AND fail-closed (never a silencer).
-  const merge = mergeArchivedTaskIndex(new Set(taskIndex.keys()), archivedCandidates);
+  const merge = mergeArchivedTaskIndex(
+    new Set(taskIndex.keys()),
+    archivedCandidates,
+  );
   if (merge.collisions.length > 0) {
     throw new PhaseSnapshotInvalidError(
       `archive snapshot task ids collide with the live plan: ${merge.collisions
-        .map((c) => c.reason)
+        .map(c => c.reason)
         .join("; ")}`,
     );
   }
@@ -337,13 +416,21 @@ export async function collectPlanArtifacts(
 ): Promise<LenientLoadResult> {
   const fileIssues: FileIssue[] = [];
   const skippedChecks: string[] = [];
-  const rmPath = roadmapPath(cwd);
+  const rmPath = roadmapPath(cwd); // display label for the returned field
 
   let roadmap: RoadmapT | null = null;
   try {
-    roadmap = await loadYaml(rmPath, Roadmap);
+    // OWN the roadmap read. A `..`/symlink alias (in- OR out-of-project) OR a
+    // parse/schema error both become a FileIssue on `design/roadmap.yaml` →
+    // planArtifactsUnreadable fail-closes (so decision prune/retire cannot be
+    // authorized off an ALIASED roadmap that hides the current project's
+    // referencing tasks — the same control-plane parity the strict loader holds).
+    // pushParseIssue tags the ownership refusal (a non-ParseError CONFIG_ERROR /
+    // PATH_NOT_OWNED) as an INVALID_YAML error FileIssue.
+    const rmAbs = await resolveRoadmapReadPath(cwd);
+    roadmap = await loadYaml(rmAbs, Roadmap);
   } catch (err) {
-    pushParseIssue(fileIssues, err, rmPath);
+    pushParseIssue(fileIssues, err, "design/roadmap.yaml");
     skippedChecks.push(
       "MISSING_PHASE_FILE",
       "ORPHAN_PHASE_FILE",
@@ -368,10 +455,18 @@ export async function collectPlanArtifacts(
   const phases: PhaseEntry[] = [];
   const archivedCandidates: ArchivedTaskEntry[] = [];
   for (const ref of roadmap.phases) {
-    const absPath = join(cwd, ref.path);
+    let ownedPath: OwnedReadPath;
     try {
-      const phase = await loadPlanStatePhase(absPath);
-      phases.push({ ref, absPath, phase });
+      // OWN each phase ref; a symlink alias (in- OR out-of-project) becomes a
+      // graph-file FileIssue (fail-closed for prune/retire), not an aliased read.
+      ownedPath = await resolvePhaseReadPath(cwd, ref.path);
+    } catch (err) {
+      pushParseIssue(fileIssues, err, ref.path);
+      continue;
+    }
+    try {
+      const phase = await loadPlanStatePhase(ownedPath);
+      phases.push({ ref, absPath: unbrand(ownedPath), phase });
     } catch (err) {
       // design-docs-ephemeral (step 4a): only a missing file (ENOENT) is a
       // toleration candidate; a ParseError keeps its existing FileIssue.
@@ -403,7 +498,11 @@ export async function collectPlanArtifacts(
   let legacyEvents: ProgressEvent[] = [];
   let hasLegacy = false;
   try {
-    const raw = await readFile(progPath, "utf8");
+    const progReadPath = await resolveProgressReadPath(
+      cwd,
+      PROGRESS_PATH_SEGMENTS.join("/"),
+    );
+    const raw = await readOwnedText(progReadPath);
     const parsed = ProgressLog.safeParse(parseYaml(raw) as unknown);
     if (parsed.success) {
       legacyEvents = parsed.data.events;
@@ -428,24 +527,38 @@ export async function collectPlanArtifacts(
     packSources = await readPackSources(cwd, "lenient");
   } catch (err) {
     pushParseIssue(fileIssues, err, eventsDir(cwd));
-    packSources = { looseFiles: [], packs: [], validatedPackFiles: [], issues: [] };
+    packSources = {
+      looseFiles: [],
+      packs: [],
+      validatedPackFiles: [],
+      issues: [],
+    };
   }
   for (const issue of packSources.issues) {
-    fileIssues.push({ code: issue.code, severity: "error", message: issue.message });
+    fileIssues.push({
+      code: issue.code,
+      severity: "error",
+      message: issue.message,
+    });
   }
   // Archived-task legacy conflict gate (lenient: collect as FileIssue + exclude
   // the offending legacy event from the merged stream so state stays reproducible).
   const { durableIds, archivedTaskIds, archivedEnumerationComplete } =
     await durableIdsAndArchivedTasks(cwd, packSources);
-  const { mergeableLegacyEvents, issues: legacyIssues } = filterArchivedTaskLegacyConflicts(
-    legacyEvents,
-    durableIds,
-    archivedTaskIds,
-    "lenient",
-    archivedEnumerationComplete,
-  );
+  const { mergeableLegacyEvents, issues: legacyIssues } =
+    filterArchivedTaskLegacyConflicts(
+      legacyEvents,
+      durableIds,
+      archivedTaskIds,
+      "lenient",
+      archivedEnumerationComplete,
+    );
   for (const issue of legacyIssues) {
-    fileIssues.push({ code: issue.code, severity: "error", message: issue.message });
+    fileIssues.push({
+      code: issue.code,
+      severity: "error",
+      message: issue.message,
+    });
   }
   const eventFiles: LoadedEventFile[] = [
     ...packSources.looseFiles,
@@ -466,7 +579,7 @@ export async function collectPlanArtifacts(
   // for a live dep, ORPHAN_PROGRESS_EVENT for a leftover event — those are NOT silenced.
   const discovered = await discoverUnreferencedSnapshots(
     cwd,
-    new Set(roadmap.phases.map((r) => r.id)),
+    new Set(roadmap.phases.map(r => r.id)),
   );
   archivedCandidates.push(...discovered.entries);
   for (const inv of discovered.invalid) {
@@ -476,13 +589,16 @@ export async function collectPlanArtifacts(
   const taskIndex = buildTaskIndex(phases);
   // Collision-checked merge (lenient: collision → FileIssue, colliding ids
   // excluded; never thrown, never a silencer).
-  const merge = mergeArchivedTaskIndex(new Set(taskIndex.keys()), archivedCandidates);
+  const merge = mergeArchivedTaskIndex(
+    new Set(taskIndex.keys()),
+    archivedCandidates,
+  );
   for (const c of merge.collisions) {
     fileIssues.push({
       code: "PHASE_SNAPSHOT_INVALID",
       severity: "error",
       message: `archive snapshot task id collides with the live plan: ${c.reason}`,
-      file: c.phase_ids.map((id) => `design/phases (archived ${id})`).join(", "),
+      file: c.phase_ids.map(id => `design/phases (archived ${id})`).join(", "),
     });
   }
 
@@ -496,17 +612,25 @@ export async function collectPlanArtifacts(
     archivedTaskIndex: merge.index,
   };
 
-  return { state, archivedTaskIndex: merge.index, fallbackPhases: [], fileIssues, skippedChecks };
+  return {
+    state,
+    archivedTaskIndex: merge.index,
+    fallbackPhases: [],
+    fileIssues,
+    skippedChecks,
+  };
 }
 
 async function scanPhasesDirBestEffort(
   cwd: string,
   fileIssues: FileIssue[],
 ): Promise<PhaseEntry[]> {
-  const phasesDir = phasesDirPath(cwd);
   let entries: string[] = [];
   try {
-    entries = await readdir(phasesDir);
+    // Require an owned directory BEFORE enumerating it: no symlink alias may
+    // turn the control-plane phase namespace into a view of another directory.
+    const phasesDir = await resolvePhaseDirectoryReadPath(cwd);
+    entries = await listOwned(phasesDir);
   } catch {
     return [];
   }
@@ -514,15 +638,21 @@ async function scanPhasesDirBestEffort(
   const phases: PhaseEntry[] = [];
   for (const entry of entries) {
     if (!entry.endsWith(".yaml")) continue;
-    const absPath = join(phasesDir, entry);
     const relPath = `design/phases/${entry}`;
+    let ownedPath: OwnedReadPath;
     try {
-      const phase = await loadPlanStatePhase(absPath);
+      ownedPath = await resolvePhaseReadPath(cwd, relPath);
+    } catch (err) {
+      pushParseIssue(fileIssues, err, relPath);
+      continue;
+    }
+    try {
+      const phase = await loadPlanStatePhase(ownedPath);
       // Without a roadmap, ref.id is unknown — fall back to the phase id
       // so downstream checks can still refer to the phase by id.
       phases.push({
         ref: { id: phase.id, path: relPath, weight: phase.weight },
-        absPath,
+        absPath: unbrand(ownedPath),
         phase,
       });
     } catch (err) {

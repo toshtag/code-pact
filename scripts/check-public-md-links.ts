@@ -3,7 +3,7 @@
 //
 // This is the COMPLEMENT of `check-doc-links`, not a duplicate:
 //   - `check-doc-links` is RECORD-AWARE: a link to a hand-deleted / retired
-//     `design/decisions/*.md` resolves as OK when a `.code-pact/state` decision
+//     `design/decisions/**/*.md` resolves as OK when a `.code-pact/state` decision
 //     record backs it (the ephemeral-design-doc model's semantic integrity).
 //   - THIS check is DISK-ONLY: a clickable Markdown link whose target file is not
 //     present on disk is a 404 for a human reading the rendered Markdown on GitHub,

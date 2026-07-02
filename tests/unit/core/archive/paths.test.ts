@@ -54,7 +54,7 @@ describe("phaseSnapshotPath", () => {
 });
 
 describe("normalizeDecisionRef (canonical confinement)", () => {
-  it("accepts a top-level design/decisions/*.md and normalizes ./ prefixes", () => {
+  it("accepts a design/decisions/**/*.md and normalizes ./ prefixes", () => {
     expect(normalizeDecisionRef("design/decisions/foo-rfc.md")).toBe(
       "design/decisions/foo-rfc.md",
     );
@@ -63,20 +63,20 @@ describe("normalizeDecisionRef (canonical confinement)", () => {
     );
   });
 
-  it("rejects absolute, traversal, outside-dir, nested, and non-decision targets", () => {
+  it("accepts nested decision refs and rejects absolute, traversal, outside-dir, and non-decision targets", () => {
     expect(normalizeDecisionRef("/etc/passwd")).toBeNull();
     expect(normalizeDecisionRef("../outside.md")).toBeNull();
     expect(normalizeDecisionRef("design/decisions/../../secret.md")).toBeNull();
     expect(normalizeDecisionRef("docs/cli-contract.md")).toBeNull();
     expect(normalizeDecisionRef("design/phases/P1-x.yaml")).toBeNull();
-    expect(normalizeDecisionRef("design/decisions/nested/adr.md")).toBeNull();
+    expect(normalizeDecisionRef("design/decisions/nested/adr.md")).toBe(
+      "design/decisions/nested/adr.md",
+    );
     expect(normalizeDecisionRef("design/decisions/README.md")).toBeNull();
     expect(normalizeDecisionRef("design/decisions/PRUNED.md")).toBeNull();
   });
 
-  it("normalizes backslash input to the canonical POSIX form (never hashed raw)", () => {
-    expect(normalizeDecisionRef("design\\decisions\\foo-rfc.md")).toBe(
-      "design/decisions/foo-rfc.md",
-    );
+  it("rejects backslash input instead of silently changing the namespace", () => {
+    expect(normalizeDecisionRef("design\\decisions\\foo-rfc.md")).toBeNull();
   });
 });

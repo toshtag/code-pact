@@ -34,6 +34,28 @@ jobs:
       - run: pnpm check:docs
         if: matrix.profile == 'full'
 
+      # Lexical filesystem-containment guard: flags raw readFile(join(cwd, ...))
+      # reads that bypass the owned/contained path seams. A structural backstop
+      # for the path-containment work; the SEMANTIC invariants (decision_refs
+      # namespace, forged-manifest ownership) are pinned by the security
+      # regression tests in test:unit, which this does NOT replace.
+      - run: pnpm check:fs-containment
+        if: matrix.profile == 'full'
+
+      # AST-based filesystem-authority gate: flags fs operations on paths
+      # not sourced from an authority resolver (resolveSymlinkFreeProjectPath,
+      # resolveOwnedReadPath, etc.). A structural backstop complementing the
+      # lexical containment guard above.
+      - run: pnpm check:fs-authority
+        if: matrix.profile == 'full'
+
+      # Security hardening invariants: verifies raw fs exports removed,
+      # owned-read.ts deprecated, allowlist structured with line numbers,
+      # decision-ref validator unified, O_NOFOLLOW read, exclusive create,
+      # docs synced.
+      - run: pnpm check:security-hardening
+        if: matrix.profile == 'full'
+
       - run: pnpm typecheck
 
       - run: pnpm test:unit

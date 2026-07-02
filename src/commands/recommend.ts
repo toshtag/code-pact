@@ -1,11 +1,14 @@
-import { readFile } from "node:fs/promises";
+import { readOwnedText } from "../core/project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
 import { resolvePhaseInRoadmap } from "../core/plan/resolve-phase.ts";
 import type { Task } from "../core/schemas/task.ts";
 import { assertSafePlanId } from "../core/schemas/plan-id.ts";
-import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
+import {
+  assertAgentProfileNameMatches,
+  resolveAgentProfilePath,
+} from "../core/agent-profile-path.ts";
 import {
   resolveRecommendation,
   type RecommendResult,
@@ -28,7 +31,10 @@ export type { RecommendResult };
 // Loaders
 // ---------------------------------------------------------------------------
 
-async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentProfile> {
+async function loadAgentProfile(
+  cwd: string,
+  agentName: string,
+): Promise<AgentProfile> {
   // `agentName` (raw `--agent`) can become a path segment; reject unsafe names
   // up front. (resolveAgentProfilePath also validates, so this is defence in
   // depth — the resolver is the single source for the path.)
@@ -36,7 +42,7 @@ async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentPr
   const path = await resolveAgentProfilePath(cwd, agentName);
   let raw: string;
   try {
-    raw = await readFile(path, "utf8");
+    raw = await readOwnedText(path);
   } catch {
     const err = new Error(`Agent profile for "${agentName}" not found.`);
     (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
@@ -47,7 +53,9 @@ async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentPr
   // contextFit byte override — surfaces as CONFIG_ERROR rather than an unclassified YAML/Zod
   // throw, mirroring task-prepare.ts so `recommend` renders a clean envelope.
   try {
-    return AgentProfile.parse(parseYaml(raw) as unknown);
+    const profile = AgentProfile.parse(parseYaml(raw) as unknown);
+    assertAgentProfileNameMatches(profile, agentName, path);
+    return profile;
   } catch (cause) {
     const err = new Error(
       `Agent profile for "${agentName}" is invalid: ${
@@ -63,7 +71,9 @@ async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentPr
 // Main
 // ---------------------------------------------------------------------------
 
-export async function runRecommend(opts: RecommendOptions): Promise<RecommendResult> {
+export async function runRecommend(
+  opts: RecommendOptions,
+): Promise<RecommendResult> {
   const { cwd, phaseId, taskId, agentName } = opts;
 
   const ref = await resolvePhaseInRoadmap(cwd, phaseId);
@@ -73,7 +83,7 @@ export async function runRecommend(opts: RecommendOptions): Promise<RecommendRes
     loadAgentProfile(cwd, agentName),
   ]);
 
-  const task: Task | undefined = phase.tasks?.find((t) => t.id === taskId);
+  const task: Task | undefined = phase.tasks?.find(t => t.id === taskId);
   if (!task) {
     const err = new Error(`Task "${taskId}" not found in phase "${phaseId}".`);
     (err as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
@@ -86,7 +96,9 @@ export async function runRecommend(opts: RecommendOptions): Promise<RecommendRes
     task,
     agentName,
     agentProfile,
-    decisionContext: { phaseRequiresDecision: phase.requires_decision === true },
+    decisionContext: {
+      phaseRequiresDecision: phase.requires_decision === true,
+    },
   });
 }
 
@@ -120,7 +132,9 @@ export function formatRecommend(r: RecommendResult): string {
     ].join("\n"),
   );
 
-  sections.push(["Reasons:", ...r.reasons.map((reason) => `  - ${reason}`)].join("\n"));
+  sections.push(
+    ["Reasons:", ...r.reasons.map(reason => `  - ${reason}`)].join("\n"),
+  );
 
   sections.push(`Lifecycle: ${r.lifecycleMode}`);
 
@@ -135,7 +149,10 @@ export function formatRecommend(r: RecommendResult): string {
   );
 
   sections.push(
-    [`Escalation:`, ...r.allowedEscalation.map((step, i) => `  ${i + 1}. ${step}`)].join("\n"),
+    [
+      `Escalation:`,
+      ...r.allowedEscalation.map((step, i) => `  ${i + 1}. ${step}`),
+    ].join("\n"),
   );
 
   sections.push(formatPreflight(r.preflight));
