@@ -1,9 +1,12 @@
-import { accessOwned, existsOwnedSync } from "../../project-fs/operations.ts";
-import { projectConfigReadPath } from "../../project-fs/authorities/project-config-authority.ts";
 import {
-  resolveSymlinkFreeProjectPath,
-  resolveSymlinkFreeProjectPathSync,
-} from "../../path-safety.ts";
+  accessProjectPresence,
+  existsProjectPresenceSync,
+} from "../../project-fs/operations.ts";
+import {
+  resolveProjectProbeReadPath,
+  resolveProjectProbeReadPathSync,
+  resolveStandaloneProjectProbeReadPath,
+} from "../../project-fs/authorities/project-config-authority.ts";
 
 /**
  * True when `p` exists and is accessible. Shared internal helper for the
@@ -14,7 +17,7 @@ import {
  */
 export async function fileExists(p: string): Promise<boolean> {
   try {
-    await accessOwned(projectConfigReadPath(p));
+    await accessProjectPresence(await resolveStandaloneProjectProbeReadPath(p));
     return true;
   } catch {
     return false;
@@ -33,7 +36,7 @@ export async function phaseFilePresence(
   p: string,
 ): Promise<"present" | "absent" | "inaccessible"> {
   try {
-    await accessOwned(projectConfigReadPath(p));
+    await accessProjectPresence(await resolveStandaloneProjectProbeReadPath(p));
     return "present";
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === "ENOENT"
@@ -54,14 +57,14 @@ export async function projectPathPresence(
   cwd: string,
   relPath: string,
 ): Promise<ProjectPathPresence> {
-  let abs: string;
+  let abs;
   try {
-    abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
+    abs = await resolveProjectProbeReadPath(cwd, relPath);
   } catch {
     return "inaccessible";
   }
   try {
-    await accessOwned(projectConfigReadPath(abs));
+    await accessProjectPresence(abs);
     return "present";
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === "ENOENT"
@@ -74,11 +77,11 @@ export function projectPathPresenceSync(
   cwd: string,
   relPath: string,
 ): ProjectPathPresence {
-  let abs: string;
+  let abs;
   try {
-    abs = resolveSymlinkFreeProjectPathSync(cwd, relPath);
+    abs = resolveProjectProbeReadPathSync(cwd, relPath);
   } catch {
     return "inaccessible";
   }
-  return existsOwnedSync(projectConfigReadPath(abs)) ? "present" : "absent";
+  return existsProjectPresenceSync(abs) ? "present" : "absent";
 }

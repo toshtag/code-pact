@@ -1,7 +1,6 @@
-import { join } from "node:path";
 import type { PlanIssue } from "../shared.ts";
 import type { Roadmap } from "../../schemas/roadmap.ts";
-import { phaseFilePresence } from "./fs.ts";
+import { projectPathPresence } from "./fs.ts";
 import { resolveMissingPhaseRef } from "../../archive/load-phase-snapshot.ts";
 import { listOwnedPhaseDirectory } from "../../project-fs/control-plane.ts";
 
@@ -25,8 +24,7 @@ export async function detectMissingPhaseFiles(
 ): Promise<PlanIssue[]> {
   const issues: PlanIssue[] = [];
   for (const ref of roadmap.phases) {
-    const absPath = join(cwd, ref.path);
-    const presence = await phaseFilePresence(absPath);
+    const presence = await projectPathPresence(cwd, ref.path);
     if (presence === "present") continue; // live-wins
     if (presence === "inaccessible") {
       // Present but unreadable (e.g. a non-searchable parent dir) — fail closed.
