@@ -8,6 +8,7 @@ import {
 } from "../core/project-fs/raw-internal.ts";
 import {
   unbrand,
+  type ExplicitUserWritePath,
   type OwnedWritePath,
 } from "../core/project-fs/branded-paths.ts";
 import { dirname } from "node:path";
@@ -172,7 +173,7 @@ async function writeThenRename(
  * to still hold exactly `content`.
  */
 export async function atomicWriteText(
-  path: OwnedWritePath,
+  path: OwnedWritePath | ExplicitUserWritePath,
   content: string,
   expected?: ExpectedState,
   opts: { mkdir?: boolean } = {},
