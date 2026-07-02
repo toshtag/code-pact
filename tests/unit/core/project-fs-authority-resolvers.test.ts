@@ -6,6 +6,15 @@ import {
   resolveInstructionWritePath,
   resolvePhaseWritePath,
 } from "../../../src/core/project-fs/index.ts";
+import {
+  resolveArchiveOwnedWritePath,
+  resolveArchiveOwnedPathSync,
+} from "../../../src/core/archive/paths.ts";
+import { resolveProjectTreeListPath } from "../../../src/core/project-fs/authorities/project-config-authority.ts";
+import {
+  readOwnedText,
+  listProjectTreeDirents,
+} from "../../../src/core/project-fs/operations.ts";
 import { resolveNoFollowFlag } from "../../../src/core/project-fs/raw-internal.ts";
 
 async function withTempProject<T>(fn: (cwd: string) => Promise<T>): Promise<T> {
@@ -64,5 +73,29 @@ describe("project-fs authority resolvers", () => {
     } catch (err) {
       expect(err).toMatchObject({ code: "ENOSYS" });
     }
+  });
+
+  it("rejects archive authority outside the archive namespace", async () => {
+    await withTempProject(async cwd => {
+      await expect(resolveArchiveOwnedWritePath(cwd, ".env")).rejects.toMatchObject({
+        code: "CONFIG_ERROR",
+      });
+      expect(() => resolveArchiveOwnedPathSync(cwd, "design/roadmap.yaml")).toThrow(
+        /outside the archive authority namespace/,
+      );
+    });
+  });
+
+  it("keeps project tree listing separate from file read authority", async () => {
+    await withTempProject(async cwd => {
+      const tree = await resolveProjectTreeListPath(cwd, ".");
+      await expect(listProjectTreeDirents(tree)).resolves.toEqual([]);
+      await expect(
+        readOwnedText(
+          // @ts-expect-error ProjectTreeListPath is list-only and must not read files.
+          tree,
+        ),
+      ).rejects.toThrow();
+    });
   });
 });
