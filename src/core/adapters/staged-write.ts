@@ -21,6 +21,9 @@ import {
   adapterReadPath,
   adapterDeletePath,
   adapterListPath,
+  adapterValidatedAuthorityPath,
+  resolveAdapterProjectAuthorityPathSync,
+  type AdapterAuthorityPath,
 } from "../project-fs/authorities/adapter-authority.ts";
 import type {
   OwnedDeletePath,
@@ -38,8 +41,12 @@ import {
 } from "./manifest-file-ownership.ts";
 import {
   adapterTransactionProjectDir,
+  adapterTransactionJournalPath,
+  adapterTransactionJournalPathInDir,
+  adapterTransactionSidecarPath,
   canonicalProjectRoot,
   LEGACY_TRANSACTION_DIR_REL,
+  type AdapterPrivateStatePath,
 } from "./transaction-state-root.ts";
 
 /**
@@ -128,30 +135,30 @@ export type AdapterWriteTarget =
   | {
       kind: "agent_profile";
       agentName: SupportedAgent;
-      absPath: OwnedWritePath;
+      absPath: OwnedWritePath & AdapterAuthorityPath;
     }
   | {
       kind: "adapter_manifest";
       agentName: SupportedAgent;
-      absPath: OwnedWritePath;
+      absPath: OwnedWritePath & AdapterAuthorityPath;
     }
   | {
       kind: "adapter_static_file";
       agentName: SupportedAgent;
       relPath: string;
       role: DesiredAdapterFileRole;
-      absPath: OwnedWritePath;
+      absPath: OwnedWritePath & AdapterAuthorityPath;
     }
   | {
       kind: "adapter_dynamic_create";
       agentName: SupportedAgent;
       relPath: string;
       role: DesiredAdapterFileRole;
-      absPath: OwnedWritePath;
+      absPath: OwnedWritePath & AdapterAuthorityPath;
     }
   | {
       kind: "test_only";
-      absPath: string;
+      absPath: AdapterAuthorityPath;
     };
 
 export type AdapterDeleteTarget =
@@ -160,11 +167,11 @@ export type AdapterDeleteTarget =
       agentName: SupportedAgent;
       relPath: string;
       role: DesiredAdapterFileRole;
-      absPath: OwnedDeletePath;
+      absPath: OwnedDeletePath & AdapterAuthorityPath;
     }
   | {
       kind: "test_only";
-      absPath: string;
+      absPath: AdapterAuthorityPath;
     };
 
 interface StagedEntry {
@@ -172,9 +179,9 @@ interface StagedEntry {
   targetKind: AdapterTransactionEntryV2["target_kind"];
   agentName?: SupportedAgent;
   role?: DesiredAdapterFileRole;
-  tempPath: string;
-  finalPath: string;
-  backupPath: string;
+  tempPath: AdapterAuthorityPath;
+  finalPath: AdapterAuthorityPath;
+  backupPath: AdapterAuthorityPath;
   relPath: string;
   content?: string;
   preState: FileState;
@@ -208,14 +215,22 @@ export function adapterProfileWriteTarget(
   agentName: SupportedAgent,
   absPath: OwnedWritePath,
 ): AdapterWriteTarget {
-  return { kind: "agent_profile", agentName, absPath };
+  return {
+    kind: "agent_profile",
+    agentName,
+    absPath: adapterWritePath(adapterValidatedAuthorityPath(absPath)),
+  };
 }
 
 export function adapterManifestWriteTarget(
   agentName: SupportedAgent,
   absPath: OwnedWritePath,
 ): AdapterWriteTarget {
-  return { kind: "adapter_manifest", agentName, absPath };
+  return {
+    kind: "adapter_manifest",
+    agentName,
+    absPath: adapterWritePath(adapterValidatedAuthorityPath(absPath)),
+  };
 }
 
 export function adapterStaticWriteTarget(
@@ -259,11 +274,11 @@ export function adapterStaticDeleteTarget(
     agentName,
     relPath,
     role,
-    absPath: adapterDeletePath(unbrand(authority.absPath)),
+    absPath: adapterDeletePath(authority.absPath),
   };
 }
 
-async function pathExists(path: string): Promise<boolean> {
+async function pathExists(path: AdapterAuthorityPath): Promise<boolean> {
   try {
     await statOwned(adapterReadPath(path));
     return true;
@@ -273,7 +288,7 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-async function syncDirectory(dir: string): Promise<void> {
+async function syncDirectory(dir: AdapterAuthorityPath): Promise<void> {
   try {
     await fsyncOwnedDirectory(adapterListPath(dir));
   } catch {
@@ -281,43 +296,50 @@ async function syncDirectory(dir: string): Promise<void> {
   }
 }
 
-async function durableWriteJson(path: string, value: unknown): Promise<void> {
-  await mkdirOwned(adapterWritePath(dirname(path)), {
+async function durableWriteJson(
+  path: AdapterPrivateStatePath,
+  value: unknown,
+  dir: AdapterPrivateStatePath,
+): Promise<void> {
+  await mkdirOwned(adapterWritePath(dir), {
     recursive: true,
     mode: 0o700,
   });
-  const tmp = `${path}.tmp-${randomUUID()}`;
+  const tmp = adapterTransactionSidecarPath(path, `.tmp-${randomUUID()}`);
   try {
     await writeOwnedTempDurably(
       adapterWritePath(tmp),
       `${JSON.stringify(value, null, 2)}\n`,
     );
     await renameOwned(adapterDeletePath(tmp), adapterWritePath(path));
-    await syncDirectory(dirname(path));
+    await syncDirectory(dir);
   } catch (err) {
     await unlinkOwned(adapterDeletePath(tmp)).catch(() => {});
     throw err;
   }
 }
 
-async function removeFileIfExists(path: string): Promise<void> {
+async function removeFileIfExists(path: AdapterAuthorityPath): Promise<void> {
   await unlinkOwned(adapterDeletePath(path)).catch(err => {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   });
 }
 
-async function cleanupJournal(path: string): Promise<void> {
+async function cleanupJournal(
+  path: AdapterPrivateStatePath,
+  dir: AdapterPrivateStatePath,
+): Promise<void> {
   await unlinkOwned(adapterDeletePath(path)).catch(err => {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   });
-  await syncDirectory(dirname(path));
+  await syncDirectory(dir);
 }
 
 function sha256Bytes(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-async function hashFile(path: string): Promise<FileState> {
+async function hashFile(path: AdapterAuthorityPath): Promise<FileState> {
   try {
     const bytes = await readOwnedText(adapterReadPath(path));
     return { kind: "present", sha256: sha256Bytes(Buffer.from(bytes)) };
@@ -348,20 +370,26 @@ function toRel(cwd: string, absPath: string): string {
   return rel;
 }
 
-function fromRel(cwd: string, relPath: string): string {
+function fromRel(cwd: string, relPath: string): AdapterAuthorityPath {
   assertSafeRelativePath(relPath);
-  return resolve(cwd, relPath);
+  return resolveAdapterProjectAuthorityPathSync(cwd, relPath);
 }
 
 function artifactPathsFor(
   cwd: string,
   journalId: string,
   entry: Pick<AdapterTransactionEntryV2, "target_rel_path" | "index">,
-): { finalPath: string; tempPath: string; backupPath: string } {
+): {
+  finalPath: AdapterAuthorityPath;
+  tempPath: AdapterAuthorityPath;
+  backupPath: AdapterAuthorityPath;
+} {
   assertUuidV4(journalId, "journal id");
   const finalPath = fromRel(cwd, entry.target_rel_path);
-  const tempPath = `${finalPath}.code-pact-tx-${journalId}-${entry.index}.tmp`;
-  const backupPath = `${finalPath}.bak-${journalId}-${entry.index}`;
+  const tempRelPath = `${entry.target_rel_path}.code-pact-tx-${journalId}-${entry.index}.tmp`;
+  const backupRelPath = `${entry.target_rel_path}.bak-${journalId}-${entry.index}`;
+  const tempPath = fromRel(cwd, tempRelPath);
+  const backupPath = fromRel(cwd, backupRelPath);
   if (
     dirname(tempPath) !== dirname(finalPath) ||
     dirname(backupPath) !== dirname(finalPath)
@@ -399,7 +427,9 @@ function assertUuidV4(value: string, label: string): void {
   }
 }
 
-async function ensureRegularFileIfPresent(path: string): Promise<void> {
+async function ensureRegularFileIfPresent(
+  path: AdapterAuthorityPath,
+): Promise<void> {
   try {
     const st = await statOwned(adapterReadPath(path));
     if (st.isDirectory()) {
@@ -422,7 +452,8 @@ async function ensureRegularFileIfPresent(path: string): Promise<void> {
 export class FileTransaction {
   private staged: StagedEntry[] = [];
   private finalPaths = new Set<string>();
-  private journalPath: string | null = null;
+  private journalPath: AdapterPrivateStatePath | null = null;
+  private journalDir: AdapterPrivateStatePath | null = null;
   private transactionId = randomUUID();
   private state:
     | "open"
@@ -445,19 +476,25 @@ export class FileTransaction {
   }
 
   async stageForTest(path: string, content: string): Promise<void> {
-    await this.stageInternal({ kind: "test_only", absPath: path }, content);
+    await this.stageInternal(
+      { kind: "test_only", absPath: this.testAuthorityPath(path) },
+      content,
+    );
   }
 
   stageDeleteForTest(path: string): void {
-    this.stageDeleteInternal({ kind: "test_only", absPath: path });
+    this.stageDeleteInternal({
+      kind: "test_only",
+      absPath: this.testAuthorityPath(path),
+    });
   }
 
   private async stageInternal(
     target: AdapterWriteTarget,
     content: string,
   ): Promise<void> {
-    const path =
-      target.kind === "test_only" ? target.absPath : unbrand(target.absPath);
+    const path: AdapterAuthorityPath =
+      target.kind === "test_only" ? target.absPath : target.absPath;
     this.assertCanStage(path);
     const cwd = this.resolveCwd(path);
     const relPath = toRel(cwd, path);
@@ -471,8 +508,14 @@ export class FileTransaction {
       );
     }
     const index = this.staged.length;
-    const tempPath = `${path}.code-pact-tx-${this.transactionId}-${index}.tmp`;
-    const backupPath = `${path}.bak-${this.transactionId}-${index}`;
+    const tempPath = fromRel(
+      cwd,
+      `${relPath}.code-pact-tx-${this.transactionId}-${index}.tmp`,
+    );
+    const backupPath = fromRel(
+      cwd,
+      `${relPath}.bak-${this.transactionId}-${index}`,
+    );
     this.staged.push({
       kind: "write",
       targetKind: target.kind,
@@ -493,8 +536,8 @@ export class FileTransaction {
   }
 
   private stageDeleteInternal(target: AdapterDeleteTarget): void {
-    const path =
-      target.kind === "test_only" ? target.absPath : unbrand(target.absPath);
+    const path: AdapterAuthorityPath =
+      target.kind === "test_only" ? target.absPath : target.absPath;
     this.assertCanStage(path);
     const cwd = this.resolveCwd(path);
     const relPath = toRel(cwd, path);
@@ -509,9 +552,12 @@ export class FileTransaction {
       targetKind: target.kind,
       agentName: target.kind === "test_only" ? undefined : target.agentName,
       role: target.kind === "adapter_static_file" ? target.role : undefined,
-      tempPath: "",
+      tempPath: fromRel(
+        cwd,
+        `${relPath}.code-pact-tx-${this.transactionId}-${index}.tmp`,
+      ),
       finalPath: path,
-      backupPath: `${path}.bak-${this.transactionId}-${index}`,
+      backupPath: fromRel(cwd, `${relPath}.bak-${this.transactionId}-${index}`),
       relPath,
       preState: { kind: "absent" },
       postState: { kind: "absent" },
@@ -549,14 +595,22 @@ export class FileTransaction {
       }
 
       journal.status = "committed";
-      await durableWriteJson(this.requireJournalPath(), journal);
+      await durableWriteJson(
+        this.requireJournalPath(),
+        journal,
+        this.requireJournalDir(),
+      );
       this.state = "committed";
 
       const cleanupFailures = await this.cleanupCommittedArtifacts();
       if (cleanupFailures.length > 0) {
         journal.status = "cleanup_pending";
         journal.cleanup_failures = cleanupFailures;
-        await durableWriteJson(this.requireJournalPath(), journal);
+        await durableWriteJson(
+          this.requireJournalPath(),
+          journal,
+          this.requireJournalDir(),
+        );
         this.state = "cleanup_pending";
         throw new TransactionCleanupPendingError(
           `Transaction committed, but cleanup is pending: ${cleanupFailures.join("; ")}`,
@@ -567,16 +621,19 @@ export class FileTransaction {
       }
 
       try {
-        await cleanupJournal(this.requireJournalPath());
+        await cleanupJournal(this.requireJournalPath(), this.requireJournalDir());
         this.journalPath = null;
+        this.journalDir = null;
       } catch (err) {
         journal.status = "cleanup_pending";
         journal.cleanup_failures = [
           `${this.requireJournalPath()}: ${(err as Error).message}`,
         ];
-        await durableWriteJson(this.requireJournalPath(), journal).catch(
-          () => {},
-        );
+        await durableWriteJson(
+          this.requireJournalPath(),
+          journal,
+          this.requireJournalDir(),
+        ).catch(() => {});
         this.state = "cleanup_pending";
         throw new TransactionCleanupPendingError(
           `Transaction committed, but journal cleanup is pending: ${(err as Error).message}`,
@@ -595,8 +652,11 @@ export class FileTransaction {
         { allowTestOnlyTargets: true },
       );
       if (this.journalPath && rollbackFailures.length === 0) {
-        await cleanupJournal(this.journalPath).catch(() => {});
+        await cleanupJournal(this.journalPath, this.requireJournalDir()).catch(
+          () => {},
+        );
         this.journalPath = null;
+        this.journalDir = null;
       }
       if (mutated || rollbackFailures.length > 0) {
         throw new PartialMutationError(
@@ -637,6 +697,11 @@ export class FileTransaction {
     }));
   }
 
+  private testAuthorityPath(path: string): AdapterAuthorityPath {
+    const cwd = this.resolveCwd(path);
+    return fromRel(cwd, toRel(cwd, path));
+  }
+
   private assertCanStage(path: string): void {
     if (this.state !== "open") {
       throw new Error("cannot stage after transaction commit has started");
@@ -657,10 +722,15 @@ export class FileTransaction {
     return this.cwd;
   }
 
-  private requireJournalPath(): string {
+  private requireJournalPath(): AdapterPrivateStatePath {
     if (!this.journalPath)
       throw new Error("transaction journal was not prepared");
     return this.journalPath;
+  }
+
+  private requireJournalDir(): AdapterPrivateStatePath {
+    if (!this.journalDir) throw new Error("transaction journal was not prepared");
+    return this.journalDir;
   }
 
   private async writePreparedJournal(): Promise<AdapterTransactionJournalV2> {
@@ -675,7 +745,11 @@ export class FileTransaction {
       throw new Error("adapter transaction cannot mix multiple agents");
     }
     const journalDir = await adapterTransactionProjectDir(cwd);
-    this.journalPath = join(journalDir, `${this.transactionId}.json`);
+    this.journalDir = journalDir;
+    this.journalPath = await adapterTransactionJournalPath(
+      cwd,
+      this.transactionId,
+    );
     const journal: AdapterTransactionJournalV2 = {
       schema_version: 2,
       id: this.transactionId,
@@ -692,7 +766,7 @@ export class FileTransaction {
         index,
       })),
     };
-    await durableWriteJson(this.journalPath, journal);
+    await durableWriteJson(this.journalPath, journal, this.journalDir);
     return journal;
   }
 
@@ -812,7 +886,7 @@ function isJournalEntryV2(value: unknown): value is AdapterTransactionEntryV2 {
 
 async function loadJournal(
   cwd: string,
-  journalPath: string,
+  journalPath: AdapterAuthorityPath,
 ): Promise<AdapterTransactionJournalV2> {
   let parsed: unknown;
   try {
@@ -993,7 +1067,11 @@ async function cleanupCommittedJournal(
 async function reconcileEntryToOldState(
   cwd: string,
   journal: AdapterTransactionJournalV2,
-  paths: { finalPath: string; tempPath: string; backupPath: string },
+  paths: {
+    finalPath: AdapterAuthorityPath;
+    tempPath: AdapterAuthorityPath;
+    backupPath: AdapterAuthorityPath;
+  },
   entry: AdapterTransactionEntryV2,
   allowTestOnlyTarget: boolean,
 ): Promise<void> {
@@ -1051,7 +1129,11 @@ async function reconcileEntryToOldState(
 async function reconcileEntryToNewState(
   cwd: string,
   journal: AdapterTransactionJournalV2,
-  paths: { finalPath: string; tempPath: string; backupPath: string },
+  paths: {
+    finalPath: AdapterAuthorityPath;
+    tempPath: AdapterAuthorityPath;
+    backupPath: AdapterAuthorityPath;
+  },
   entry: AdapterTransactionEntryV2,
 ): Promise<void> {
   await assertTransactionTargetStillOwned(
@@ -1091,7 +1173,7 @@ async function reconcileEntryToNewState(
 async function assertTransactionTargetStillOwned(
   cwd: string,
   journal: AdapterTransactionJournalV2,
-  finalPath: string,
+  finalPath: AdapterAuthorityPath,
   entry: AdapterTransactionEntryV2,
   allowTestOnlyTarget: boolean,
 ): Promise<void> {
@@ -1170,7 +1252,19 @@ async function assertTransactionTargetStillOwned(
 }
 
 async function rejectLegacyProjectJournals(cwd: string): Promise<string[]> {
-  const legacyDir = join(resolve(cwd), LEGACY_TRANSACTION_DIR_REL);
+  let legacyDir: AdapterAuthorityPath;
+  try {
+    legacyDir = resolveAdapterProjectAuthorityPathSync(
+      resolve(cwd),
+      LEGACY_TRANSACTION_DIR_REL.split(sep).join("/"),
+    );
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_NOT_OWNED" || code === "PATH_OUTSIDE_PROJECT") {
+      return [LEGACY_REJECTION];
+    }
+    throw err;
+  }
   try {
     await lstatOwned(adapterReadPath(legacyDir));
     return [LEGACY_REJECTION];
@@ -1203,7 +1297,7 @@ export async function recoverPendingAdapterTransactions(
   for (const name of names.filter(
     n => UUID_V4_RE.test(n.replace(/\.json$/, "")) && n.endsWith(".json"),
   )) {
-    const journalPath = join(stateDir, name);
+    const journalPath = adapterTransactionJournalPathInDir(stateDir, name);
     const journal = await loadJournal(resolve(cwd), journalPath);
     try {
       if (
@@ -1217,7 +1311,7 @@ export async function recoverPendingAdapterTransactions(
         if (failures.length > 0) throw new Error(failures.join("; "));
         recovered.push(journalPath);
       }
-      await cleanupJournal(journalPath);
+      await cleanupJournal(journalPath, stateDir);
     } catch (err) {
       throw new TransactionRecoveryError(
         `adapter transaction recovery failed: ${(err as Error).message}`,
