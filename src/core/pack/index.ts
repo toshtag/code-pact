@@ -11,10 +11,10 @@ import { resolvePhaseInRoadmap } from "../plan/resolve-phase.ts";
 import { loadPhase } from "../plan/load-phase.ts";
 import { renderSections, type DependsOnEntry } from "./formatters/markdown.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { resolveProfileContextOutputPath } from "./context-output-path.ts";
 import {
-  contextOutputWritePath,
+  resolveExplicitContextOutputWritePath,
+  resolveExplicitProjectContextOutputWritePath,
   unbrand,
   type OwnedWritePath,
 } from "../project-fs/authorities/context-output-authority.ts";
@@ -319,26 +319,34 @@ export async function writeContextPack(
 ): Promise<WriteContextPackResult> {
   const { cwd, agentName, outputDir } = opts;
   const profile = await loadAgentProfile(cwd, agentName);
-  let outputPath: OwnedWritePath;
   if (outputDir !== undefined) {
     // Explicit --output-dir: caller authority, not profile-derived.
     // Absolute paths are used as-is (explicit user choice, e.g. /tmp).
     // Project-relative paths are resolved through symlink-free containment.
     if (isAbsolute(outputDir)) {
-      outputPath = contextOutputWritePath(join(outputDir, `${pack.taskId}.md`));
+      const outputPath = resolveExplicitContextOutputWritePath(
+        outputDir,
+        `${pack.taskId}.md`,
+      );
+      await atomicWriteText(outputPath, pack.content);
+      return { outputPath: unbrand(outputPath) };
     } else {
-      const dir = await resolveSymlinkFreeProjectPath(cwd, outputDir);
-      outputPath = contextOutputWritePath(join(dir, `${pack.taskId}.md`));
+      const outputPath = await resolveExplicitProjectContextOutputWritePath(
+        cwd,
+        join(outputDir, `${pack.taskId}.md`),
+      );
+      await atomicWriteText(outputPath, pack.content);
+      return { outputPath: unbrand(outputPath) };
     }
   } else {
     // Profile-derived: constrained to .context/** + symlink-free resolution
     // on the FULL path (directory + filename).
-    outputPath = await resolveProfileContextOutputPath(
+    const outputPath: OwnedWritePath = await resolveProfileContextOutputPath(
       cwd,
       profile?.context_dir ?? `.context/${agentName}`,
       pack.taskId,
     );
+    await atomicWriteText(outputPath, pack.content);
+    return { outputPath: unbrand(outputPath) };
   }
-  await atomicWriteText(outputPath, pack.content);
-  return { outputPath: unbrand(outputPath) };
 }

@@ -1,6 +1,5 @@
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {
-  contextOutputWritePath,
+  resolveProfileContextOutputWritePath,
   type OwnedWritePath,
 } from "../project-fs/authorities/context-output-authority.ts";
 import { ContextOutputDir } from "../schemas/agent-profile.ts";
@@ -50,7 +49,7 @@ export async function resolveProfileContextOutputPath(
   // 3. Build the full output path and resolve through symlink-free containment.
   const relPath = `${contextDir}/${taskId}.md`;
   try {
-    return contextOutputWritePath(await resolveSymlinkFreeProjectPath(cwd, relPath));
+    return await resolveProfileContextOutputWritePath(cwd, relPath);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
