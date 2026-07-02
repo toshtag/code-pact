@@ -2,11 +2,11 @@
 
 ## Language policy
 
-| Surface                                          | Language                              |
-| ------------------------------------------------ | ------------------------------------- |
-| Branch names, commit messages, PR titles/bodies  | English                               |
-| Source code and code comments                    | English                               |
-| CLI output, usage docs, generated context packs  | i18n (currently `ja-JP`, `en-US`)     |
+| Surface                                         | Language                          |
+| ----------------------------------------------- | --------------------------------- |
+| Branch names, commit messages, PR titles/bodies | English                           |
+| Source code and code comments                   | English                           |
+| CLI output, usage docs, generated context packs | i18n (currently `ja-JP`, `en-US`) |
 
 Internal planning notes that are not meant for public consumption belong in `.local/` (gitignored).
 
@@ -14,14 +14,14 @@ Internal planning notes that are not meant for public consumption belong in `.lo
 
 The CLI is layered. When adding or changing a command, follow the layer that fits:
 
-| Layer | Path | Responsibility |
-| ----- | ---- | -------------- |
-| Dispatcher | `src/cli.ts` | Global flags, locale detection, the top-level `switch`, and the single-verb commands that have no subcommand surface (`init`, `tutorial`, `doctor`, `validate`, `recommend`, `verify`, `pack`, `progress`). |
-| CLI clusters | `src/cli/commands/<group>.ts` | One module per subcommand cluster (`adapter`, `task`, `plan`, `phase`, `spec`). Owns arg parsing, JSON envelopes, exit codes, and error-code mapping. Exports only its `cmd<Group>` entry; per-subcommand handlers stay private. |
-| Implementations | `src/commands/<verb>.ts` | The `run*` / `format*` functions the CLI layer calls. No `process.exit`, no argv parsing — return values, throw tagged errors. |
-| Domain logic | `src/core/` | Plan state, context packing, recommendation, adapters, schemas, locks. Pure logic, no CLI concerns. |
-| Shared utilities | `src/lib/` | Small cross-cutting helpers (`argv`, `tty`, `prompt`, `package-version`). |
-| Messages | `src/i18n/` | Locale message tables (`en-US`, `ja-JP`). |
+| Layer            | Path                          | Responsibility                                                                                                                                                                                                                   |
+| ---------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dispatcher       | `src/cli.ts`                  | Global flags, locale detection, the top-level `switch`, and the single-verb commands that have no subcommand surface (`init`, `tutorial`, `doctor`, `validate`, `recommend`, `verify`, `pack`, `progress`).                      |
+| CLI clusters     | `src/cli/commands/<group>.ts` | One module per subcommand cluster (`adapter`, `task`, `plan`, `phase`, `spec`). Owns arg parsing, JSON envelopes, exit codes, and error-code mapping. Exports only its `cmd<Group>` entry; per-subcommand handlers stay private. |
+| Implementations  | `src/commands/<verb>.ts`      | The `run*` / `format*` functions the CLI layer calls. No `process.exit`, no argv parsing — return values, throw tagged errors.                                                                                                   |
+| Domain logic     | `src/core/`                   | Plan state, context packing, recommendation, adapters, schemas, locks. Pure logic, no CLI concerns.                                                                                                                              |
+| Shared utilities | `src/lib/`                    | Small cross-cutting helpers (`argv`, `tty`, `prompt`, `package-version`).                                                                                                                                                        |
+| Messages         | `src/i18n/`                   | Locale message tables (`en-US`, `ja-JP`).                                                                                                                                                                                        |
 
 Rule of thumb: a new multi-subcommand verb gets a `src/cli/commands/<group>.ts` cluster; its logic lives in `src/commands/` and `src/core/`. Keep the CLI layer thin — parsing and presentation only.
 
@@ -68,11 +68,15 @@ Use built-ins instead:
 When `--json` is set, **stdout must be JSON only**. All human-readable logs, warnings, and progress lines must go to **stderr**. Use the shared response shape:
 
 ```json
-{ "ok": true, "data": { } }
+{ "ok": true, "data": {} }
 ```
 
 ```json
-{ "ok": false, "error": { "code": "PHASE_NOT_FOUND", "message": "..." }, "data": { } }
+{
+  "ok": false,
+  "error": { "code": "PHASE_NOT_FOUND", "message": "..." },
+  "data": {}
+}
 ```
 
 Stable error code strings are the public contract; do not rename them lightly.
@@ -137,7 +141,7 @@ npm publishes the first version of a package with both the chosen tag (e.g. `--t
 
 Starting with v1.0.0:
 
-- Stable releases (`v1.x.0`, `v1.x.y` patches) publish to `latest` by default. Plain `npm publish` is enough — `1.x.y` is not a prerelease string, so npm puts it on `latest` automatically.
+- Stable releases (`v1.x.0`, `v1.x.y` patches) publish to `latest` by default. The publish workflow uses Trusted Publishing (OIDC) — `1.x.y` is not a prerelease string, so npm puts it on `latest` automatically.
 - The historical `alpha` tag continues to point at `v0.9.0-alpha.0` so `npm install code-pact@alpha` keeps working for users pinned to pre-v1.0 behaviour. Past alphas are not maintained but the tag is not deleted.
 - Future prerelease cuts (if any) should use `--tag rc` / `--tag beta` and **not** auto-promote to `latest` until the corresponding stable cut.
 
