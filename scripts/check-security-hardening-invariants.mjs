@@ -1,10 +1,5 @@
 #!/usr/bin/env node
-import {
-  existsSync,
-  readFileSync,
-  readdirSync,
-  statSync,
-} from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,10 +33,7 @@ function walkTs(dir) {
 }
 
 function rel(abs) {
-  return abs
-    .replace(`${repoRoot}/`, "")
-    .split(/[\\/]/)
-    .join("/");
+  return abs.replace(`${repoRoot}/`, "").split(/[\\/]/).join("/");
 }
 
 function authorityModulesWithGenericProofWrappers() {
@@ -158,7 +150,10 @@ function runChecker() {
 console.log("\n=== 1. Public API Surface ===");
 {
   const index = read("src/core/project-fs/index.ts");
-  check("project-fs/index.ts has no forbidden API", !hasForbiddenApiName(index));
+  check(
+    "project-fs/index.ts has no forbidden API",
+    !hasForbiddenApiName(index),
+  );
   check(
     "project-fs/index.ts does not export FileHandle",
     !/\bFileHandle\b/.test(index),
@@ -203,7 +198,10 @@ console.log("\n=== 4. Safe Read ===");
   const raw = read("src/core/project-fs/raw-internal.ts");
   const operations = read("src/core/project-fs/operations.ts");
   check("async read uses O_NOFOLLOW", /O_NOFOLLOW/.test(raw));
-  check("sync read uses O_NOFOLLOW + fstat", /readRegularOwnedTextSync/.test(raw) && /fstatSyncRaw/.test(raw));
+  check(
+    "sync read uses O_NOFOLLOW + fstat",
+    /readRegularOwnedTextSync/.test(raw) && /fstatSyncRaw/.test(raw),
+  );
   check(
     "operations has no unsafe readFileSync(unbrand(path))",
     !/readFileSyncRaw\(unbrand\(path\)/.test(operations),
@@ -212,14 +210,19 @@ console.log("\n=== 4. Safe Read ===");
 
 console.log("\n=== 5. PhasePath Single Source ===");
 {
-  check("PhasePath schema exists", existsSync(join(repoRoot, "src/core/schemas/phase-path.ts")));
+  check(
+    "PhasePath schema exists",
+    existsSync(join(repoRoot, "src/core/schemas/phase-path.ts")),
+  );
   check(
     "roadmap uses PhasePath",
     /path:\s*PhasePath/.test(read("src/core/schemas/roadmap.ts")),
   );
   check(
     "phase snapshot uses PhasePath",
-    /original_path:\s*PhasePath/.test(read("src/core/schemas/phase-snapshot.ts")),
+    /original_path:\s*PhasePath/.test(
+      read("src/core/schemas/phase-snapshot.ts"),
+    ),
   );
   check(
     "authority resolver uses isPhasePath",
@@ -407,10 +410,48 @@ console.log("\n=== 7. Malicious Fixtures ===");
         }
       `,
     },
+    {
+      name: "hardlink-read-to-write-escalation",
+      relPath: "src/core/progress/hardlink-bypass.ts",
+      source: `
+        import {
+          resolveProjectConfigReadPath,
+          resolveProgressWritePath,
+          linkOwned,
+          writeOwnedText,
+        } from "../project-fs/index.ts";
+
+        export async function f(cwd) {
+          const source =
+            await resolveProjectConfigReadPath(
+              cwd,
+            );
+
+          const alias =
+            await resolveProgressWritePath(
+              cwd,
+              ".code-pact/state/project-alias.yaml",
+            );
+
+          await linkOwned(
+            source,
+            alias,
+          );
+
+          await writeOwnedText(
+            alias,
+            "overwritten: true\\n",
+          );
+        }
+      `,
+    },
   ];
 
   for (const fixture of fixtures) {
-    check(`${fixture.name} exits 1`, runFixture(fixture.name, fixture.relPath, fixture.source) === 1);
+    check(
+      `${fixture.name} exits 1`,
+      runFixture(fixture.name, fixture.relPath, fixture.source) === 1,
+    );
   }
 }
 
