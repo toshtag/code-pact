@@ -100,7 +100,9 @@ describe("check-fs-authority", () => {
       "",
     ]);
     expect(read.ok).toBe(false);
-    expect(read.output).toContain("readOwnedText() called on non-authority path");
+    expect(read.output).toContain(
+      "readOwnedText() called on non-authority path",
+    );
 
     const write = await runFixture([
       `import { ${containedWriteResolver}, writeOwnedText } from "../../src/core/project-fs/index.ts";`,
@@ -111,7 +113,9 @@ describe("check-fs-authority", () => {
       "",
     ]);
     expect(write.ok).toBe(false);
-    expect(write.output).toContain("writeOwnedText() called on non-authority path");
+    expect(write.output).toContain(
+      "writeOwnedText() called on non-authority path",
+    );
 
     const del = await runFixture([
       `import { ${containedDeleteResolver}, unlinkOwned } from "../../src/core/project-fs/index.ts";`,
@@ -1105,5 +1109,61 @@ describe("check-fs-authority", () => {
       expect(output).not.toContain("raw-internal import");
       expect(output).not.toContain("node:fs import");
     }
+  });
+
+  it("rejects read authority as a hard-link source", async () => {
+    const result = await runFixture([
+      "import {",
+      "  linkOwned,",
+      "  writeOwnedText,",
+      "  resolveProjectConfigReadPath,",
+      "  resolveProgressWritePath,",
+      '} from "../../src/core/project-fs/index.ts";',
+      "",
+      "async function f(cwd: string) {",
+      "  const source =",
+      "    await resolveProjectConfigReadPath(cwd);",
+      "  const alias =",
+      "    await resolveProgressWritePath(",
+      "      cwd,",
+      '      ".code-pact/state/project-alias.yaml",',
+      "    );",
+      "  await linkOwned(source, alias);",
+      '  await writeOwnedText(alias, "x");',
+      "}",
+      "",
+    ]);
+
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("linkOwned() called on non-authority path");
+  });
+
+  it("allows hard links when source and destination both have write authority", async () => {
+    const result = await runFixture([
+      "import {",
+      "  linkOwned,",
+      "  resolveProgressWritePath,",
+      '} from "../../src/core/project-fs/index.ts";',
+      "",
+      "async function f(cwd: string) {",
+      "  const source =",
+      "    await resolveProgressWritePath(",
+      "      cwd,",
+      '      ".code-pact/state/source.yaml",',
+      "    );",
+      "  const destination =",
+      "    await resolveProgressWritePath(",
+      "      cwd,",
+      '      ".code-pact/state/destination.yaml",',
+      "    );",
+      "  await linkOwned(",
+      "    source,",
+      "    destination,",
+      "  );",
+      "}",
+      "",
+    ]);
+
+    expect(result.ok).toBe(true);
   });
 });
