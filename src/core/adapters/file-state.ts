@@ -8,10 +8,13 @@
 // ---------------------------------------------------------------------------
 
 import { readOwnedText, statOwned } from "../project-fs/operations.ts";
-import { adapterReadPath } from "../project-fs/authorities/adapter-authority.ts";
+import {
+  adapterReadPath,
+  resolveAdapterProjectAuthorityPath,
+  type AdapterAuthorityPath,
+} from "../project-fs/authorities/adapter-authority.ts";
 import {
   assertSafeRelativePath as assertSafeRelativePathImpl,
-  resolveSymlinkFreeProjectPath,
 } from "../path-safety.ts";
 
 export {
@@ -31,7 +34,7 @@ export {
 export type AdapterWritePathKind = "directory" | "file";
 export type AdapterWritePathSpec = { path: string; kind: AdapterWritePathKind };
 export type ResolvedAdapterWritePathSpec = AdapterWritePathSpec & {
-  absPath: string;
+  absPath: AdapterAuthorityPath;
 };
 
 function configError(message: string): Error {
@@ -42,7 +45,7 @@ function configError(message: string): Error {
 
 /** Read a path only after the caller has established static read authority. */
 export async function readAuthorizedRegularFileMaybe(
-  absPath: string,
+  absPath: AdapterAuthorityPath,
   relPath: string,
 ): Promise<string | null> {
   let st: import("node:fs").Stats;
@@ -71,7 +74,7 @@ export async function readAuthorizedRegularFileMaybe(
 
 /** Existence probe for an authorized dynamic create target; never reads bytes. */
 export async function authorizedPathExists(
-  absPath: string,
+  absPath: AdapterAuthorityPath,
   relPath: string,
 ): Promise<boolean> {
   try {
@@ -114,9 +117,9 @@ export async function assertAdapterWritePathsContained(
   for (const { path, kind } of specs) {
     assertSafeRelativePathImpl(path);
 
-    let abs: string;
+    let abs: AdapterAuthorityPath;
     try {
-      abs = await resolveSymlinkFreeProjectPath(cwd, path);
+      abs = await resolveAdapterProjectAuthorityPath(cwd, path);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT")
         throw err;
