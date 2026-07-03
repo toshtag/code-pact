@@ -2,13 +2,18 @@
 // Supply-chain invariant checker for GitHub Actions workflow files.
 //
 // Uses YAML parsing to structurally verify:
-//   - All `uses:` in .github/workflows/**/*.yml reference full 40-char commit SHAs
+//   - All `uses:` (step-level and job-level) reference full 40-char commit SHAs
 //   - publish.yml has top-level `permissions: {}`
 //   - publish.yml has exactly 4 jobs: prepare, publish, verify, github-release
+//   - Each job's permission map exactly matches the expected set (no extra permissions)
 //   - Only the publish job has `id-token: write` and `environment: npm-publish`
 //   - Only the github-release job has `contents: write`
+//   - Privileged jobs (publish, github-release) use an exact action allowlist
+//   - Privileged job run scripts are pinned by SHA-256 hash
+//   - Privileged job step count and step names are fixed
 //   - publish job has no checkout, pnpm, repository scripts, release:check, npm pack
 //   - github-release job has no checkout, repository scripts, pnpm
+//   - verify job has checkout (required for repository script execution)
 //   - No NPM_TOKEN or NODE_AUTH_TOKEN secret references
 //   - checkout steps have `persist-credentials: false`
 //   - publish workflow only triggers on tags (push.tags, no branches, no workflow_dispatch)
@@ -23,23 +28,48 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseDocument } from "yaml";
+import { createHash } from "node:crypto";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-let failures = 0;
+const ACTION_REF = /^[^@\s]+@[0-9a-f]{40}$/;
 
-function fail(name, detail) {
-  console.error(`  ✗ ${name}${detail ? ` — ${detail}` : ""}`);
-  failures++;
-}
+const EXPECTED_JOB_PERMISSIONS = {
+  prepare: { contents: "read" },
+  publish: { contents: "read", "id-token": "write" },
+  verify: { contents: "read" },
+  "github-release": { contents: "write" },
+};
 
-function pass(name) {
-  console.log(`  ✓ ${name}`);
-}
+const PRIVILEGED_JOB_ACTIONS = {
+  publish: ["actions/download-artifact", "actions/setup-node"],
+  "github-release": ["actions/download-artifact", "actions/download-artifact"],
+};
 
-function read(rel) {
-  return readFileSync(join(repoRoot, rel), "utf8");
-}
+const PRIVILEGED_JOB_STEP_COUNTS = {
+  publish: 3,
+  "github-release": 3,
+};
+
+const PRIVILEGED_JOB_STEP_NAMES = {
+  publish: [
+    "Download release artifact",
+    "Set up Node",
+    "Verify manifest and publish",
+  ],
+  "github-release": [
+    "Download release artifact",
+    "Download integrity artifact",
+    "Create or reconcile GitHub Release",
+  ],
+};
+
+const EXPECTED_RUN_HASHES = {
+  publish: ["d0bc8162bedfcd6049329876c422a3a608a01b37b6d9813a7f02b3676a287d30"],
+  "github-release": [
+    "99cd20bfe6d10360bb0186e3b37a59d47a8352b8081e4aed2138cf575f8846dd",
+  ],
+};
 
 function walkYml(dir) {
   const out = [];
@@ -63,11 +93,10 @@ function walkYml(dir) {
   return out;
 }
 
-const ACTION_REF = /^[^@\s]+@[0-9a-f]{40}$/;
-
 /**
- * Check all `uses:` references are pinned to exact 40-char commit SHAs.
- * Rejects tag refs, branch refs, SHA+suffix, SHA+subpath, short/long SHAs.
+ * Check all `uses:` references (step-level and job-level) are pinned to
+ * exact 40-char commit SHAs. Rejects tag refs, branch refs, SHA+suffix,
+ * SHA+subpath, short/long SHAs. Also checks job-level reusable workflow refs.
  * @param {string} content - workflow file content
  * @returns {string[]} list of violations
  */
@@ -86,6 +115,20 @@ export function checkActionShaPins(content) {
     const jobKey = String(jobPair.key.value ?? jobPair.key);
     const job = jobPair.value;
     if (!job) continue;
+
+    // Check job-level reusable workflow uses:
+    const jobUses = job.get("uses");
+    if (typeof jobUses === "string") {
+      if (jobUses.startsWith("./")) {
+        // local reusable workflow — allowed
+      } else if (!ACTION_REF.test(jobUses)) {
+        violations.push(
+          `job "${jobKey}" job-level uses: ${jobUses} — must be pinned to exact 40-char commit SHA`,
+        );
+      }
+    }
+
+    // Check step-level uses:
     const steps = job.get("steps");
     if (!steps || !steps.items) continue;
 
@@ -93,7 +136,7 @@ export function checkActionShaPins(content) {
       const step = steps.items[i];
       const uses = step.get("uses");
       if (typeof uses !== "string") continue;
-      if (uses.startsWith("./")) continue; // local actions allowed
+      if (uses.startsWith("./")) continue;
       if (!ACTION_REF.test(uses)) {
         violations.push(
           `job "${jobKey}" step ${i + 1}: ${uses} — must be pinned to exact 40-char commit SHA (no tags, branches, suffixes, or subpaths)`,
@@ -241,19 +284,58 @@ function getJobPermissions(doc, jobName) {
   return null;
 }
 
+function stableEntries(value) {
+  return Object.entries(value ?? {}).sort(([a], [b]) => a.localeCompare(b));
+}
+
+function actionName(ref) {
+  const idx = ref.lastIndexOf("@");
+  return idx > 0 ? ref.slice(0, idx) : ref;
+}
+
+function normalizeRun(value) {
+  return value.replace(/\r\n/g, "\n").trimEnd() + "\n";
+}
+
+function getJobSteps(doc, jobName) {
+  const jobs = doc.get("jobs");
+  if (!jobs || !jobs.items) return [];
+  for (const jobPair of jobs.items) {
+    const key = String(jobPair.key.value ?? jobPair.key);
+    if (key !== jobName) continue;
+    const job = jobPair.value;
+    if (!job) return [];
+    const steps = job.get("steps");
+    if (!steps || !steps.items) return [];
+    return steps.items;
+  }
+  return [];
+}
+
 /**
  * Run all supply-chain invariant checks.
  * @param {string} root - repo root path
  * @returns {{failures: number}}
  */
 export function checkSupplyChainInvariants(root) {
+  let failures = 0;
+
+  function fail(name, detail) {
+    console.error(`  ✗ ${name}${detail ? ` — ${detail}` : ""}`);
+    failures++;
+  }
+
+  function pass(name) {
+    console.log(`  ✓ ${name}`);
+  }
+
   const _read = rel => readFileSync(join(root, rel), "utf8");
   const workflowDir = join(root, ".github", "workflows");
   const ymlFiles = walkYml(workflowDir);
 
   console.log("Supply-chain invariants:");
 
-  // 1. All uses: are exact 40-char SHAs (across all workflow files)
+  // 1. All uses: are exact 40-char SHAs (across all workflow files, including job-level)
   let allShaPinned = true;
   for (const file of ymlFiles) {
     const rel = file.replace(`${root}/`, "");
@@ -349,41 +431,19 @@ export function checkSupplyChainInvariants(root) {
         );
       }
 
-      // Only publish job has id-token: write
+      // Permission map exact match for each job
       for (const jobName of expectedJobs) {
-        const perms = getJobPermissions(doc, jobName);
-        const hasIdToken = perms && perms["id-token"] === "write";
-        if (jobName === "publish") {
-          if (hasIdToken) {
-            pass(`publish.yml: publish job has id-token: write`);
-          } else {
-            fail("publish.yml: publish job must have id-token: write");
-          }
+        const actual = getJobPermissions(doc, jobName);
+        const expected = EXPECTED_JOB_PERMISSIONS[jobName];
+        const actualStr = JSON.stringify(stableEntries(actual));
+        const expectedStr = JSON.stringify(stableEntries(expected));
+        if (actualStr === expectedStr) {
+          pass(`publish.yml: ${jobName} job permission map exact match`);
         } else {
-          if (hasIdToken) {
-            fail(`publish.yml: ${jobName} job must NOT have id-token: write`);
-          } else {
-            pass(`publish.yml: ${jobName} job does not have id-token: write`);
-          }
-        }
-      }
-
-      // Only github-release job has contents: write
-      for (const jobName of expectedJobs) {
-        const perms = getJobPermissions(doc, jobName);
-        const hasContentsWrite = perms && perms["contents"] === "write";
-        if (jobName === "github-release") {
-          if (hasContentsWrite) {
-            pass(`publish.yml: github-release job has contents: write`);
-          } else {
-            fail("publish.yml: github-release job must have contents: write");
-          }
-        } else {
-          if (hasContentsWrite) {
-            fail(`publish.yml: ${jobName} job must NOT have contents: write`);
-          } else {
-            pass(`publish.yml: ${jobName} job does not have contents: write`);
-          }
+          fail(
+            `publish.yml: ${jobName} job permission map mismatch`,
+            `expected ${JSON.stringify(expected)}, found ${JSON.stringify(actual)}`,
+          );
         }
       }
 
@@ -402,6 +462,87 @@ export function checkSupplyChainInvariants(root) {
         pass("publish.yml: publish job has environment: npm-publish");
       } else {
         fail("publish.yml: publish job must have environment: npm-publish");
+      }
+
+      // Privileged job checks: action allowlist, step count, step names, run script hashes
+      for (const jobName of ["publish", "github-release"]) {
+        const steps = getJobSteps(doc, jobName);
+
+        // Step count
+        const expectedCount = PRIVILEGED_JOB_STEP_COUNTS[jobName];
+        if (steps.length === expectedCount) {
+          pass(
+            `publish.yml: ${jobName} job has exactly ${expectedCount} steps`,
+          );
+        } else {
+          fail(
+            `publish.yml: ${jobName} job must have exactly ${expectedCount} steps`,
+            `found: ${steps.length}`,
+          );
+        }
+
+        // Step names
+        const expectedNames = PRIVILEGED_JOB_STEP_NAMES[jobName];
+        const actualNames = steps.map(s => String(s.get("name") ?? ""));
+        const namesMatch =
+          actualNames.length === expectedNames.length &&
+          actualNames.every((n, i) => n === expectedNames[i]);
+        if (namesMatch) {
+          pass(`publish.yml: ${jobName} job step names match allowlist`);
+        } else {
+          fail(
+            `publish.yml: ${jobName} job step names mismatch`,
+            `expected: ${JSON.stringify(expectedNames)}, found: ${JSON.stringify(actualNames)}`,
+          );
+        }
+
+        // Action allowlist: exact action names in order
+        const expectedActions = PRIVILEGED_JOB_ACTIONS[jobName];
+        const actualActions = steps
+          .map(s => {
+            const uses = s.get("uses");
+            return typeof uses === "string" ? actionName(uses) : null;
+          })
+          .filter(a => a !== null);
+        const actionsMatch =
+          actualActions.length === expectedActions.length &&
+          actualActions.every((a, i) => a === expectedActions[i]);
+        if (actionsMatch) {
+          pass(`publish.yml: ${jobName} job action allowlist exact match`);
+        } else {
+          fail(
+            `publish.yml: ${jobName} job action allowlist mismatch`,
+            `expected: ${JSON.stringify(expectedActions)}, found: ${JSON.stringify(actualActions)}`,
+          );
+        }
+
+        // Run script SHA-256 hashes
+        const expectedHashes = EXPECTED_RUN_HASHES[jobName];
+        const runScripts = steps
+          .map(s => s.get("run"))
+          .filter(r => typeof r === "string");
+        if (runScripts.length === expectedHashes.length) {
+          let hashesOk = true;
+          for (let i = 0; i < runScripts.length; i++) {
+            const normalized = normalizeRun(runScripts[i]);
+            const hash = createHash("sha256").update(normalized).digest("hex");
+            if (hash !== expectedHashes[i]) {
+              hashesOk = false;
+              fail(
+                `publish.yml: ${jobName} job run script ${i + 1} hash mismatch`,
+                `expected: ${expectedHashes[i]}, found: ${hash}`,
+              );
+            }
+          }
+          if (hashesOk) {
+            pass(`publish.yml: ${jobName} job run script hashes match`);
+          }
+        } else {
+          fail(
+            `publish.yml: ${jobName} job run script count mismatch`,
+            `expected: ${expectedHashes.length}, found: ${runScripts.length}`,
+          );
+        }
       }
 
       // publish job must NOT have checkout, pnpm, repository scripts, release:check, npm pack
@@ -507,6 +648,19 @@ export function checkSupplyChainInvariants(root) {
       } else {
         fail(
           "publish.yml: verify job must run post-publish tarball verification",
+        );
+      }
+
+      // verify job must have checkout (required for repository script execution)
+      const verifyRefs = collectActionRefsForJob(doc, "verify");
+      const verifyHasCheckout = verifyRefs.some(r =>
+        r.startsWith("actions/checkout"),
+      );
+      if (verifyHasCheckout) {
+        pass("publish.yml: verify job has checkout (required for scripts)");
+      } else {
+        fail(
+          "publish.yml: verify job must have checkout (runs repository scripts)",
         );
       }
 
