@@ -1,8 +1,12 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
+import {
+  run as cliRun,
+  ensureCliBuilt,
+  type RunResult,
+} from "../helpers/cli.ts";
 import { seedDurableEvents } from "../helpers/seed-events.ts";
 import { writePhaseSnapshot } from "../../src/core/archive/phase-snapshot.ts";
 
@@ -118,11 +122,28 @@ const PROGRESS = `events:
 async function scaffold(
   opts: { p1?: string; p2?: string; progress?: string } = {},
 ) {
-  const init = run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
-  if (init.code !== 0) throw new Error(`init failed: ${init.stdout}${init.stderr}`);
+  const init = run([
+    "init",
+    "--non-interactive",
+    "--locale",
+    "en-US",
+    "--agent",
+    "claude-code",
+    "--json",
+  ]);
+  if (init.code !== 0)
+    throw new Error(`init failed: ${init.stdout}${init.stderr}`);
   await writeFile(join(tmpDir, "design", "roadmap.yaml"), ROADMAP, "utf8");
-  await writeFile(join(tmpDir, "design", "phases", "P1-x.yaml"), opts.p1 ?? P1_DONE, "utf8");
-  await writeFile(join(tmpDir, "design", "phases", "P2-y.yaml"), opts.p2 ?? P2_DEP, "utf8");
+  await writeFile(
+    join(tmpDir, "design", "phases", "P1-x.yaml"),
+    opts.p1 ?? P1_DONE,
+    "utf8",
+  );
+  await writeFile(
+    join(tmpDir, "design", "phases", "P2-y.yaml"),
+    opts.p2 ?? P2_DEP,
+    "utf8",
+  );
   await mkdir(join(tmpDir, ".code-pact", "state"), { recursive: true });
   await seedDurableEvents(tmpDir, opts.progress ?? PROGRESS);
 }
@@ -191,7 +212,7 @@ beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "code-pact-archive-tol-int-"));
 });
 
-afterAll(async () => {
+afterEach(async () => {
   if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -202,7 +223,13 @@ describe("hand-deleted completed phase with a valid snapshot keeps cross-phase d
     await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
 
     expect(jsonOk(run(["validate", "--json"]))).toBe(true);
-    const lint = run(["plan", "lint", "--include-quality", "--strict", "--json"]);
+    const lint = run([
+      "plan",
+      "lint",
+      "--include-quality",
+      "--strict",
+      "--json",
+    ]);
     expect(jsonOk(lint)).toBe(true);
     // No false unresolved-dep / orphan-event on the deleted phase's task.
     expect(lint.stdout).not.toContain("TASK_DEPENDS_ON_UNRESOLVED");
@@ -213,8 +240,19 @@ describe("hand-deleted completed phase with a valid snapshot keeps cross-phase d
     // task context / task prepare on the LIVE active task (P2-T1, depends_on the
     // deleted P1-T1): resolution skips the deleted P1, dep satisfaction reads the
     // surviving done event → not blocked. (touch point E)
-    expect(jsonOk(run(["task", "context", "P2-T1", "--agent", "claude-code", "--json"]))).toBe(true);
-    const prep = run(["task", "prepare", "P2-T1", "--agent", "claude-code", "--json"]);
+    expect(
+      jsonOk(
+        run(["task", "context", "P2-T1", "--agent", "claude-code", "--json"]),
+      ),
+    ).toBe(true);
+    const prep = run([
+      "task",
+      "prepare",
+      "P2-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
     expect(jsonOk(prep)).toBe(true);
     // depends_on P1-T1 is satisfied from the surviving event → not wait_for_dependencies.
     expect(prep.stdout).not.toContain("wait_for_dependencies");
@@ -228,7 +266,11 @@ describe("hand-deleted completed phase with a valid snapshot keeps cross-phase d
     // snapshot now carries the cancelled P1-T2 as a known-but-unsatisfiable dep.
     await scaffold({ p1: P1_CANCELLED, p2: P2_DEP });
     await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
-    await writeFile(join(tmpDir, "design", "phases", "P2-y.yaml"), P2_DEP_CANCELLED, "utf8");
+    await writeFile(
+      join(tmpDir, "design", "phases", "P2-y.yaml"),
+      P2_DEP_CANCELLED,
+      "utf8",
+    );
     await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
 
     // EXISTENCE: the cancelled archived id is known → no unresolved-dep / orphan.
@@ -239,7 +281,14 @@ describe("hand-deleted completed phase with a valid snapshot keeps cross-phase d
 
     // SATISFACTION: a cancelled dep has no done event → P2-T1 is BLOCKED, exactly
     // as a cancelled LIVE dep would be. The archived index must NOT mark it satisfied.
-    const prep = run(["task", "prepare", "P2-T1", "--agent", "claude-code", "--json"]);
+    const prep = run([
+      "task",
+      "prepare",
+      "P2-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
     const parsed = JSON.parse(prep.stdout) as {
       data?: { next_action?: { type?: string }; blocked_by?: string[] };
     };
@@ -276,8 +325,12 @@ describe("hand-deleted completed phase with a valid snapshot keeps cross-phase d
     await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
     const lint = run(["plan", "lint", "--strict", "--json"]);
     expect(jsonOk(lint)).toBe(false);
-    const parsed = JSON.parse(lint.stdout) as { data: { issues: { code: string }[] } };
-    const invalids = parsed.data.issues.filter((i) => i.code === "PHASE_SNAPSHOT_INVALID");
+    const parsed = JSON.parse(lint.stdout) as {
+      data: { issues: { code: string }[] };
+    };
+    const invalids = parsed.data.issues.filter(
+      i => i.code === "PHASE_SNAPSHOT_INVALID",
+    );
     expect(invalids).toHaveLength(1);
   });
 
@@ -300,7 +353,11 @@ describe("hand-deleted completed phase with a valid snapshot keeps cross-phase d
     await scaffold();
     await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
     const P2_COLLIDE = P2_DEP.replace("id: P2-T1", "id: P1-T1");
-    await writeFile(join(tmpDir, "design", "phases", "P2-y.yaml"), P2_COLLIDE, "utf8");
+    await writeFile(
+      join(tmpDir, "design", "phases", "P2-y.yaml"),
+      P2_COLLIDE,
+      "utf8",
+    );
     await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
 
     // Every command that resolves a task / loads plan state shares the throwing
@@ -309,7 +366,16 @@ describe("hand-deleted completed phase with a valid snapshot keeps cross-phase d
     const exit2: string[][] = [
       ["task", "status", "P1-T1", "--json"],
       ["task", "complete", "P1-T1", "--agent", "claude-code", "--json"],
-      ["task", "record-done", "P1-T1", "--agent", "claude-code", "--evidence", "x", "--json"],
+      [
+        "task",
+        "record-done",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--evidence",
+        "x",
+        "--json",
+      ],
       ["task", "finalize", "P1-T1", "--json"],
       ["task", "runbook", "P1-T1", "--json"],
       ["task", "start", "P1-T1", "--json"],
@@ -326,19 +392,23 @@ describe("hand-deleted completed phase with a valid snapshot keeps cross-phase d
     for (const c of exit2) {
       const r = run(c);
       expect(r.code, `${c.join(" ")} should exit 2, not crash`).toBe(2);
-      const parsed = JSON.parse(r.stdout) as { ok?: boolean; error?: { code?: string } };
+      const parsed = JSON.parse(r.stdout) as {
+        ok?: boolean;
+        error?: { code?: string };
+      };
       expect(parsed.ok, `${c.join(" ")} should be ok:false`).toBe(false);
-      expect(parsed.error?.code, `${c.join(" ")} should map to PHASE_SNAPSHOT_INVALID`).toBe(
-        "PHASE_SNAPSHOT_INVALID",
-      );
+      expect(
+        parsed.error?.code,
+        `${c.join(" ")} should map to PHASE_SNAPSHOT_INVALID`,
+      ).toBe("PHASE_SNAPSHOT_INVALID");
     }
 
     // plan analyze surfaces it top-level too, but at its exit-1 failure convention.
     const analyze = run(["plan", "analyze", "--strict", "--json"]);
     expect(analyze.code).toBe(1);
-    expect((JSON.parse(analyze.stdout) as { error?: { code?: string } }).error?.code).toBe(
-      "PHASE_SNAPSHOT_INVALID",
-    );
+    expect(
+      (JSON.parse(analyze.stdout) as { error?: { code?: string } }).error?.code,
+    ).toBe("PHASE_SNAPSHOT_INVALID");
   });
 
   it("collision (archived id == live id) → ALL FIVE commands fail closed, none green (blocker-2 + E)", async () => {
@@ -347,7 +417,11 @@ describe("hand-deleted completed phase with a valid snapshot keeps cross-phase d
     await scaffold();
     await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
     const P2_COLLIDE = P2_DEP.replace("id: P2-T1", "id: P1-T1");
-    await writeFile(join(tmpDir, "design", "phases", "P2-y.yaml"), P2_COLLIDE, "utf8");
+    await writeFile(
+      join(tmpDir, "design", "phases", "P2-y.yaml"),
+      P2_COLLIDE,
+      "utf8",
+    );
     await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
 
     // validate (via doctor) + plan lint + plan analyze surface PHASE_SNAPSHOT_INVALID.
@@ -357,10 +431,24 @@ describe("hand-deleted completed phase with a valid snapshot keeps cross-phase d
     expect(jsonOk(run(["plan", "lint", "--strict", "--json"]))).toBe(false);
     expect(jsonOk(run(["plan", "analyze", "--strict", "--json"]))).toBe(false);
     // task context / task prepare must NOT return a green target (E does not bypass).
-    const ctx = run(["task", "context", "P1-T1", "--agent", "claude-code", "--json"]);
+    const ctx = run([
+      "task",
+      "context",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
     expect(jsonOk(ctx)).toBe(false);
     expect(ctx.stdout).toContain("PHASE_SNAPSHOT_INVALID");
-    const prep = run(["task", "prepare", "P1-T1", "--agent", "claude-code", "--json"]);
+    const prep = run([
+      "task",
+      "prepare",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
     expect(jsonOk(prep)).toBe(false);
     expect(prep.stdout).toContain("PHASE_SNAPSHOT_INVALID");
   });
@@ -399,11 +487,20 @@ async function makeUnreferencedP1(p2: string, progressAfter?: string) {
     // to drop the P1-T1 done event so no orphan remains once the snapshot is
     // also destroyed (a leftover archived-task event is only suppressed while a
     // valid snapshot covers it).
-    await rm(join(tmpDir, ".code-pact", "state", "events"), { recursive: true, force: true });
-    await mkdir(join(tmpDir, ".code-pact", "state", "events"), { recursive: true });
+    await rm(join(tmpDir, ".code-pact", "state", "events"), {
+      recursive: true,
+      force: true,
+    });
+    await mkdir(join(tmpDir, ".code-pact", "state", "events"), {
+      recursive: true,
+    });
     await seedDurableEvents(tmpDir, progressAfter);
   }
-  await writeFile(join(tmpDir, "design", "roadmap.yaml"), ROADMAP_P2_ONLY, "utf8");
+  await writeFile(
+    join(tmpDir, "design", "roadmap.yaml"),
+    ROADMAP_P2_ONLY,
+    "utf8",
+  );
   await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
 }
 
@@ -411,14 +508,28 @@ describe("cross-phase depends_on into an UNREFERENCED archived phase", () => {
   it("valid unreferenced snapshot whose task a live phase depends_on → all GREEN", async () => {
     await makeUnreferencedP1(P2_DEP); // P2-T1 depends_on P1-T1
     expect(jsonOk(run(["validate", "--json"]))).toBe(true);
-    const lint = run(["plan", "lint", "--include-quality", "--strict", "--json"]);
+    const lint = run([
+      "plan",
+      "lint",
+      "--include-quality",
+      "--strict",
+      "--json",
+    ]);
     expect(jsonOk(lint)).toBe(true);
     expect(lint.stdout).not.toContain("TASK_DEPENDS_ON_UNRESOLVED");
     const analyze = run(["plan", "analyze", "--strict", "--json"]);
     expect(jsonOk(analyze)).toBe(true);
     expect(analyze.stdout).not.toContain("ORPHAN_PROGRESS_EVENT");
-    expect(jsonOk(run(["task", "context", "P2-T1", "--agent", "claude-code", "--json"]))).toBe(true);
-    expect(jsonOk(run(["task", "prepare", "P2-T1", "--agent", "claude-code", "--json"]))).toBe(true);
+    expect(
+      jsonOk(
+        run(["task", "context", "P2-T1", "--agent", "claude-code", "--json"]),
+      ),
+    ).toBe(true);
+    expect(
+      jsonOk(
+        run(["task", "prepare", "P2-T1", "--agent", "claude-code", "--json"]),
+      ),
+    ).toBe(true);
     expect(jsonOk(run(["status", "--json"]))).toBe(true);
     expect(jsonOk(run(["phase", "runbook", "P2", "--json"]))).toBe(true);
   });
@@ -467,8 +578,14 @@ describe("cross-phase depends_on into an UNREFERENCED archived phase", () => {
 
   it("unreadable archive dir (a regular file at the path) → no PHASE_SNAPSHOT_INVALID/ORPHAN from validate, no crash; plan lint green", async () => {
     await makeUnreferencedP1(P2_NO_DEP, PROGRESS_P2_ONLY); // no leftover orphan event
-    await rm(join(tmpDir, ".code-pact", "state", "archive", "phases"), { recursive: true });
-    await writeFile(join(tmpDir, ".code-pact", "state", "archive", "phases"), "not a dir", "utf8");
+    await rm(join(tmpDir, ".code-pact", "state", "archive", "phases"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(tmpDir, ".code-pact", "state", "archive", "phases"),
+      "not a dir",
+      "utf8",
+    );
     const validate = run(["validate", "--strict", "--json"]);
     expect(validate.code).not.toBe(3); // no crash
     expect(validate.stdout).not.toContain("PHASE_SNAPSHOT_INVALID"); // doctor silent on dir-level
@@ -492,9 +609,17 @@ describe("cross-phase depends_on into an UNREFERENCED archived phase", () => {
     expect(jsonOk(lint)).toBe(false);
     const issues = lintIssues(lint);
     // The failure is the live-scoped depends-on ERROR, not the snapshot.
-    expect(issues.some((i) => i.code === "TASK_DEPENDS_ON_UNRESOLVED" && i.severity === "error")).toBe(true);
+    expect(
+      issues.some(
+        i => i.code === "TASK_DEPENDS_ON_UNRESOLVED" && i.severity === "error",
+      ),
+    ).toBe(true);
     // PHASE_SNAPSHOT_INVALID appears ONLY as the affects_exit:false advisory — never as an error.
-    expect(issues.some((i) => i.code === "PHASE_SNAPSHOT_INVALID" && i.severity === "error")).toBe(false);
+    expect(
+      issues.some(
+        i => i.code === "PHASE_SNAPSHOT_INVALID" && i.severity === "error",
+      ),
+    ).toBe(false);
   });
 
   // DIRECTORY-level soft failure + live dep (the directory-level soft-failure class the
@@ -503,13 +628,27 @@ describe("cross-phase depends_on into an UNREFERENCED archived phase", () => {
   // PHASE_SNAPSHOT_INVALID. plan analyze does NOT run the depends-on detector.
   it("(d) unreadable archive dir + a live dep → TASK_DEPENDS_ON_UNRESOLVED error (plan lint), no hard PHASE_SNAPSHOT_INVALID", async () => {
     await makeUnreferencedP1(P2_DEP, PROGRESS_P2_ONLY); // P2-T1 depends_on P1-T1, no orphan event
-    await rm(join(tmpDir, ".code-pact", "state", "archive", "phases"), { recursive: true });
-    await writeFile(join(tmpDir, ".code-pact", "state", "archive", "phases"), "not a dir", "utf8");
+    await rm(join(tmpDir, ".code-pact", "state", "archive", "phases"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(tmpDir, ".code-pact", "state", "archive", "phases"),
+      "not a dir",
+      "utf8",
+    );
     const lint = run(["plan", "lint", "--strict", "--json"]);
     expect(jsonOk(lint)).toBe(false);
     const issues = lintIssues(lint);
-    expect(issues.some((i) => i.code === "TASK_DEPENDS_ON_UNRESOLVED" && i.severity === "error")).toBe(true);
-    expect(issues.some((i) => i.code === "PHASE_SNAPSHOT_INVALID" && i.severity === "error")).toBe(false);
+    expect(
+      issues.some(
+        i => i.code === "TASK_DEPENDS_ON_UNRESOLVED" && i.severity === "error",
+      ),
+    ).toBe(true);
+    expect(
+      issues.some(
+        i => i.code === "PHASE_SNAPSHOT_INVALID" && i.severity === "error",
+      ),
+    ).toBe(false);
     // plan analyze does not run the depends-on detector → no TASK_DEPENDS_ON_UNRESOLVED there.
     const analyze = run(["plan", "analyze", "--strict", "--json"]);
     expect(analyze.stdout).not.toContain("TASK_DEPENDS_ON_UNRESOLVED");
@@ -525,7 +664,11 @@ describe("cross-phase depends_on into an UNREFERENCED archived phase", () => {
       P2_NO_DEP.replace("id: P2-T1", "id: P1-T1"),
       "utf8",
     );
-    await writeFile(join(tmpDir, "design", "roadmap.yaml"), ROADMAP_P2_ONLY, "utf8");
+    await writeFile(
+      join(tmpDir, "design", "roadmap.yaml"),
+      ROADMAP_P2_ONLY,
+      "utf8",
+    );
     await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
 
     // Every public reader path that runs discovery must hard-fail on the collision
@@ -544,9 +687,10 @@ describe("cross-phase depends_on into an UNREFERENCED archived phase", () => {
     ]) {
       const r = run(cmd);
       expect(jsonOk(r), `${cmd.join(" ")} must not be ok`).toBe(false);
-      expect(r.stdout, `${cmd.join(" ")} must surface PHASE_SNAPSHOT_INVALID`).toContain(
-        "PHASE_SNAPSHOT_INVALID",
-      );
+      expect(
+        r.stdout,
+        `${cmd.join(" ")} must surface PHASE_SNAPSHOT_INVALID`,
+      ).toContain("PHASE_SNAPSHOT_INVALID");
     }
   });
 

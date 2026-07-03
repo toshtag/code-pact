@@ -1,8 +1,12 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
+import {
+  run as cliRun,
+  ensureCliBuilt,
+  type RunResult,
+} from "../helpers/cli.ts";
 
 let tmpDir: string;
 
@@ -20,7 +24,7 @@ beforeEach(async () => {
   await mkdir(join(tmpDir, ".code-pact", "state"), { recursive: true });
 });
 
-afterAll(async () => {
+afterEach(async () => {
   if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -54,7 +58,10 @@ async function writeFixture(args: {
   phases: Array<{
     id: string;
     status?: "planned" | "in_progress" | "done" | "cancelled";
-    tasks: Array<{ id: string; status?: "planned" | "in_progress" | "done" | "cancelled" }>;
+    tasks: Array<{
+      id: string;
+      status?: "planned" | "in_progress" | "done" | "cancelled";
+    }>;
   }>;
   events: Array<{
     task_id: string;
@@ -64,7 +71,7 @@ async function writeFixture(args: {
 }): Promise<void> {
   const roadmap = `phases:\n${args.phases
     .map(
-      (p) =>
+      p =>
         `  - id: ${p.id}\n    path: design/phases/${p.id}.yaml\n    weight: 10`,
     )
     .join("\n")}\n`;
@@ -72,7 +79,7 @@ async function writeFixture(args: {
   for (const p of args.phases) {
     const tasksBlock = p.tasks
       .map(
-        (t) => `  - id: ${t.id}
+        t => `  - id: ${t.id}
     type: feature
     ambiguity: low
     risk: low
@@ -125,9 +132,7 @@ ${tasksBlock}
 describe("plan analyze", () => {
   it("clean tree: ok=true, exit 0, no drift", async () => {
     await writeFixture({
-      phases: [
-        { id: "P1", tasks: [{ id: "P1-T1", status: "done" }] },
-      ],
+      phases: [{ id: "P1", tasks: [{ id: "P1-T1", status: "done" }] }],
       events: [
         { task_id: "P1-T1", status: "started" },
         { task_id: "P1-T1", status: "done" },
@@ -190,18 +195,15 @@ describe("plan analyze", () => {
     expect(parsed.ok).toBe(true);
     expect(parsed.data?.include_historical).toBe(true);
     const historical = parsed.data?.issues.find(
-      (i) =>
-        i.code === "STATUS_DRIFT" &&
-        i.details?.["kind"] === "done-historical",
+      i =>
+        i.code === "STATUS_DRIFT" && i.details?.["kind"] === "done-historical",
     );
     expect(historical).toBeDefined();
   });
 
   it("done + blocked: exit 1, PLAN_ANALYZE_FAILED, single STATUS_DRIFT (kind=done-blocked-conflict)", async () => {
     await writeFixture({
-      phases: [
-        { id: "P1", tasks: [{ id: "P1-T1", status: "done" }] },
-      ],
+      phases: [{ id: "P1", tasks: [{ id: "P1-T1", status: "done" }] }],
       events: [
         { task_id: "P1-T1", status: "started" },
         { task_id: "P1-T1", status: "blocked", reason: "wait" },
@@ -214,7 +216,7 @@ describe("plan analyze", () => {
     expect(parsed.ok).toBe(false);
     expect(parsed.error?.code).toBe("PLAN_ANALYZE_FAILED");
     const drifts = parsed.data?.issues.filter(
-      (i) => i.code === "STATUS_DRIFT" && i.task_id === "P1-T1",
+      i => i.code === "STATUS_DRIFT" && i.task_id === "P1-T1",
     );
     expect(drifts).toHaveLength(1);
     expect(drifts?.[0]?.details?.["kind"]).toBe("done-blocked-conflict");
@@ -223,9 +225,7 @@ describe("plan analyze", () => {
   it("warnings-only stays exit 0; --strict promotes to exit 1", async () => {
     // design planned + derived done = warning kind=done-but-design-not-done
     await writeFixture({
-      phases: [
-        { id: "P1", tasks: [{ id: "P1-T1", status: "planned" }] },
-      ],
+      phases: [{ id: "P1", tasks: [{ id: "P1-T1", status: "planned" }] }],
       events: [
         { task_id: "P1-T1", status: "started" },
         { task_id: "P1-T1", status: "done" },
@@ -245,9 +245,7 @@ describe("plan analyze", () => {
 
   it("orphan progress event is a warning that does not break exit 0", async () => {
     await writeFixture({
-      phases: [
-        { id: "P1", tasks: [{ id: "P1-T1", status: "done" }] },
-      ],
+      phases: [{ id: "P1", tasks: [{ id: "P1-T1", status: "done" }] }],
       events: [
         { task_id: "P1-T1", status: "started" },
         { task_id: "P1-T1", status: "done" },
@@ -260,7 +258,7 @@ describe("plan analyze", () => {
     const parsed = parseAnalyze(res.stdout);
     expect(
       parsed.data?.issues.some(
-        (i) => i.code === "ORPHAN_PROGRESS_EVENT" && i.task_id === "GHOST",
+        i => i.code === "ORPHAN_PROGRESS_EVENT" && i.task_id === "GHOST",
       ),
     ).toBe(true);
   });

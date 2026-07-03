@@ -1,8 +1,12 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
+import {
+  run as cliRun,
+  ensureCliBuilt,
+  type RunResult,
+} from "../helpers/cli.ts";
 
 let tmpDir: string;
 
@@ -46,10 +50,14 @@ beforeAll(() => {
 beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "code-pact-plan-sync-int-"));
   await mkdir(join(tmpDir, "design", "phases"), { recursive: true });
-  await writeFile(join(tmpDir, "design", "phases", "P1.yaml"), PHASE_YAML, "utf8");
+  await writeFile(
+    join(tmpDir, "design", "phases", "P1.yaml"),
+    PHASE_YAML,
+    "utf8",
+  );
 });
 
-afterAll(async () => {
+afterEach(async () => {
   if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -59,7 +67,13 @@ type SyncJson = {
   data?: {
     mode: "check" | "write";
     renames: Array<{ from: string; to: string }>;
-    changes: Array<{ file: string; task_id: string; field: string; from: string; to: string }>;
+    changes: Array<{
+      file: string;
+      task_id: string;
+      field: string;
+      from: string;
+      to: string;
+    }>;
     files_changed: string[];
     written: string[];
     skipped: Array<{ file: string; reason: string }>;
@@ -124,7 +138,13 @@ describe("plan sync-paths", () => {
   });
 
   it("invalid --rename (no '='): CONFIG_ERROR, exit 2", async () => {
-    const res = run(["plan", "sync-paths", "--rename", "justastring", "--json"]);
+    const res = run([
+      "plan",
+      "sync-paths",
+      "--rename",
+      "justastring",
+      "--json",
+    ]);
     expect(res.code).toBe(2);
     const parsed = JSON.parse(res.stdout) as SyncJson;
     expect(parsed.error?.code).toBe("CONFIG_ERROR");

@@ -1,8 +1,12 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
+import {
+  run as cliRun,
+  ensureCliBuilt,
+  type RunResult,
+} from "../helpers/cli.ts";
 
 let tmpDir: string;
 
@@ -12,7 +16,11 @@ function run(args: string[]): RunResult {
 
 async function writeProgress(yaml: string): Promise<void> {
   await mkdir(join(tmpDir, ".code-pact", "state"), { recursive: true });
-  await writeFile(join(tmpDir, ".code-pact", "state", "progress.yaml"), yaml, "utf8");
+  await writeFile(
+    join(tmpDir, ".code-pact", "state", "progress.yaml"),
+    yaml,
+    "utf8",
+  );
 }
 
 const PROGRESS = `events:
@@ -35,7 +43,7 @@ beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "code-pact-plan-migrate-int-"));
 });
 
-afterAll(async () => {
+afterEach(async () => {
   if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -59,22 +67,28 @@ describe("plan migrate (B4)", () => {
     expect(j.data.dry_run).toBe(true);
     expect(j.data.legacy_events).toBe(2);
     expect(j.data.written).toBe(0);
-    await expect(readdir(join(tmpDir, ".code-pact", "state", "events"))).rejects.toMatchObject({
+    await expect(
+      readdir(join(tmpDir, ".code-pact", "state", "events")),
+    ).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
 
   it("--write migrates to event files and is idempotent on re-run", async () => {
     await writeProgress(PROGRESS);
-    const first = JSON.parse(run(["plan", "migrate", "--write", "--json"]).stdout) as MigrateJson;
+    const first = JSON.parse(
+      run(["plan", "migrate", "--write", "--json"]).stdout,
+    ) as MigrateJson;
     expect(first.data.written).toBe(2);
     expect(
-      (await readdir(join(tmpDir, ".code-pact", "state", "events"))).filter((f) =>
+      (await readdir(join(tmpDir, ".code-pact", "state", "events"))).filter(f =>
         f.endsWith(".yaml"),
       ).length,
     ).toBe(2);
 
-    const second = JSON.parse(run(["plan", "migrate", "--write", "--json"]).stdout) as MigrateJson;
+    const second = JSON.parse(
+      run(["plan", "migrate", "--write", "--json"]).stdout,
+    ) as MigrateJson;
     expect(second.data.written).toBe(0);
     expect(second.data.already_present).toBe(2);
   });
@@ -91,7 +105,11 @@ describe("plan migrate (B4)", () => {
     at: "2026-05-18T10:00:00.000Z"
     actor: agent
 `);
-    const j = JSON.parse(run(["plan", "migrate", "--json"]).stdout) as MigrateJson;
-    expect(j.data.state_changes).toEqual([{ task_id: "P1-T1", before: "started", after: "done" }]);
+    const j = JSON.parse(
+      run(["plan", "migrate", "--json"]).stdout,
+    ) as MigrateJson;
+    expect(j.data.state_changes).toEqual([
+      { task_id: "P1-T1", before: "started", after: "done" },
+    ]);
   });
 });

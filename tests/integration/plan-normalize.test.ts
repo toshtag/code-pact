@@ -1,8 +1,12 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
+import {
+  run as cliRun,
+  ensureCliBuilt,
+  type RunResult,
+} from "../helpers/cli.ts";
 
 let tmpDir: string;
 
@@ -19,7 +23,7 @@ beforeEach(async () => {
   await mkdir(join(tmpDir, "design", "phases"), { recursive: true });
 });
 
-afterAll(async () => {
+afterEach(async () => {
   if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
 });
 
