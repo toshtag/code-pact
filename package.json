@@ -72,13 +72,21 @@
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
+  "pnpm": {
+    "overrides": {
+      "esbuild": ">=0.28.1"
+    },
+    "ignoredBuiltDependencies": [
+      "esbuild"
+    ]
+  },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "github-slugger": "^2.0.0",
     "tsup": "^8.5.1",
     "tsx": "^4.22.3",
     "typescript": "^6.0.3",
-    "vite": "^6.4.2",
+    "vite": "^6.4.3",
     "vitest": "^4.1.6"
   }
 }
