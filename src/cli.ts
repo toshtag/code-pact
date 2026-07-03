@@ -648,6 +648,16 @@ async function cmdRecommend(
 // Command: verify
 // ---------------------------------------------------------------------------
 
+function parseTimeout(raw: string): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new ConfigError(
+      `--timeout must be a positive number of milliseconds, got: ${raw}`,
+    );
+  }
+  return Math.floor(n);
+}
+
 async function cmdVerify(
   argv: string[],
   locale: Locale,
@@ -660,6 +670,7 @@ async function cmdVerify(
       phase: { type: "string" },
       task: { type: "string" },
       "dry-run": { type: "boolean" },
+      timeout: { type: "string" },
       json: { type: "boolean" },
     },
     strict: false,
@@ -670,6 +681,10 @@ async function cmdVerify(
   const phaseId = values.phase as string | undefined;
   const taskId = values.task as string | undefined;
   const dryRun = values["dry-run"] === true;
+  const timeoutMs =
+    values.timeout !== undefined
+      ? parseTimeout(values.timeout as string)
+      : undefined;
 
   if (!phaseId || !taskId) {
     const msg = "verify requires --phase and --task";
@@ -680,7 +695,7 @@ async function cmdVerify(
   const cwd = process.cwd();
 
   try {
-    const result = await runVerify({ cwd, phaseId, taskId, dryRun });
+    const result = await runVerify({ cwd, phaseId, taskId, dryRun, timeoutMs });
     if (json) {
       if (result.ok) {
         emitOk({ checks: result.checks });
