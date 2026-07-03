@@ -559,6 +559,7 @@ describe("publish-workflow inline scripts", () => {
 
         const log = readFileSync(npmLog, "utf8").trim();
         expect(log).toContain("view code-pact@2.0.0 version");
+        expect(log).toContain("--registry=https://registry.npmjs.org");
         expect(log).toContain(
           "publish release-artifact/package.tgz --ignore-scripts",
         );
@@ -600,6 +601,7 @@ describe("publish-workflow inline scripts", () => {
 
         const log = readFileSync(npmLog, "utf8").trim();
         expect(log).toContain("view code-pact@2.0.0 version");
+        expect(log).toContain("--registry=https://registry.npmjs.org");
         expect(log).not.toContain("publish");
 
         const ghOutput = readFileSync(
@@ -649,6 +651,40 @@ describe("publish-workflow inline scripts", () => {
         }
         expect(threw).toBe(true);
         expect(existsSync(npmLog)).toBe(false);
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("NPM_CONFIG_REGISTRY env does not override --registry flag", () => {
+      const tmpDir = makeTmpEnv({});
+      const npmLog = join(tmpDir, "npm-calls.log");
+      try {
+        const scriptFile = join(tmpDir, "__run_publish.sh");
+        writeFileSync(scriptFile, "set -e\n" + publishScript!);
+        try {
+          execSync(`bash ${scriptFile}`, {
+            encoding: "utf8",
+            cwd: tmpDir,
+            env: {
+              ...process.env,
+              PATH: `${join(tmpDir, "bin")}:${process.env.PATH}`,
+              EXPECTED_TAG: "v2.0.0",
+              EXPECTED_COMMIT: "c".repeat(40),
+              NPM_CONFIG_PROVENANCE: "true",
+              NPM_CONFIG_REGISTRY: "https://attacker.invalid",
+              NPM_LOG: npmLog,
+              GITHUB_OUTPUT: join(tmpDir, "github-output.txt"),
+            },
+            stdio: "pipe",
+          });
+        } finally {
+          rmSync(scriptFile, { force: true });
+        }
+
+        const log = readFileSync(npmLog, "utf8").trim();
+        expect(log).toContain("--registry=https://registry.npmjs.org");
+        expect(log).not.toContain("attacker.invalid");
       } finally {
         rmSync(tmpDir, { recursive: true, force: true });
       }
