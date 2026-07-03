@@ -151,7 +151,7 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
 
       - name: Verify manifest and publish
         id: publish
@@ -208,13 +208,14 @@ jobs:
           NODE
 
           version="$(node -p 'require("./release-artifact/release-manifest.json").version')"
+          registry="https://registry.npmjs.org"
 
-          if npm view "code-pact@${version}" version >/dev/null 2>&1
+          if npm view "code-pact@${version}" version --registry="$registry" >/dev/null 2>&1
           then
             echo "Version already exists; verification will follow."
             echo "published_now=false" >> "$GITHUB_OUTPUT"
           else
-            npm publish "$tarball" --ignore-scripts
+            npm publish "$tarball" --ignore-scripts --registry="$registry"
             echo "published_now=true" >> "$GITHUB_OUTPUT"
           fi
 
