@@ -150,12 +150,15 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          path: release-artifact/",
     "",
     "  publish:",
+    "    name: Publish to npm via Trusted Publishing",
     "    runs-on: ubuntu-latest",
     "    needs: prepare",
     "    environment: npm-publish",
     "    permissions:",
     "      contents: read",
     "      id-token: write",
+    "    outputs:",
+    "      published_now: ${{ steps.publish.outputs.published_now }}",
     "    steps:",
     "      - name: Download release artifact",
     "        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0",
@@ -168,6 +171,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          node-version: 24",
     "          registry-url: https://registry.npmjs.org",
     "      - name: Verify manifest and publish",
+    "        id: publish",
     "        env:",
     "          EXPECTED_TAG: ${{ github.ref_name }}",
     "          EXPECTED_COMMIT: ${{ github.sha }}",
@@ -225,8 +229,10 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     '          if npm view "code-pact@${version}" version >/dev/null 2>&1',
     "          then",
     '            echo "Version already exists; verification will follow."',
+    '            echo "published_now=false" >> "$GITHUB_OUTPUT"',
     "          else",
     '            npm publish "$tarball" --ignore-scripts',
+    '            echo "published_now=true" >> "$GITHUB_OUTPUT"',
     "          fi",
     "",
     "  verify:",
@@ -253,8 +259,9 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "        run: node scripts/verify-published-tarball.mjs",
     "",
     "  github-release:",
+    "    name: Create verified GitHub Release",
     "    runs-on: ubuntu-latest",
-    "    needs: [verify, prepare]",
+    "    needs: [verify, prepare, publish]",
     "    permissions:",
     "      contents: write",
     "    steps:",
@@ -273,11 +280,19 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          GH_TOKEN: ${{ github.token }}",
     "          GH_REPO: ${{ github.repository }}",
     "          TAG: ${{ github.ref_name }}",
+    "          PUBLISHED_NOW: ${{ needs.publish.outputs.published_now }}",
     "        run: |",
     '          version="$(node -p \'require("./release-artifact/release-manifest.json").version\')"',
     '          shasum="$(node -p \'require("./release-integrity/release-integrity.json").shasum\')"',
     '          integrity="$(node -p \'require("./release-integrity/release-integrity.json").integrity\')"',
     '          local_sha256="$(node -p \'require("./release-integrity/release-integrity.json").local_sha256\')"',
+    "",
+    '          if [ "$PUBLISHED_NOW" = "true" ]',
+    "          then",
+    '            provenance_note="generated through Trusted Publishing"',
+    "          else",
+    '            provenance_note="existing-version rerun; verify the npm provenance badge manually"',
+    "          fi",
     "",
     "          cat release-artifact/release-notes.md > final-notes.md",
     "          cat >> final-notes.md <<EOF",
@@ -287,7 +302,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          - npm shasum: \\`$shasum\\`",
     "          - npm integrity: \\`$integrity\\`",
     "          - local tarball SHA-256: \\`$local_sha256\\`",
-    "          - npm provenance: generated through Trusted Publishing",
+    "          - npm provenance: $provenance_note",
     "          EOF",
     "",
     '          if gh release view "$TAG" >/dev/null 2>&1',
@@ -447,8 +462,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when github-release job has id-token: write", async () => {
     root = await buildTree({
       publishContent: wellFormedPublish.replace(
-        "  github-release:\n    runs-on: ubuntu-latest\n    needs: [verify, prepare]\n    permissions:\n      contents: write",
-        "  github-release:\n    runs-on: ubuntu-latest\n    needs: [verify, prepare]\n    permissions:\n      contents: write\n      id-token: write",
+        "  github-release:\n    name: Create verified GitHub Release\n    runs-on: ubuntu-latest\n    needs: [verify, prepare, publish]\n    permissions:\n      contents: write",
+        "  github-release:\n    name: Create verified GitHub Release\n    runs-on: ubuntu-latest\n    needs: [verify, prepare, publish]\n    permissions:\n      contents: write\n      id-token: write",
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);
@@ -581,8 +596,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when publish job has packages: write", async () => {
     root = await buildTree({
       publishContent: wellFormedPublish.replace(
-        "  publish:\n    runs-on: ubuntu-latest\n    needs: prepare\n    environment: npm-publish\n    permissions:\n      contents: read\n      id-token: write",
-        "  publish:\n    runs-on: ubuntu-latest\n    needs: prepare\n    environment: npm-publish\n    permissions:\n      contents: read\n      id-token: write\n      packages: write",
+        "  publish:\n    name: Publish to npm via Trusted Publishing\n    runs-on: ubuntu-latest\n    needs: prepare\n    environment: npm-publish\n    permissions:\n      contents: read\n      id-token: write\n    outputs:\n      published_now: ${{ steps.publish.outputs.published_now }}",
+        "  publish:\n    name: Publish to npm via Trusted Publishing\n    runs-on: ubuntu-latest\n    needs: prepare\n    environment: npm-publish\n    permissions:\n      contents: read\n      id-token: write\n    outputs:\n      published_now: ${{ steps.publish.outputs.published_now }}\n      packages: write",
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);
@@ -627,6 +642,128 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     root = await buildTree();
     const { failures: secondFailures } = checkSupplyChainInvariants(root);
     expect(secondFailures).toBe(0);
+    await cleanup();
+  });
+
+  // --- Canonical structure violation tests ---
+
+  it("fails when publish job has job-level NODE_OPTIONS env", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "  publish:\n    name: Publish to npm via Trusted Publishing\n    runs-on: ubuntu-latest\n    needs: prepare\n    environment: npm-publish",
+        "  publish:\n    name: Publish to npm via Trusted Publishing\n    runs-on: ubuntu-latest\n    needs: prepare\n    environment: npm-publish\n    env:\n      NODE_OPTIONS: --require ./release-artifact/preload.cjs",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when publish step has custom shell", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "      - name: Verify manifest and publish\n        id: publish\n        env:",
+        "      - name: Verify manifest and publish\n        id: publish\n        shell: \"bash -c 'echo PWNED >&2; bash {0}'\"\n        env:",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when publish job has container", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "  publish:\n    name: Publish to npm via Trusted Publishing\n    runs-on: ubuntu-latest\n    needs: prepare\n    environment: npm-publish",
+        "  publish:\n    name: Publish to npm via Trusted Publishing\n    runs-on: ubuntu-latest\n    needs: prepare\n    environment: npm-publish\n    container: attacker/image:latest",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when publish job runs-on self-hosted", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "  publish:\n    name: Publish to npm via Trusted Publishing\n    runs-on: ubuntu-latest",
+        "  publish:\n    name: Publish to npm via Trusted Publishing\n    runs-on:\n      - self-hosted\n      - attacker",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when EXPECTED_TAG is replaced with fixed string", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "EXPECTED_TAG: ${{ github.ref_name }}",
+        "EXPECTED_TAG: v9.9.9",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when EXPECTED_COMMIT is replaced with fixed string", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "EXPECTED_COMMIT: ${{ github.sha }}",
+        "EXPECTED_COMMIT: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when download-artifact uses pattern: *", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "      - name: Download release artifact\n        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0\n        with:\n          name: release-artifact\n          path: release-artifact\n      - name: Set up Node",
+        '      - name: Download release artifact\n        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0\n        with:\n          pattern: "*"\n          merge-multiple: true\n          path: release-artifact\n      - name: Set up Node',
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when setup-node registry-url is changed", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "registry-url: https://registry.npmjs.org",
+        "registry-url: https://evil.registry.invalid",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when github-release job has GH_HOST env", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "          TAG: ${{ github.ref_name }}\n          PUBLISHED_NOW: ${{ needs.publish.outputs.published_now }}",
+        "          TAG: ${{ github.ref_name }}\n          PUBLISHED_NOW: ${{ needs.publish.outputs.published_now }}\n          GH_HOST: github.enterprise.invalid",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when github-release step has custom shell", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "      - name: Create or reconcile GitHub Release\n        env:",
+        "      - name: Create or reconcile GitHub Release\n        shell: python\n        env:",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
     await cleanup();
   });
 });
