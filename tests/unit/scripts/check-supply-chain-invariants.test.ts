@@ -169,7 +169,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0",
     "        with:",
     "          node-version: 24",
-    "          registry-url: https://registry.npmjs.org",
+    "          package-manager-cache: false",
     "      - name: Verify manifest and publish",
     "        id: publish",
     "        env:",
@@ -225,13 +225,14 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          NODE",
     "",
     '          version="$(node -p \'require("./release-artifact/release-manifest.json").version\')"',
+    '          registry="https://registry.npmjs.org"',
     "",
-    '          if npm view "code-pact@${version}" version >/dev/null 2>&1',
+    '          if npm view "code-pact@${version}" version --registry="$registry" >/dev/null 2>&1',
     "          then",
     '            echo "Version already exists; verification will follow."',
     '            echo "published_now=false" >> "$GITHUB_OUTPUT"',
     "          else",
-    '            npm publish "$tarball" --ignore-scripts',
+    '            npm publish "$tarball" --ignore-scripts --registry="$registry"',
     '            echo "published_now=true" >> "$GITHUB_OUTPUT"',
     "          fi",
     "",
@@ -731,11 +732,11 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     await cleanup();
   });
 
-  it("fails when setup-node registry-url is changed", async () => {
+  it("fails when setup-node package-manager-cache is changed", async () => {
     root = await buildTree({
       publishContent: wellFormedPublish.replace(
-        "registry-url: https://registry.npmjs.org",
-        "registry-url: https://evil.registry.invalid",
+        "package-manager-cache: false",
+        "package-manager-cache: true",
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);
@@ -760,6 +761,94 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
       publishContent: wellFormedPublish.replace(
         "      - name: Create or reconcile GitHub Release\n        env:",
         "      - name: Create or reconcile GitHub Release\n        shell: python\n        env:",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  // --- Workflow envelope violation tests ---
+
+  it("fails when workflow has top-level NODE_OPTIONS env", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "permissions: {}\n",
+        "permissions: {}\n\nenv:\n  NODE_OPTIONS: --require ./release-artifact/preload.cjs\n",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when workflow has top-level NPM_CONFIG_REGISTRY env", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "permissions: {}\n",
+        "permissions: {}\n\nenv:\n  NPM_CONFIG_REGISTRY: https://attacker.invalid\n",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when workflow has top-level defaults.run.shell", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "permissions: {}\n",
+        'permissions: {}\n\ndefaults:\n  run:\n    shell: bash -c "echo PWNED >&2; bash {0}"\n',
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when workflow has top-level defaults.run.working-directory", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "permissions: {}\n",
+        "permissions: {}\n\ndefaults:\n  run:\n    working-directory: release-artifact\n",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when workflow concurrency group is changed", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "  group: npm-publish-${{ github.ref }}\n  cancel-in-progress: false",
+        "  group: shared-release-group\n  cancel-in-progress: true",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  // --- OIDC setup-node invariant tests ---
+
+  it("fails when setup-node re-adds registry-url", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "          node-version: 24\n          package-manager-cache: false",
+        "          node-version: 24\n          registry-url: https://registry.npmjs.org",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when setup-node removes package-manager-cache", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        "          node-version: 24\n          package-manager-cache: false",
+        "          node-version: 24",
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);
