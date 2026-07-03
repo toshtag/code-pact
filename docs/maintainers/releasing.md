@@ -1,13 +1,14 @@
 # Releasing
 
 The repeatable steps to cut a release. Most of it is a normal PR; only the
-**signed tag** and **`npm publish`** are maintainer-local (they need the
-maintainer's signing key and npm credentials).
+**signed tag** is maintainer-local (it needs the maintainer's signing key).
+Publishing is fully automated via GitHub Actions Trusted Publishing; maintainers
+do not run a local registry publication command.
 
 `package.json` `files` whitelists `dist/` + `LICENSE`; npm additionally **always**
 includes `package.json` and the `README` regardless of `files`. Source under `src/`
 and docs other than the README are **not** shipped. So **code changes under `src/`
-require a release to reach users; docs under `docs/**` / `design/**` do not** (they
+require a release to reach users; docs under `docs/**`/`design/**` do not** (they
 are not shipped — read them in the repo). The one exception is `README.md`: it is
 visible in the repo immediately, but the README shown on the **npm package page**
 updates only on publish — release a README-only change when that npm-facing copy
@@ -55,6 +56,7 @@ On a `chore/release-<version>` branch:
    git diff <last-tag>..HEAD --name-only -- docs/ design/decisions/
    # scan for: new error codes without a troubleshooting entry.
    ```
+
 5. **Verify** — one command, the release gate:
    ```sh
    pnpm release:check
@@ -67,45 +69,92 @@ On a `chore/release-<version>` branch:
    gate — don't re-list the steps here, or the runbook drifts from the script.
 6. Open the PR; merge once CI is green.
 
-## Tag + publish (maintainer-local)
+## Tag + publish (automated via GitHub Actions)
 
 After the release-prep PR merges to `main`:
 
 7. **SSH-signed annotated tag** on the merge commit. `SECURITY.md` requires
    stable releases to use SSH-signed tags (so the GitHub tag page shows
    "Verified"); use `-s` (not `-a`, which is annotated but not signed).
-   Lightweight tags are rejected by a hook; signing setup is in
+   Lightweight tags are rejected by the publish workflow; signing setup is in
    [CONTRIBUTING](../../CONTRIBUTING.md#tag-signing-maintainer-only):
    ```sh
    git tag -s v<version> -m "v<version> — <theme>"
    git verify-tag v<version>   # expect a good signature before pushing
    git push origin v<version>
    ```
-8. **Publish.** `dist/` is gitignored, yet `files: ["dist", …]` / `bin: dist/cli.js`
-   ship it — so a fresh checkout (or a clean `main`) has **nothing to publish**
-   until you build. Build first, then publish (`prepublishOnly` re-checks package
-   metadata as a backstop, but does not build for you):
-   ```sh
-   pnpm install --frozen-lockfile
-   pnpm build            # or `pnpm release:check` for the full pre-publish gate
-   npm publish
-   ```
-9. **GitHub Release** from the tag, using the CHANGELOG section as the body —
-   generate it verbatim with `node scripts/release-notes.mjs <version>` (or
-   `pnpm release-notes <version>`) so the notes are never authored twice —
-   **plus an `## Integrity` section** recording the published tarball's
-   `shasum` and `integrity`. This is a documented supply-chain policy
-   ([SECURITY.md](../../SECURITY.md): "the published tarball shasum is recorded
-   in the corresponding GitHub Release notes"), so it is **required**. Take the
-   values **after** publish from the registry — `pnpm pack` is not the
-   published tarball, and `npm view … dist` can return a stale `E404` right
-   after publish, so read the registry JSON directly:
-   ```sh
-   curl -s https://registry.npmjs.org/code-pact \
-     | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const v=JSON.parse(d).versions["<version>"].dist;console.log("shasum:",v.shasum);console.log("integrity:",v.integrity)})'
-   ```
-   As a final check, download that `dist.tarball` and recompute `shasum` to
-   confirm it matches the notes.
+8. **Approve the publish workflow.** Pushing the tag triggers
+   `.github/workflows/publish.yml`. The workflow has four jobs with strict
+   permission separation:
+
+   | Job              | Permissions                         | Runs                                                                                                               |
+   | ---------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+   | `prepare`        | `contents: read`                    | checkout, tag verification, `release:check`, tarball build + inspection, release notes generation, artifact upload |
+   | `publish`        | `contents: read`, `id-token: write` | artifact download, manifest verification, `npm publish --ignore-scripts` (no checkout, no repository code)         |
+   | `verify`         | `contents: read`                    | artifact download, registry tarball download + byte verification, integrity report upload                          |
+   | `github-release` | `contents: write`                   | artifact download, `gh release create/edit` (no checkout, no repository code)                                      |
+
+   Approve the deployment in the GitHub Actions UI (the `publish` job runs in
+   the `npm-publish` GitHub Environment with required reviewers). The workflow
+   then:
+   - **prepare** verifies the signed annotated tag (`check-release-tag.mjs`),
+     runs `pnpm release:check`, builds and inspects the exact tarball
+     (`check-package-tarball.mjs`), generates release notes, and uploads the
+     artifact,
+   - **publish** downloads the verified artifact and publishes it via npm
+     Trusted Publishing (OIDC, no npm token) with `--ignore-scripts`,
+
+     > **OIDC note:** The `publish` job does **not** pass `registry-url` to
+     > `actions/setup-node`. Setting `registry-url` generates an `.npmrc` entry
+     > referencing `NODE_AUTH_TOKEN`; when that token is absent (as it is with
+     > Trusted Publishing), npm may attempt legacy token auth instead of OIDC
+     > and fail with `ENEEDAUTH`. The npm registry endpoint is fixed via the
+     > `--registry` CLI flag on both `npm view` and `npm publish` to prevent
+     > `NPM_CONFIG_REGISTRY` environment variable overrides.
+
+   - **verify** downloads the registry tarball and verifies its bytes
+     (`verify-published-tarball.mjs`),
+   - **github-release** creates a GitHub Release with an auto-generated
+     `## Integrity` section.
+
+9. **Verify.** After the workflow succeeds:
+   - Check the npm package page for the provenance badge.
+   - Check the GitHub Release for the auto-generated Integrity section
+     (shasum, integrity, local SHA-256, provenance note).
+
+## One-time security setup
+
+These steps are performed once by a repository administrator. They cannot be
+verified from code alone — attach evidence (screenshots or API output) to the
+rollout PR.
+
+### GitHub Environment: `npm-publish`
+
+1. **Create** a GitHub Environment named `npm-publish` (Settings → Environments).
+2. **Required reviewers:** add the maintainer or release team.
+3. **Prevent self-review:** enabled — the person who pushed the tag cannot
+   approve their own deployment.
+4. **Allow administrators to bypass:** disabled — no bypass.
+5. **Deployment branches and tags:** selected tags → `v*` only.
+
+### npm Trusted Publisher
+
+Configure at [npmjs.com](https://www.npmjs.com/) → package settings →
+Trusted Publishing:
+
+1. **Provider:** GitHub Actions.
+2. **Repository:** `toshtag/code-pact` (or the target repository).
+3. **Workflow filename:** `publish.yml`.
+4. **Environment:** `npm-publish`.
+5. **Allowed action:** `npm publish` only.
+
+### After first successful publish
+
+1. **Revoke** any existing npm automation tokens (Access Tokens → delete).
+2. **Remove** `NPM_TOKEN` from GitHub repository secrets (if it existed).
+3. **Disable token-based publish** in the npm package settings (require Trusted
+   Publishing only).
+4. **Confirm** maintainer accounts have 2FA enabled.
 
 ## What does NOT need a release
 

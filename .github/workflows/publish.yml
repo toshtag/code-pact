@@ -1,0 +1,364 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Build and inspect release artifact
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout signed tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+
+      - name: Verify npm Trusted Publishing prerequisites
+        run: |
+          node --version
+          npm --version
+          NPM_VERSION="$(npm --version)" node <<'NODE'
+          const [major, minor, patch] =
+            process.env.NPM_VERSION
+              .split(".")
+              .map(Number);
+
+          if (
+            major < 11 ||
+            (major === 11 && (minor < 5 || (minor === 5 && patch < 1)))
+          ) {
+            console.error("npm >= 11.5.1 is required for Trusted Publishing");
+            process.exit(1);
+          }
+          NODE
+
+      - name: Verify signed release tag
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/check-release-tag.mjs
+
+      - name: Install exact dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run complete release gate
+        run: pnpm release:check
+
+      - name: Assert package metadata
+        run: node scripts/assert-package-metadata.mjs
+
+      - name: Build and inspect exact package tarball
+        id: pack
+        run: |
+          npm pack --json --ignore-scripts > pack.json
+          node scripts/check-package-tarball.mjs \
+            --pack-json pack.json
+
+          tarball="$(node -p 'JSON.parse(require("fs").readFileSync("pack.json","utf8"))[0].filename')"
+
+          mkdir -p release-artifact
+          mv "$tarball" release-artifact/package.tgz
+
+          version="$(node -p 'require("./package.json").version')"
+          sha256="$(sha256sum release-artifact/package.tgz | cut -d' ' -f1)"
+
+          VERSION="$version" \
+          TARBALL_SHA256="$sha256" \
+          node <<'NODE'
+          const fs = require("fs");
+
+          const version = process.env.VERSION;
+          const commit = process.env.GITHUB_SHA;
+          const tarballSha256 = process.env.TARBALL_SHA256;
+
+          if (typeof version !== "string" || !/^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(version)) {
+            throw new Error(`invalid release version: ${JSON.stringify(version)}`);
+          }
+
+          if (typeof commit !== "string" || !/^[0-9a-f]{40}$/.test(commit)) {
+            throw new Error("GITHUB_SHA is not a 40-character SHA");
+          }
+
+          if (typeof tarballSha256 !== "string" || !/^[0-9a-f]{64}$/.test(tarballSha256)) {
+            throw new Error("tarball SHA-256 is invalid");
+          }
+
+          const manifest = {
+            package: "code-pact",
+            version,
+            tag: `v${version}`,
+            commit,
+            tarball_sha256: tarballSha256,
+          };
+
+          fs.writeFileSync(
+            "release-artifact/release-manifest.json",
+            JSON.stringify(manifest, null, 2) + "\n",
+          );
+          NODE
+
+          node scripts/release-notes.mjs "$version" \
+            > release-artifact/release-notes.md
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-artifact
+          path: release-artifact/
+          if-no-files-found: error
+
+  publish:
+    name: Publish to npm via Trusted Publishing
+    runs-on: ubuntu-latest
+    needs: prepare
+    environment: npm-publish
+
+    permissions:
+      contents: read
+      id-token: write
+
+    outputs:
+      published_now: ${{ steps.publish.outputs.published_now }}
+
+    steps:
+      - name: Download release artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: release-artifact
+          path: release-artifact
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Verify manifest and publish
+        id: publish
+        env:
+          EXPECTED_TAG: ${{ github.ref_name }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+          NPM_CONFIG_PROVENANCE: "true"
+        run: |
+          manifest="release-artifact/release-manifest.json"
+          tarball="release-artifact/package.tgz"
+
+          MANIFEST="$manifest" \
+          TARBALL="$tarball" \
+          node <<'NODE'
+          const fs = require("fs");
+          const crypto = require("crypto");
+
+          const m = JSON.parse(fs.readFileSync(process.env.MANIFEST, "utf8"));
+
+          if (m.package !== "code-pact") {
+            throw new Error(`unexpected package: ${JSON.stringify(m.package)}`);
+          }
+
+          const match = /^v(\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?)$/.exec(process.env.EXPECTED_TAG ?? "");
+
+          if (!match) {
+            throw new Error(`unexpected workflow tag: ${JSON.stringify(process.env.EXPECTED_TAG)}`);
+          }
+
+          const expectedVersion = match[1];
+
+          if (m.tag !== process.env.EXPECTED_TAG) {
+            throw new Error(`manifest tag ${JSON.stringify(m.tag)} != workflow tag ${JSON.stringify(process.env.EXPECTED_TAG)}`);
+          }
+
+          if (m.version !== expectedVersion) {
+            throw new Error(`manifest version ${JSON.stringify(m.version)} != workflow version ${JSON.stringify(expectedVersion)}`);
+          }
+
+          if (m.commit !== process.env.EXPECTED_COMMIT) {
+            throw new Error(`manifest commit ${JSON.stringify(m.commit)} != workflow commit ${JSON.stringify(process.env.EXPECTED_COMMIT)}`);
+          }
+
+          if (!/^[0-9a-f]{64}$/.test(m.tarball_sha256)) {
+            throw new Error("manifest tarball_sha256 is invalid");
+          }
+
+          const bytes = fs.readFileSync(process.env.TARBALL);
+          const actual = crypto.createHash("sha256").update(bytes).digest("hex");
+
+          if (actual !== m.tarball_sha256) {
+            throw new Error(`tarball SHA-256 ${actual} != manifest ${m.tarball_sha256}`);
+          }
+          NODE
+
+          version="$(node -p 'require("./release-artifact/release-manifest.json").version')"
+          registry="https://registry.npmjs.org"
+
+          if npm view "code-pact@${version}" version --registry="$registry" >/dev/null 2>&1
+          then
+            echo "Version already exists; verification will follow."
+            echo "published_now=false" >> "$GITHUB_OUTPUT"
+          else
+            npm publish "$tarball" --ignore-scripts --registry="$registry"
+            echo "published_now=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  verify:
+    name: Verify registry tarball
+    runs-on: ubuntu-latest
+    needs: [publish, prepare]
+
+    permissions:
+      contents: read
+
+    outputs:
+      shasum: ${{ steps.integrity.outputs.shasum }}
+      integrity: ${{ steps.integrity.outputs.integrity }}
+      local_sha256: ${{ steps.integrity.outputs.local_sha256 }}
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download release artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: release-artifact
+          path: release-artifact
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+
+      - name: Verify registry tarball
+        id: integrity
+        run: |
+          version="$(node -p 'require("./release-artifact/release-manifest.json").version')"
+
+          node \
+            scripts/verify-published-tarball.mjs \
+            --package code-pact \
+            --version "$version" \
+            --local release-artifact/package.tgz \
+            --output release-integrity.json
+
+          node - <<'NODE'
+          const fs = require("fs");
+          const data =
+            JSON.parse(
+              fs.readFileSync(
+                "release-integrity.json",
+                "utf8",
+              ),
+            );
+
+          const out =
+            process.env.GITHUB_OUTPUT;
+
+          fs.appendFileSync(
+            out,
+            `shasum=${data.shasum}\n`,
+          );
+
+          fs.appendFileSync(
+            out,
+            `integrity=${data.integrity}\n`,
+          );
+
+          fs.appendFileSync(
+            out,
+            `local_sha256=${data.local_sha256}\n`,
+          );
+          NODE
+
+      - name: Upload integrity artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-integrity
+          path: release-integrity.json
+          if-no-files-found: error
+
+  github-release:
+    name: Create verified GitHub Release
+    runs-on: ubuntu-latest
+    needs: [verify, prepare, publish]
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: release-artifact
+          path: release-artifact
+
+      - name: Download integrity artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: release-integrity
+          path: release-integrity
+
+      - name: Create or reconcile GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          PUBLISHED_NOW: ${{ needs.publish.outputs.published_now }}
+        run: |
+          version="$(node -p 'require("./release-artifact/release-manifest.json").version')"
+          shasum="$(node -p 'require("./release-integrity/release-integrity.json").shasum')"
+          integrity="$(node -p 'require("./release-integrity/release-integrity.json").integrity')"
+          local_sha256="$(node -p 'require("./release-integrity/release-integrity.json").local_sha256')"
+
+          if [ "$PUBLISHED_NOW" = "true" ]
+          then
+            provenance_note="generated through Trusted Publishing"
+          else
+            provenance_note="existing-version rerun; verify the npm provenance badge manually"
+          fi
+
+          cat release-artifact/release-notes.md > final-notes.md
+          cat >> final-notes.md <<EOF
+
+          ## Integrity
+
+          - npm shasum: \`$shasum\`
+          - npm integrity: \`$integrity\`
+          - local tarball SHA-256: \`$local_sha256\`
+          - npm provenance: $provenance_note
+          EOF
+
+          if gh release view "$TAG" >/dev/null 2>&1
+          then
+            gh release edit \
+              "$TAG" \
+              --notes-file final-notes.md \
+              --verify-tag
+          else
+            gh release create \
+              "$TAG" \
+              --title "$TAG" \
+              --notes-file final-notes.md \
+              --verify-tag
+          fi

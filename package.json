@@ -42,7 +42,7 @@
     "test": "pnpm test:unit && pnpm test:integration",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:integration": "pnpm build && vitest run --config vitest.integration.config.ts",
-    "test:ci": "pnpm typecheck && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm test:unit && pnpm build && vitest run --config vitest.integration.config.ts",
+    "test:ci": "pnpm typecheck && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm check:supply-chain && pnpm test:unit && pnpm build && vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "harness": "tsx scripts/harness/run.ts",
@@ -62,8 +62,11 @@
     "check:fs-containment": "node scripts/check-fs-containment.mjs",
     "check:fs-authority": "node scripts/check-fs-authority.mjs",
     "check:security-hardening": "node scripts/check-security-hardening-invariants.mjs",
-    "release:check": "pnpm typecheck && pnpm test && pnpm build && pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm check:release-version && node dist/cli.js validate --json && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json",
-    "prepublishOnly": "node scripts/assert-package-metadata.mjs"
+    "check:release-tag": "node scripts/check-release-tag.mjs",
+    "check:package-tarball": "node scripts/check-package-tarball.mjs",
+    "verify:published-tarball": "node scripts/verify-published-tarball.mjs",
+    "check:supply-chain": "node scripts/check-supply-chain-invariants.mjs",
+    "release:check": "pnpm typecheck && pnpm test && pnpm build && pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm check:supply-chain && pnpm check:release-version && node dist/cli.js validate --json && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json"
   },
   "dependencies": {
     "yaml": "^2.9.0",
