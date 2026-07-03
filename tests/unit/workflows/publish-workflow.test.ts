@@ -8,9 +8,13 @@ import {
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { parseDocument } from "yaml";
+import {
+  PUBLISH_RUN_HASH,
+  GITHUB_RELEASE_RUN_HASH,
+} from "../../../scripts/check-supply-chain-invariants.mjs";
 
 const repoRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -433,28 +437,362 @@ describe("publish-workflow inline scripts", () => {
   });
 
   describe("run script hash stability", () => {
-    it("publish job run script hash matches EXPECTED_RUN_HASHES", () => {
+    it("publish job run script hash matches checker constant", () => {
       const content = readWorkflow();
       const scripts = extractRunScripts(content, "publish");
       const runScripts = scripts.filter(s => typeof s === "string");
       expect(runScripts.length).toBe(1);
       const normalized = runScripts[0]!.replace(/\r\n/g, "\n").trimEnd() + "\n";
       const hash = createHash("sha256").update(normalized).digest("hex");
-      expect(hash).toBe(
-        "d0bc8162bedfcd6049329876c422a3a608a01b37b6d9813a7f02b3676a287d30",
-      );
+      expect(hash).toBe(PUBLISH_RUN_HASH);
     });
 
-    it("github-release job run script hash matches EXPECTED_RUN_HASHES", () => {
+    it("github-release job run script hash matches checker constant", () => {
       const content = readWorkflow();
       const scripts = extractRunScripts(content, "github-release");
       const runScripts = scripts.filter(s => typeof s === "string");
       expect(runScripts.length).toBe(1);
       const normalized = runScripts[0]!.replace(/\r\n/g, "\n").trimEnd() + "\n";
       const hash = createHash("sha256").update(normalized).digest("hex");
-      expect(hash).toBe(
-        "99cd20bfe6d10360bb0186e3b37a59d47a8352b8081e4aed2138cf575f8846dd",
+      expect(hash).toBe(GITHUB_RELEASE_RUN_HASH);
+    });
+  });
+
+  describe("bash -n syntax check for all run steps", () => {
+    const content = readWorkflow();
+    const allJobs = ["prepare", "publish", "verify", "github-release"];
+
+    for (const jobName of allJobs) {
+      it(`${jobName} job: all run scripts pass bash -n`, () => {
+        const scripts = extractRunScripts(content, jobName);
+        for (const script of scripts) {
+          const tmpFile = join(repoRoot, `__test_bash_syntax_${jobName}.sh`);
+          writeFileSync(tmpFile, script);
+          try {
+            execFileSync("bash", ["-n", tmpFile], {
+              encoding: "utf8",
+              stdio: "pipe",
+            });
+          } finally {
+            rmSync(tmpFile, { force: true });
+          }
+        }
+      });
+    }
+  });
+
+  describe("publish job: full shell execution with stub npm", () => {
+    const content = readWorkflow();
+    const scripts = extractRunScripts(content, "publish");
+    const publishScript = scripts.find(s => s.includes("EXPECTED_TAG"));
+
+    function makeTmpEnv(opts: {
+      npmViewExit?: number;
+      manifest?: Record<string, unknown>;
+      tarballContent?: Buffer;
+    }): string {
+      const tmpDir = join(repoRoot, "tmp-test-publish-shell");
+      rmSync(tmpDir, { recursive: true, force: true });
+      mkdirSync(join(tmpDir, "release-artifact"), { recursive: true });
+      mkdirSync(join(tmpDir, "bin"), { recursive: true });
+
+      const tarball = opts.tarballContent ?? Buffer.from("publish-tarball");
+      writeFileSync(join(tmpDir, "release-artifact", "package.tgz"), tarball);
+      const sha256 = createHash("sha256").update(tarball).digest("hex");
+
+      const manifest = opts.manifest ?? {
+        package: "code-pact",
+        version: "2.0.0",
+        tag: "v2.0.0",
+        commit: "c".repeat(40),
+        tarball_sha256: sha256,
+      };
+      writeFileSync(
+        join(tmpDir, "release-artifact", "release-manifest.json"),
+        JSON.stringify(manifest, null, 2) + "\n",
       );
+
+      const npmViewExit = opts.npmViewExit ?? 1;
+      writeFileSync(
+        join(tmpDir, "bin", "npm"),
+        [
+          "#!/bin/sh",
+          'printf \'%s\\n\' "$*" >> "$NPM_LOG"',
+          'if [ "$1" = "view" ]; then',
+          `  exit ${npmViewExit}`,
+          "fi",
+          'if [ "$1" = "publish" ]; then',
+          "  exit 0",
+          "fi",
+          "exit 2",
+        ].join("\n"),
+      );
+      execSync(`chmod +x ${join(tmpDir, "bin", "npm")}`);
+
+      return tmpDir;
+    }
+
+    it("new version: calls npm view then npm publish", () => {
+      const tmpDir = makeTmpEnv({});
+      const npmLog = join(tmpDir, "npm-calls.log");
+      try {
+        const scriptFile = join(tmpDir, "__run_publish.sh");
+        writeFileSync(scriptFile, "set -e\n" + publishScript!);
+        try {
+          execSync(`bash ${scriptFile}`, {
+            encoding: "utf8",
+            cwd: tmpDir,
+            env: {
+              ...process.env,
+              PATH: `${join(tmpDir, "bin")}:${process.env.PATH}`,
+              EXPECTED_TAG: "v2.0.0",
+              EXPECTED_COMMIT: "c".repeat(40),
+              NPM_CONFIG_PROVENANCE: "true",
+              NPM_LOG: npmLog,
+              GITHUB_OUTPUT: join(tmpDir, "github-output.txt"),
+            },
+            stdio: "pipe",
+          });
+        } finally {
+          rmSync(scriptFile, { force: true });
+        }
+
+        const log = readFileSync(npmLog, "utf8").trim();
+        expect(log).toContain("view code-pact@2.0.0 version");
+        expect(log).toContain(
+          "publish release-artifact/package.tgz --ignore-scripts",
+        );
+
+        const ghOutput = readFileSync(
+          join(tmpDir, "github-output.txt"),
+          "utf8",
+        );
+        expect(ghOutput).toContain("published_now=true");
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("existing version: calls npm view but not npm publish", () => {
+      const tmpDir = makeTmpEnv({ npmViewExit: 0 });
+      const npmLog = join(tmpDir, "npm-calls.log");
+      try {
+        const scriptFile = join(tmpDir, "__run_publish.sh");
+        writeFileSync(scriptFile, "set -e\n" + publishScript!);
+        try {
+          execSync(`bash ${scriptFile}`, {
+            encoding: "utf8",
+            cwd: tmpDir,
+            env: {
+              ...process.env,
+              PATH: `${join(tmpDir, "bin")}:${process.env.PATH}`,
+              EXPECTED_TAG: "v2.0.0",
+              EXPECTED_COMMIT: "c".repeat(40),
+              NPM_CONFIG_PROVENANCE: "true",
+              NPM_LOG: npmLog,
+              GITHUB_OUTPUT: join(tmpDir, "github-output.txt"),
+            },
+            stdio: "pipe",
+          });
+        } finally {
+          rmSync(scriptFile, { force: true });
+        }
+
+        const log = readFileSync(npmLog, "utf8").trim();
+        expect(log).toContain("view code-pact@2.0.0 version");
+        expect(log).not.toContain("publish");
+
+        const ghOutput = readFileSync(
+          join(tmpDir, "github-output.txt"),
+          "utf8",
+        );
+        expect(ghOutput).toContain("published_now=false");
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("manifest mismatch: fails before npm view", () => {
+      const tmpDir = makeTmpEnv({
+        manifest: {
+          package: "code-pact",
+          version: "1.0.0",
+          tag: "v1.0.0",
+          commit: "d".repeat(40),
+          tarball_sha256: "0".repeat(64),
+        },
+      });
+      const npmLog = join(tmpDir, "npm-calls.log");
+      try {
+        const scriptFile = join(tmpDir, "__run_publish.sh");
+        writeFileSync(scriptFile, "set -e\n" + publishScript!);
+        let threw = false;
+        try {
+          execSync(`bash ${scriptFile}`, {
+            encoding: "utf8",
+            cwd: tmpDir,
+            env: {
+              ...process.env,
+              PATH: `${join(tmpDir, "bin")}:${process.env.PATH}`,
+              EXPECTED_TAG: "v2.0.0",
+              EXPECTED_COMMIT: "c".repeat(40),
+              NPM_CONFIG_PROVENANCE: "true",
+              NPM_LOG: npmLog,
+              GITHUB_OUTPUT: join(tmpDir, "github-output.txt"),
+            },
+            stdio: "pipe",
+          });
+        } catch {
+          threw = true;
+        } finally {
+          rmSync(scriptFile, { force: true });
+        }
+        expect(threw).toBe(true);
+        expect(existsSync(npmLog)).toBe(false);
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("github-release job: full shell execution with stub gh", () => {
+    const content = readWorkflow();
+    const scripts = extractRunScripts(content, "github-release");
+    const releaseScript = scripts.find(s => s.includes("gh release"));
+
+    function makeTmpEnv(opts: {
+      ghViewExit?: number;
+      publishedNow?: string;
+    }): string {
+      const tmpDir = join(repoRoot, "tmp-test-ghrelease-shell");
+      rmSync(tmpDir, { recursive: true, force: true });
+      mkdirSync(join(tmpDir, "release-artifact"), { recursive: true });
+      mkdirSync(join(tmpDir, "release-integrity"), { recursive: true });
+      mkdirSync(join(tmpDir, "bin"), { recursive: true });
+
+      writeFileSync(
+        join(tmpDir, "release-artifact", "release-manifest.json"),
+        JSON.stringify(
+          {
+            package: "code-pact",
+            version: "2.0.0",
+            tag: "v2.0.0",
+            commit: "c".repeat(40),
+            tarball_sha256: "0".repeat(64),
+          },
+          null,
+          2,
+        ) + "\n",
+      );
+      writeFileSync(
+        join(tmpDir, "release-artifact", "release-notes.md"),
+        "## Release notes\n",
+      );
+      writeFileSync(
+        join(tmpDir, "release-integrity", "release-integrity.json"),
+        JSON.stringify(
+          {
+            shasum: "abc123",
+            integrity: "sha512-xyz",
+            local_sha256: "0".repeat(64),
+          },
+          null,
+          2,
+        ) + "\n",
+      );
+
+      const ghViewExit = opts.ghViewExit ?? 1;
+      writeFileSync(
+        join(tmpDir, "bin", "gh"),
+        [
+          "#!/bin/sh",
+          'printf \'%s\\n\' "$*" >> "$GH_LOG"',
+          'if [ "$1" = "release" ] && [ "$2" = "view" ]; then',
+          `  exit ${ghViewExit}`,
+          "fi",
+          "exit 0",
+        ].join("\n"),
+      );
+      execSync(`chmod +x ${join(tmpDir, "bin", "gh")}`);
+
+      return tmpDir;
+    }
+
+    it("new release: calls gh release view then gh release create", () => {
+      const tmpDir = makeTmpEnv({ ghViewExit: 1, publishedNow: "true" });
+      const ghLog = join(tmpDir, "gh-calls.log");
+      try {
+        const scriptFile = join(tmpDir, "__run_release.sh");
+        writeFileSync(scriptFile, "set -e\n" + releaseScript!);
+        try {
+          execSync(`bash ${scriptFile}`, {
+            encoding: "utf8",
+            cwd: tmpDir,
+            env: {
+              ...process.env,
+              PATH: `${join(tmpDir, "bin")}:${process.env.PATH}`,
+              GH_TOKEN: "test-token",
+              GH_REPO: "toshtag/code-pact",
+              TAG: "v2.0.0",
+              PUBLISHED_NOW: "true",
+              GH_LOG: ghLog,
+            },
+            stdio: "pipe",
+          });
+        } finally {
+          rmSync(scriptFile, { force: true });
+        }
+
+        const log = readFileSync(ghLog, "utf8").trim();
+        expect(log).toContain("release view v2.0.0");
+        expect(log).toContain("release create");
+        expect(log).toContain("--verify-tag");
+
+        const notes = readFileSync(join(tmpDir, "final-notes.md"), "utf8");
+        expect(notes).toContain("generated through Trusted Publishing");
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("existing release: calls gh release view then gh release edit", () => {
+      const tmpDir = makeTmpEnv({ ghViewExit: 0, publishedNow: "false" });
+      const ghLog = join(tmpDir, "gh-calls.log");
+      try {
+        const scriptFile = join(tmpDir, "__run_release.sh");
+        writeFileSync(scriptFile, "set -e\n" + releaseScript!);
+        try {
+          execSync(`bash ${scriptFile}`, {
+            encoding: "utf8",
+            cwd: tmpDir,
+            env: {
+              ...process.env,
+              PATH: `${join(tmpDir, "bin")}:${process.env.PATH}`,
+              GH_TOKEN: "test-token",
+              GH_REPO: "toshtag/code-pact",
+              TAG: "v2.0.0",
+              PUBLISHED_NOW: "false",
+              GH_LOG: ghLog,
+            },
+            stdio: "pipe",
+          });
+        } finally {
+          rmSync(scriptFile, { force: true });
+        }
+
+        const log = readFileSync(ghLog, "utf8").trim();
+        expect(log).toContain("release view v2.0.0");
+        expect(log).toContain("release edit");
+        expect(log).toContain("--verify-tag");
+        expect(log).not.toContain("release create");
+
+        const notes = readFileSync(join(tmpDir, "final-notes.md"), "utf8");
+        expect(notes).toContain(
+          "existing-version rerun; verify the npm provenance badge manually",
+        );
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
     });
   });
 });
