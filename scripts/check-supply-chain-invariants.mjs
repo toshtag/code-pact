@@ -41,35 +41,112 @@ const EXPECTED_JOB_PERMISSIONS = {
   "github-release": { contents: "write" },
 };
 
-const PRIVILEGED_JOB_ACTIONS = {
-  publish: ["actions/download-artifact", "actions/setup-node"],
-  "github-release": ["actions/download-artifact", "actions/download-artifact"],
+// --- Canonical privileged job structures (source of truth) ---
+// run: blocks are replaced with run-sha256 hashes for stability.
+
+function sortKeysDeep(value) {
+  if (Array.isArray(value)) return value.map(sortKeysDeep);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, child]) => [key, sortKeysDeep(child)]),
+    );
+  }
+  return value;
+}
+
+function hashRun(run) {
+  return createHash("sha256")
+    .update(run.replace(/\r\n/g, "\n").trimEnd() + "\n")
+    .digest("hex");
+}
+
+export const PUBLISH_RUN_HASH =
+  "981ef29046b468b354a80881f41368b9b20ddbf54b84b293c9ff294a1a590895";
+export const GITHUB_RELEASE_RUN_HASH =
+  "fca11320656640fbea0fadfd233d548ad40ac0754bbb6be3c0e2a9193fac66cc";
+
+export const EXPECTED_CANONICAL_JOBS = {
+  publish: sortKeysDeep({
+    name: "Publish to npm via Trusted Publishing",
+    "runs-on": "ubuntu-latest",
+    needs: "prepare",
+    environment: "npm-publish",
+    permissions: { contents: "read", "id-token": "write" },
+    outputs: {
+      published_now: "${{ steps.publish.outputs.published_now }}",
+    },
+    steps: [
+      {
+        name: "Download release artifact",
+        uses: "actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0",
+        with: { name: "release-artifact", path: "release-artifact" },
+      },
+      {
+        name: "Set up Node",
+        uses: "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
+        with: {
+          "node-version": 24,
+          "registry-url": "https://registry.npmjs.org",
+        },
+      },
+      {
+        name: "Verify manifest and publish",
+        id: "publish",
+        env: {
+          EXPECTED_TAG: "${{ github.ref_name }}",
+          EXPECTED_COMMIT: "${{ github.sha }}",
+          NPM_CONFIG_PROVENANCE: "true",
+        },
+        "run-sha256": PUBLISH_RUN_HASH,
+      },
+    ],
+  }),
+  "github-release": sortKeysDeep({
+    name: "Create verified GitHub Release",
+    "runs-on": "ubuntu-latest",
+    needs: ["verify", "prepare", "publish"],
+    permissions: { contents: "write" },
+    steps: [
+      {
+        name: "Download release artifact",
+        uses: "actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0",
+        with: { name: "release-artifact", path: "release-artifact" },
+      },
+      {
+        name: "Download integrity artifact",
+        uses: "actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0",
+        with: { name: "release-integrity", path: "release-integrity" },
+      },
+      {
+        name: "Create or reconcile GitHub Release",
+        env: {
+          GH_TOKEN: "${{ github.token }}",
+          GH_REPO: "${{ github.repository }}",
+          TAG: "${{ github.ref_name }}",
+          PUBLISHED_NOW: "${{ needs.publish.outputs.published_now }}",
+        },
+        "run-sha256": GITHUB_RELEASE_RUN_HASH,
+      },
+    ],
+  }),
 };
 
-const PRIVILEGED_JOB_STEP_COUNTS = {
-  publish: 3,
-  "github-release": 3,
-};
-
-const PRIVILEGED_JOB_STEP_NAMES = {
-  publish: [
-    "Download release artifact",
-    "Set up Node",
-    "Verify manifest and publish",
-  ],
-  "github-release": [
-    "Download release artifact",
-    "Download integrity artifact",
-    "Create or reconcile GitHub Release",
-  ],
-};
-
-const EXPECTED_RUN_HASHES = {
-  publish: ["d0bc8162bedfcd6049329876c422a3a608a01b37b6d9813a7f02b3676a287d30"],
-  "github-release": [
-    "99cd20bfe6d10360bb0186e3b37a59d47a8352b8081e4aed2138cf575f8846dd",
-  ],
-};
+// Helper to canonicalize a parsed YAML job node for comparison
+function canonicalizePrivilegedJob(jobNode) {
+  const job = jobNode.toJSON();
+  if (job.steps) {
+    job.steps = job.steps.map(step => {
+      if (typeof step.run === "string") {
+        const { run, ...rest } = step;
+        return { ...rest, "run-sha256": hashRun(run) };
+      }
+      return step;
+    });
+  }
+  return sortKeysDeep(job);
+}
 
 function walkYml(dir) {
   const out = [];
@@ -464,83 +541,57 @@ export function checkSupplyChainInvariants(root) {
         fail("publish.yml: publish job must have environment: npm-publish");
       }
 
-      // Privileged job checks: action allowlist, step count, step names, run script hashes
+      // Privileged job checks: canonical structure exact match (source of truth)
       for (const jobName of ["publish", "github-release"]) {
-        const steps = getJobSteps(doc, jobName);
-
-        // Step count
-        const expectedCount = PRIVILEGED_JOB_STEP_COUNTS[jobName];
-        if (steps.length === expectedCount) {
-          pass(
-            `publish.yml: ${jobName} job has exactly ${expectedCount} steps`,
-          );
-        } else {
-          fail(
-            `publish.yml: ${jobName} job must have exactly ${expectedCount} steps`,
-            `found: ${steps.length}`,
-          );
-        }
-
-        // Step names
-        const expectedNames = PRIVILEGED_JOB_STEP_NAMES[jobName];
-        const actualNames = steps.map(s => String(s.get("name") ?? ""));
-        const namesMatch =
-          actualNames.length === expectedNames.length &&
-          actualNames.every((n, i) => n === expectedNames[i]);
-        if (namesMatch) {
-          pass(`publish.yml: ${jobName} job step names match allowlist`);
-        } else {
-          fail(
-            `publish.yml: ${jobName} job step names mismatch`,
-            `expected: ${JSON.stringify(expectedNames)}, found: ${JSON.stringify(actualNames)}`,
-          );
-        }
-
-        // Action allowlist: exact action names in order
-        const expectedActions = PRIVILEGED_JOB_ACTIONS[jobName];
-        const actualActions = steps
-          .map(s => {
-            const uses = s.get("uses");
-            return typeof uses === "string" ? actionName(uses) : null;
-          })
-          .filter(a => a !== null);
-        const actionsMatch =
-          actualActions.length === expectedActions.length &&
-          actualActions.every((a, i) => a === expectedActions[i]);
-        if (actionsMatch) {
-          pass(`publish.yml: ${jobName} job action allowlist exact match`);
-        } else {
-          fail(
-            `publish.yml: ${jobName} job action allowlist mismatch`,
-            `expected: ${JSON.stringify(expectedActions)}, found: ${JSON.stringify(actualActions)}`,
-          );
-        }
-
-        // Run script SHA-256 hashes
-        const expectedHashes = EXPECTED_RUN_HASHES[jobName];
-        const runScripts = steps
-          .map(s => s.get("run"))
-          .filter(r => typeof r === "string");
-        if (runScripts.length === expectedHashes.length) {
-          let hashesOk = true;
-          for (let i = 0; i < runScripts.length; i++) {
-            const normalized = normalizeRun(runScripts[i]);
-            const hash = createHash("sha256").update(normalized).digest("hex");
-            if (hash !== expectedHashes[i]) {
-              hashesOk = false;
-              fail(
-                `publish.yml: ${jobName} job run script ${i + 1} hash mismatch`,
-                `expected: ${expectedHashes[i]}, found: ${hash}`,
-              );
+        let actualJobNode = null;
+        if (jobs && jobs.items) {
+          for (const jobPair of jobs.items) {
+            const key = String(jobPair.key.value ?? jobPair.key);
+            if (key === jobName) {
+              actualJobNode = jobPair.value;
+              break;
             }
           }
-          if (hashesOk) {
-            pass(`publish.yml: ${jobName} job run script hashes match`);
-          }
+        }
+        if (!actualJobNode) {
+          fail(`publish.yml: ${jobName} job not found`);
+          continue;
+        }
+
+        const actualCanonical = canonicalizePrivilegedJob(actualJobNode);
+        const expectedCanonical = EXPECTED_CANONICAL_JOBS[jobName];
+        const actualStr = JSON.stringify(actualCanonical);
+        const expectedStr = JSON.stringify(expectedCanonical);
+
+        if (actualStr === expectedStr) {
+          pass(`publish.yml: ${jobName} job canonical structure exact match`);
         } else {
+          // Find the first differing key for a helpful error message
+          const actualKeys = Object.keys(actualCanonical);
+          const expectedKeys = Object.keys(expectedCanonical);
+          const extraKeys = actualKeys.filter(k => !expectedKeys.includes(k));
+          const missingKeys = expectedKeys.filter(k => !actualKeys.includes(k));
+          let detail;
+          if (extraKeys.length > 0) {
+            detail = `unexpected keys: ${extraKeys.join(", ")}`;
+          } else if (missingKeys.length > 0) {
+            detail = `missing keys: ${missingKeys.join(", ")}`;
+          } else {
+            // Find first value mismatch
+            for (const key of expectedKeys) {
+              if (
+                JSON.stringify(actualCanonical[key]) !==
+                JSON.stringify(expectedCanonical[key])
+              ) {
+                detail = `key "${key}" mismatch: expected ${JSON.stringify(expectedCanonical[key]).slice(0, 200)}, found ${JSON.stringify(actualCanonical[key]).slice(0, 200)}`;
+                break;
+              }
+            }
+            if (!detail) detail = "structure mismatch";
+          }
           fail(
-            `publish.yml: ${jobName} job run script count mismatch`,
-            `expected: ${expectedHashes.length}, found: ${runScripts.length}`,
+            `publish.yml: ${jobName} job canonical structure mismatch`,
+            detail,
           );
         }
       }
@@ -720,7 +771,7 @@ export function checkSupplyChainInvariants(root) {
       const expectedNeeds = {
         publish: ["prepare"],
         verify: ["publish", "prepare"],
-        "github-release": ["verify", "prepare"],
+        "github-release": ["verify", "prepare", "publish"],
       };
       for (const [jobName, expectedDeps] of Object.entries(expectedNeeds)) {
         if (jobs && jobs.items) {
