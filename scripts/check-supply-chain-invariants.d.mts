@@ -9,3 +9,4 @@ export function checkSupplyChainInvariants(root: string): { failures: number };
 export const PUBLISH_RUN_HASH: string;
 export const GITHUB_RELEASE_RUN_HASH: string;
 export const EXPECTED_CANONICAL_JOBS: Record<string, unknown>;
+export const EXPECTED_WORKFLOW_ENVELOPE: Record<string, unknown>;

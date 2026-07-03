@@ -63,7 +63,7 @@ function hashRun(run) {
 }
 
 export const PUBLISH_RUN_HASH =
-  "981ef29046b468b354a80881f41368b9b20ddbf54b84b293c9ff294a1a590895";
+  "d74f5355bb7463a2fc41f009f127545b46280d482875d1fa08d989f516c7fa2e";
 export const GITHUB_RELEASE_RUN_HASH =
   "fca11320656640fbea0fadfd233d548ad40ac0754bbb6be3c0e2a9193fac66cc";
 
@@ -88,7 +88,7 @@ export const EXPECTED_CANONICAL_JOBS = {
         uses: "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
         with: {
           "node-version": 24,
-          "registry-url": "https://registry.npmjs.org",
+          "package-manager-cache": false,
         },
       },
       {
@@ -146,6 +146,28 @@ function canonicalizePrivilegedJob(jobNode) {
     });
   }
   return sortKeysDeep(job);
+}
+
+// --- Workflow envelope canonical structure (top-level keys except jobs) ---
+
+export const EXPECTED_WORKFLOW_ENVELOPE = sortKeysDeep({
+  name: "Publish",
+  on: {
+    push: {
+      tags: ["v*"],
+    },
+  },
+  permissions: {},
+  concurrency: {
+    group: "npm-publish-${{ github.ref }}",
+    "cancel-in-progress": false,
+  },
+});
+
+function canonicalizeWorkflowEnvelope(doc) {
+  const workflow = doc.toJSON();
+  const { jobs: _jobs, ...envelope } = workflow;
+  return sortKeysDeep(envelope);
 }
 
 function walkYml(dir) {
@@ -488,6 +510,38 @@ export function checkSupplyChainInvariants(root) {
         );
       }
 
+      // Workflow envelope canonical exact match (top-level keys except jobs)
+      const actualEnvelope = canonicalizeWorkflowEnvelope(doc);
+      const expectedEnvelope = EXPECTED_WORKFLOW_ENVELOPE;
+      const actualEnvelopeStr = JSON.stringify(actualEnvelope);
+      const expectedEnvelopeStr = JSON.stringify(expectedEnvelope);
+      if (actualEnvelopeStr === expectedEnvelopeStr) {
+        pass("publish.yml: workflow envelope canonical exact match");
+      } else {
+        const actualKeys = Object.keys(actualEnvelope);
+        const expectedKeys = Object.keys(expectedEnvelope);
+        const extraKeys = actualKeys.filter(k => !expectedKeys.includes(k));
+        const missingKeys = expectedKeys.filter(k => !actualKeys.includes(k));
+        let detail;
+        if (extraKeys.length > 0) {
+          detail = `unexpected top-level keys: ${extraKeys.join(", ")}`;
+        } else if (missingKeys.length > 0) {
+          detail = `missing top-level keys: ${missingKeys.join(", ")}`;
+        } else {
+          for (const key of expectedKeys) {
+            if (
+              JSON.stringify(actualEnvelope[key]) !==
+              JSON.stringify(expectedEnvelope[key])
+            ) {
+              detail = `key "${key}" mismatch: expected ${JSON.stringify(expectedEnvelope[key]).slice(0, 200)}, found ${JSON.stringify(actualEnvelope[key]).slice(0, 200)}`;
+              break;
+            }
+          }
+          if (!detail) detail = "structure mismatch";
+        }
+        fail("publish.yml: workflow envelope canonical mismatch", detail);
+      }
+
       // Job structure: exactly prepare, publish, verify, github-release
       const jobs = doc.get("jobs");
       const jobNames =
@@ -723,6 +777,58 @@ export function checkSupplyChainInvariants(root) {
         pass("publish.yml: publish job uses --ignore-scripts");
       } else {
         fail("publish.yml: publish job must use --ignore-scripts");
+      }
+
+      // OIDC invariant: setup-node must NOT have registry-url
+      let setupNodeHasRegistryUrl = false;
+      if (jobs && jobs.items) {
+        for (const jobPair of jobs.items) {
+          const key = String(jobPair.key.value ?? jobPair.key);
+          if (key !== "publish") continue;
+          const steps = jobPair.value?.get("steps");
+          if (!steps || !steps.items) continue;
+          for (const step of steps.items) {
+            const uses = step.get("uses");
+            if (
+              typeof uses === "string" &&
+              uses.startsWith("actions/setup-node")
+            ) {
+              const withBlock = step.get("with");
+              if (withBlock && withBlock.get("registry-url") !== undefined) {
+                setupNodeHasRegistryUrl = true;
+              }
+            }
+          }
+        }
+      }
+      if (!setupNodeHasRegistryUrl) {
+        pass("publish.yml: setup-node has no registry-url (OIDC safe)");
+      } else {
+        fail(
+          "publish.yml: setup-node must NOT have registry-url (generates empty NODE_AUTH_TOKEN .npmrc that blocks OIDC)",
+        );
+      }
+
+      // OIDC invariant: npm view and npm publish must use --registry flag
+      const hasViewRegistry = publishScripts.some(s =>
+        /npm view.*--registry=/.test(s),
+      );
+      const hasPublishRegistry = publishScripts.some(s =>
+        /npm publish.*--registry=/.test(s),
+      );
+      if (hasViewRegistry) {
+        pass("publish.yml: npm view uses --registry flag");
+      } else {
+        fail(
+          "publish.yml: npm view must use --registry flag to prevent env override",
+        );
+      }
+      if (hasPublishRegistry) {
+        pass("publish.yml: npm publish uses --registry flag");
+      } else {
+        fail(
+          "publish.yml: npm publish must use --registry flag to prevent env override",
+        );
       }
 
       // No NPM_TOKEN or NODE_AUTH_TOKEN
