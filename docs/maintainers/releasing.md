@@ -103,6 +103,15 @@ After the release-prep PR merges to `main`:
      artifact,
    - **publish** downloads the verified artifact and publishes it via npm
      Trusted Publishing (OIDC, no npm token) with `--ignore-scripts`,
+
+     > **OIDC note:** The `publish` job does **not** pass `registry-url` to
+     > `actions/setup-node`. Setting `registry-url` generates an `.npmrc` entry
+     > referencing `NODE_AUTH_TOKEN`; when that token is absent (as it is with
+     > Trusted Publishing), npm may attempt legacy token auth instead of OIDC
+     > and fail with `ENEEDAUTH`. The npm registry endpoint is fixed via the
+     > `--registry` CLI flag on both `npm view` and `npm publish` to prevent
+     > `NPM_CONFIG_REGISTRY` environment variable overrides.
+
    - **verify** downloads the registry tarball and verifies its bytes
      (`verify-published-tarball.mjs`),
    - **github-release** creates a GitHub Release with an auto-generated
