@@ -2,11 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  run as cliRun,
-  ensureCliBuilt,
-  type RunResult,
-} from "../helpers/cli.ts";
+import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
 
 let tmpDir: string;
 
@@ -56,7 +52,7 @@ verification:
 tasks:
 ${taskIds
   .map(
-    t => `  - id: ${t}
+    (t) => `  - id: ${t}
     type: feature
     ambiguity: low
     risk: low
@@ -122,9 +118,9 @@ describe("plan lint --json", () => {
     const parsed = parseLint(res.stdout);
     expect(parsed.ok).toBe(false);
     expect(parsed.error?.code).toBe("PLAN_LINT_FAILED");
-    expect(parsed.data?.issues.some(i => i.code === "DUPLICATE_TASK_ID")).toBe(
-      true,
-    );
+    expect(
+      parsed.data?.issues.some((i) => i.code === "DUPLICATE_TASK_ID"),
+    ).toBe(true);
   });
 
   it("warnings alone keep exit 0 but --strict promotes them to exit 1", async () => {
@@ -156,11 +152,15 @@ describe("plan lint --json", () => {
 
     const off = run(["plan", "lint", "--json"]);
     const offParsed = parseLint(off.stdout);
-    expect(offParsed.data?.issues.some(i => i.code === "WEAK_DOD")).toBe(false);
+    expect(offParsed.data?.issues.some((i) => i.code === "WEAK_DOD")).toBe(
+      false,
+    );
 
     const on = run(["plan", "lint", "--include-quality", "--json"]);
     const onParsed = parseLint(on.stdout);
-    expect(onParsed.data?.issues.some(i => i.code === "WEAK_DOD")).toBe(true);
+    expect(onParsed.data?.issues.some((i) => i.code === "WEAK_DOD")).toBe(
+      true,
+    );
     expect(onParsed.data?.include_quality).toBe(true);
   });
 
@@ -173,38 +173,32 @@ describe("plan lint --json", () => {
     const parsed = parseLint(res.stdout);
     expect(parsed.data?.skipped_checks).toContain("MISSING_PHASE_FILE");
     expect(parsed.data?.skipped_checks).toContain("ORPHAN_PHASE_FILE");
-    expect(parsed.data?.issues.some(i => i.code === "INVALID_YAML")).toBe(true);
+    expect(
+      parsed.data?.issues.some((i) => i.code === "INVALID_YAML"),
+    ).toBe(true);
   });
 
   // A corrupt per-event file must report the SAME diagnostic code on `plan lint`
   // as on `doctor` — the two integrity surfaces must not disagree.
   async function writeCorruptEvent(body: string): Promise<void> {
-    await writeRoadmap(
-      `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`,
-    );
+    await writeRoadmap(`phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`);
     await writePhase("P1.yaml", phaseYaml("P1", ["P1-T1"]));
     const events = join(tmpDir, ".code-pact", "state", "events");
     await mkdir(events, { recursive: true });
-    await writeFile(
-      join(events, `20260518T100000000Z-${"a".repeat(64)}.yaml`),
-      body,
-      "utf8",
-    );
+    await writeFile(join(events, `20260518T100000000Z-${"a".repeat(64)}.yaml`), body, "utf8");
   }
 
   it("reports SCHEMA_ERROR (not INVALID_YAML) for a parseable-but-invalid event body", async () => {
     await writeCorruptEvent("status: not_a_status\n");
     const parsed = parseLint(run(["plan", "lint", "--json"]).stdout);
-    expect(parsed.data?.issues.some(i => i.code === "SCHEMA_ERROR")).toBe(true);
-    expect(parsed.data?.issues.some(i => i.code === "INVALID_YAML")).toBe(
-      false,
-    );
+    expect(parsed.data?.issues.some((i) => i.code === "SCHEMA_ERROR")).toBe(true);
+    expect(parsed.data?.issues.some((i) => i.code === "INVALID_YAML")).toBe(false);
   });
 
   it("reports INVALID_YAML for an unparseable event body", async () => {
     await writeCorruptEvent("{ unclosed flow mapping");
     const parsed = parseLint(run(["plan", "lint", "--json"]).stdout);
-    expect(parsed.data?.issues.some(i => i.code === "INVALID_YAML")).toBe(true);
+    expect(parsed.data?.issues.some((i) => i.code === "INVALID_YAML")).toBe(true);
   });
 });
 
@@ -246,23 +240,14 @@ tasks:
     await writeRoadmap(ROADMAP);
     await writePhase("P1.yaml", GATED_PHASE);
     // Accepted ADR resolving the gate, but with no commitments section.
-    await writeAdr(
-      "P1-T1-rfc.md",
-      "**Status:** accepted\n\n## Decision\n\nChose X.\n",
-    );
+    await writeAdr("P1-T1-rfc.md", "**Status:** accepted\n\n## Decision\n\nChose X.\n");
 
-    const res = run([
-      "plan",
-      "lint",
-      "--include-quality",
-      "--strict",
-      "--json",
-    ]);
+    const res = run(["plan", "lint", "--include-quality", "--strict", "--json"]);
     const parsed = parseLint(res.stdout);
 
     // Advisory is present...
     expect(
-      parsed.data?.issues.some(i => i.code === "ADR_COMMITMENTS_EMPTY"),
+      parsed.data?.issues.some((i) => i.code === "ADR_COMMITMENTS_EMPTY"),
     ).toBe(true);
     // ...but it never promotes to a failure, even under --strict.
     expect(res.code).toBe(0);
@@ -318,23 +303,17 @@ tasks:
     expect(res.code).toBe(0);
     const parsed = parseLint(res.stdout);
     expect(
-      parsed.data?.issues.some(i => i.code === "TASK_DECLARED_DECISION_LARGE"),
+      parsed.data?.issues.some((i) => i.code === "TASK_DECLARED_DECISION_LARGE"),
     ).toBe(false);
   });
 
   it("emits the advisory under --include-quality and keeps exit 0 even with --strict", async () => {
     await writeBigDecisionPlan();
-    const res = run([
-      "plan",
-      "lint",
-      "--include-quality",
-      "--strict",
-      "--json",
-    ]);
+    const res = run(["plan", "lint", "--include-quality", "--strict", "--json"]);
     const parsed = parseLint(res.stdout);
 
     const fired = parsed.data?.issues.find(
-      i => i.code === "TASK_DECLARED_DECISION_LARGE",
+      (i) => i.code === "TASK_DECLARED_DECISION_LARGE",
     );
     expect(fired).toBeDefined();
     expect(fired?.affects_exit).toBe(false);

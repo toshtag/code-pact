@@ -19,11 +19,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import {
-  run as cliRun,
-  ensureCliBuilt,
-  type RunResult,
-} from "../helpers/cli.ts";
+import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
 
 let tmpDir: string;
 
@@ -31,11 +27,7 @@ function run(args: string[]): RunResult {
   return cliRun(tmpDir, args);
 }
 
-function envelope(stdout: string): {
-  ok?: boolean;
-  error?: { code?: string };
-  data?: Record<string, unknown>;
-} {
+function envelope(stdout: string): { ok?: boolean; error?: { code?: string }; data?: Record<string, unknown> } {
   return JSON.parse(stdout.trim().split("\n").at(-1)!);
 }
 
@@ -45,16 +37,7 @@ beforeAll(() => {
 
 beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "code-pact-cli-aliases-test-"));
-  run([
-    "init",
-    "--non-interactive",
-    "--agent",
-    "claude-code",
-    "--locale",
-    "en-US",
-    "--sample-phase",
-    "--json",
-  ]);
+  run(["init", "--non-interactive", "--agent", "claude-code", "--locale", "en-US", "--sample-phase", "--json"]);
 });
 
 afterEach(async () => {
@@ -80,12 +63,8 @@ describe("aliases dispatch to the canonical command", () => {
     const alias = run(["task", "reconcile", "TUTORIAL-T1", "--json"]);
     const canonical = run(["task", "finalize", "TUTORIAL-T1", "--json"]);
     expect(alias.code).toBe(canonical.code);
-    expect(envelope(alias.stdout).error?.code).toBe(
-      "TASK_FINALIZE_NOT_ELIGIBLE",
-    );
-    expect(envelope(alias.stdout).error?.code).toBe(
-      envelope(canonical.stdout).error?.code,
-    );
+    expect(envelope(alias.stdout).error?.code).toBe("TASK_FINALIZE_NOT_ELIGIBLE");
+    expect(envelope(alias.stdout).error?.code).toBe(envelope(canonical.stdout).error?.code);
   });
 
   it("`plan import` matches `phase import` on a missing input file", () => {
@@ -93,9 +72,7 @@ describe("aliases dispatch to the canonical command", () => {
     const canonical = run(["phase", "import", "does-not-exist.yaml", "--json"]);
     expect(alias.code).toBe(canonical.code);
     expect(alias.code).not.toBe(0);
-    expect(envelope(alias.stdout).error?.code).toBe(
-      envelope(canonical.stdout).error?.code,
-    );
+    expect(envelope(alias.stdout).error?.code).toBe(envelope(canonical.stdout).error?.code);
   });
 
   it("`plan import` actually ingests a roadmap (positive path)", async () => {
@@ -204,30 +181,11 @@ describe("`task reconcile --write` finalizes like `task finalize --write`", () =
     // reach `done` and become finalize-eligible. (phase add sets the verify
     // command reliably; lenient `phase import` would default it to `pnpm test`.)
     run([
-      "phase",
-      "add",
-      "--id",
-      "PX",
-      "--name",
-      "Reconcile fixture",
-      "--weight",
-      "10",
-      "--objective",
-      "Exercise the reconcile alias write path",
-      "--verify-command",
-      "node --version",
-      "--json",
+      "phase", "add", "--id", "PX", "--name", "Reconcile fixture", "--weight", "10",
+      "--objective", "Exercise the reconcile alias write path",
+      "--verify-command", "node --version", "--json",
     ]);
-    run([
-      "task",
-      "add",
-      "PX",
-      "--description",
-      "Task to finalize via the reconcile alias",
-      "--type",
-      "feature",
-      "--json",
-    ]);
+    run(["task", "add", "PX", "--description", "Task to finalize via the reconcile alias", "--type", "feature", "--json"]);
     run(["task", "start", "PX-T1", "--agent", "claude-code"]);
     run(["task", "complete", "PX-T1", "--agent", "claude-code", "--json"]);
   });
@@ -256,8 +214,6 @@ describe("unknown subcommands are still rejected", () => {
   it("`task bogus` exits 2", () => {
     const res = run(["task", "bogus"]);
     expect(res.code).toBe(2);
-    expect(`${res.stdout}${res.stderr}`).toContain(
-      'unknown subcommand "bogus"',
-    );
+    expect(`${res.stdout}${res.stderr}`).toContain('unknown subcommand "bogus"');
   });
 });

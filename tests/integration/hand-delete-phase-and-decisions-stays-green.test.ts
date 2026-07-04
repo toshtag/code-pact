@@ -3,11 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import {
-  run as cliRun,
-  ensureCliBuilt,
-  type RunResult,
-} from "../helpers/cli.ts";
+import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
 import { seedDurableEvents } from "../helpers/seed-events.ts";
 import { writePhaseSnapshot } from "../../src/core/archive/phase-snapshot.ts";
 import { writeDecisionRecord } from "../../src/core/archive/decision-record.ts";
@@ -41,10 +37,8 @@ import { writeDecisionRecord } from "../../src/core/archive/decision-record.ts";
 let tmpDir: string;
 const NOW = new Date("2026-06-10T00:00:00.000Z");
 const XREF = "design/decisions/x-rfc.md";
-const ACCEPTED =
-  "# RFC: X\n\n**Status:** accepted (P9, 2026-06)\n\n## Decision\n\nSettled body here.\n";
-const BLOCKED =
-  "# RFC: X\n\n**Status:** proposed\n\n## Decision\n\nNot yet settled.\n";
+const ACCEPTED = "# RFC: X\n\n**Status:** accepted (P9, 2026-06)\n\n## Decision\n\nSettled body here.\n";
+const BLOCKED = "# RFC: X\n\n**Status:** proposed\n\n## Decision\n\nNot yet settled.\n";
 
 function run(args: string[]): RunResult {
   return cliRun(tmpDir, args);
@@ -171,25 +165,15 @@ function jsonOk(r: RunResult): boolean {
  *  enforcement point. verify itself may exit 1 for unrelated checks (task not
  *  done / no progress event), so we read the DECISION check, not the exit code. */
 function decisionCheckOk(r: RunResult): boolean {
-  const checks =
-    (
-      JSON.parse(r.stdout) as {
-        data?: { checks?: { name: string; ok: boolean }[] };
-      }
-    ).data?.checks ?? [];
-  return checks.find(c => c.name === "decision")?.ok === true;
+  const checks = (JSON.parse(r.stdout) as { data?: { checks?: { name: string; ok: boolean }[] } })
+    .data?.checks ?? [];
+  return checks.find((c) => c.name === "decision")?.ok === true;
 }
 
 function hasDecisionRefError(r: RunResult): boolean {
-  const issues =
-    (
-      JSON.parse(r.stdout) as {
-        data?: { issues?: { code: string; severity: string }[] };
-      }
-    ).data?.issues ?? [];
-  return issues.some(
-    i => i.code === "TASK_DECISION_REF_NOT_FOUND" && i.severity === "error",
-  );
+  const issues = (JSON.parse(r.stdout) as { data?: { issues?: { code: string; severity: string }[] } })
+    .data?.issues ?? [];
+  return issues.some((i) => i.code === "TASK_DECISION_REF_NOT_FOUND" && i.severity === "error");
 }
 
 type LintIssue = {
@@ -200,36 +184,17 @@ type LintIssue = {
   details?: { value?: string };
 };
 function lintIssues(r: RunResult): LintIssue[] {
-  return (
-    (JSON.parse(r.stdout) as { data?: { issues?: LintIssue[] } }).data
-      ?.issues ?? []
-  );
+  return (JSON.parse(r.stdout) as { data?: { issues?: LintIssue[] } }).data?.issues ?? [];
 }
 
 // `init` scaffolds a complete project so validate/doctor have no unrelated
 // failures; then overlay the roadmap + phases + progress + the live decision.
-async function scaffold(
-  adr: string,
-  p2: string = P2_DEP_DECISION,
-): Promise<void> {
-  const init = run([
-    "init",
-    "--non-interactive",
-    "--locale",
-    "en-US",
-    "--agent",
-    "claude-code",
-    "--json",
-  ]);
-  if (init.code !== 0)
-    throw new Error(`init failed: ${init.stdout}${init.stderr}`);
+async function scaffold(adr: string, p2: string = P2_DEP_DECISION): Promise<void> {
+  const init = run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+  if (init.code !== 0) throw new Error(`init failed: ${init.stdout}${init.stderr}`);
   execFileSync("git", ["init"], { cwd: tmpDir, stdio: "ignore" });
   await writeFile(join(tmpDir, "design", "roadmap.yaml"), ROADMAP, "utf8");
-  await writeFile(
-    join(tmpDir, "design", "phases", "P1-x.yaml"),
-    P1_DONE,
-    "utf8",
-  );
+  await writeFile(join(tmpDir, "design", "phases", "P1-x.yaml"), P1_DONE, "utf8");
   await writeFile(join(tmpDir, "design", "phases", "P2-y.yaml"), p2, "utf8");
   await mkdir(join(tmpDir, ".code-pact", "state"), { recursive: true });
   await seedDurableEvents(tmpDir, PROGRESS);
@@ -249,9 +214,7 @@ beforeAll(() => {
 }, 60_000);
 
 beforeEach(async () => {
-  tmpDir = await mkdtemp(
-    join(tmpdir(), "code-pact-hand-delete-phase-decisions-int-"),
-  );
+  tmpDir = await mkdtemp(join(tmpdir(), "code-pact-hand-delete-phase-decisions-int-"));
 });
 
 afterEach(async () => {
@@ -268,21 +231,14 @@ describe("phase YAML + design/decisions both hand-deleted: five surfaces tolerat
     // would be vacuous (it could pass simply because nothing ever fired). Pin the full
     // identity of the issue so it is unmistakably P1-T1's stale read.
     const liveLint = run(["plan", "lint", "--strict", "--json"]);
-    const liveReadsIssue = lintIssues(liveLint).find(
-      i => i.code === "TASK_READS_NO_MATCH",
-    );
-    expect(
-      liveReadsIssue,
-      "P1-T1's stale read must fire TASK_READS_NO_MATCH while P1 is live",
-    ).toBeDefined();
+    const liveReadsIssue = lintIssues(liveLint).find((i) => i.code === "TASK_READS_NO_MATCH");
+    expect(liveReadsIssue, "P1-T1's stale read must fire TASK_READS_NO_MATCH while P1 is live").toBeDefined();
     expect(liveReadsIssue?.phase_id).toBe("P1");
     expect(liveReadsIssue?.task_id).toBe("P1-T1");
     expect(liveReadsIssue?.details?.value).toBe(STALE_READ);
 
     await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
-    expect((await writeDecisionRecord(tmpDir, XREF, { now: NOW })).kind).toBe(
-      "written",
-    );
+    expect((await writeDecisionRecord(tmpDir, XREF, { now: NOW })).kind).toBe("written");
     await handDeletePhaseAndDecisions();
 
     // validate / doctor: green (phase tolerated via snapshot; decisions are outside their remit).
@@ -304,51 +260,24 @@ describe("phase YAML + design/decisions both hand-deleted: five surfaces tolerat
     expect(lint.stdout).not.toContain("TASK_READS_NO_MATCH");
 
     // task context / task prepare on the live active task: not blocked.
-    expect(
-      jsonOk(
-        run(["task", "context", "P2-T1", "--agent", "claude-code", "--json"]),
-      ),
-    ).toBe(true);
-    const prep = run([
-      "task",
-      "prepare",
-      "P2-T1",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    expect(jsonOk(run(["task", "context", "P2-T1", "--agent", "claude-code", "--json"]))).toBe(true);
+    const prep = run(["task", "prepare", "P2-T1", "--agent", "claude-code", "--json"]);
     expect(jsonOk(prep)).toBe(true);
     expect(prep.stdout).not.toContain("wait_for_dependencies");
 
     // The GATE enforcement point: verify's decision check is RELEASED by the record.
-    const verify = run([
-      "verify",
-      "--phase",
-      "P2",
-      "--task",
-      "P2-T1",
-      "--json",
-    ]);
+    const verify = run(["verify", "--phase", "P2", "--task", "P2-T1", "--json"]);
     expect(decisionCheckOk(verify)).toBe(true);
   });
 
   it("NEGATIVE (gate): same combined delete but NON-ACCEPTED record → verify gate + plan lint fail closed; validate/doctor stay green (decisions outside their remit)", async () => {
     await scaffold(BLOCKED);
     await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
-    expect((await writeDecisionRecord(tmpDir, XREF, { now: NOW })).kind).toBe(
-      "written",
-    );
+    expect((await writeDecisionRecord(tmpDir, XREF, { now: NOW })).kind).toBe("written");
     await handDeletePhaseAndDecisions();
 
     // The gate enforcement point fails closed: a non-accepted record never releases.
-    const verify = run([
-      "verify",
-      "--phase",
-      "P2",
-      "--task",
-      "P2-T1",
-      "--json",
-    ]);
+    const verify = run(["verify", "--phase", "P2", "--task", "P2-T1", "--json"]);
     expect(decisionCheckOk(verify)).toBe(false);
 
     // plan lint --strict fails closed with the decision-ref error.
@@ -374,16 +303,8 @@ describe("phase YAML + design/decisions both hand-deleted: five surfaces tolerat
     // CLOSED. (The positive test pins the open-gate half; this pins the closed-gate
     // half, so a future change that made prepare/context fail on a non-accepted
     // record would be caught here, not pass silently.)
-    expect(
-      jsonOk(
-        run(["task", "context", "P2-T1", "--agent", "claude-code", "--json"]),
-      ),
-    ).toBe(true);
-    expect(
-      jsonOk(
-        run(["task", "prepare", "P2-T1", "--agent", "claude-code", "--json"]),
-      ),
-    ).toBe(true);
+    expect(jsonOk(run(["task", "context", "P2-T1", "--agent", "claude-code", "--json"]))).toBe(true);
+    expect(jsonOk(run(["task", "prepare", "P2-T1", "--agent", "claude-code", "--json"]))).toBe(true);
   });
 
   it("NEGATIVE (gate): same combined delete with NO record at all → verify gate + plan lint fail closed", async () => {
@@ -392,14 +313,7 @@ describe("phase YAML + design/decisions both hand-deleted: five surfaces tolerat
     // Deliberately write NO decision record before deleting the directory.
     await handDeletePhaseAndDecisions();
 
-    const verify = run([
-      "verify",
-      "--phase",
-      "P2",
-      "--task",
-      "P2-T1",
-      "--json",
-    ]);
+    const verify = run(["verify", "--phase", "P2", "--task", "P2-T1", "--json"]);
     expect(decisionCheckOk(verify)).toBe(false);
 
     const lint = run(["plan", "lint", "--strict", "--json"]);
@@ -410,16 +324,8 @@ describe("phase YAML + design/decisions both hand-deleted: five surfaces tolerat
     expect(lint.stdout).not.toContain("PHASE_SNAPSHOT_INVALID");
 
     // ADVISORY (closed-gate half): the non-enforcement surfaces stay green.
-    expect(
-      jsonOk(
-        run(["task", "context", "P2-T1", "--agent", "claude-code", "--json"]),
-      ),
-    ).toBe(true);
-    expect(
-      jsonOk(
-        run(["task", "prepare", "P2-T1", "--agent", "claude-code", "--json"]),
-      ),
-    ).toBe(true);
+    expect(jsonOk(run(["task", "context", "P2-T1", "--agent", "claude-code", "--json"]))).toBe(true);
+    expect(jsonOk(run(["task", "prepare", "P2-T1", "--agent", "claude-code", "--json"]))).toBe(true);
   });
 
   it("NEGATIVE (filename-scan): combined delete + accepted record but NO explicit decision_refs → gate fails closed (a record cannot release a filename-scan gate)", async () => {
@@ -427,21 +333,12 @@ describe("phase YAML + design/decisions both hand-deleted: five surfaces tolerat
     await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
     // An accepted record EXISTS, but the active gate has no decision_refs — there is
     // no canonical key to look up, so the record can never release it.
-    expect((await writeDecisionRecord(tmpDir, XREF, { now: NOW })).kind).toBe(
-      "written",
-    );
+    expect((await writeDecisionRecord(tmpDir, XREF, { now: NOW })).kind).toBe("written");
     await handDeletePhaseAndDecisions();
 
     // The gate fails closed: filename-scan resolution finds no live ADR and is never
     // record-backed.
-    const verify = run([
-      "verify",
-      "--phase",
-      "P2",
-      "--task",
-      "P2-T1",
-      "--json",
-    ]);
+    const verify = run(["verify", "--phase", "P2", "--task", "P2-T1", "--json"]);
     expect(decisionCheckOk(verify)).toBe(false);
 
     // the phase side is unaffected — validate/doctor green, no phase-snapshot error.
@@ -451,15 +348,7 @@ describe("phase YAML + design/decisions both hand-deleted: five surfaces tolerat
     // ADVISORY (closed-gate half): a filename-scan task has NO decision_refs — a
     // distinct surface shape from the explicit-refs cases above — yet the advisory
     // surfaces still stay green with the gate closed.
-    expect(
-      jsonOk(
-        run(["task", "context", "P2-T1", "--agent", "claude-code", "--json"]),
-      ),
-    ).toBe(true);
-    expect(
-      jsonOk(
-        run(["task", "prepare", "P2-T1", "--agent", "claude-code", "--json"]),
-      ),
-    ).toBe(true);
+    expect(jsonOk(run(["task", "context", "P2-T1", "--agent", "claude-code", "--json"]))).toBe(true);
+    expect(jsonOk(run(["task", "prepare", "P2-T1", "--agent", "claude-code", "--json"]))).toBe(true);
   });
 });

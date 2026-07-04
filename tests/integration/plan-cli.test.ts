@@ -18,11 +18,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import {
-  run as cliRun,
-  ensureCliBuilt,
-  type RunResult,
-} from "../helpers/cli.ts";
+import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
 
 let tmpDir: string;
 
@@ -48,15 +44,7 @@ afterEach(async () => {
 
 describe("CLI: plan brief (no-TTY)", () => {
   it("plan brief --json in a non-TTY subprocess returns {ok:false,error:CONFIG_ERROR} exit 2", () => {
-    run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     const res = run(["plan", "brief", "--json"]);
     expect(res.code).toBe(2);
     const parsed = JSON.parse(res.stdout) as {
@@ -69,15 +57,7 @@ describe("CLI: plan brief (no-TTY)", () => {
   });
 
   it("plan brief (human output) in a non-TTY subprocess writes a single stderr line and exit 2", () => {
-    run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     const res = run(["plan", "brief"]);
     expect(res.code).toBe(2);
     expect(res.stdout).toBe("");
@@ -91,15 +71,7 @@ describe("CLI: plan brief (no-TTY)", () => {
 
 describe("CLI: plan constitution (no-TTY)", () => {
   it("plan constitution --json in a non-TTY subprocess returns {ok:false,error:CONFIG_ERROR} exit 2", () => {
-    run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     const res = run(["plan", "constitution", "--json"]);
     expect(res.code).toBe(2);
     const parsed = JSON.parse(res.stdout) as {
@@ -112,15 +84,7 @@ describe("CLI: plan constitution (no-TTY)", () => {
   });
 
   it("plan constitution (human output) in a non-TTY subprocess writes a single stderr line and exit 2", () => {
-    run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     const res = run(["plan", "constitution"]);
     expect(res.code).toBe(2);
     expect(res.stdout).toBe("");
@@ -156,20 +120,9 @@ describe("CLI: plan prompt", () => {
   });
 
   it("plan prompt --json picks up design/brief.md and design/constitution.md when present", async () => {
-    run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     await mkdir(join(tmpDir, "design"), { recursive: true });
-    await writeFile(
-      join(tmpDir, "design", "brief.md"),
-      "# Brief\n\nTest brief content.\n",
-    );
+    await writeFile(join(tmpDir, "design", "brief.md"), "# Brief\n\nTest brief content.\n");
     await writeFile(
       join(tmpDir, "design", "constitution.md"),
       "# Constitution\n\nTest constitution content.\n",
@@ -217,15 +170,7 @@ describe("CLI: plan prompt", () => {
   });
 
   it("plan prompt --schema-only ignores design/brief.md even when present", async () => {
-    run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     await mkdir(join(tmpDir, "design"), { recursive: true });
     await writeFile(
       join(tmpDir, "design", "brief.md"),
@@ -270,15 +215,7 @@ describe("CLI: plan prompt", () => {
 
 describe("CLI: plan adopt", () => {
   async function initAndWrite(name: string, body: string): Promise<void> {
-    run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     await writeFile(join(tmpDir, name), body);
   }
 
@@ -322,48 +259,28 @@ describe("CLI: plan adopt", () => {
     expect(res.code).toBe(0);
     const parsed = JSON.parse(res.stdout) as {
       ok: boolean;
-      data: {
-        kind: string;
-        import_result: { imported_tasks: string[] } | null;
-      };
+      data: { kind: string; import_result: { imported_tasks: string[] } | null };
     };
     expect(parsed.ok).toBe(true);
     expect(parsed.data.kind).toBe("adopted");
-    expect(parsed.data.import_result?.imported_tasks).toEqual([
-      "P1-T1",
-      "P1-T2",
-    ]);
+    expect(parsed.data.import_result?.imported_tasks).toEqual(["P1-T1", "P1-T2"]);
 
     const ls = run(["phase", "ls", "--json"]);
     const lsParsed = JSON.parse(ls.stdout) as { data: { id: string }[] };
-    expect(lsParsed.data.map(p => p.id)).toContain("P1");
+    expect(lsParsed.data.map((p) => p.id)).toContain("P1");
   });
 
   it("plan adopt with no path returns CONFIG_ERROR exit 2", async () => {
-    run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     const res = run(["plan", "adopt", "--json"]);
     expect(res.code).toBe(2);
-    const parsed = JSON.parse(res.stdout) as {
-      ok: boolean;
-      error: { code: string };
-    };
+    const parsed = JSON.parse(res.stdout) as { ok: boolean; error: { code: string } };
     expect(parsed.ok).toBe(false);
     expect(parsed.error.code).toBe("CONFIG_ERROR");
   });
 
   it("plan adopt of a prose file returns no_plan_items_detected", async () => {
-    await initAndWrite(
-      "notes.md",
-      `# Notes\n\nJust prose, no bullet lists at all.\n`,
-    );
+    await initAndWrite("notes.md", `# Notes\n\nJust prose, no bullet lists at all.\n`);
     const res = run(["plan", "adopt", "notes.md", "--json"]);
     expect(res.code).toBe(2);
     const parsed = JSON.parse(res.stdout) as {
@@ -377,15 +294,7 @@ describe("CLI: plan adopt", () => {
   });
 
   it("plan adopt of an unsafe path is rejected", async () => {
-    run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     const res = run(["plan", "adopt", "../escape.md", "--json"]);
     expect(res.code).toBe(2);
     const parsed = JSON.parse(res.stdout) as { data: { detail: string } };
