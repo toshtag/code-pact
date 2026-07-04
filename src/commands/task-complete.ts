@@ -14,6 +14,8 @@ export type TaskCompleteOptions = {
   agent?: string;
   /** When true, do not record a progress event (the ledger is unchanged). */
   dryRun?: boolean;
+  /** Per-command timeout in milliseconds. Defaults to 300000 (5 min). */
+  timeoutMs?: number;
   /** Date injection for tests. Defaults to new Date(). */
   now?: () => Date;
 };
@@ -105,6 +107,7 @@ export async function runTaskComplete(
     phaseId,
     taskId,
     dryRun,
+    timeoutMs: opts.timeoutMs,
     skipConsistencyChecks: true,
   });
 
