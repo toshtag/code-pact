@@ -27,6 +27,7 @@ import {
 import { isStandardContextBudgetProfile } from "../../core/context-fit/budget-profiles.ts";
 import type { ContextBudgetProfiles } from "../../core/schemas/agent-profile.ts";
 import { runTaskComplete } from "../../commands/task-complete.ts";
+import { MAX_TIMEOUT_MS } from "../../commands/verify.ts";
 import {
   runTaskRecordDone,
   type DecisionRequiredData,
@@ -846,10 +847,20 @@ async function cmdTaskComplete(
     return 2;
   }
   const agent = values.agent as string | undefined;
+  let timeoutMs: number | undefined;
+  if (values.timeout !== undefined) {
+    const raw = values.timeout as string;
+    const n = Number(raw);
+    if (!Number.isSafeInteger(n) || n < 1 || n > MAX_TIMEOUT_MS) {
+      emitError(json, "CONFIG_ERROR", `--timeout must be a safe integer between 1 and ${MAX_TIMEOUT_MS} ms, got: ${raw}`);
+      return 2;
+    }
+    timeoutMs = n;
+  }
   const cwd = process.cwd();
 
   try {
-    const result = await runTaskComplete({ cwd, taskId, agent, dryRun });
+    const result = await runTaskComplete({ cwd, taskId, agent, dryRun, timeoutMs });
 
     if (result.kind === "already_done") {
       if (json) {

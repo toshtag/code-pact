@@ -16,7 +16,7 @@ import { SUPPORTED_AGENTS } from "./core/agents.ts";
 import { withWriteLock, emitOk, emitError } from "./cli/util.ts";
 import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
-import { runVerify, formatVerify } from "./commands/verify.ts";
+import { runVerify, formatVerify, MAX_TIMEOUT_MS } from "./commands/verify.ts";
 import { runRecommend, formatRecommend } from "./commands/recommend.ts";
 import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runValidate } from "./commands/validate.ts";
@@ -648,16 +648,6 @@ async function cmdRecommend(
 // Command: verify
 // ---------------------------------------------------------------------------
 
-function parseTimeout(raw: string): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) {
-    throw new ConfigError(
-      `--timeout must be a positive number of milliseconds, got: ${raw}`,
-    );
-  }
-  return Math.floor(n);
-}
-
 async function cmdVerify(
   argv: string[],
   locale: Locale,
@@ -681,10 +671,20 @@ async function cmdVerify(
   const phaseId = values.phase as string | undefined;
   const taskId = values.task as string | undefined;
   const dryRun = values["dry-run"] === true;
-  const timeoutMs =
-    values.timeout !== undefined
-      ? parseTimeout(values.timeout as string)
-      : undefined;
+  let timeoutMs: number | undefined;
+  if (values.timeout !== undefined) {
+    const raw = values.timeout as string;
+    const n = Number(raw);
+    if (!Number.isSafeInteger(n) || n < 1 || n > MAX_TIMEOUT_MS) {
+      emitError(
+        json,
+        "CONFIG_ERROR",
+        `--timeout must be a safe integer between 1 and ${MAX_TIMEOUT_MS} ms, got: ${raw}`,
+      );
+      return 2;
+    }
+    timeoutMs = n;
+  }
 
   if (!phaseId || !taskId) {
     const msg = "verify requires --phase and --task";

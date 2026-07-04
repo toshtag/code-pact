@@ -46,6 +46,7 @@ const complete: CommandSpec = {
   flags: [
     { name: "agent", value: "<name>", description: "Agent name. Defaults to project default_agent." },
     { name: "dry-run", description: "Show the event without recording it." },
+    { name: "timeout", value: "<ms>", description: "Per-command timeout in milliseconds (1–2147483647). Defaults to 300000 (5 min)." },
     { name: "json", description: "Emit JSON." },
   ],
   examples: ["code-pact task complete P1-T1 --agent claude-code --json"],
