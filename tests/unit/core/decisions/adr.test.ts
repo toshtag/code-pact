@@ -15,6 +15,8 @@ import {
   resolveDecisionGate,
   makeDecisionResolver,
   classifyDecisionAdrs,
+  listLiveDecisionFiles,
+  type DecisionDirLister,
 } from "../../../../src/core/decisions/adr.ts";
 import { loadDeclaredDecisions } from "../../../../src/core/pack/loaders.ts";
 
@@ -1107,77 +1109,72 @@ describe("listLiveDecisionFiles — directory-list EACCES → DECISION_SCAN_UNRE
     await rm(cwd, { recursive: true, force: true });
   });
 
-  // root can read chmod 000 directories, so these tests only work as non-root.
-  const isRoot = process.getuid !== undefined && process.getuid() === 0;
-  const maybeDescribe = isRoot ? describe.skip : describe;
+  // DI-based tests: work on ALL platforms (root and non-root) by injecting
+  // a fake readdir that throws EACCES, bypassing the OS permission layer.
+  function makeEaccesLister(): DecisionDirLister {
+    return async () => {
+      const err = new Error("permission denied");
+      (err as NodeJS.ErrnoException).code = "EACCES";
+      throw err;
+    };
+  }
 
-  maybeDescribe("EACCES on design/decisions/ (non-root only)", () => {
-    it("EACCES on design/decisions/ → throws with DECISION_SCAN_UNREADABLE", async () => {
-      await mkdir(join(cwd, "design", "decisions"), { recursive: true });
-      await writeFile(
-        join(cwd, "design", "decisions", "P1-T1.md"),
-        "**Status:** accepted\n",
-      );
-      await (
-        await import("node:fs/promises")
-      ).chmod(join(cwd, "design", "decisions"), 0o000);
-      try {
-        await expect(readLiveDecisionDir(cwd)).rejects.toMatchObject({
-          code: "DECISION_SCAN_UNREADABLE",
-        });
-      } finally {
-        await (
-          await import("node:fs/promises")
-        ).chmod(join(cwd, "design", "decisions"), 0o755);
+  function makeNestedEaccesLister(): DecisionDirLister {
+    return async (absPath: string) => {
+      if (absPath.includes("sub")) {
+        const err = new Error("permission denied");
+        (err as NodeJS.ErrnoException).code = "EACCES";
+        throw err;
       }
-    });
+      const { readdir } = await import("node:fs/promises");
+      return await readdir(absPath, { withFileTypes: true });
+    };
+  }
 
-    it("EACCES on a nested subdirectory → throws with DECISION_SCAN_UNREADABLE", async () => {
-      await mkdir(join(cwd, "design", "decisions", "sub"), { recursive: true });
-      await writeFile(
-        join(cwd, "design", "decisions", "sub", "P1-T1.md"),
-        "**Status:** accepted\n",
-      );
-      await (
-        await import("node:fs/promises")
-      ).chmod(join(cwd, "design", "decisions", "sub"), 0o000);
-      try {
-        await expect(readLiveDecisionDir(cwd)).rejects.toMatchObject({
-          code: "DECISION_SCAN_UNREADABLE",
-        });
-      } finally {
-        await (
-          await import("node:fs/promises")
-        ).chmod(join(cwd, "design", "decisions", "sub"), 0o755);
-      }
-    });
-
-    it("DECISION_SCAN_UNREADABLE propagates through resolveDecisionGate (filename-scan)", async () => {
-      await mkdir(join(cwd, "design", "decisions"), { recursive: true });
-      await writeFile(
-        join(cwd, "design", "decisions", "P1-T1.md"),
-        "**Status:** accepted\n",
-      );
-      await (
-        await import("node:fs/promises")
-      ).chmod(join(cwd, "design", "decisions"), 0o000);
-      try {
-        const res = await resolveDecisionGate(cwd, "P1-T1", undefined);
-        expect(res.resolved).toBe(false);
-        expect(res.reason).toContain("DECISION_SCAN_UNREADABLE");
-      } finally {
-        await (
-          await import("node:fs/promises")
-        ).chmod(join(cwd, "design", "decisions"), 0o755);
-      }
+  it("EACCES on design/decisions/ → throws with DECISION_SCAN_UNREADABLE (DI)", async () => {
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    await writeFile(
+      join(cwd, "design", "decisions", "P1-T1.md"),
+      "**Status:** accepted\n",
+    );
+    await expect(
+      listLiveDecisionFiles(cwd, makeEaccesLister()),
+    ).rejects.toMatchObject({
+      code: "DECISION_SCAN_UNREADABLE",
     });
   });
 
-  // When running as root, verify the error-handling logic still works by
-  // confirming that isAbsentDecisionsDirError correctly distinguishes EACCES
-  // from ENOENT/ENOTDIR. The actual chmod-based EACCES test is skipped because
-  // root bypasses POSIX permission checks.
-  it("isAbsentDecisionsDirError returns false for EACCES (root-safe)", () => {
-    expect(isAbsentDecisionsDirError({ code: "EACCES" })).toBe(false);
+  it("EACCES on a nested subdirectory → throws with DECISION_SCAN_UNREADABLE (DI)", async () => {
+    await mkdir(join(cwd, "design", "decisions", "sub"), { recursive: true });
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "P1-T1.md"),
+      "**Status:** accepted\n",
+    );
+    await expect(
+      listLiveDecisionFiles(cwd, makeNestedEaccesLister()),
+    ).rejects.toMatchObject({
+      code: "DECISION_SCAN_UNREADABLE",
+    });
   });
+
+  it("DECISION_SCAN_UNREADABLE propagates through resolveDecisionGate (DI)", async () => {
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    await writeFile(
+      join(cwd, "design", "decisions", "P1-T1.md"),
+      "**Status:** accepted\n",
+    );
+    const res = await resolveDecisionGate(cwd, "P1-T1", undefined, makeEaccesLister());
+    expect(res.resolved).toBe(false);
+    expect(res.reason).toContain("DECISION_SCAN_UNREADABLE");
+  });
+
+  it("readLiveDecisionDir propagates EACCES via DI", async () => {
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    await expect(
+      readLiveDecisionDir(cwd, makeEaccesLister()),
+    ).rejects.toMatchObject({
+      code: "DECISION_SCAN_UNREADABLE",
+    });
+  });
+
 });
