@@ -25,7 +25,7 @@
   "engines": {
     "node": ">=22"
   },
-  "packageManager": "pnpm@10.33.2",
+  "packageManager": "pnpm@10.34.2",
   "bin": {
     "code-pact": "dist/cli.js"
   },
@@ -65,20 +65,13 @@
     "check:release-tag": "node scripts/check-release-tag.mjs",
     "check:package-tarball": "node scripts/check-package-tarball.mjs",
     "verify:published-tarball": "node scripts/verify-published-tarball.mjs",
-    "check:supply-chain": "node scripts/check-supply-chain-invariants.mjs",
-    "release:check": "pnpm typecheck && pnpm test && pnpm build && pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm check:supply-chain && pnpm check:release-version && node dist/cli.js validate --json && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json"
+    "check:supply-chain": "node scripts/check-supply-chain-invariants.mjs && pnpm check:toolchain-binaries",
+    "release:check": "pnpm typecheck && pnpm test && pnpm build && pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm check:supply-chain && pnpm check:release-version && node dist/cli.js validate --json && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json",
+    "check:toolchain-binaries": "node scripts/check-toolchain-binaries.mjs"
   },
   "dependencies": {
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
-  },
-  "pnpm": {
-    "overrides": {
-      "esbuild": "0.28.1"
-    },
-    "ignoredBuiltDependencies": [
-      "esbuild"
-    ]
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

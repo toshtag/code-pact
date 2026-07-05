@@ -339,6 +339,55 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
     "        with:",
     "          persist-credentials: false",
+    "      - run: pnpm check:supply-chain",
+    "",
+    "  windows-process-control:",
+    "    runs-on: windows-latest",
+    "    steps:",
+    "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
+    "        with:",
+    "          persist-credentials: false",
+    "      - run: pnpm check:toolchain-binaries",
+    "      - run: pnpm build",
+    "      - run: pnpm exec vitest run tests/unit/commands/verify-process.test.ts",
+  ].join("\n");
+
+  const wellFormedPackage = JSON.stringify(
+    {
+      packageManager: "pnpm@10.34.2",
+      devDependencies: {
+        esbuild: "0.28.1",
+        vite: "^6.4.3",
+      },
+    },
+    null,
+    2,
+  );
+
+  const wellFormedWorkspace = [
+    "overrides:",
+    "  esbuild: 0.28.1",
+    "allowBuilds:",
+    "  esbuild: false",
+  ].join("\n");
+
+  const wellFormedLock = [
+    "lockfileVersion: '9.0'",
+    "importers:",
+    "  .:",
+    "    devDependencies:",
+    "      esbuild:",
+    "        specifier: 0.28.1",
+    "        version: 0.28.1",
+    "      vite:",
+    "        specifier: ^6.4.3",
+    "        version: 6.4.3",
+    "packages:",
+    "  esbuild@0.28.1: {}",
+    "  vite@6.4.3: {}",
+    "snapshots:",
+    "  esbuild@0.28.1: {}",
+    "  vite@6.4.3: {}",
   ].join("\n");
 
   async function buildTree(
@@ -346,7 +395,9 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
       publishContent?: string;
       ciContent?: string;
       securityContent?: string;
-      pkgContent?: string;
+      packageContent?: string;
+      workspaceContent?: string;
+      lockContent?: string;
     } = {},
   ): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), "sci-"));
@@ -365,11 +416,15 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     );
     await writeFile(
       join(dir, "package.json"),
-      overrides.pkgContent ??
-        JSON.stringify({
-          name: "test-pkg",
-          pnpm: { overrides: { esbuild: "0.28.1" } },
-        }),
+      overrides.packageContent ?? wellFormedPackage,
+    );
+    await writeFile(
+      join(dir, "pnpm-workspace.yaml"),
+      overrides.workspaceContent ?? wellFormedWorkspace,
+    );
+    await writeFile(
+      join(dir, "pnpm-lock.yaml"),
+      overrides.lockContent ?? wellFormedLock,
     );
     return dir;
   }
@@ -385,6 +440,36 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     root = await buildTree();
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBe(0);
+    await cleanup();
+  });
+
+  it("fails when pnpm is below the reviewed security release", async () => {
+    root = await buildTree({
+      packageContent: wellFormedPackage.replace("pnpm@10.34.2", "pnpm@10.33.2"),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when Vite is below the reviewed version", async () => {
+    root = await buildTree({
+      packageContent: wellFormedPackage.replace("^6.4.3", "^6.4.2"),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when esbuild lifecycle scripts are not explicitly denied", async () => {
+    root = await buildTree({
+      workspaceContent: wellFormedWorkspace.replace(
+        "  esbuild: false",
+        "  esbuild: true",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
     await cleanup();
   });
 
