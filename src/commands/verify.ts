@@ -38,6 +38,7 @@ export type CheckResult = {
   name: string;
   ok: boolean;
   reason?: string;
+  command?: string;
   stdout?: string;
   stderr?: string;
   timedOut?: boolean;
@@ -63,11 +64,21 @@ async function loadProgressLog(cwd: string): Promise<ProgressLog> {
 // Individual checks
 // ---------------------------------------------------------------------------
 
-type CommandRun = { exitCode: number; stdout: string; stderr: string; timedOut: boolean; aborted: boolean; elapsedMs: number };
+type CommandRun = {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  aborted: boolean;
+  elapsedMs: number;
+};
+
+type TerminationCause = "none" | "timeout" | "abort";
 
 export const DEFAULT_COMMAND_TIMEOUT_MS = 300_000;
 export const MAX_TIMEOUT_MS = 2_147_483_647;
 const KILL_FALLBACK_MS = 5_000;
+const HARD_DEADLINE_MS = 10_000;
 
 export function validateTimeoutMs(value: number): number {
   if (!Number.isSafeInteger(value) || value < 1 || value > MAX_TIMEOUT_MS) {
@@ -88,19 +99,29 @@ async function killProcessTree(proc: ChildProcess): Promise<void> {
       // fall through to fallback
     }
   } else {
-    const tkProc = spawn(
-      "taskkill",
-      ["/pid", String(proc.pid), "/T", "/F"],
-      { stdio: "ignore", shell: false },
-    );
+    const tkProc = spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], {
+      stdio: "ignore",
+      shell: false,
+    });
     const tkExit: Promise<number | null> = new Promise(resolve => {
       tkProc.on("close", code => resolve(code));
       tkProc.on("error", () => resolve(1));
     });
-    const result = await Promise.race([
-      tkExit,
-      new Promise<null>(resolve => setTimeout(() => resolve(null), KILL_FALLBACK_MS)),
-    ]);
+    let result: number | null = null;
+    try {
+      result = await Promise.race([
+        tkExit,
+        new Promise<null>(resolve =>
+          setTimeout(() => resolve(null), KILL_FALLBACK_MS),
+        ),
+      ]);
+    } finally {
+      try {
+        tkProc.kill("SIGKILL");
+      } catch {
+        /* already dead */
+      }
+    }
     if (result === 0) return;
   }
   try {
@@ -113,7 +134,10 @@ async function killProcessTree(proc: ChildProcess): Promise<void> {
 const MAX_COMMAND_OUTPUT_BYTES = 1_048_576;
 const TRUNCATED_OUTPUT_MESSAGE = `\n[code-pact: output truncated after ${MAX_COMMAND_OUTPUT_BYTES} bytes]\n`;
 
-function createOutputCapture(): { append: (chunk: Buffer) => void; value: () => string } {
+function createOutputCapture(): {
+  append: (chunk: Buffer) => void;
+  value: () => string;
+} {
   let text = "";
   let bytes = 0;
   let truncated = false;
@@ -142,16 +166,35 @@ function createOutputCapture(): { append: (chunk: Buffer) => void; value: () => 
   };
 }
 
-function runCommand(cmd: string, cwd: string, timeoutMs: number, signal?: AbortSignal): Promise<CommandRun> {
-  return new Promise((resolve) => {
+function runCommand(
+  cmd: string,
+  cwd: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<CommandRun> {
+  return new Promise(resolve => {
     const shellCommand = cmd.trim();
     if (!shellCommand) {
-      resolve({ exitCode: 1, stdout: "", stderr: "empty verification command", timedOut: false, aborted: false, elapsedMs: 0 });
+      resolve({
+        exitCode: 1,
+        stdout: "",
+        stderr: "empty verification command",
+        timedOut: false,
+        aborted: false,
+        elapsedMs: 0,
+      });
       return;
     }
 
     if (signal?.aborted) {
-      resolve({ exitCode: 1, stdout: "", stderr: "aborted before start", timedOut: false, aborted: true, elapsedMs: 0 });
+      resolve({
+        exitCode: null,
+        stdout: "",
+        stderr: "aborted before start",
+        timedOut: false,
+        aborted: true,
+        elapsedMs: 0,
+      });
       return;
     }
 
@@ -164,19 +207,42 @@ function runCommand(cmd: string, cwd: string, timeoutMs: number, signal?: AbortS
     });
     const stdout = createOutputCapture();
     const stderr = createOutputCapture();
-    let timedOut = false;
-    let aborted = false;
+    let cause: TerminationCause = "none";
     let settled = false;
+    let hardDeadline: ReturnType<typeof setTimeout> | undefined;
+
+    const startHardDeadline = () => {
+      hardDeadline = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        const elapsedMs = Date.now() - start;
+        resolve({
+          exitCode: null,
+          stdout: stdout.value(),
+          stderr: stderr.value(),
+          timedOut: cause === "timeout",
+          aborted: cause === "abort",
+          elapsedMs,
+        });
+      }, HARD_DEADLINE_MS);
+      hardDeadline.unref();
+    };
 
     const timer = setTimeout(() => {
-      timedOut = true;
+      if (settled || cause !== "none") return;
+      cause = "timeout";
+      clearTimeout(timer);
+      startHardDeadline();
       killProcessTree(proc);
     }, timeoutMs);
 
     const onAbort = () => {
-      if (settled) return;
-      aborted = true;
+      if (settled || cause !== "none") return;
+      cause = "abort";
       clearTimeout(timer);
+      startHardDeadline();
       killProcessTree(proc);
     };
     signal?.addEventListener("abort", onAbort, { once: true });
@@ -185,25 +251,31 @@ function runCommand(cmd: string, cwd: string, timeoutMs: number, signal?: AbortS
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (hardDeadline) clearTimeout(hardDeadline);
       signal?.removeEventListener("abort", onAbort);
       const elapsedMs = Date.now() - start;
       resolve({
-        exitCode: code ?? 1,
+        exitCode: code,
         stdout: stdout.value(),
         stderr: stderr.value(),
-        timedOut,
-        aborted,
+        timedOut: cause === "timeout",
+        aborted: cause === "abort",
         elapsedMs,
       });
     };
+
     proc.stdout?.on("data", (chunk: Buffer) => {
       stdout.append(chunk);
     });
     proc.stderr?.on("data", (chunk: Buffer) => {
       stderr.append(chunk);
     });
-    proc.on("close", (code) => finish(code));
-    proc.on("error", () => finish(1));
+    proc.on("close", code => {
+      finish(code);
+    });
+    proc.on("error", () => {
+      finish(1);
+    });
   });
 }
 
@@ -219,10 +291,13 @@ async function checkCommands(
       name: "commands",
       ok: true,
       reason: `dry-run: would execute: ${commands.join(", ")}`,
+      command: commands.join("; "),
       timedOut: false,
       aborted: false,
       exitCode: null,
       elapsedMs: 0,
+      stdout: "",
+      stderr: "",
     };
   }
 
@@ -231,22 +306,33 @@ async function checkCommands(
       name: "commands",
       ok: false,
       reason: "aborted before start",
+      command: commands.join("; "),
       timedOut: false,
       aborted: true,
       exitCode: null,
       elapsedMs: 0,
+      stdout: "",
+      stderr: "",
     };
   }
 
+  let totalElapsed = 0;
   for (const cmd of commands) {
-    const { exitCode, stdout, stderr, timedOut, aborted, elapsedMs } = await runCommand(cmd, cwd, timeoutMs, signal);
+    const { exitCode, stdout, stderr, timedOut, aborted, elapsedMs } =
+      await runCommand(cmd, cwd, timeoutMs, signal);
+    totalElapsed += elapsedMs;
     if (aborted) {
       return {
         name: "commands",
         ok: false,
         reason: `"${cmd}" was aborted`,
+        command: cmd,
+        timedOut: false,
         aborted: true,
-        elapsedMs,
+        exitCode,
+        elapsedMs: totalElapsed,
+        stdout,
+        stderr,
       };
     }
     if (timedOut) {
@@ -254,9 +340,13 @@ async function checkCommands(
         name: "commands",
         ok: false,
         reason: `"${cmd}" timed out after ${timeoutMs} ms`,
+        command: cmd,
         timedOut: true,
-        elapsedMs,
+        aborted: false,
         exitCode,
+        elapsedMs: totalElapsed,
+        stdout,
+        stderr,
       };
     }
     if (exitCode !== 0) {
@@ -264,23 +354,36 @@ async function checkCommands(
         name: "commands",
         ok: false,
         reason: `"${cmd}" exited with code ${exitCode}`,
-        ...(stdout && { stdout }),
-        ...(stderr && { stderr }),
+        command: cmd,
         timedOut: false,
         aborted: false,
-        elapsedMs,
         exitCode,
+        elapsedMs: totalElapsed,
+        stdout,
+        stderr,
       };
     }
   }
-  return { name: "commands", ok: true, timedOut: false, aborted: false, exitCode: 0, elapsedMs: 0 };
+  return {
+    name: "commands",
+    ok: true,
+    command: commands.join("; "),
+    timedOut: false,
+    aborted: false,
+    exitCode: 0,
+    elapsedMs: totalElapsed,
+    stdout: "",
+    stderr: "",
+  };
 }
 
 async function checkProgressEvent(
   log: ProgressLog,
   taskId: string,
 ): Promise<CheckResult> {
-  const event = log.events.find((e) => e.task_id === taskId && e.status === "done");
+  const event = log.events.find(
+    e => e.task_id === taskId && e.status === "done",
+  );
   if (!event) {
     return {
       name: "progress_event",
@@ -299,7 +402,9 @@ export type DecisionGateResult = {
 };
 
 /** Project a status-aware resolution onto the verify CheckResult shape. */
-export function decisionResolutionToCheck(res: DecisionResolution): CheckResult {
+export function decisionResolutionToCheck(
+  res: DecisionResolution,
+): CheckResult {
   return res.resolved
     ? { name: "decision", ok: true }
     : { name: "decision", ok: false, reason: res.reason };
@@ -320,12 +425,16 @@ export async function checkDecision(
   if (!isDecisionRequiredForTask(phase, task)) {
     return { check: { name: "decision", ok: true }, resolution: null };
   }
-  const resolution = await resolveDecisionGate(cwd, task.id, task.decision_refs);
+  const resolution = await resolveDecisionGate(
+    cwd,
+    task.id,
+    task.decision_refs,
+  );
   return { check: decisionResolutionToCheck(resolution), resolution };
 }
 
 function checkTaskStatus(phase: Phase, taskId: string): CheckResult {
-  const task = phase.tasks?.find((t) => t.id === taskId);
+  const task = phase.tasks?.find(t => t.id === taskId);
   if (!task) {
     return {
       name: "task_status",
@@ -349,7 +458,9 @@ function checkTaskStatus(phase: Phase, taskId: string): CheckResult {
 
 export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
   const { cwd, phaseId, taskId, dryRun, signal } = opts;
-  const timeoutMs = validateTimeoutMs(opts.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS);
+  const timeoutMs = validateTimeoutMs(
+    opts.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
+  );
   const skipConsistency = opts.skipConsistencyChecks === true;
 
   // Resolve phase
@@ -359,20 +470,26 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
   const phase = await loadPhase(cwd, ref.path);
 
   // Verify task exists in phase before running checks
-  const taskExists = phase.tasks?.some((t) => t.id === taskId) ?? false;
+  const taskExists = phase.tasks?.some(t => t.id === taskId) ?? false;
   if (!taskExists) {
     const err = new Error(`Task "${taskId}" not found in phase "${phaseId}".`);
     (err as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
     throw err;
   }
 
-  const task = phase.tasks!.find((t) => t.id === taskId)!;
+  const task = phase.tasks!.find(t => t.id === taskId)!;
 
   // Deterministic preflight checks: would always be runnable on a fresh
   // task before any state mutation. `task complete` calls runVerify with
   // skipConsistencyChecks: true so these are the only checks evaluated.
   const checks: CheckResult[] = [
-    await checkCommands(phase.verification.commands, cwd, dryRun, timeoutMs, signal),
+    await checkCommands(
+      phase.verification.commands,
+      cwd,
+      dryRun,
+      timeoutMs,
+      signal,
+    ),
     (await checkDecision(cwd, phase, task)).check,
   ];
 
@@ -385,7 +502,7 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
     checks.push(checkTaskStatus(phase, taskId));
   }
 
-  const ok = checks.every((c) => c.ok);
+  const ok = checks.every(c => c.ok);
   return { ok, checks };
 }
 
@@ -394,7 +511,7 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
 // ---------------------------------------------------------------------------
 
 export function formatVerify(result: VerifyResult): string {
-  const lines = result.checks.map((c) => {
+  const lines = result.checks.map(c => {
     const mark = c.ok ? "✓" : "✗";
     const reason = c.reason ? `  → ${c.reason}` : "";
     return `  ${mark} ${c.name}${reason}`;
