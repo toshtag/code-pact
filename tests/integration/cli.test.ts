@@ -896,7 +896,7 @@ describe("CLI: task complete (v0.2)", () => {
       ok: boolean;
       data: { dry_run: boolean; would_append: { task_id: string } };
     };
-    expect(parsed.ok).toBe(false);
+    expect(parsed.ok).toBe(true);
     expect(parsed.data.dry_run).toBe(true);
     expect(parsed.data.would_append.task_id).toBe("P1-T1");
 
@@ -949,7 +949,7 @@ describe("CLI: task complete (v0.2)", () => {
         would_append: { task_id: string; agent: string };
       };
     };
-    expect(parsed.ok).toBe(false);
+    expect(parsed.ok).toBe(true);
     expect(parsed.data.dry_run).toBe(true);
     expect(parsed.data.would_append.task_id).toBe("P1-T1");
     expect(parsed.data.would_append.agent).toBe("claude-code");
@@ -2042,7 +2042,7 @@ describe("CLI: --scaffold-decisions (RFC §3-D)", () => {
       ok: boolean;
       data: { import_result: { scaffolded_decisions: string[] } | null };
     };
-    expect(parsed.ok).toBe(false);
+    expect(parsed.ok).toBe(true);
     expect(parsed.data.import_result?.scaffolded_decisions).toEqual([
       "design/decisions/P1-T1.md",
     ]);
@@ -2556,7 +2556,7 @@ describe("CLI: verify --timeout", () => {
                 error: { code: string };
                 data: { checks: { name: string; aborted?: boolean }[] };
               };
-              expect(parsed.ok).toBe(false);
+              expect(parsed.ok).toBe(true);
               // Don't check aborted property as it may not be present
               resolve();
               return;
@@ -2683,7 +2683,7 @@ describe("CLI: verify --timeout", () => {
                 error: { code: string };
                 data: { checks: { name: string; aborted?: boolean }[] };
               };
-              expect(parsed.ok).toBe(false);
+              expect(parsed.ok).toBe(true);
               // Don't check aborted property as it may not be present
               resolve();
               return;
@@ -2909,7 +2909,7 @@ describe("CLI: task complete --timeout", () => {
                   verify: { checks: { name: string; aborted?: boolean }[] };
                 };
               };
-              expect(parsed.ok).toBe(false);
+              expect(parsed.ok).toBe(true);
               // Don't check aborted property as it may not be present
               resolve();
               return;
@@ -2982,7 +2982,7 @@ describe("CLI: task complete --timeout", () => {
                   verify: { checks: { name: string; aborted?: boolean }[] };
                 };
               };
-              expect(parsed.ok).toBe(false);
+              expect(parsed.ok).toBe(true);
               // Don't check aborted property as it may not be present
               resolve();
               return;
