@@ -6,8 +6,6 @@ export default defineConfig({
     passWithNoTests: true,
     reporters: ["default"],
     setupFiles: ["./tests/setup.ts"],
-    testTimeout: 30_000,
-    hookTimeout: 30_000,
     maxWorkers: 4,
     coverage: {
       provider: "v8",
