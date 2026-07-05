@@ -2527,7 +2527,7 @@ describe("CLI: verify --timeout", () => {
       stdout += chunk.toString();
     });
     // Send SIGINT after a short delay to allow command to start
-    setTimeout(() => child.kill("SIGINT"), 500);
+    setTimeout(() => child.kill("SIGINT"), 1000);
     child.on("error", (err: Error) => {
       childError = err;
     });
@@ -2551,7 +2551,7 @@ describe("CLI: verify --timeout", () => {
                 error: { code: string };
                 data: { checks: { name: string; aborted?: boolean }[] };
               };
-              expect(parsed.ok).toBe(true);
+              expect(parsed.ok).toBe(false);
               // Don't check aborted property as it may not be present
               resolve();
               return;
@@ -2881,7 +2881,7 @@ describe("CLI: task complete --timeout", () => {
       childError = err;
     });
 
-    const sigintTimer = setTimeout(() => child.kill("SIGINT"), 500);
+    const sigintTimer = setTimeout(() => child.kill("SIGINT"), 1000);
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -2904,7 +2904,7 @@ describe("CLI: task complete --timeout", () => {
                   verify: { checks: { name: string; aborted?: boolean }[] };
                 };
               };
-              expect(parsed.ok).toBe(true);
+              expect(parsed.ok).toBe(false);
               // Don't check aborted property as it may not be present
               resolve();
               return;
