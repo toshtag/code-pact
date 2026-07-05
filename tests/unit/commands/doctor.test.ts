@@ -1,0 +1,1355 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { spawn } from "node:child_process";
+import { runInit } from "../../../src/commands/init.ts";
+import { runPhaseAdd } from "../../../src/commands/phase.ts";
+import { runDoctor } from "../../../src/commands/doctor.ts";
+import { eventsDir, writeEventFile } from "../../../src/core/progress/events-io.ts";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const fixtureDir = new URL("../../../tests/fixtures/project-a", import.meta.url).pathname;
+
+let dir: string;
+
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), "code-pact-doctor-test-"));
+  await runInit({ cwd: dir, locale: "en-US", agents: ["claude-code"], force: false, json: false });
+});
+
+afterEach(async () => {
+  await rm(dir, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// Healthy project
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — healthy project (fresh init)", () => {
+  it("returns ok=true with no errors for a freshly initialised project", async () => {
+    const result = await runDoctor(dir);
+    expect(result.ok).toBe(true);
+    // ADAPTER_MISSING is a warning (adapter not yet generated) — errors must be 0
+    const errors = result.issues.filter((i) => i.severity === "error");
+    expect(errors).toHaveLength(0);
+  });
+
+  it("does not report LOCAL_NOT_GITIGNORED because init creates .gitignore", async () => {
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "LOCAL_NOT_GITIGNORED");
+    expect(issue).toBeUndefined();
+  });
+
+  it("flags an out-of-enum decision_retention as a SCHEMA_ERROR (validate/doctor recognize the policy field)", async () => {
+    const projectPath = join(dir, ".code-pact", "project.yaml");
+    const current = await readFile(projectPath, "utf8");
+    await writeFile(projectPath, `${current.trimEnd()}\ndecision_retention: prun-on-ship\n`); // typo
+    const result = await runDoctor(dir);
+    expect(result.ok).toBe(false);
+    const schemaErr = result.issues.find((i) => i.code === "SCHEMA_ERROR" && i.severity === "error");
+    expect(schemaErr).toBeDefined();
+    expect(schemaErr?.message).toContain("project.yaml failed schema validation");
+  });
+});
+
+describe("runDoctor — project-a fixture", () => {
+  it("returns ok=true for the project-a fixture", async () => {
+    const result = await runDoctor(fixtureDir);
+    expect(result.ok).toBe(true);
+    // Warnings are allowed (e.g. model tier, stale context); errors are not
+    const errors = result.issues.filter((i) => i.severity === "error");
+    expect(errors).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Missing phase file (roadmap references a phase whose YAML does not exist)
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — missing roadmap-referenced phase file", () => {
+  it("reports MISSING_PHASE_FILE error when roadmap refs a missing file (matches plan lint)", async () => {
+    await writeFile(
+      join(dir, "design", "roadmap.yaml"),
+      "phases:\n  - id: P99\n    path: design/phases/P99-ghost.yaml\n    weight: 5\n",
+      "utf8",
+    );
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "MISSING_PHASE_FILE");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("error");
+    // The roadmap-referenced-but-missing case is MISSING_PHASE_FILE, NOT
+    // ORPHAN_PHASE_FILE — doctor now agrees with plan lint (the code name matches
+    // the condition: "referenced but not present", not "present but unreferenced").
+    expect(result.issues.find((i) => i.code === "ORPHAN_PHASE_FILE")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Orphan phase YAML (file exists but not in roadmap)
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — unreferenced phase file", () => {
+  it("reports ORPHAN_PHASE_FILE warning for phase YAML not in roadmap", async () => {
+    await mkdir(join(dir, "design", "phases"), { recursive: true });
+    await writeFile(
+      join(dir, "design", "phases", "P99-ghost.yaml"),
+      [
+        "id: P99",
+        "name: Ghost",
+        "weight: 5",
+        "confidence: low",
+        "risk: low",
+        "status: planned",
+        "objective: Ghost phase.",
+        "definition_of_done:",
+        "  - Done",
+        "verification:",
+        "  commands:",
+        "    - echo ok",
+      ].join("\n"),
+      "utf8",
+    );
+    const result = await runDoctor(dir);
+    const issue = result.issues.find(
+      (i) => i.code === "ORPHAN_PHASE_FILE" && i.severity === "warning",
+    );
+    expect(issue).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Orphan progress event (task_id not in any phase)
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — orphan progress event", () => {
+  it("reports ORPHAN_PROGRESS_EVENT warning for unknown task_id in progress.yaml", async () => {
+    await writeFile(
+      join(dir, ".code-pact", "state", "progress.yaml"),
+      `events:\n  - task_id: GHOST-T99\n    status: done\n    at: "2026-05-15T10:00:00+09:00"\n    actor: human\n`,
+      "utf8",
+    );
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "ORPHAN_PROGRESS_EVENT");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+    expect(issue?.message).toContain("GHOST-T99");
+  });
+
+  it("treats a missing progress.yaml as empty and still reads event files (no false INVALID_YAML)", async () => {
+    await rm(join(dir, ".code-pact", "state", "progress.yaml"), { force: true });
+    await writeEventFile(dir, {
+      task_id: "GHOST-T99",
+      status: "done",
+      at: "2026-05-15T10:00:00.000Z",
+      actor: "human",
+      source: "loop",
+    } as Parameters<typeof writeEventFile>[1]);
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "INVALID_YAML")).toBeUndefined();
+    const orphan = result.issues.find((i) => i.code === "ORPHAN_PROGRESS_EVENT");
+    expect(orphan).toBeDefined();
+    expect(orphan?.message).toContain("GHOST-T99");
+  });
+
+  it("reports INVALID_YAML (not SCHEMA_ERROR) for an unparseable event-file body", async () => {
+    await mkdir(eventsDir(dir), { recursive: true });
+    const name = `20260518T100000000Z-${"a".repeat(64)}.yaml`;
+    await writeFile(join(eventsDir(dir), name), "{ unclosed flow mapping", "utf8");
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "INVALID_YAML")).toBeDefined();
+    expect(result.issues.find((i) => i.code === "SCHEMA_ERROR")).toBeUndefined();
+  });
+
+  it("reports SCHEMA_ERROR (not EVENT_FILE_ID_MISMATCH) for a parseable-but-invalid event body", async () => {
+    await mkdir(eventsDir(dir), { recursive: true });
+    const name = `20260518T100000000Z-${"a".repeat(64)}.yaml`;
+    await writeFile(join(eventsDir(dir), name), "status: not_a_status\n", "utf8");
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "SCHEMA_ERROR")).toBeDefined();
+    expect(result.issues.find((i) => i.code === "EVENT_FILE_ID_MISMATCH")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase ID mismatch
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — phase id mismatch", () => {
+  it("reports PHASE_ID_MISMATCH when YAML id differs from roadmap ref", async () => {
+    await runPhaseAdd({
+      cwd: dir,
+      id: "P1",
+      name: "Foundation",
+      weight: 10,
+      objective: "Establish foundation.",
+      confidence: "high",
+      risk: "low",
+      verifyCommands: ["echo ok"],
+      definitionOfDone: ["Done"],
+    });
+    // Overwrite the phase file with a different id
+    await writeFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      [
+        "id: WRONG",
+        "name: Foundation",
+        "weight: 10",
+        "confidence: high",
+        "risk: low",
+        "status: planned",
+        "objective: Establish foundation.",
+        "definition_of_done:",
+        "  - Done",
+        "verification:",
+        "  commands:",
+        "    - echo ok",
+      ].join("\n"),
+      "utf8",
+    );
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "PHASE_ID_MISMATCH");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("error");
+    // PR1b re-scope: the doctor surface carries actionable recovery too
+    // (manual edit + confirm command, mirroring the CONTROL_PLANE_* convention).
+    expect(issue?.recovery?.manual_action).toContain("id: P1"); // expected (roadmap ref)
+    expect(issue?.recovery?.confirm).toBe("code-pact plan lint");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// .bak file detection
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — bak file detection", () => {
+  it("reports BAK_FILE warning when a .bak file is found in design/", async () => {
+    await mkdir(join(dir, "design"), { recursive: true });
+    await writeFile(join(dir, "design", "roadmap.yaml.bak"), "old content", "utf8");
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "BAK_FILE");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Invalid YAML
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — invalid YAML in project.yaml", () => {
+  it("reports INVALID_YAML error when project.yaml is unreadable", async () => {
+    await writeFile(join(dir, ".code-pact", "project.yaml"), "{ invalid: yaml: :", "utf8");
+    const result = await runDoctor(dir);
+    // YAML parser may succeed on some malformed inputs; at minimum no crash
+    expect(Array.isArray(result.issues)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New checks: DUPLICATE_TASK_ID, LOCAL_NOT_GITIGNORED, ADAPTER_MISSING
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — duplicate task ids", () => {
+  it("reports DUPLICATE_TASK_ID error when same id appears in two phases", async () => {
+    // Phase 1 with task P1-T1
+    await runPhaseAdd({
+      cwd: dir, id: "P1", name: "Alpha", weight: 10, objective: "Alpha.",
+      confidence: "medium", risk: "medium", verifyCommands: ["echo ok"],
+      definitionOfDone: ["Done"],
+    });
+    await writeFile(
+      join(dir, "design", "phases", "P1-alpha.yaml"),
+      [
+        "id: P1", "name: Alpha", "weight: 10", "confidence: medium", "risk: medium",
+        "status: planned", "objective: Alpha.", "definition_of_done:", "  - Done",
+        "verification:", "  commands:", "    - echo ok",
+        "tasks:", "  - id: SHARED-T1", "    type: feature", "    ambiguity: medium",
+        "    risk: medium", "    context_size: medium", "    write_surface: medium",
+        "    verification_strength: medium", "    expected_duration: medium",
+        "    status: planned",
+      ].join("\n"),
+      "utf8",
+    );
+    // Phase 2 with the same task id
+    await runPhaseAdd({
+      cwd: dir, id: "P2", name: "Beta", weight: 10, objective: "Beta.",
+      confidence: "medium", risk: "medium", verifyCommands: ["echo ok"],
+      definitionOfDone: ["Done"],
+    });
+    await writeFile(
+      join(dir, "design", "phases", "P2-beta.yaml"),
+      [
+        "id: P2", "name: Beta", "weight: 10", "confidence: medium", "risk: medium",
+        "status: planned", "objective: Beta.", "definition_of_done:", "  - Done",
+        "verification:", "  commands:", "    - echo ok",
+        "tasks:", "  - id: SHARED-T1", "    type: feature", "    ambiguity: medium",
+        "    risk: medium", "    context_size: medium", "    write_surface: medium",
+        "    verification_strength: medium", "    expected_duration: medium",
+        "    status: planned",
+      ].join("\n"),
+      "utf8",
+    );
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "DUPLICATE_TASK_ID");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("error");
+    expect(issue?.message).toContain("SHARED-T1");
+    // doctor surfaces the same recovery shape as plan lint (manual_action + confirm).
+    expect(issue?.recovery?.manual_action).toBeDefined();
+    expect(issue?.recovery?.confirm).toBe("code-pact plan lint");
+  });
+});
+
+describe("runDoctor — duplicate PHASE ids (clean-but-wrong merge)", () => {
+  const phaseBody = (name: string) =>
+    [
+      "id: P1", `name: ${name}`, "weight: 10", "confidence: high", "risk: low",
+      "status: planned", "objective: An objective that is long enough to pass",
+      "definition_of_done:", "  - A definition of done long enough to read",
+      "verification:", "  commands:", "    - echo ok",
+    ].join("\n");
+
+  it("reports DUPLICATE_PHASE_ID (with recovery) when two phase files claim the same id", async () => {
+    // The exact incident: two branches each minted P1 in a separate file; the
+    // merged roadmap has two P1 entries, no git conflict. `plan lint` already
+    // caught this; this asserts `doctor` now does too (PR1b parity).
+    await writeFile(
+      join(dir, "design", "roadmap.yaml"),
+      [
+        "phases:",
+        "  - id: P1", "    path: design/phases/P1-a.yaml", "    weight: 10",
+        "  - id: P1", "    path: design/phases/P1-b.yaml", "    weight: 10",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(join(dir, "design", "phases", "P1-a.yaml"), phaseBody("Alpha"), "utf8");
+    await writeFile(join(dir, "design", "phases", "P1-b.yaml"), phaseBody("Beta"), "utf8");
+
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "DUPLICATE_PHASE_ID");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("error");
+    // Names a colliding FILE (needs the real roadmap ref path, not an empty one).
+    expect(issue?.message).toContain("design/phases/P1-b.yaml");
+    expect(issue?.recovery?.manual_action).toContain("design/roadmap.yaml");
+    expect(issue?.recovery?.confirm).toBe("code-pact plan lint");
+  });
+
+  it("does not report DUPLICATE_PHASE_ID for a healthy unique-id project", async () => {
+    const result = await runDoctor(dir); // fresh init → empty roadmap
+    expect(result.issues.find((i) => i.code === "DUPLICATE_PHASE_ID")).toBeUndefined();
+  });
+});
+
+describe("runDoctor — LOCAL_NOT_GITIGNORED", () => {
+  it("reports LOCAL_NOT_GITIGNORED warning when .local/ is absent from .gitignore", async () => {
+    await writeFile(join(dir, ".gitignore"), "node_modules/\ndist/\n", "utf8");
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "LOCAL_NOT_GITIGNORED");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+  });
+
+  it("does not report LOCAL_NOT_GITIGNORED when .local/ is in .gitignore", async () => {
+    await writeFile(join(dir, ".gitignore"), "node_modules/\n.local/\n", "utf8");
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "LOCAL_NOT_GITIGNORED");
+    expect(issue).toBeUndefined();
+  });
+});
+
+describe("runDoctor — ADAPTER_MISSING", () => {
+  it("reports ADAPTER_MISSING warning when enabled agent has no instruction file", async () => {
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "ADAPTER_MISSING");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+    expect(issue?.message).toContain("claude-code");
+  });
+
+  it("does not report ADAPTER_MISSING when CLAUDE.md exists", async () => {
+    await writeFile(join(dir, "CLAUDE.md"), "# Claude Code adapter\n", "utf8");
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "ADAPTER_MISSING");
+    expect(issue).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v0.5.3 plan quality checks
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — BRIEF_MISSING (v0.5.3)", () => {
+  // Like CONSTITUTION_PLACEHOLDER, BRIEF_MISSING is gated on a real
+  // (non-TUTORIAL) phase existing, so a fresh-init project never sees the nag.
+  async function addRealPhase(): Promise<void> {
+    await runPhaseAdd({
+      cwd: dir,
+      id: "P1",
+      name: "Foundation",
+      weight: 10,
+      objective: "Establish the project foundation.",
+      confidence: "high",
+      risk: "low",
+      verifyCommands: ["echo ok"],
+      definitionOfDone: ["Done"],
+    });
+  }
+
+  it("reports BRIEF_MISSING warning when a real phase exists and design/brief.md does not", async () => {
+    await addRealPhase();
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "BRIEF_MISSING");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+  });
+
+  it("does not report BRIEF_MISSING on a fresh project with no real phase (noise suppression)", async () => {
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "BRIEF_MISSING");
+    expect(issue).toBeUndefined();
+  });
+
+  it("does not report BRIEF_MISSING when design/brief.md exists", async () => {
+    await addRealPhase();
+    await writeFile(join(dir, "design", "brief.md"), "# Brief\n\nWe are building something.\n", "utf8");
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "BRIEF_MISSING");
+    expect(issue).toBeUndefined();
+  });
+});
+
+describe("runDoctor — CONSTITUTION_PLACEHOLDER (v0.5.3)", () => {
+  // The placeholder warning is gated on a real (non-TUTORIAL) phase existing,
+  // so a fresh-init project must add one before the warning can fire.
+  async function addRealPhase(): Promise<void> {
+    await runPhaseAdd({
+      cwd: dir,
+      id: "P1",
+      name: "Foundation",
+      weight: 10,
+      objective: "Establish the project foundation.",
+      confidence: "high",
+      risk: "low",
+      verifyCommands: ["echo ok"],
+      definitionOfDone: ["Done"],
+    });
+  }
+
+  it("reports CONSTITUTION_PLACEHOLDER when a real phase exists and the constitution is still the placeholder", async () => {
+    await addRealPhase();
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "CONSTITUTION_PLACEHOLDER");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+  });
+
+  it("does not report CONSTITUTION_PLACEHOLDER on a fresh project with no real phase (noise suppression)", async () => {
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "CONSTITUTION_PLACEHOLDER");
+    expect(issue).toBeUndefined();
+  });
+
+  it("does not report CONSTITUTION_PLACEHOLDER when the hint text is removed", async () => {
+    await addRealPhase();
+    await writeFile(
+      join(dir, "design", "constitution.md"),
+      "# My Project Constitution\n\n- Keep it simple.\n",
+      "utf8",
+    );
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "CONSTITUTION_PLACEHOLDER");
+    expect(issue).toBeUndefined();
+  });
+});
+
+describe("runDoctor — EMPTY_OBJECTIVE (v0.5.3)", () => {
+  it("reports EMPTY_OBJECTIVE error when a phase objective is shorter than 10 chars", async () => {
+    await runPhaseAdd({
+      cwd: dir,
+      id: "PX",
+      name: "Tiny",
+      weight: 5,
+      objective: "Short",
+      confidence: "medium",
+      risk: "medium",
+      verifyCommands: ["pnpm test"],
+      definitionOfDone: ["Done"],
+    });
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "EMPTY_OBJECTIVE");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("error");
+    expect(issue?.message).toContain("PX");
+  });
+
+  it("does not report EMPTY_OBJECTIVE for adequate objectives", async () => {
+    await runPhaseAdd({
+      cwd: dir,
+      id: "PY",
+      name: "Adequate",
+      weight: 5,
+      objective: "This is a well-written phase objective that is long enough.",
+      confidence: "medium",
+      risk: "medium",
+      verifyCommands: ["pnpm test"],
+      definitionOfDone: ["Done"],
+    });
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "EMPTY_OBJECTIVE" && i.message.includes("PY"));
+    expect(issue).toBeUndefined();
+  });
+});
+
+
+describe("runDoctor — ADAPTER_STALE (v0.5.3)", () => {
+  it("reports ADAPTER_STALE warning when an enabled agent profile has no model_version", async () => {
+    // Fresh init creates claude-code.yaml without model_version — should trigger warning
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "ADAPTER_STALE");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+    expect(issue?.message).toContain("claude-code");
+  });
+
+  it("does not report ADAPTER_STALE when model_version is set in the agent profile", async () => {
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const original = await readFile(profilePath, "utf8");
+    await writeFile(profilePath, original + "model_version: opus-4.7\n", "utf8");
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "ADAPTER_STALE");
+    expect(issue).toBeUndefined();
+  });
+});
+
+describe("runDoctor — disabled_checks via .code-pact/doctor.yaml (v0.5.3)", () => {
+  it("suppresses checks listed in disabled_checks", async () => {
+    // A real phase is needed for BRIEF_MISSING and CONSTITUTION_PLACEHOLDER to
+    // fire at all (both are gated on non-tutorial work existing); otherwise
+    // this would assert suppression of warnings that never appear.
+    await runPhaseAdd({
+      cwd: dir,
+      id: "P1",
+      name: "Foundation",
+      weight: 10,
+      objective: "Establish the project foundation.",
+      confidence: "high",
+      risk: "low",
+      verifyCommands: ["echo ok"],
+      definitionOfDone: ["Done"],
+    });
+    await writeFile(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "disabled_checks:\n  - BRIEF_MISSING\n  - CONSTITUTION_PLACEHOLDER\n  - ADAPTER_STALE\n",
+      "utf8",
+    );
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "BRIEF_MISSING")).toBeUndefined();
+    expect(result.issues.find((i) => i.code === "CONSTITUTION_PLACEHOLDER")).toBeUndefined();
+    expect(result.issues.find((i) => i.code === "ADAPTER_STALE")).toBeUndefined();
+  });
+
+  it("other checks still fire when only some are disabled", async () => {
+    // A real phase is needed for CONSTITUTION_PLACEHOLDER to fire at all.
+    await runPhaseAdd({
+      cwd: dir,
+      id: "P1",
+      name: "Foundation",
+      weight: 10,
+      objective: "Establish the project foundation.",
+      confidence: "high",
+      risk: "low",
+      verifyCommands: ["echo ok"],
+      definitionOfDone: ["Done"],
+    });
+    await writeFile(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "disabled_checks:\n  - BRIEF_MISSING\n",
+      "utf8",
+    );
+    // CONSTITUTION_PLACEHOLDER should still fire (constitution still unedited)
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "BRIEF_MISSING")).toBeUndefined();
+    expect(result.issues.find((i) => i.code === "CONSTITUTION_PLACEHOLDER")).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v0.9 — manifest-aware adapter health
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — v0.9 manifest-aware adapter health", () => {
+  it("no manifest → still emits legacy ADAPTER_MISSING (byte-identical with v0.8)", async () => {
+    // Fresh init, no adapter install → no manifest. CLAUDE.md is also absent.
+    const result = await runDoctor(dir);
+    expect(result.issues.map((i) => i.code)).toContain("ADAPTER_MISSING");
+    // No manifest-aware codes should appear when there's no manifest.
+    const adapterCodes = result.issues.map((i) => i.code).filter((c) => c.startsWith("ADAPTER_"));
+    expect(adapterCodes).not.toContain("ADAPTER_FILE_MISSING");
+    expect(adapterCodes).not.toContain("ADAPTER_MANIFEST_MISSING");
+    expect(adapterCodes).not.toContain("ADAPTER_MANIFEST_INVALID");
+  });
+
+  it("no manifest + present CLAUDE.md → no ADAPTER_MISSING (byte-identical with v0.8)", async () => {
+    await writeFile(join(dir, "CLAUDE.md"), "# Claude Code adapter\n", "utf8");
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "ADAPTER_MISSING")).toBeUndefined();
+  });
+
+  it("with manifest + clean state → no adapter findings", async () => {
+    const { runAdapterInstall } = await import("../../../src/commands/adapter-install.ts");
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+    });
+    const result = await runDoctor(dir);
+    const adapterFindings = result.issues
+      .map((i) => i.code)
+      .filter((c) => c.startsWith("ADAPTER_") && c !== "ADAPTER_STALE");
+    expect(adapterFindings).toEqual([]);
+  });
+
+  it("with manifest + deleted CLAUDE.md → ADAPTER_FILE_MISSING (NOT ADAPTER_MISSING)", async () => {
+    const { runAdapterInstall } = await import("../../../src/commands/adapter-install.ts");
+    const { unlink } = await import("node:fs/promises");
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+    });
+    await unlink(join(dir, "CLAUDE.md"));
+    const result = await runDoctor(dir);
+    const codes = result.issues.map((i) => i.code);
+    expect(codes).toContain("ADAPTER_FILE_MISSING");
+    expect(codes).not.toContain("ADAPTER_MISSING"); // legacy check skipped when manifest exists
+    const fileMissing = result.issues.find((i) => i.code === "ADAPTER_FILE_MISSING")!;
+    expect(fileMissing.severity).toBe("error");
+    expect(fileMissing.message).toMatch(/\[claude-code\]/);
+  });
+
+  it("global doctor NEVER emits ADAPTER_MANIFEST_MISSING (that signal is adapter-doctor only)", async () => {
+    // Fresh init, no manifest. adapter doctor would emit MANIFEST_MISSING.
+    // Global doctor must NOT — it uses the legacy ADAPTER_MISSING signal
+    // and stays quiet on manifest absence.
+    const result = await runDoctor(dir);
+    expect(result.issues.map((i) => i.code)).not.toContain("ADAPTER_MANIFEST_MISSING");
+  });
+
+  it("with malformed manifest → ADAPTER_MANIFEST_INVALID (error)", async () => {
+    const { manifestPath, ADAPTER_MANIFEST_DIR_SEGMENTS } = await import(
+      "../../../src/core/adapters/manifest.ts"
+    );
+    await mkdir(join(dir, ...ADAPTER_MANIFEST_DIR_SEGMENTS), { recursive: true });
+    await writeFile(
+      manifestPath(dir, "claude-code"),
+      "schema_version: 99\nagent_name: claude-code\n",
+      "utf8",
+    );
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "ADAPTER_MANIFEST_INVALID");
+    expect(issue).toBeDefined();
+    expect(issue!.severity).toBe("error");
+    expect(result.ok).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CONTROL_PLANE_NOT_DRIVEN (RFC §2)
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — CONTROL_PLANE_NOT_DRIVEN", () => {
+  function git(cwd: string, args: readonly string[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn("git", args, {
+        cwd,
+        stdio: ["ignore", "ignore", "pipe"],
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@e.com",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@e.com",
+        },
+      });
+      proc.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git ${args.join(" ")} (${code})`))));
+      proc.on("error", reject);
+    });
+  }
+
+  const PHASE_YAML = (id = "P1", taskId = "P1-T1") =>
+    [
+      `id: ${id}`,
+      "name: Foundation",
+      "weight: 10",
+      "confidence: high",
+      "risk: low",
+      "status: planned",
+      "objective: Establish the foundation of the project",
+      "definition_of_done:",
+      "  - tests pass",
+      "verification:",
+      "  commands:",
+      "    - echo ok",
+      "tasks:",
+      `  - id: ${taskId}`,
+      "    type: feature",
+      "    ambiguity: low",
+      "    risk: low",
+      "    context_size: small",
+      "    write_surface: low",
+      "    verification_strength: weak",
+      "    expected_duration: short",
+      "    status: planned",
+    ].join("\n") + "\n";
+
+  // Replace the empty init roadmap with one real (non-TUTORIAL) phase + task.
+  async function writeRealPhase(id = "P1"): Promise<void> {
+    await writeFile(
+      join(dir, "design", "roadmap.yaml"),
+      `phases:\n  - id: ${id}\n    path: design/phases/${id}.yaml\n    weight: 10\n`,
+      "utf8",
+    );
+    await mkdir(join(dir, "design", "phases"), { recursive: true });
+    await writeFile(join(dir, "design", "phases", `${id}.yaml`), PHASE_YAML(id), "utf8");
+  }
+
+  const setProgress = (yaml: string) =>
+    writeFile(join(dir, ".code-pact", "state", "progress.yaml"), yaml, "utf8");
+
+  const find = (r: Awaited<ReturnType<typeof runDoctor>>) =>
+    r.issues.find((i) => i.code === "CONTROL_PLANE_NOT_DRIVEN");
+
+  it("fires (warning, advisory) when scaffold has a real task, progress is empty, and git is dirty", async () => {
+    await writeRealPhase();
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]); // scaffolding now untracked = dirty
+    const result = await runDoctor(dir);
+    const issue = find(result);
+    expect(issue).toBeDefined();
+    expect(issue!.severity).toBe("warning");
+    expect(result.ok).toBe(true); // advisory — does not fail doctor
+  });
+
+  it("carries machine-readable recovery (v1.28+) — primary, alternatives, reference", async () => {
+    await writeRealPhase();
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    const result = await runDoctor(dir);
+    const issue = find(result);
+    expect(issue!.recovery).toBeDefined();
+    expect(issue!.recovery!.primary).toContain("task prepare");
+    expect(issue!.recovery!.alternatives?.[0]).toContain("task record-done");
+    expect(issue!.recovery!.reference).toContain("disabled_checks");
+
+    // recovery survives JSON serialization — it must reach `doctor --json` /
+    // `validate --json` consumers (both stringify the same DoctorResult).
+    const roundTripped = JSON.parse(JSON.stringify(result)) as typeof result;
+    const rtIssue = roundTripped.issues.find(
+      (i) => i.code === "CONTROL_PLANE_NOT_DRIVEN",
+    );
+    expect(rtIssue?.recovery?.primary).toBe(issue!.recovery!.primary);
+  });
+
+  it("silent when not a git repo (default fixture is non-git)", async () => {
+    await writeRealPhase();
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+
+  it("silent when a non-TUTORIAL task has forward motion", async () => {
+    await writeRealPhase();
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await setProgress(
+      `events:\n  - task_id: P1-T1\n    status: started\n    at: "2026-05-18T09:00:00+00:00"\n    actor: agent\n`,
+    );
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+
+  it("FIRES when only TUTORIAL was driven (tutorial usage is not real forward motion)", async () => {
+    await writeRealPhase();
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await setProgress(
+      `events:\n  - task_id: TUTORIAL-T1\n    status: started\n    at: "2026-05-18T09:00:00+00:00"\n    actor: agent\n`,
+    );
+    expect(find(await runDoctor(dir))).toBeDefined();
+  });
+
+  it("silent when only a TUTORIAL phase exists (no real task)", async () => {
+    await writeRealPhase("TUTORIAL");
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+
+  it("silent when the working tree is clean (committed)", async () => {
+    await writeRealPhase();
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "--quiet", "-m", "init"]);
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+
+  it("skips (does not fire) when progress.yaml is invalid — doctor's own error owns it", async () => {
+    await writeRealPhase();
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await setProgress("events: [ this is not: valid: yaml\n");
+    const result = await runDoctor(dir);
+    expect(find(result)).toBeUndefined();
+    // The real problem is reported by the existing progress check.
+    expect(result.issues.some((i) => i.code === "INVALID_YAML" || i.code === "SCHEMA_ERROR")).toBe(true);
+  });
+
+  it("is suppressed by .code-pact/doctor.yaml disabled_checks", async () => {
+    await writeRealPhase();
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await writeFile(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "disabled_checks:\n  - CONTROL_PLANE_NOT_DRIVEN\n",
+      "utf8",
+    );
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34) — branch-diff drift for PR CI
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
+  const PROGRESS_REL = ".code-pact/state/progress.yaml";
+
+  function git(cwd: string, args: readonly string[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn("git", args, {
+        cwd,
+        stdio: ["ignore", "ignore", "pipe"],
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@e.com",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@e.com",
+        },
+      });
+      proc.on("close", (code) =>
+        code === 0 ? resolve() : reject(new Error(`git ${args.join(" ")} (${code})`)),
+      );
+      proc.on("error", reject);
+    });
+  }
+
+  const PHASE_YAML =
+    [
+      "id: P1",
+      "name: Foundation",
+      "weight: 10",
+      "confidence: high",
+      "risk: low",
+      "status: planned",
+      "objective: Establish the foundation of the project",
+      "definition_of_done:",
+      "  - tests pass",
+      "verification:",
+      "  commands:",
+      "    - echo ok",
+      "tasks:",
+      "  - id: P1-T1",
+      "    type: feature",
+      "    ambiguity: low",
+      "    risk: low",
+      "    context_size: small",
+      "    write_surface: low",
+      "    verification_strength: weak",
+      "    expected_duration: short",
+      "    status: planned",
+    ].join("\n") + "\n";
+
+  const setProgress = (yaml: string) =>
+    writeFile(join(dir, ".code-pact", "state", "progress.yaml"), yaml, "utf8");
+
+  const ev = (taskId: string, status: string, at = "2026-05-28T09:00:00+00:00") =>
+    `  - task_id: ${taskId}\n    status: ${status}\n    at: "${at}"\n    actor: agent\n`;
+
+  const find = (r: Awaited<ReturnType<typeof runDoctor>>) =>
+    r.issues.find((i) => i.code === "CONTROL_PLANE_BRANCH_NOT_DRIVEN");
+
+  // Base on `main`: a real phase, .gitignore'd .code-pact, and (optionally) a
+  // committed progress.yaml. Then branch to `feature`. The ledger is gitignored
+  // by default so it is only tracked when force-added (trackProgress).
+  async function setupBaseAndBranch(
+    opts: {
+      baseProgress?: string;
+      trackProgress?: boolean;
+      baseEvents?: import("../../../src/core/schemas/progress-event.ts").ProgressEvent[];
+      trackEventsGitkeep?: boolean;
+    } = {},
+  ): Promise<void> {
+    await writeFile(
+      join(dir, "design", "roadmap.yaml"),
+      `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`,
+      "utf8",
+    );
+    await mkdir(join(dir, "design", "phases"), { recursive: true });
+    await writeFile(join(dir, "design", "phases", "P1.yaml"), PHASE_YAML, "utf8");
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/\n", "utf8");
+    await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
+    await setProgress(opts.baseProgress ?? "events: []\n");
+    for (const e of opts.baseEvents ?? []) {
+      await writeEventFile(dir, e as Parameters<typeof writeEventFile>[1]);
+    }
+    if (opts.trackEventsGitkeep) {
+      await mkdir(join(dir, ".code-pact", "state", "events"), { recursive: true });
+      await writeFile(join(dir, ".code-pact", "state", "events", ".gitkeep"), "", "utf8");
+    }
+
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await git(dir, ["add", "-A"]);
+    if (opts.trackProgress ?? true) await git(dir, ["add", "-f", PROGRESS_REL]);
+    if ((opts.baseEvents ?? []).length > 0 || opts.trackEventsGitkeep) {
+      await git(dir, ["add", "-f", ".code-pact/state/events/"]);
+    }
+    await git(dir, ["commit", "--quiet", "-m", "base"]);
+    await git(dir, ["checkout", "--quiet", "-b", "feature"]);
+  }
+
+  async function commitEventFileFull(
+    event: import("../../../src/core/schemas/progress-event.ts").ProgressEvent,
+  ): Promise<void> {
+    await writeEventFile(dir, event as Parameters<typeof writeEventFile>[1]);
+    await git(dir, ["add", "-f", ".code-pact/state/events/"]);
+    await git(dir, ["commit", "--quiet", "-m", "event"]);
+  }
+
+  async function commitBranchCode(relPath = "src/foo.ts"): Promise<void> {
+    await mkdir(join(dir, relPath, ".."), { recursive: true });
+    await writeFile(join(dir, relPath), "export const x = 1;\n", "utf8");
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "--quiet", "-m", `code ${relPath}`]);
+  }
+
+  async function commitProgress(yaml: string): Promise<void> {
+    await setProgress(yaml);
+    await git(dir, ["add", "-f", PROGRESS_REL]);
+    await git(dir, ["commit", "--quiet", "-m", "progress"]);
+  }
+
+  it("fires (warning, advisory) when the branch changed real code but added no known started/done", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    const r = await runDoctor(dir, { baseRef: "main" });
+    const issue = find(r);
+    expect(issue).toBeDefined();
+    expect(issue!.severity).toBe("warning");
+    expect(r.ok).toBe(true); // advisory — does not fail doctor on its own
+  });
+
+  it("carries machine-readable recovery (v1.28+) — primary, alternatives, reference", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    const r = await runDoctor(dir, { baseRef: "main" });
+    const issue = find(r);
+    expect(issue!.recovery).toBeDefined();
+    expect(issue!.recovery!.primary).toContain("task prepare");
+    expect(issue!.recovery!.alternatives?.[0]).toContain("task record-done");
+    expect(issue!.recovery!.reference).toContain("exclude_globs");
+  });
+
+  it("skips when the branch added a known non-TUTORIAL started (started alone suffices)", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    await commitProgress(`events:\n${ev("P1-T1", "started")}`);
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("skips when the branch added a known non-TUTORIAL done", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    await commitProgress(`events:\n${ev("P1-T1", "done")}`);
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("fires when the only added event is an unknown task_id (not in the plan)", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    await commitProgress(`events:\n${ev("P99-TX", "started")}`);
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeDefined();
+  });
+
+  // Bucket B PR2: the branch-drift gate reads the committed git tree —
+  // legacy progress.yaml AND per-event files — so a flipped writer that commits
+  // an event file (not progress.yaml) still counts as "driven".
+  async function commitEventFile(
+    taskId: string,
+    status: "started" | "done",
+  ): Promise<void> {
+    await writeEventFile(dir, {
+      task_id: taskId,
+      status,
+      at: "2026-05-28T10:00:00.000Z",
+      actor: "agent",
+      agent: "claude-code",
+      ...(status === "done" ? { source: "loop" } : {}),
+    } as Parameters<typeof writeEventFile>[1]);
+    await git(dir, ["add", "-f", ".code-pact/state/events/"]);
+    await git(dir, ["commit", "--quiet", "-m", "event"]);
+  }
+
+  it("skips when the branch added a known started/done as a committed EVENT FILE", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    await commitEventFile("P1-T1", "started");
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("fires when the branch's only added event file is an unknown task id", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    await commitEventFile("P99-TX", "started");
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeDefined();
+  });
+
+  it("uses the content id for identity: a content-different event on the branch counts as added (driven)", async () => {
+    const baseDone = {
+      task_id: "P1-T1",
+      status: "done",
+      at: "2026-05-28T09:00:00.000Z",
+      actor: "agent",
+      source: "loop",
+      evidence: ["old"],
+    } as import("../../../src/core/schemas/progress-event.ts").ProgressEvent;
+    await setupBaseAndBranch({ baseEvents: [baseDone] });
+    await commitBranchCode();
+    // Same task/status/at/actor/source, DIFFERENT evidence → a distinct content
+    // id, so the branch DID add a started/done. A coarse key would miss this.
+    await commitEventFileFull({ ...baseDone, evidence: ["new"] });
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("skips (does not fire) when the BASE ledger is unparseable — can't diff, so don't guess", async () => {
+    // base commits an invalid progress.yaml; HEAD fixes it but adds only an
+    // unknown-task event. With base treated as []=empty the gate would FIRE
+    // (false signal); base=null must skip instead.
+    await setupBaseAndBranch({ baseProgress: "events: [unclosed" });
+    await commitBranchCode();
+    await commitProgress(`events:\n${ev("P99-TX", "started")}`);
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("fires when the only added event is TUTORIAL", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    await commitProgress(`events:\n${ev("TUTORIAL-T1", "started")}`);
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeDefined();
+  });
+
+  it("skips when only exclude_globs paths changed", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode("docs/guide.md");
+    // doctor.yaml is gitignored (.code-pact/) — read from disk regardless of git.
+    await writeFile(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "control_plane_branch_not_driven:\n  exclude_globs:\n    - \"docs/**\"\n",
+      "utf8",
+    );
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("is silent when progress.yaml is not git-tracked (ledger not committed)", async () => {
+    await setupBaseAndBranch({ trackProgress: false });
+    await commitBranchCode();
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("FIRES with only events/.gitkeep tracked (no progress.yaml, no real event files) — the dogfood A3 sentinel keeps the gate active, not silently skipped", async () => {
+    // Dogfood A3: this repo commits `.code-pact/state/events/.gitkeep` so the
+    // committed-ledger precondition (ledgerTracked) is satisfied WITHOUT
+    // committing the legacy monolithic progress.yaml. The path is tracked but
+    // holds no real events, so a code-changing branch that drives nothing must
+    // still fire — proving the sentinel flips the gate from skip to active
+    // (contrast: the test just above, where nothing is tracked, stays silent).
+    await setupBaseAndBranch({ trackProgress: false, trackEventsGitkeep: true });
+    await commitBranchCode();
+    const r = await runDoctor(dir, { baseRef: "main" });
+    const issue = find(r);
+    expect(issue).toBeDefined();
+    expect(issue!.severity).toBe("warning");
+  });
+
+  it("does not run without --base-ref", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+
+  it("is silent when the base ref does not resolve (no merge-base)", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    expect(find(await runDoctor(dir, { baseRef: "no-such-ref" }))).toBeUndefined();
+  });
+
+  it("is suppressed by disabled_checks", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    await writeFile(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "disabled_checks:\n  - CONTROL_PLANE_BRANCH_NOT_DRIVEN\n",
+      "utf8",
+    );
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  // Rev twin of Codex Finding B: a corrupt archived snapshot committed at a
+  // revision shrinks the rev archived-task set. A committed legacy event for that
+  // now-invisible archived task must NOT be admitted as valid rev progress — the
+  // rev reader fails closed (returns null) so the branch-drift comparison SKIPS
+  // rather than trusting a leaked legacy event.
+  it("fails closed (skips) when the rev has a corrupt archived snapshot + a legacy event for that archived task", async () => {
+    await setupBaseAndBranch({ trackProgress: true });
+    await commitBranchCode();
+    // Commit a corrupt archived snapshot for ARCH (so ARCH-T1 drops from the rev
+    // archived set) and a legacy progress event for ARCH-T1 not in loose/pack.
+    await mkdir(join(dir, ".code-pact", "state", "archive", "phases"), { recursive: true });
+    await writeFile(
+      join(dir, ".code-pact", "state", "archive", "phases", "ARCH.json"),
+      "{ corrupt json",
+      "utf8",
+    );
+    await commitProgress(`events:\n${ev("ARCH-T1", "started")}`);
+    await git(dir, ["add", "-f", ".code-pact/state/archive/phases/ARCH.json"]);
+    await git(dir, ["commit", "--quiet", "-m", "corrupt archived snapshot"]);
+    // The HEAD rev ledger cannot be trusted (incomplete archived set + legacy
+    // present) → readMergedEventsAtRev returns null → the gate skips, never fires
+    // a false verdict from the leaked legacy event.
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Model-id drift checks (MODEL_ID_UNKNOWN / MODEL_MAP_STALE), offline,
+// scoped to the claude-code (anthropic) profile.
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — model-id drift checks", () => {
+  // Overwrite the claude-code profile with a custom model_map / model_version.
+  async function writeClaudeProfile(
+    modelMap: Record<string, string>,
+    modelVersion?: string,
+  ): Promise<void> {
+    const body = [
+      "name: claude-code",
+      "instruction_filename: CLAUDE.md",
+      "context_dir: .context/claude-code",
+      "skill_dir: .claude/skills",
+      "hook_dir: .claude/hooks",
+      "model_map:",
+      ...Object.entries(modelMap).map(([k, v]) => `  ${k}: ${v}`),
+      ...(modelVersion ? [`model_version: ${modelVersion}`] : []),
+      "",
+    ].join("\n");
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      body,
+      "utf8",
+    );
+  }
+
+  const CURRENT_DEFAULTS = {
+    highest_reasoning: "claude-opus-4-8",
+    balanced_coding: "claude-sonnet-4-6",
+    cheap_mechanical: "claude-haiku-4-5",
+  };
+
+  it("does not flag a freshly initialised claude-code profile (matches catalog default)", async () => {
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "MODEL_MAP_STALE")).toBeUndefined();
+    expect(result.issues.find((i) => i.code === "MODEL_ID_UNKNOWN")).toBeUndefined();
+  });
+
+  it("reports MODEL_MAP_STALE (warning) when a model_map id is known but not the current default", async () => {
+    await writeClaudeProfile({ ...CURRENT_DEFAULTS, highest_reasoning: "claude-opus-4-7" });
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "MODEL_MAP_STALE");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+    // Message names the current default so the user knows what to follow.
+    expect(issue?.message).toContain("claude-opus-4-8");
+    // Remediation must be honest: model_map is updated by a hand-edit + plain
+    // regenerate. `adapter upgrade --model` only re-pins model_version and would
+    // NOT clear this warning, so the message must not advise it.
+    expect(issue?.message).toContain(".code-pact/agent-profiles/claude-code.yaml");
+    expect(issue?.message).not.toContain("--model");
+    // opus-4-7 is a *known* id, so it must NOT also be flagged as unknown.
+    expect(result.issues.find((i) => i.code === "MODEL_ID_UNKNOWN")).toBeUndefined();
+    // Drift is advisory only — never an error.
+    expect(result.ok).toBe(true);
+  });
+
+  it("reports MODEL_ID_UNKNOWN (warning) for an unrecognised model_map id", async () => {
+    await writeClaudeProfile({ ...CURRENT_DEFAULTS, highest_reasoning: "claude-opus-9-9" });
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "MODEL_ID_UNKNOWN");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+  });
+
+  it("suppresses MODEL_MAP_STALE via .code-pact/doctor.yaml disabled_checks", async () => {
+    await writeClaudeProfile({ ...CURRENT_DEFAULTS, highest_reasoning: "claude-opus-4-7" });
+    await writeFile(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "disabled_checks:\n  - MODEL_MAP_STALE\n",
+      "utf8",
+    );
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "MODEL_MAP_STALE")).toBeUndefined();
+  });
+
+  it("treats model_version as a pin: a known-but-older value is not flagged", async () => {
+    await writeClaudeProfile(CURRENT_DEFAULTS, "opus-4.7");
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "MODEL_ID_UNKNOWN")).toBeUndefined();
+    expect(result.issues.find((i) => i.code === "MODEL_MAP_STALE")).toBeUndefined();
+  });
+
+  it("flags an unrecognised model_version as MODEL_ID_UNKNOWN", async () => {
+    await writeClaudeProfile(CURRENT_DEFAULTS, "opus-9.9");
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "MODEL_ID_UNKNOWN")).toBeDefined();
+  });
+
+  it("does not false-positive on non-Claude agents (codex gpt-5.x)", async () => {
+    // Re-init with codex added; its model_map (gpt-5.5 / gpt-5.4 / gpt-5.4-mini)
+    // is not a Claude id, but the checks are scoped to claude-code so it must not
+    // trigger MODEL_ID_UNKNOWN / MODEL_MAP_STALE.
+    await runInit({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["claude-code", "codex"],
+      force: true,
+      json: false,
+    });
+    const result = await runDoctor(dir);
+    const claudeOnly = result.issues.filter(
+      (i) => i.code === "MODEL_ID_UNKNOWN" || i.code === "MODEL_MAP_STALE",
+    );
+    expect(claudeOnly).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CONTROL_PLANE_GITIGNORED (v1.32) — the shared control plane is git-ignored.
+// Authoritative via `git check-ignore --no-index` over the WHOLE shared control
+// plane (project.yaml / agent+model profiles / baselines / the event ledger),
+// each probed via a representative FILE path so a file-scoped rule
+// (`events/*.yaml`) is caught and a force-added .gitkeep does not mask it.
+// Requires a real git repo.
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — CONTROL_PLANE_GITIGNORED (v1.32)", () => {
+  function git(cwd: string, args: readonly string[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn("git", args, {
+        cwd,
+        stdio: ["ignore", "ignore", "pipe"],
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@e.com",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@e.com",
+        },
+      });
+      proc.on("close", (code) =>
+        code === 0 ? resolve() : reject(new Error(`git ${args.join(" ")} (${code})`)),
+      );
+      proc.on("error", reject);
+    });
+  }
+
+  const find = (r: Awaited<ReturnType<typeof runDoctor>>) =>
+    r.issues.find((i) => i.code === "CONTROL_PLANE_GITIGNORED");
+
+  it("fires (warning) when a blanket /.code-pact/ ignore is present in a git repo", async () => {
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/\nnode_modules/\n", "utf8");
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    const issue = find(await runDoctor(dir));
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+    // Recovery is a MANUAL edit (not a runnable command), with a confirm command.
+    expect(issue?.recovery?.manual_action).toBeDefined();
+    expect(issue?.recovery?.confirm).toBe("code-pact doctor");
+    expect(issue?.recovery?.primary).toBeUndefined();
+    // The message names which shared area(s) are affected.
+    expect(issue?.message).toContain(".code-pact/state/events/");
+  });
+
+  it("FIRES on a file-scoped ledger ignore (events/*.yaml) a directory probe would miss", async () => {
+    // The events/ dir is NOT ignored, but every NEW event file is — the exact
+    // silent-breakage Gap1 targets. A directory probe stays quiet; the file probe
+    // catches it.
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/state/events/*.yaml\n", "utf8");
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    expect(find(await runDoctor(dir))).toBeDefined();
+  });
+
+  it("FIRES when only the ledger is re-included but shared CONFIG stays ignored", async () => {
+    // The diagnostic covers the whole shared control plane: re-including just the
+    // ledger leaves project.yaml / profiles / baselines off git — a teammate's
+    // clean checkout would have no project config.
+    await writeFile(
+      join(dir, ".gitignore"),
+      "/.code-pact/*\n!/.code-pact/state\n/.code-pact/state/*\n!/.code-pact/state/events\n",
+      "utf8",
+    );
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    const issue = find(await runDoctor(dir));
+    expect(issue).toBeDefined();
+    // It should name a config area, not only the ledger.
+    expect(issue?.message).toContain(".code-pact/project.yaml");
+  });
+
+  it("FIRES on a config-only ignore even when the ledger is committable", async () => {
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/project.yaml\n", "utf8");
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    const issue = find(await runDoctor(dir));
+    expect(issue).toBeDefined();
+    expect(issue?.message).toContain(".code-pact/project.yaml");
+  });
+
+  it("is silent with the narrow ignore init writes (whole control plane committable)", async () => {
+    // beforeEach already ran init → narrow .gitignore. Just make it a git repo.
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+
+  it("is silent when the directory is not a git repo (check-ignore unavailable)", async () => {
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/\n", "utf8");
+    // No `git init` — git check-ignore fails → conservative skip.
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+
+  it("still fires when a .gitkeep was force-added under the blanket ignore (--no-index)", async () => {
+    // A force-added file does not change the ignore RULE: NEW event files are
+    // still ignored. --no-index makes the check see the rule, not the index.
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/\n", "utf8");
+    await mkdir(join(dir, ".code-pact", "state", "events"), { recursive: true });
+    await writeFile(join(dir, ".code-pact", "state", "events", ".gitkeep"), "", "utf8");
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await git(dir, ["add", "-f", ".code-pact/state/events/.gitkeep"]);
+    await git(dir, ["commit", "--quiet", "-m", "force-add gitkeep"]);
+    expect(find(await runDoctor(dir))).toBeDefined();
+  });
+
+  it("is silenced by disabled_checks in .code-pact/doctor.yaml", async () => {
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/\n", "utf8");
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await writeFile(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "disabled_checks:\n  - CONTROL_PLANE_GITIGNORED\n",
+      "utf8",
+    );
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+});

@@ -58,6 +58,7 @@ const KNOWN_CODES: Record<
   ALREADY_INITIALIZED: "public",
   AMBIGUOUS_TASK_ID: "public",
   AMBIGUOUS_PHASE_ID: "public",
+  ABORTED: "public",
   ARCHIVE_BUNDLE_WRITE_FAILED: "public",
   BASELINE_NOT_FOUND: "public",
   COMMANDS_FAILED: "public",
@@ -110,10 +111,6 @@ const KNOWN_CODES: Record<
   VALIDATE_FAILED: "public",
   VERIFICATION_FAILED: "public",
   DOCTOR_FAILED: "public",
-  // Internal: thrown by throwIfAborted when an AbortSignal fires before
-  // the event write commit point in task complete. Not a user-facing
-  // error code — the CLI boundary catches it and exits with code 1.
-  ABORTED: "internal",
   PLAN_ANALYZE_FAILED: "public",
   PLAN_MIGRATE_FAILED: "public",
   PLAN_LINT_FAILED: "public",
