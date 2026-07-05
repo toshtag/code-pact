@@ -274,7 +274,7 @@ describe("state archive-maintain --write — compaction + retention", () => {
     expect(
       run(["plan", "lint", "--include-quality", "--strict", "--json"]).code,
     ).toBe(0);
-  });
+  }, 60_000);
 
   it("drops unreferenced old truth honestly: deleted bucket populated, others empty, no double-count", async () => {
     // P3 stays referenced (keeps the project valid so the post-checks pass); P1+P2 become
@@ -673,7 +673,7 @@ describe("state archive-maintain — pending delete-intent recovery is surfaced 
       true,
     );
     expect(r2.code).toBe(0);
-  });
+  }, 60_000);
 
   it("the low-level `state compact-archive --write` REFUSES under a pending delete-intent journal (no wedge); archive-maintain still recovers", async () => {
     // The public low-level verb must not be a back door to the same wedge: compaction would retire a

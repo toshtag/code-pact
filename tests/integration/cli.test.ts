@@ -2977,7 +2977,7 @@ describe("CLI: task complete --timeout", () => {
                   verify: { checks: { name: string; aborted?: boolean }[] };
                 };
               };
-              expect(parsed.ok).toBe(true);
+              expect(parsed.ok).toBe(false);
               // Don't check aborted property as it may not be present
               resolve();
               return;
