@@ -68,12 +68,18 @@ export function resolveNoFollowFlag(value: unknown): number {
 }
 
 export async function openReadNoFollow(path: string): Promise<FileHandle> {
-  const flags = constantsRaw.O_RDONLY | resolveNoFollowFlag(constantsRaw.O_NOFOLLOW);
+  const flags =
+    constantsRaw.O_RDONLY | resolveNoFollowFlag(constantsRaw.O_NOFOLLOW);
   try {
     return await openRaw(path, flags);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === "EINVAL" || code === "ENOTSUP" || code === "EOPNOTSUPP") {
+    if (
+      code === "EINVAL" ||
+      code === "ENOTSUP" ||
+      code === "EOPNOTSUPP" ||
+      code === "ENOSYS"
+    ) {
       throw unsupportedNoFollowError();
     }
     throw err;
@@ -89,7 +95,12 @@ export async function openDirectoryNoFollow(path: string): Promise<FileHandle> {
     return await openRaw(path, flags);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === "EINVAL" || code === "ENOTSUP" || code === "EOPNOTSUPP") {
+    if (
+      code === "EINVAL" ||
+      code === "ENOTSUP" ||
+      code === "EOPNOTSUPP" ||
+      code === "ENOSYS"
+    ) {
       throw unsupportedNoFollowError();
     }
     throw err;
@@ -136,7 +147,12 @@ export function readRegularOwnedTextSync(path: string): string {
     fd = openSyncRaw(path, flags);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === "EINVAL" || code === "ENOTSUP" || code === "EOPNOTSUPP") {
+    if (
+      code === "EINVAL" ||
+      code === "ENOTSUP" ||
+      code === "EOPNOTSUPP" ||
+      code === "ENOSYS"
+    ) {
       throw unsupportedNoFollowError();
     }
     throw err;
