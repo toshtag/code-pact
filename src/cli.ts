@@ -13,7 +13,12 @@ import { runInit, type SupportedAgent } from "./commands/init.ts";
 import { runInitWizard } from "./commands/init-wizard.ts";
 import { runTutorial } from "./commands/tutorial.ts";
 import { SUPPORTED_AGENTS } from "./core/agents.ts";
-import { withWriteLock, emitOk, emitError } from "./cli/util.ts";
+import {
+  withWriteLock,
+  emitOk,
+  emitError,
+  createCliAbortSignal,
+} from "./cli/util.ts";
 import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
 import { runVerify, formatVerify, MAX_TIMEOUT_MS } from "./commands/verify.ts";
@@ -693,9 +698,17 @@ async function cmdVerify(
   }
 
   const cwd = process.cwd();
+  const { signal, cleanup } = createCliAbortSignal();
 
   try {
-    const result = await runVerify({ cwd, phaseId, taskId, dryRun, timeoutMs });
+    const result = await runVerify({
+      cwd,
+      phaseId,
+      taskId,
+      dryRun,
+      timeoutMs,
+      signal,
+    });
     if (json) {
       if (result.ok) {
         emitOk({ checks: result.checks });
@@ -743,6 +756,8 @@ async function cmdVerify(
       return 2;
     }
     throw err;
+  } finally {
+    cleanup();
   }
 }
 
