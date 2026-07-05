@@ -3,6 +3,7 @@ import {
   listOwnedDirents,
   resolveDecisionReadPath,
   resolveOwnedDirectoryReadPath,
+  type OwnedListPath,
 } from "../project-fs/index.ts";
 import { parseFrontMatter } from "../pack/front-matter.ts";
 import {
@@ -35,7 +36,10 @@ export function isAbsentDecisionsDirError(error: unknown): boolean {
  * convert a real environment problem into a spurious
  * `TASK_DECISION_UNRESOLVED` advisory.
  */
-export async function readDecisionAdrFiles(cwd: string, listFn?: DecisionDirLister): Promise<string[]> {
+export async function readDecisionAdrFiles(
+  cwd: string,
+  listFn?: DecisionDirLister,
+): Promise<string[]> {
   return (await listLiveDecisionFiles(cwd, listFn)).paths;
 }
 
@@ -67,7 +71,7 @@ function codedDecisionScanError(message: string, cause?: unknown): Error {
  * Production code leaves this undefined and uses the real fs.
  */
 export type DecisionDirLister = (
-  absPath: string,
+  path: OwnedListPath,
 ) => Promise<import("node:fs").Dirent[]>;
 
 /**
