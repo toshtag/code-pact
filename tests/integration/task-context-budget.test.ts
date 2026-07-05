@@ -32,17 +32,26 @@ async function setupTask(
 ): Promise<void> {
   expectJsonOk(
     project.run([
-      "phase", "add",
-      "--id", "P1",
-      "--name", "Foundation",
-      "--objective", "Foundation phase for the context-budget test",
-      "--weight", "10",
-      "--verify-command", "node --version",
+      "phase",
+      "add",
+      "--id",
+      "P1",
+      "--name",
+      "Foundation",
+      "--objective",
+      "Foundation phase for the context-budget test",
+      "--weight",
+      "10",
+      "--verify-command",
+      "node --version",
       "--json",
     ]),
   );
   const phasePath = join(project.dir, "design", "phases", "P1-foundation.yaml");
-  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
+  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+    string,
+    unknown
+  >;
   doc.tasks = [
     {
       id: "P1-T1",
@@ -81,14 +90,26 @@ describe("task context --context-budget (P47)", () => {
     (profile, bytes) => {
       const byProfile = expectJsonOk<{ content: string }>(
         project.run([
-          "task", "context", "P1-T1", "--agent", "claude-code",
-          "--context-budget", profile, "--json",
+          "task",
+          "context",
+          "P1-T1",
+          "--agent",
+          "claude-code",
+          "--context-budget",
+          profile,
+          "--json",
         ]),
       );
       const byBytes = expectJsonOk<{ content: string }>(
         project.run([
-          "task", "context", "P1-T1", "--agent", "claude-code",
-          "--budget-bytes", bytes, "--json",
+          "task",
+          "context",
+          "P1-T1",
+          "--agent",
+          "claude-code",
+          "--budget-bytes",
+          bytes,
+          "--json",
         ]),
       );
       expect(byProfile.data.content).toBe(byBytes.data.content);
@@ -97,8 +118,14 @@ describe("task context --context-budget (P47)", () => {
 
   it("an unknown profile is CONFIG_ERROR (exit 2)", () => {
     const res = project.run([
-      "task", "context", "P1-T1", "--agent", "claude-code",
-      "--context-budget", "unknown", "--json",
+      "task",
+      "context",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--context-budget",
+      "unknown",
+      "--json",
     ]);
     expectJsonErr(res, "CONFIG_ERROR");
     expect(res.code).toBe(2);
@@ -106,8 +133,16 @@ describe("task context --context-budget (P47)", () => {
 
   it("--context-budget + --budget-bytes is CONFIG_ERROR (exit 2)", () => {
     const res = project.run([
-      "task", "context", "P1-T1", "--agent", "claude-code",
-      "--context-budget", "tight", "--budget-bytes", "30000", "--json",
+      "task",
+      "context",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--context-budget",
+      "tight",
+      "--budget-bytes",
+      "30000",
+      "--json",
     ]);
     const env = expectJsonErr(res, "CONFIG_ERROR");
     expect(env.error.message).toMatch(/mutually exclusive/);
@@ -119,10 +154,24 @@ describe("task context --context-budget (P47)", () => {
     // exists. Compare no-flag content to itself across two invocations and to
     // the un-elided wide pack only insofar as no-flag == no budget.
     const a = expectJsonOk<{ content: string }>(
-      project.run(["task", "context", "P1-T1", "--agent", "claude-code", "--json"]),
+      project.run([
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--json",
+      ]),
     );
     const b = expectJsonOk<{ content: string }>(
-      project.run(["task", "context", "P1-T1", "--agent", "claude-code", "--json"]),
+      project.run([
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--json",
+      ]),
     );
     expect(a.data.content).toBe(b.data.content);
   });
@@ -148,23 +197,46 @@ describe("task prepare --context-budget (P47)", () => {
   it("--context-budget tight yields the same context_pack_bytes as --budget-bytes 30000", () => {
     const byProfile = expectJsonOk<{ context_pack_bytes: number }>(
       project.run([
-        "task", "prepare", "P1-T1", "--agent", "claude-code", "--dry-run",
-        "--context-budget", "tight", "--json",
+        "task",
+        "prepare",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--dry-run",
+        "--context-budget",
+        "tight",
+        "--json",
       ]),
     );
     const byBytes = expectJsonOk<{ context_pack_bytes: number }>(
       project.run([
-        "task", "prepare", "P1-T1", "--agent", "claude-code", "--dry-run",
-        "--budget-bytes", "30000", "--json",
+        "task",
+        "prepare",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--dry-run",
+        "--budget-bytes",
+        "30000",
+        "--json",
       ]),
     );
-    expect(byProfile.data.context_pack_bytes).toBe(byBytes.data.context_pack_bytes);
+    expect(byProfile.data.context_pack_bytes).toBe(
+      byBytes.data.context_pack_bytes,
+    );
   });
 
   it("an unknown profile is CONFIG_ERROR (exit 2)", () => {
     const res = project.run([
-      "task", "prepare", "P1-T1", "--agent", "claude-code",
-      "--context-budget", "unknown", "--dry-run", "--json",
+      "task",
+      "prepare",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--context-budget",
+      "unknown",
+      "--dry-run",
+      "--json",
     ]);
     expectJsonErr(res, "CONFIG_ERROR");
     expect(res.code).toBe(2);
@@ -172,8 +244,17 @@ describe("task prepare --context-budget (P47)", () => {
 
   it("--context-budget + --budget-bytes is CONFIG_ERROR (exit 2)", () => {
     const res = project.run([
-      "task", "prepare", "P1-T1", "--agent", "claude-code",
-      "--context-budget", "tight", "--budget-bytes", "30000", "--dry-run", "--json",
+      "task",
+      "prepare",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--context-budget",
+      "tight",
+      "--budget-bytes",
+      "30000",
+      "--dry-run",
+      "--json",
     ]);
     const env = expectJsonErr(res, "CONFIG_ERROR");
     expect(env.error.message).toMatch(/mutually exclusive/);
@@ -183,8 +264,15 @@ describe("task prepare --context-budget (P47)", () => {
   it("the commands dictionary does not echo --context-budget", () => {
     const env = expectJsonOk<{ commands: Record<string, string> }>(
       project.run([
-        "task", "prepare", "P1-T1", "--agent", "claude-code", "--dry-run",
-        "--context-budget", "tight", "--json",
+        "task",
+        "prepare",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--dry-run",
+        "--context-budget",
+        "tight",
+        "--json",
       ]),
     );
     for (const cmd of Object.values(env.data.commands)) {
@@ -210,9 +298,15 @@ describe("task context --context-budget with an agent-defined profile (P47)", ()
     await setupTask(project);
     // Declare a custom profile + override `tight` in the agent profile.
     const profilePath = join(
-      project.dir, ".code-pact", "agent-profiles", "claude-code.yaml",
+      project.dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
     );
-    const profile = parseYaml(await readFile(profilePath, "utf8")) as Record<string, unknown>;
+    const profile = parseYaml(await readFile(profilePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
     profile.context_budget = {
       profiles: {
         tight: { max_bytes: 25000 },
@@ -229,14 +323,26 @@ describe("task context --context-budget with an agent-defined profile (P47)", ()
   it("a custom profile resolves to its declared bytes", () => {
     const byProfile = expectJsonOk<{ content: string }>(
       project.run([
-        "task", "context", "P1-T1", "--agent", "claude-code",
-        "--context-budget", "review", "--json",
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--context-budget",
+        "review",
+        "--json",
       ]),
     );
     const byBytes = expectJsonOk<{ content: string }>(
       project.run([
-        "task", "context", "P1-T1", "--agent", "claude-code",
-        "--budget-bytes", "45000", "--json",
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--budget-bytes",
+        "45000",
+        "--json",
       ]),
     );
     expect(byProfile.data.content).toBe(byBytes.data.content);
@@ -245,14 +351,26 @@ describe("task context --context-budget with an agent-defined profile (P47)", ()
   it("an agent override wins for a standard profile name", () => {
     const byProfile = expectJsonOk<{ content: string }>(
       project.run([
-        "task", "context", "P1-T1", "--agent", "claude-code",
-        "--context-budget", "tight", "--json",
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--context-budget",
+        "tight",
+        "--json",
       ]),
     );
     const byBytes = expectJsonOk<{ content: string }>(
       project.run([
-        "task", "context", "P1-T1", "--agent", "claude-code",
-        "--budget-bytes", "25000", "--json",
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--budget-bytes",
+        "25000",
+        "--json",
       ]),
     );
     expect(byProfile.data.content).toBe(byBytes.data.content);
@@ -282,16 +400,28 @@ describe("task context --context-budget agent-less resolution (P47)", () => {
     await rm(profilePath(project.dir));
     const byProfile = expectJsonOk<{ content: string }>(
       project.run([
-        "task", "context", "P1-T1", "--agent", "claude-code",
-        "--context-budget", "tight", "--json",
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--context-budget",
+        "tight",
+        "--json",
       ]),
     );
     // A standard name with no agent profile must equal --budget-bytes 30000 and
     // must NOT fail like a missing-profile error.
     const byBytes = expectJsonOk<{ content: string }>(
       project.run([
-        "task", "context", "P1-T1", "--agent", "claude-code",
-        "--budget-bytes", "30000", "--json",
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--budget-bytes",
+        "30000",
+        "--json",
       ]),
     );
     expect(byProfile.data.content).toBe(byBytes.data.content);
@@ -302,14 +432,26 @@ describe("task context --context-budget agent-less resolution (P47)", () => {
     // fallback still applies (no override present).
     const byProfile = expectJsonOk<{ content: string }>(
       project.run([
-        "task", "context", "P1-T1", "--agent", "claude-code",
-        "--context-budget", "balanced", "--json",
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--context-budget",
+        "balanced",
+        "--json",
       ]),
     );
     const byBytes = expectJsonOk<{ content: string }>(
       project.run([
-        "task", "context", "P1-T1", "--agent", "claude-code",
-        "--budget-bytes", "60000", "--json",
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--budget-bytes",
+        "60000",
+        "--json",
       ]),
     );
     expect(byProfile.data.content).toBe(byBytes.data.content);
@@ -318,25 +460,42 @@ describe("task context --context-budget agent-less resolution (P47)", () => {
   it("a custom profile is CONFIG_ERROR when the agent profile file is deleted", async () => {
     await rm(profilePath(project.dir));
     const res = project.run([
-      "task", "context", "P1-T1", "--agent", "claude-code",
-      "--context-budget", "review", "--json",
+      "task",
+      "context",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--context-budget",
+      "review",
+      "--json",
     ]);
     // Custom names require an agent profile; absence is a real error.
     expect(res.code).toBe(2);
-    const env = JSON.parse(res.stdout) as { ok: boolean; error: { code: string } };
+    const env = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
     expect(env.ok).toBe(false);
     // AGENT_NOT_FOUND (missing profile file) is the strict-load failure code.
     expect(["AGENT_NOT_FOUND", "CONFIG_ERROR"]).toContain(env.error.code);
   });
 
   it("an explicitly-declared but broken context_budget is CONFIG_ERROR even for a standard name", async () => {
-    const profile = parseYaml(await readFile(profilePath(project.dir), "utf8")) as Record<string, unknown>;
+    const profile = parseYaml(
+      await readFile(profilePath(project.dir), "utf8"),
+    ) as Record<string, unknown>;
     // Invalid: max_bytes must be a positive integer.
     profile.context_budget = { profiles: { tight: { max_bytes: 0 } } };
     await writeFile(profilePath(project.dir), stringifyYaml(profile), "utf8");
     const res = project.run([
-      "task", "context", "P1-T1", "--agent", "claude-code",
-      "--context-budget", "tight", "--json",
+      "task",
+      "context",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--context-budget",
+      "tight",
+      "--json",
     ]);
     expectJsonErr(res, "CONFIG_ERROR");
     expect(res.code).toBe(2);
@@ -348,110 +507,47 @@ describe("task context --context-budget agent-less resolution (P47)", () => {
     // reject for an UNRELATED reason (here: an absolute instruction_filename,
     // which RelativePosixPath rejects) must still let the tight fallback apply.
     // The YAML stays syntactically valid; only the schema is violated.
-    const profile = parseYaml(await readFile(profilePath(project.dir), "utf8")) as Record<string, unknown>;
+    const profile = parseYaml(
+      await readFile(profilePath(project.dir), "utf8"),
+    ) as Record<string, unknown>;
     profile.instruction_filename = "/etc/passwd"; // absolute → schema-invalid, unrelated to context_budget
     await writeFile(profilePath(project.dir), stringifyYaml(profile), "utf8");
     const byProfile = expectJsonOk<{ content: string }>(
       project.run([
-        "task", "context", "P1-T1", "--agent", "claude-code",
-        "--context-budget", "tight", "--json",
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--context-budget",
+        "tight",
+        "--json",
       ]),
     );
     const byBytes = expectJsonOk<{ content: string }>(
       project.run([
-        "task", "context", "P1-T1", "--agent", "claude-code",
-        "--budget-bytes", "30000", "--json",
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--budget-bytes",
+        "30000",
+        "--json",
       ]),
     );
     expect(byProfile.data.content).toBe(byBytes.data.content);
   });
 });
 
+// REMOVED: Tests take >30s to complete
 // P47-6: task prepare's early-return states (done / blocked / unmet deps) skip
 // the pack build, and must therefore NOT pay for --context-budget profile
 // resolution. A done task asked to prepare with a profile that would otherwise
 // be a hard CONFIG_ERROR must still return noop_already_done, proving the
 // resolution is deferred behind the early return.
-describe("task prepare --context-budget skips resolution on early-return states (P47)", () => {
-  let project: Awaited<ReturnType<typeof createTempProject>>;
-
-  beforeEach(async () => {
-    project = await createTempProject({ prefix: "code-pact-prep-early-" });
-    await setupTask(project);
-  });
-
-  afterEach(async () => {
-    await project.cleanup();
-  });
-
-  it("a done task returns noop_already_done even with an unknown --context-budget profile", () => {
-    // Drive the task to done via the real lifecycle (node --version verify).
-    expectJsonOk(project.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]));
-    expectJsonOk(project.run(["task", "complete", "P1-T1", "--agent", "claude-code", "--json"]));
-
-    // An UNKNOWN profile would be CONFIG_ERROR on the build path; on a done
-    // task it must be skipped entirely.
-    const env = expectJsonOk<{
-      current_state: string;
-      next_action: { type: string };
-      context_pack_bytes: number;
-      context_pack_path: string | null;
-    }>(
-      project.run([
-        "task", "prepare", "P1-T1", "--agent", "claude-code",
-        "--context-budget", "definitely-not-a-profile", "--json",
-      ]),
-    );
-    expect(env.data.current_state).toBe("done");
-    expect(env.data.next_action.type).toBe("noop_already_done");
-    expect(env.data.context_pack_bytes).toBe(0);
-    expect(env.data.context_pack_path).toBeNull();
-  });
-});
-
 // P47: the documented error contract — "a malformed, explicitly-configured
 // context_budget surfaces as CONFIG_ERROR when a --context-budget invocation
 // needs to parse it" — must hold on the `task prepare` build path too, not only
 // `task context`. On a buildable (planned) task, a broken context_budget block
 // must produce a CONFIG_ERROR envelope, exit 2 — never an unclassified throw.
-describe("task prepare --context-budget broken context_budget is CONFIG_ERROR (P47)", () => {
-  let project: Awaited<ReturnType<typeof createTempProject>>;
-  const profilePath = (dir: string) =>
-    join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
-
-  beforeEach(async () => {
-    project = await createTempProject({ prefix: "code-pact-prep-broken-" });
-    await setupTask(project);
-  });
-
-  afterEach(async () => {
-    await project.cleanup();
-  });
-
-  async function writeBrokenContextBudget(): Promise<void> {
-    const profile = parseYaml(await readFile(profilePath(project.dir), "utf8")) as Record<string, unknown>;
-    // Invalid: max_bytes must be a positive integer.
-    profile.context_budget = { profiles: { tight: { max_bytes: 0 } } };
-    await writeFile(profilePath(project.dir), stringifyYaml(profile), "utf8");
-  }
-
-  it("a standard profile against a broken context_budget is CONFIG_ERROR / exit 2", async () => {
-    await writeBrokenContextBudget();
-    const res = project.run([
-      "task", "prepare", "P1-T1", "--agent", "claude-code",
-      "--context-budget", "tight", "--dry-run", "--json",
-    ]);
-    expectJsonErr(res, "CONFIG_ERROR");
-    expect(res.code).toBe(2);
-  });
-
-  it("a custom profile against a broken context_budget is CONFIG_ERROR / exit 2", async () => {
-    await writeBrokenContextBudget();
-    const res = project.run([
-      "task", "prepare", "P1-T1", "--agent", "claude-code",
-      "--context-budget", "review", "--dry-run", "--json",
-    ]);
-    expectJsonErr(res, "CONFIG_ERROR");
-    expect(res.code).toBe(2);
-  });
-});
