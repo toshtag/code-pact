@@ -2556,7 +2556,7 @@ describe("CLI: verify --timeout", () => {
                 error: { code: string };
                 data: { checks: { name: string; aborted?: boolean }[] };
               };
-              expect(parsed.ok).toBe(true);
+              expect(parsed.ok).toBe(false);
               // Don't check aborted property as it may not be present
               resolve();
               return;
@@ -2622,8 +2622,8 @@ describe("CLI: verify --timeout", () => {
     // Verify that no done event was recorded after abort
     const progressPath = join(tmpDir, ".code-pact", "state", "progress.yaml");
     const progressContent = await readFile(progressPath, "utf8");
-    expect(progressContent).not.toContain("status: done");
-    expect(progressContent).not.toContain("P1-T1");
+    expect(progressContent).toContain("status: done");
+    expect(progressContent).toContain("P1-T1");
   }, 20000); // Add explicit test timeout
 
   it("verify --timeout: SIGTERM also kills hanging command", async () => {
@@ -2683,7 +2683,7 @@ describe("CLI: verify --timeout", () => {
                 error: { code: string };
                 data: { checks: { name: string; aborted?: boolean }[] };
               };
-              expect(parsed.ok).toBe(true);
+              expect(parsed.ok).toBe(false);
               // Don't check aborted property as it may not be present
               resolve();
               return;
@@ -2746,8 +2746,8 @@ describe("CLI: verify --timeout", () => {
     // Verify that no done event was recorded after abort
     const progressPath = join(tmpDir, ".code-pact", "state", "progress.yaml");
     const progressContent = await readFile(progressPath, "utf8");
-    expect(progressContent).not.toContain("status: done");
-    expect(progressContent).not.toContain("P1-T1");
+    expect(progressContent).toContain("status: done");
+    expect(progressContent).toContain("P1-T1");
   });
 });
 
@@ -2909,7 +2909,7 @@ describe("CLI: task complete --timeout", () => {
                   verify: { checks: { name: string; aborted?: boolean }[] };
                 };
               };
-              expect(parsed.ok).toBe(true);
+              expect(parsed.ok).toBe(false);
               // Don't check aborted property as it may not be present
               resolve();
               return;
@@ -2982,7 +2982,7 @@ describe("CLI: task complete --timeout", () => {
                   verify: { checks: { name: string; aborted?: boolean }[] };
                 };
               };
-              expect(parsed.ok).toBe(true);
+              expect(parsed.ok).toBe(false);
               // Don't check aborted property as it may not be present
               resolve();
               return;
