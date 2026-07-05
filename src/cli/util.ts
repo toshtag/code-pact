@@ -17,6 +17,7 @@ import {
   isLockHeldError,
   type LockHandle,
 } from "../core/locks/write-lock.ts";
+import { parseTimeoutMs } from "../lib/timeout.ts";
 
 /**
  * Write the canonical success envelope `{ok:true,data}` to stdout with a
@@ -45,71 +46,79 @@ export function emitError(
   code: string,
   message: string,
   opts: {
+    causeCode?: string;
     data?: unknown;
     human?: string;
     humanStream?: "stdout" | "stderr";
   } = {},
 ): void {
   if (json) {
+    const error: { code: string; cause_code?: string; message: string } = {
+      code,
+      message,
+    };
+    if (opts.causeCode !== undefined) error.cause_code = opts.causeCode;
     const envelope: {
       ok: false;
-      error: { code: string; message: string };
+      error: { code: string; cause_code?: string; message: string };
       data?: unknown;
-    } = { ok: false, error: { code, message } };
+    } = { ok: false, error };
     if (opts.data !== undefined) envelope.data = opts.data;
     process.stdout.write(`${JSON.stringify(envelope)}\n`);
     return;
   }
-  const stream =
-    opts.humanStream === "stdout" ? process.stdout : process.stderr;
+  const stream = opts.humanStream === "stdout" ? process.stdout : process.stderr;
   stream.write(`${opts.human ?? message}\n`);
 }
 
-/**
- * Create an AbortController wired to SIGINT/SIGTERM. Returns the controller
- * and a cleanup function that removes the signal listeners. The cleanup
- * function MUST be called after the command completes (typically in a
- * `finally` block) to prevent listener leaks across multiple commands.
+/** Create a cancellation signal for long-running CLI commands.
+ * The first SIGINT/SIGTERM requests a clean abort and unregisters both
+ * handlers. A repeated signal therefore falls back to Node's default hard
+ * termination behaviour instead of being swallowed indefinitely.
  */
 export function createCliAbortSignal(): {
   signal: AbortSignal;
   cleanup: () => void;
 } {
   const controller = new AbortController();
-  const onSignal = () => controller.abort();
-  process.on("SIGINT", onSignal);
-  process.on("SIGTERM", onSignal);
-  return {
-    signal: controller.signal,
-    cleanup: () => {
-      process.off("SIGINT", onSignal);
-      process.off("SIGTERM", onSignal);
-    },
+  let cleaned = false;
+
+  const cleanup = (): void => {
+    if (cleaned) return;
+    cleaned = true;
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
   };
+  const onSignal = (): void => {
+    cleanup();
+    controller.abort();
+  };
+
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
+  return { signal: controller.signal, cleanup };
 }
 
-/**
- * Parse a --timeout CLI argument. Returns the validated number, `undefined`
- * if no argument was given, or `2` (exit code) if validation failed (after
- * emitting a CONFIG_ERROR envelope). Callers should check for `=== 2` and
- * return early.
- */
+export type ParsedTimeoutArg =
+  | { ok: true; value: number | undefined }
+  | { ok: false; exitCode: 2 };
+
+/** Parse and report the shared verification timeout contract. */
 export function parseTimeoutArg(
   raw: string | undefined,
   json: boolean,
-  maxTimeoutMs: number,
-): number | undefined | 2 {
-  if (raw === undefined) return undefined;
-  const n = Number(raw);
-  if (!Number.isSafeInteger(n) || n < 1 || n > maxTimeoutMs) {
+): ParsedTimeoutArg {
+  if (raw === undefined) return { ok: true, value: undefined };
+  try {
+    return { ok: true, value: parseTimeoutMs(raw) };
+  } catch (error) {
     emitError(
       json,
       "CONFIG_ERROR",
-      `--timeout must be a safe integer between 1 and ${maxTimeoutMs} ms, got: ${raw}`,
+      error instanceof Error ? error.message : "Invalid timeout.",
     );
-    return 2;
+    return { ok: false, exitCode: 2 };
   }
-  return n;
 }
 
 /**

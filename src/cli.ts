@@ -22,7 +22,7 @@ import {
 } from "./cli/util.ts";
 import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
-import { runVerify, formatVerify, MAX_TIMEOUT_MS } from "./commands/verify.ts";
+import { runVerify, formatVerify } from "./commands/verify.ts";
 import { runRecommend, formatRecommend } from "./commands/recommend.ts";
 import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runValidate } from "./commands/validate.ts";
@@ -677,87 +677,80 @@ async function cmdVerify(
   const phaseId = values.phase as string | undefined;
   const taskId = values.task as string | undefined;
   const dryRun = values["dry-run"] === true;
-  const timeoutResult = parseTimeoutArg(
-    values.timeout as string | undefined,
-    json,
-    MAX_TIMEOUT_MS,
-  );
-  if (timeoutResult === 2) return 2;
-  const timeoutMs = timeoutResult;
+  const parsedTimeout = parseTimeoutArg(values.timeout as string | undefined, json);
+  if (!parsedTimeout.ok) return parsedTimeout.exitCode;
 
   if (!phaseId || !taskId) {
-    const msg = "verify requires --phase and --task";
-    emitError(json, "CONFIG_ERROR", msg);
+    emitError(json, "CONFIG_ERROR", "verify requires --phase and --task");
     return 2;
   }
 
-  const cwd = process.cwd();
   const { signal, cleanup } = createCliAbortSignal();
-
   try {
     const result = await runVerify({
-      cwd,
+      cwd: process.cwd(),
       phaseId,
       taskId,
       dryRun,
-      timeoutMs,
+      timeoutMs: parsedTimeout.value,
       signal,
     });
+    const aborted = result.checks.some(check => check.aborted === true);
     if (json) {
       if (result.ok) {
         emitOk({ checks: result.checks });
       } else {
-        emitError(json, "VERIFICATION_FAILED", "Verification failed", {
-          data: { checks: result.checks },
-        });
+        emitError(
+          json,
+          "VERIFICATION_FAILED",
+          aborted ? m.verify.aborted : "Verification failed",
+          {
+            ...(aborted ? { causeCode: "ABORTED" } : {}),
+            data: { checks: result.checks },
+          },
+        );
       }
     } else {
-      for (const c of result.checks) {
-        if (c.stdout) process.stderr.write(c.stdout);
-        if (c.stderr) process.stderr.write(c.stderr);
+      for (const check of result.checks) {
+        if (check.stdout) process.stderr.write(check.stdout);
+        if (check.stderr) process.stderr.write(check.stderr);
       }
       process.stdout.write(`${formatVerify(result)}\n`);
     }
     return result.ok ? 0 : 1;
-  } catch (err: unknown) {
-    const code = (err as NodeJS.ErrnoException).code;
+  } catch (error: unknown) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ABORTED") {
+      emitError(json, "VERIFICATION_FAILED", m.verify.aborted, {
+        causeCode: "ABORTED",
+      });
+      return 1;
+    }
     if (code === "PHASE_NOT_FOUND") {
-      const msg = m.verify.phaseNotFound(phaseId);
-      emitError(json, "PHASE_NOT_FOUND", msg);
+      emitError(json, "PHASE_NOT_FOUND", m.verify.phaseNotFound(phaseId));
       return 2;
     }
     if (code === "AMBIGUOUS_PHASE_ID") {
       const phases =
-        (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
-      const msg =
-        err instanceof Error ? err.message : `Phase "${phaseId}" is ambiguous.`;
-      emitError(json, "AMBIGUOUS_PHASE_ID", msg, { data: { phases } });
+        (error as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+      const message =
+        error instanceof Error ? error.message : `Phase "${phaseId}" is ambiguous.`;
+      emitError(json, "AMBIGUOUS_PHASE_ID", message, { data: { phases } });
       return 2;
     }
     if (code === "TASK_NOT_FOUND") {
-      const msg = m.verify.taskNotFound(taskId, phaseId);
-      emitError(json, "TASK_NOT_FOUND", msg);
+      emitError(json, "TASK_NOT_FOUND", m.verify.taskNotFound(taskId, phaseId));
       return 2;
     }
     if (code === "CONFIG_ERROR") {
-      // A contained-loader path-safety refusal / malformed roadmap or phase →
-      // structured envelope (exit 2), not a top-level internal error / exit 3.
       emitError(
         json,
         "CONFIG_ERROR",
-        err instanceof Error ? err.message : "Invalid configuration.",
+        error instanceof Error ? error.message : "Invalid configuration.",
       );
       return 2;
     }
-    if (code === "ABORTED") {
-      // Defensive: runVerify returns CheckResult on abort, but if
-      // throwIfAborted fires in a future code path, handle it here too.
-      emitError(json, "VERIFICATION_FAILED", `Verification was aborted.`, {
-        data: { aborted: true },
-      });
-      return 1;
-    }
-    throw err;
+    throw error;
   } finally {
     cleanup();
   }

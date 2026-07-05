@@ -158,6 +158,7 @@ export const messages = {
       `Context pack written to ${path} (${chars} chars)`,
   },
   verify: {
+    aborted: "Verification was aborted.",
     phaseNotFound: (id: string): string => `Phase "${id}" not found in roadmap.yaml.`,
     taskNotFound: (taskId: string, phaseId: string): string =>
       `Task "${taskId}" not found in phase "${phaseId}".`,
@@ -276,6 +277,8 @@ export const messages = {
         reason
           ? `${taskId}: a verification command failed: ${reason}. no progress event was recorded.`
           : `${taskId}: a verification command failed. no progress event was recorded.`,
+      aborted: (taskId: string): string =>
+        `Task completion for "${taskId}" was aborted. No progress event was recorded.`,
       alreadyDone: (taskId: string): string =>
         `Task "${taskId}" already has a done event. Skipped re-verification (idempotent).`,
       success: (taskId: string, agent: string): string =>
