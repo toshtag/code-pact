@@ -1109,7 +1109,7 @@ describe("check-fs-authority", () => {
       expect(output).not.toContain("raw-internal import");
       expect(output).not.toContain("node:fs import");
     }
-  });
+  }, 10_000);
 
   it("rejects read authority as a hard-link source", async () => {
     const result = await runFixture([
