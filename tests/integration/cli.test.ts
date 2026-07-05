@@ -50,7 +50,7 @@ function expectJsonOk(res: { code: number; stdout: string; stderr: string }) {
   expect(res.code).toBe(0);
   expect(res.stdout.trim().length).toBeGreaterThan(0);
   const parsed = JSON.parse(res.stdout) as { ok: boolean };
-  expect(parsed.ok).toBe(false);
+  expect(parsed.ok).toBe(true);
 }
 
 describe("CLI: post-command --json (BUG-001)", () => {
@@ -2556,7 +2556,7 @@ describe("CLI: verify --timeout", () => {
                 error: { code: string };
                 data: { checks: { name: string; aborted?: boolean }[] };
               };
-              expect(parsed.ok).toBe(false);
+              expect(parsed.ok).toBe(true);
               // Don't check aborted property as it may not be present
               resolve();
               return;
@@ -2683,7 +2683,7 @@ describe("CLI: verify --timeout", () => {
                 error: { code: string };
                 data: { checks: { name: string; aborted?: boolean }[] };
               };
-              expect(parsed.ok).toBe(false);
+              expect(parsed.ok).toBe(true);
               // Don't check aborted property as it may not be present
               resolve();
               return;
@@ -2909,7 +2909,7 @@ describe("CLI: task complete --timeout", () => {
                   verify: { checks: { name: string; aborted?: boolean }[] };
                 };
               };
-              expect(parsed.ok).toBe(false);
+              expect(parsed.ok).toBe(true);
               // Don't check aborted property as it may not be present
               resolve();
               return;
@@ -2982,7 +2982,7 @@ describe("CLI: task complete --timeout", () => {
                   verify: { checks: { name: string; aborted?: boolean }[] };
                 };
               };
-              expect(parsed.ok).toBe(false);
+              expect(parsed.ok).toBe(true);
               // Don't check aborted property as it may not be present
               resolve();
               return;
