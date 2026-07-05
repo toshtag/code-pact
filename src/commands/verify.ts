@@ -149,8 +149,8 @@ async function killProcessTree(
     } catch {
       // fall through to fallback
     }
-    // Poll for process extinction (max 2s)
-    const processExited = await waitForProcessExit(proc, 2_000);
+    // Poll for process extinction (max 500ms)
+    const processExited = await waitForProcessExit(proc, 500);
     return {
       attempted: true,
       completed: processExited,
@@ -247,8 +247,8 @@ async function killProcessTree(
       }
     }
   }
-  // Poll for process extinction (max 2s)
-  const processExited = await waitForProcessExit(proc, 2_000);
+  // Poll for process extinction (max 500ms)
+  const processExited = await waitForProcessExit(proc, 500);
   return {
     attempted: true,
     completed: result === 0 && processExited,
