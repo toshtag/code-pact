@@ -60,8 +60,32 @@ export function emitError(
     process.stdout.write(`${JSON.stringify(envelope)}\n`);
     return;
   }
-  const stream = opts.humanStream === "stdout" ? process.stdout : process.stderr;
+  const stream =
+    opts.humanStream === "stdout" ? process.stdout : process.stderr;
   stream.write(`${opts.human ?? message}\n`);
+}
+
+/**
+ * Create an AbortController wired to SIGINT/SIGTERM. Returns the controller
+ * and a cleanup function that removes the signal listeners. The cleanup
+ * function MUST be called after the command completes (typically in a
+ * `finally` block) to prevent listener leaks across multiple commands.
+ */
+export function createCliAbortSignal(): {
+  signal: AbortSignal;
+  cleanup: () => void;
+} {
+  const controller = new AbortController();
+  const onSignal = () => controller.abort();
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      process.off("SIGINT", onSignal);
+      process.off("SIGTERM", onSignal);
+    },
+  };
 }
 
 /**
