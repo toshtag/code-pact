@@ -5,7 +5,7 @@ import { writeEventFile } from "../core/progress/events-io.ts";
 import { resolveEventAuthor } from "../core/progress/author.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
-import { runVerify, type CheckResult } from "./verify.ts";
+import { runVerify, throwIfAborted, type CheckResult } from "./verify.ts";
 
 export type TaskCompleteOptions = {
   cwd: string;
@@ -56,13 +56,16 @@ export async function runTaskComplete(
   // ---- Step 0: agent validation (same order as task context) ----
   const project = await loadProject(cwd);
   const agentName = resolveEnabledAgent(project, opts.agent);
+  throwIfAborted(opts.signal);
 
   // ---- Step 1: resolve phase from task id ----
   const { phaseId } = await resolveTaskInRoadmap(cwd, taskId);
+  throwIfAborted(opts.signal);
 
   // ---- Step 2: derive current state ----
   const { log } = await loadProgressLog(cwd);
   const state = deriveTaskState(log.events, taskId);
+  throwIfAborted(opts.signal);
 
   if (state.current === "done") {
     return {
@@ -118,6 +121,9 @@ export async function runTaskComplete(
     skipConsistencyChecks: true,
   });
 
+  // Check signal after verification succeeds
+  throwIfAborted(opts.signal);
+
   if (!verifyResult.ok) {
     // Surface verify result without recording an event.
     const err = new Error(
@@ -130,7 +136,13 @@ export async function runTaskComplete(
   }
 
   // ---- Step 4: build the done event ----
+  throwIfAborted(opts.signal);
   const author = await resolveEventAuthor(cwd);
+  throwIfAborted(opts.signal);
+
+  // Check signal before event generation
+  throwIfAborted(opts.signal);
+
   const event: ProgressEvent = {
     task_id: taskId,
     status: "done",
@@ -155,6 +167,9 @@ export async function runTaskComplete(
   }
 
   // ---- Step 6: append + atomic write (shared helper) ----
+  // Commit point: once writeEventFile begins, the done event is recorded.
+  // If abort arrives before this point, no event is written.
+  throwIfAborted(opts.signal);
   await writeEventFile(cwd, event);
 
   return {

@@ -109,6 +109,21 @@ code-pact verify --phase <phase-id> --task <task-id>
 
 **`data` detail.** The `task complete` failure envelope carries `failed_checks`, `first_failure: { name, reason }`, and `suggested_next_command` under `data`, alongside `data.verify.checks`. The same three summary fields also appear on the `task finalize` failure envelopes (`TASK_FINALIZE_NOT_ELIGIBLE`, `TASK_FINALIZE_WRITE_REFUSED`, `WRITES_AUDIT_STRICT_FAILED`) — but `finalize` does **not** run verify, so there is no `data.verify.checks` there; the summary sits alongside the finalize-specific `data` instead (e.g. `data.write_audit` on `WRITES_AUDIT_STRICT_FAILED`, `data.current` / `data.phase_id` on `TASK_FINALIZE_NOT_ELIGIBLE`). Human (non-`--json`) output leads with the actionable cause headline (the `cause_code` message above — no longer a generic line) and prints `cause:` and `rerun after fixing:` lines below it. `suggested_next_command` is the command to rerun **after fixing** `first_failure` — not a hint that re-running unchanged will pass.
 
+### Command timed out (`timedOut: true`)
+
+When a verification command exceeds the `--timeout` limit (default 300,000 ms = 5 min), it is killed along with its process tree and the `commands` check reports `timedOut: true` with `exitCode: null`. The `reason` field reads `"<cmd>" timed out after <ms> ms`.
+
+```sh
+# Increase the timeout if the command legitimately needs more time
+code-pact verify --phase P1 --task P1-T1 --timeout 600000
+
+# Or fix the command itself if it hangs unexpectedly
+```
+
+### Command aborted (`aborted: true`)
+
+When `SIGINT` (Ctrl+C) or `SIGTERM` is received mid-execution, the running command's process tree is killed and the `commands` check reports `aborted: true` with `exitCode: null`. The `reason` field reads `"<cmd>" was aborted`. The CLI exits with code 1 (`VERIFICATION_FAILED`). This is a clean cancellation — no partial state is left behind in the progress ledger. In `task complete`, `AbortSignal` cancellation is checked at every key step (after agent validation, phase resolution, state derivation, verification, author resolution, and before the event write commit point), so an abort arriving at any stage prevents a partial `done` event from being recorded.
+
 ## `TASK_FINALIZE_NOT_ELIGIBLE` from `task finalize`
 
 The task's derived state from the progress ledger is not `done`, so flipping its design YAML status would create a worse drift (design says done, progress says otherwise). The check fires in **both** dry-run and `--write` — dry-run means "won't write", not "won't validate".

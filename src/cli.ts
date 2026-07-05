@@ -18,6 +18,7 @@ import {
   emitOk,
   emitError,
   createCliAbortSignal,
+  parseTimeoutArg,
 } from "./cli/util.ts";
 import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
@@ -676,20 +677,13 @@ async function cmdVerify(
   const phaseId = values.phase as string | undefined;
   const taskId = values.task as string | undefined;
   const dryRun = values["dry-run"] === true;
-  let timeoutMs: number | undefined;
-  if (values.timeout !== undefined) {
-    const raw = values.timeout as string;
-    const n = Number(raw);
-    if (!Number.isSafeInteger(n) || n < 1 || n > MAX_TIMEOUT_MS) {
-      emitError(
-        json,
-        "CONFIG_ERROR",
-        `--timeout must be a safe integer between 1 and ${MAX_TIMEOUT_MS} ms, got: ${raw}`,
-      );
-      return 2;
-    }
-    timeoutMs = n;
-  }
+  const timeoutResult = parseTimeoutArg(
+    values.timeout as string | undefined,
+    json,
+    MAX_TIMEOUT_MS,
+  );
+  if (timeoutResult === 2) return 2;
+  const timeoutMs = timeoutResult;
 
   if (!phaseId || !taskId) {
     const msg = "verify requires --phase and --task";
@@ -754,6 +748,14 @@ async function cmdVerify(
         err instanceof Error ? err.message : "Invalid configuration.",
       );
       return 2;
+    }
+    if (code === "ABORTED") {
+      // Defensive: runVerify returns CheckResult on abort, but if
+      // throwIfAborted fires in a future code path, handle it here too.
+      emitError(json, "VERIFICATION_FAILED", `Verification was aborted.`, {
+        data: { aborted: true },
+      });
+      return 1;
     }
     throw err;
   } finally {

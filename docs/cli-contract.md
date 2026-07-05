@@ -2161,8 +2161,9 @@ Order of operations:
 
 - `DECISION_REQUIRED` — the decision gate is unresolved (a `requires_decision` task with no accepted ADR). `error.message` names that an accepted ADR is required and embeds the gate's reason (e.g. `… requires an accepted ADR before completion: No accepted ADR found for "P1-T1". …`).
 - `COMMANDS_FAILED` — a verification command failed. `error.message` embeds the failing command's reason (e.g. `… a verification command failed: "pnpm test" exited with code 1.`).
+- `ABORTED` — `SIGINT`/`SIGTERM` was received before the event write commit point. No progress event was recorded. `data.aborted` is `true`.
 
-`error.code` stays `VERIFICATION_FAILED` (exit 1) for backward compatibility; `cause_code` is additive. The P32 `data` fields are **not** duplicated into `error`, and no structured decision block is added. `task complete` runs only the `commands` + `decision` checks, so those are the only two `cause_code` values. The decision gate runs in `verify` / `task complete` / `task record-done`; `task finalize` does **not** run it, so finalize has no decision `cause_code`. Note the deliberate asymmetry with `task record-done`, whose _top-level_ `error.code` is `DECISION_REQUIRED` at exit 2.
+`error.code` stays `VERIFICATION_FAILED` (exit 1) for backward compatibility; `cause_code` is additive. The P32 `data` fields are **not** duplicated into `error`, and no structured decision block is added. `task complete` runs only the `commands` + `decision` checks, so `DECISION_REQUIRED` and `COMMANDS_FAILED` are the only verification cause*code values; `ABORTED` is emitted when `SIGINT`/`SIGTERM` fires before the event write commit point. The decision gate runs in `verify` / `task complete` / `task record-done`; `task finalize` does **not** run it, so finalize has no decision `cause_code`. Note the deliberate asymmetry with `task record-done`, whose \_top-level* `error.code` is `DECISION_REQUIRED` at exit 2.
 
 The `agent` field on `ProgressEvent` is optional for backward compatibility with v0.1 logs that predate `task complete`. The `source` field (v1.21+) is `"loop"` for events produced by `task complete` and `"external"` for events produced by `task record-done`; it is optional, and a legacy `done` event with no `source` is treated as `"loop"` by readers.
 
@@ -2190,6 +2191,81 @@ Order of operations:
 7. **`--dry-run`**. Skips the record; returns `{ ok: true, data: { dry_run: true, would_append: <event> } }`. No event file is written.
 
 `task finalize` works after `task record-done` exactly as it does after `task complete` — finalize never inspects `source`.
+
+## `verify` — standalone verification (v1.0+)
+
+`code-pact verify --phase <phase-id> --task <task-id> [--timeout <ms>] [--dry-run] [--json]` runs the four verification checks for a task without recording a progress event. It is the after-the-fact consistency auditor; `task complete` is the loop entry point that also records a `done` event.
+
+### Flags
+
+| Flag        | Value  | Description                                                                                                                                                                                                 |
+| ----------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--phase`   | `<id>` | Required. Phase id from `roadmap.yaml`.                                                                                                                                                                     |
+| `--task`    | `<id>` | Required. Task id within the phase.                                                                                                                                                                         |
+| `--timeout` | `<ms>` | Per-command timeout in milliseconds (1–2147483647). Defaults to 300000 (5 min). When a command exceeds the timeout, it is killed along with its process tree and the check is reported as `timedOut: true`. |
+| `--dry-run` | —      | Skip command execution; report what would run.                                                                                                                                                              |
+| `--json`    | —      | Emit JSON.                                                                                                                                                                                                  |
+
+### Signal handling
+
+`SIGINT` and `SIGTERM` are wired to an internal `AbortController`. When either signal is received mid-execution, the running command's process tree is killed and the check is reported as `aborted: true`. The CLI exits with code 1 (`VERIFICATION_FAILED`). Signal listeners are removed in a `finally` block to prevent leaks across repeated invocations.
+
+### JSON contract
+
+On success (`--json`):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "checks": [
+      {
+        "name": "commands",
+        "ok": true,
+        "command": "echo ok",
+        "timedOut": false,
+        "aborted": false,
+        "exitCode": 0,
+        "elapsedMs": 42
+      },
+      { "name": "progress_event", "ok": true },
+      { "name": "decision", "ok": true },
+      { "name": "task_status", "ok": true }
+    ]
+  }
+}
+```
+
+On failure (`--json`), exit 1:
+
+```json
+{
+  "ok": false,
+  "error": { "code": "VERIFICATION_FAILED", "message": "..." },
+  "data": {
+    "checks": [
+      {
+        "name": "commands",
+        "ok": false,
+        "command": "echo ok",
+        "reason": "\"echo ok\" timed out after 300 ms",
+        "timedOut": true,
+        "aborted": false,
+        "exitCode": null,
+        "elapsedMs": 305,
+        "stdout": "",
+        "stderr": ""
+      }
+    ]
+  }
+}
+```
+
+The `commands` check object always includes `command`, `timedOut`, `aborted`, `exitCode`, `elapsedMs`, `stdout`, `stderr`, and `commands` (an array of per-command results with `command`, `ok`, `exitCode`, `timedOut`, `aborted`, `elapsedMs`, `stdout`, `stderr`) on every execution path (success, failure, timeout, abort, dry-run). Other checks (`progress_event`, `decision`, `task_status`) carry `name`, `ok`, and optional `reason` only.
+
+### `--timeout` validation
+
+`--timeout` must be a safe integer in `[1, 2147483647]`. Values outside this range (`0`, `NaN`, `Infinity`, `0.5`, negative, or exceeding `MAX_TIMEOUT_MS`) are rejected with `CONFIG_ERROR` (exit 2) before any command is spawned.
 
 ## `task finalize` — flip task design status to done (v1.2+, P11)
 

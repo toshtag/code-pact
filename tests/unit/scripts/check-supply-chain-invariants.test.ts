@@ -346,6 +346,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
       publishContent?: string;
       ciContent?: string;
       securityContent?: string;
+      pkgContent?: string;
     } = {},
   ): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), "sci-"));
@@ -361,6 +362,14 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     await writeFile(
       join(dir, "SECURITY.md"),
       overrides.securityContent ?? "No local build references.",
+    );
+    await writeFile(
+      join(dir, "package.json"),
+      overrides.pkgContent ??
+        JSON.stringify({
+          name: "test-pkg",
+          pnpm: { overrides: { esbuild: "0.28.1" } },
+        }),
     );
     return dir;
   }

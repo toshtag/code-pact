@@ -25,6 +25,7 @@ import {
   emitOk,
   emitError,
   createCliAbortSignal,
+  parseTimeoutArg,
 } from "../util.ts";
 import { runTaskContext } from "../../commands/task-context.ts";
 import {
@@ -936,20 +937,13 @@ async function cmdTaskComplete(
     return 2;
   }
   const agent = values.agent as string | undefined;
-  let timeoutMs: number | undefined;
-  if (values.timeout !== undefined) {
-    const raw = values.timeout as string;
-    const n = Number(raw);
-    if (!Number.isSafeInteger(n) || n < 1 || n > MAX_TIMEOUT_MS) {
-      emitError(
-        json,
-        "CONFIG_ERROR",
-        `--timeout must be a safe integer between 1 and ${MAX_TIMEOUT_MS} ms, got: ${raw}`,
-      );
-      return 2;
-    }
-    timeoutMs = n;
-  }
+  const timeoutResult = parseTimeoutArg(
+    values.timeout as string | undefined,
+    json,
+    MAX_TIMEOUT_MS,
+  );
+  if (timeoutResult === 2) return 2;
+  const timeoutMs = timeoutResult;
   const cwd = process.cwd();
   const { signal, cleanup } = createCliAbortSignal();
 
@@ -1116,6 +1110,28 @@ async function cmdTaskComplete(
         msg = err.message;
         outCode = "CONFIG_ERROR";
         break;
+      case "ABORTED":
+        // throwIfAborted fired in task-complete.ts before the event write
+        // commit point. No done event was recorded. Emit as
+        // VERIFICATION_FAILED with cause_code ABORTED, exit 1.
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({
+              ok: false,
+              error: {
+                code: "VERIFICATION_FAILED",
+                cause_code: "ABORTED",
+                message: `Task "${taskId}" was aborted before completion. No progress event was recorded.`,
+              },
+              data: { task_id: taskId, aborted: true },
+            })}\n`,
+          );
+        } else {
+          process.stderr.write(
+            `${m.task.complete.verificationFailed(taskId)}\n`,
+          );
+        }
+        return 1;
       default:
         throw err;
     }

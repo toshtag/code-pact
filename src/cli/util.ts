@@ -89,6 +89,30 @@ export function createCliAbortSignal(): {
 }
 
 /**
+ * Parse a --timeout CLI argument. Returns the validated number, `undefined`
+ * if no argument was given, or `2` (exit code) if validation failed (after
+ * emitting a CONFIG_ERROR envelope). Callers should check for `=== 2` and
+ * return early.
+ */
+export function parseTimeoutArg(
+  raw: string | undefined,
+  json: boolean,
+  maxTimeoutMs: number,
+): number | undefined | 2 {
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n) || n < 1 || n > maxTimeoutMs) {
+    emitError(
+      json,
+      "CONFIG_ERROR",
+      `--timeout must be a safe integer between 1 and ${maxTimeoutMs} ms, got: ${raw}`,
+    );
+    return 2;
+  }
+  return n;
+}
+
+/**
  * Run `run()` under the project's advisory write lock. The lock is
  * acquired before `run()` starts and released in a `finally` block so
  * a thrown error from `run()` still cleans up.

@@ -980,6 +980,26 @@ export function checkSupplyChainInvariants(root) {
     // might not exist in test context
   }
 
+  // 5. Verify esbuild version is pinned in pnpm.overrides
+  let pkgContent;
+  try {
+    pkgContent = _read("package.json");
+    const pkg = JSON.parse(pkgContent);
+    const esbuildOverride = pkg?.pnpm?.overrides?.esbuild;
+    if (esbuildOverride && /^\d+\.\d+\.\d+$/.test(esbuildOverride)) {
+      pass(
+        `package.json: pnpm.overrides.esbuild pinned to exact version ${esbuildOverride}`,
+      );
+    } else {
+      fail(
+        'package.json: pnpm.overrides.esbuild must be pinned to an exact version (e.g. "0.28.1")',
+        `got: ${esbuildOverride}`,
+      );
+    }
+  } catch {
+    fail("package.json: could not read or parse");
+  }
+
   return { failures };
 }
 

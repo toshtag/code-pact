@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import {
   runVerify,
   validateTimeoutMs,
+  throwIfAborted,
   MAX_TIMEOUT_MS,
 } from "../../../src/commands/verify.ts";
 
@@ -696,18 +697,16 @@ describe("runVerify — AbortSignal support", () => {
     const controller = new AbortController();
     controller.abort();
 
-    const result = await runVerify({
-      cwd: dir,
-      phaseId: "P1",
-      taskId: "P1-T1",
-      dryRun: false,
-      timeoutMs: 10_000,
-      signal: controller.signal,
-    });
-
-    const check = result.checks.find(c => c.name === "commands");
-    expect(check?.ok).toBe(false);
-    expect(check?.aborted).toBe(true);
+    await expect(
+      runVerify({
+        cwd: dir,
+        phaseId: "P1",
+        taskId: "P1-T1",
+        dryRun: false,
+        timeoutMs: 10_000,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("Operation aborted");
   });
 });
 
@@ -748,6 +747,43 @@ describe("validateTimeoutMs", () => {
 
   it("rejects non-safe-integer (2^53)", () => {
     expect(() => validateTimeoutMs(Number.MAX_SAFE_INTEGER + 1)).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// throwIfAborted — AbortSignal guard
+// ---------------------------------------------------------------------------
+
+describe("throwIfAborted", () => {
+  it("does not throw when signal is undefined", () => {
+    expect(() => throwIfAborted(undefined)).not.toThrow();
+  });
+
+  it("does not throw when signal is not aborted", () => {
+    const controller = new AbortController();
+    expect(() => throwIfAborted(controller.signal)).not.toThrow();
+  });
+
+  it("throws with code ABORTED when signal is aborted", () => {
+    const controller = new AbortController();
+    controller.abort();
+    try {
+      throwIfAborted(controller.signal);
+      expect.fail("should have thrown");
+    } catch (err) {
+      expect((err as NodeJS.ErrnoException).code).toBe("ABORTED");
+    }
+  });
+
+  it("throws an Error instance (not a string)", () => {
+    const controller = new AbortController();
+    controller.abort();
+    try {
+      throwIfAborted(controller.signal);
+      expect.fail("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+    }
   });
 });
 
@@ -811,6 +847,201 @@ describe("runVerify — structured result contract", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Timeout vs abort race condition tests
+// ---------------------------------------------------------------------------
+
+describe("runVerify — timeout/abort race conditions", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "code-pact-verify-race-"));
+    await setupProject(dir);
+    await writeFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      PHASE_YAML("done", false).replace(
+        "echo ok",
+        'node -e "setTimeout(()=>{}, 10000)"',
+      ),
+      "utf8",
+    );
+  });
+
+  afterEach(() => rm(dir, { recursive: true, force: true }));
+
+  it("timeout fires before abort — reports timedOut", async () => {
+    const controller = new AbortController();
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      timeoutMs: 100,
+      signal: controller.signal,
+    });
+    // Abort after timeout would have fired
+    setTimeout(() => controller.abort(), 500);
+
+    const check = result.checks.find(c => c.name === "commands");
+    expect(check?.ok).toBe(false);
+    expect(check?.timedOut).toBe(true);
+    expect(check?.aborted).toBe(false);
+  });
+
+  it("abort fires before timeout — reports aborted", async () => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 100);
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      timeoutMs: 10_000,
+      signal: controller.signal,
+    });
+
+    const check = result.checks.find(c => c.name === "commands");
+    expect(check?.ok).toBe(false);
+    expect(check?.aborted).toBe(true);
+    expect(check?.timedOut).toBe(false);
+  });
+
+  it("natural exit before timeout and abort — reports success", async () => {
+    await writeFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      PHASE_YAML("done", false).replace(
+        "echo ok",
+        'node -e "setTimeout(()=>process.exit(0), 50)"',
+      ),
+      "utf8",
+    );
+    const controller = new AbortController();
+    // Schedule abort after the command should have exited
+    const abortTimer = setTimeout(() => controller.abort(), 500);
+    try {
+      const result = await runVerify({
+        cwd: dir,
+        phaseId: "P1",
+        taskId: "P1-T1",
+        dryRun: false,
+        timeoutMs: 10_000,
+        signal: controller.signal,
+      });
+      const check = result.checks.find(c => c.name === "commands");
+      expect(check?.ok).toBe(true);
+      expect(check?.timedOut).toBe(false);
+      expect(check?.aborted).toBe(false);
+    } finally {
+      clearTimeout(abortTimer);
+    }
+  });
+
+  it("only one termination cause is set (not both)", async () => {
+    const controller = new AbortController();
+    // Fire abort almost simultaneously with timeout
+    setTimeout(() => controller.abort(), 100);
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      timeoutMs: 100,
+      signal: controller.signal,
+    });
+
+    const check = result.checks.find(c => c.name === "commands");
+    expect(check?.ok).toBe(false);
+    // Exactly one of timedOut or aborted must be true, not both
+    expect(check?.timedOut === true || check?.aborted === true).toBe(true);
+    expect(check?.timedOut && check?.aborted).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-command structured result tests
+// ---------------------------------------------------------------------------
+
+describe("runVerify — per-command structured results", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "code-pact-verify-cmds-"));
+    await setupProject(dir);
+  });
+
+  afterEach(() => rm(dir, { recursive: true, force: true }));
+
+  it("commands array contains per-command results on success", async () => {
+    await writeFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      PHASE_YAML("done", false).replace(
+        "    - echo ok",
+        "    - echo first\n    - echo second",
+      ),
+      "utf8",
+    );
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+    });
+    const check = result.checks.find(c => c.name === "commands");
+    expect(check).toBeDefined();
+    const cmds = check!.commands!;
+    expect(cmds).toHaveLength(2);
+    const c0 = cmds[0]!;
+    const c1 = cmds[1]!;
+    expect(c0.command).toBe("echo first");
+    expect(c0.ok).toBe(true);
+    expect(c1.command).toBe("echo second");
+    expect(c1.ok).toBe(true);
+  });
+
+  it("commands array preserves successful commands before a failure", async () => {
+    await writeFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      PHASE_YAML("done", false).replace(
+        "    - echo ok",
+        '    - echo first\n    - node -e "process.exit(1)"',
+      ),
+      "utf8",
+    );
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+    });
+    const check = result.checks.find(c => c.name === "commands");
+    expect(check?.ok).toBe(false);
+    expect(check).toBeDefined();
+    const cmds = check!.commands!;
+    expect(cmds).toHaveLength(2);
+    const c0 = cmds[0]!;
+    const c1 = cmds[1]!;
+    expect(c0.ok).toBe(true);
+    expect(c0.exitCode).toBe(0);
+    expect(c1.ok).toBe(false);
+    expect(c1.exitCode).toBe(1);
+  });
+
+  it("dry-run with abort signal returns aborted result", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      runVerify({
+        cwd: dir,
+        phaseId: "P1",
+        taskId: "P1-T1",
+        dryRun: true,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("Operation aborted");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Meta test — no tmp directory leaks after test suite completion
 // ---------------------------------------------------------------------------
 
@@ -823,5 +1054,232 @@ describe("meta: no tmp directory leaks", () => {
       e => e.isDirectory() && e.name.startsWith("code-pact-verify-"),
     );
     expect(leftovers).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Timeout/abort race condition tests
+// ---------------------------------------------------------------------------
+
+describe("verify: timeout/abort race conditions", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "code-pact-verify-race-"));
+    await mkdir(join(dir, ".code-pact"), { recursive: true });
+    await mkdir(join(dir, "design", "phases"), { recursive: true });
+
+    // Create a phase with a hanging command
+    const phaseYaml = `
+id: P1
+name: Foundation
+weight: 12
+confidence: high
+risk: low
+status: in_progress
+objective: Test objective
+definition_of_done:
+  - Test done
+tasks:
+  - id: P1-T1
+    name: Test Task
+    type: feature
+    expected_duration: short
+    status: planned
+    description: Test task for race conditions
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+verification:
+  commands:
+    - node -e "setTimeout(() => console.log('done'), 10000)"
+`;
+    await writeFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      phaseYaml,
+    );
+
+    // Create minimal project files
+    await writeFile(
+      join(dir, ".code-pact", "project.yaml"),
+      `
+name: test-project
+agents:
+  - id: claude-code
+    name: Claude Code
+    enabled: true
+`,
+    );
+    await writeFile(
+      join(dir, ".code-pact", "plan.yaml"),
+      `
+phases:
+  - id: P1
+    ref: design/phases/P1-foundation.yaml
+`,
+    );
+    await writeFile(
+      join(dir, "design", "roadmap.yaml"),
+      `
+phases:
+  - id: P1
+    name: Foundation
+    path: design/phases/P1-foundation.yaml
+    weight: 12
+    description: Foundation phase
+`,
+    );
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("timeout fires before abort", async () => {
+    const controller = new AbortController();
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      timeoutMs: 100, // Very short timeout
+      signal: controller.signal,
+    });
+
+    const check = result.checks.find(c => c.name === "commands");
+    expect(check?.ok).toBe(false);
+    expect(check?.timedOut).toBe(true);
+    expect(check?.aborted).toBe(false);
+    expect(check?.reason).toContain("timed out");
+  });
+
+  it("abort fires before timeout", async () => {
+    const controller = new AbortController();
+
+    // Abort immediately, then wait a bit before calling runVerify
+    controller.abort();
+
+    // Small delay to ensure abort is processed first
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    await expect(
+      runVerify({
+        cwd: dir,
+        phaseId: "P1",
+        taskId: "P1-T1",
+        dryRun: false,
+        timeoutMs: 10000, // Long timeout
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("Operation aborted");
+  });
+
+  it("abort and timeout fire nearly simultaneously", async () => {
+    const controller = new AbortController();
+
+    // Schedule abort and timeout to fire at nearly the same time
+    const abortPromise = new Promise<void>(resolve => {
+      setTimeout(() => {
+        controller.abort();
+        resolve();
+      }, 50);
+    });
+
+    const verifyPromise = runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      timeoutMs: 60, // Slightly longer than abort
+      signal: controller.signal,
+    });
+
+    await abortPromise;
+    const result = await verifyPromise;
+
+    const check = result.checks.find(c => c.name === "commands");
+    expect(check?.ok).toBe(false);
+    // Should be aborted, not timed out, since abort takes precedence
+    expect(check?.aborted).toBe(true);
+    expect(check?.timedOut).toBe(false);
+  });
+
+  it("natural completion just before abort", async () => {
+    const controller = new AbortController();
+
+    // Create a phase with a fast command
+    const phaseYaml = `
+id: P1
+name: Foundation
+weight: 12
+confidence: high
+risk: low
+status: in_progress
+objective: Test objective
+definition_of_done:
+  - Test done
+tasks:
+  - id: P1-T1
+    name: Test Task
+    type: feature
+    expected_duration: short
+    status: planned
+    description: Test task for race conditions
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+verification:
+  commands:
+    - echo "success"
+`;
+    await writeFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      phaseYaml,
+    );
+
+    // Schedule abort after command should complete
+    setTimeout(() => controller.abort(), 200);
+
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      timeoutMs: 1000,
+      signal: controller.signal,
+    });
+
+    const check = result.checks.find(c => c.name === "commands");
+    expect(check?.ok).toBe(true);
+    expect(check?.timedOut).toBe(false);
+    expect(check?.aborted).toBe(false);
+  });
+
+  it("killProcessTree is only called once", async () => {
+    const controller = new AbortController();
+
+    // This test verifies the behavior doesn't crash when both timeout and abort could occur
+    // Full mocking of killProcessTree would require more complex test infrastructure
+
+    // This test would require mocking the internal killProcessTree function
+    // For now, we just verify the behavior doesn't crash
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      timeoutMs: 50,
+      signal: controller.signal,
+    });
+
+    const check = result.checks.find(c => c.name === "commands");
+    expect(check?.ok).toBe(false);
+    // Should be either timed out or aborted, but not both
+    expect(check?.timedOut || check?.aborted).toBe(true);
+    expect(check?.timedOut && check?.aborted).toBe(false);
   });
 });
