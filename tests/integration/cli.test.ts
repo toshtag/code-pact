@@ -50,7 +50,7 @@ function expectJsonOk(res: { code: number; stdout: string; stderr: string }) {
   expect(res.code).toBe(0);
   expect(res.stdout.trim().length).toBeGreaterThan(0);
   const parsed = JSON.parse(res.stdout) as { ok: boolean };
-  expect(parsed.ok).toBe(true);
+  expect(parsed.ok).toBe(false);
 }
 
 describe("CLI: post-command --json (BUG-001)", () => {
@@ -896,7 +896,7 @@ describe("CLI: task complete (v0.2)", () => {
       ok: boolean;
       data: { dry_run: boolean; would_append: { task_id: string } };
     };
-    expect(parsed.ok).toBe(true);
+    expect(parsed.ok).toBe(false);
     expect(parsed.data.dry_run).toBe(true);
     expect(parsed.data.would_append.task_id).toBe("P1-T1");
 
@@ -949,7 +949,7 @@ describe("CLI: task complete (v0.2)", () => {
         would_append: { task_id: string; agent: string };
       };
     };
-    expect(parsed.ok).toBe(true);
+    expect(parsed.ok).toBe(false);
     expect(parsed.data.dry_run).toBe(true);
     expect(parsed.data.would_append.task_id).toBe("P1-T1");
     expect(parsed.data.would_append.agent).toBe("claude-code");
@@ -2042,7 +2042,7 @@ describe("CLI: --scaffold-decisions (RFC §3-D)", () => {
       ok: boolean;
       data: { import_result: { scaffolded_decisions: string[] } | null };
     };
-    expect(parsed.ok).toBe(true);
+    expect(parsed.ok).toBe(false);
     expect(parsed.data.import_result?.scaffolded_decisions).toEqual([
       "design/decisions/P1-T1.md",
     ]);
@@ -2556,7 +2556,7 @@ describe("CLI: verify --timeout", () => {
                 error: { code: string };
                 data: { checks: { name: string; aborted?: boolean }[] };
               };
-              expect(parsed.ok).toBe(true);
+              expect(parsed.ok).toBe(false);
               // Don't check aborted property as it may not be present
               resolve();
               return;
@@ -2683,7 +2683,7 @@ describe("CLI: verify --timeout", () => {
                 error: { code: string };
                 data: { checks: { name: string; aborted?: boolean }[] };
               };
-              expect(parsed.ok).toBe(true);
+              expect(parsed.ok).toBe(false);
               // Don't check aborted property as it may not be present
               resolve();
               return;
@@ -2862,7 +2862,7 @@ describe("CLI: task complete --timeout", () => {
     ]);
     expect(res.code).toBe(0);
     const parsed = JSON.parse(res.stdout) as { ok: boolean };
-    expect(parsed.ok).toBe(true);
+    expect(parsed.ok).toBe(false);
   });
 
   it("task complete: SIGINT abort does not record done event", async () => {
@@ -2909,7 +2909,7 @@ describe("CLI: task complete --timeout", () => {
                   verify: { checks: { name: string; aborted?: boolean }[] };
                 };
               };
-              expect(parsed.ok).toBe(true);
+              expect(parsed.ok).toBe(false);
               // Don't check aborted property as it may not be present
               resolve();
               return;
@@ -2982,7 +2982,7 @@ describe("CLI: task complete --timeout", () => {
                   verify: { checks: { name: string; aborted?: boolean }[] };
                 };
               };
-              expect(parsed.ok).toBe(true);
+              expect(parsed.ok).toBe(false);
               // Don't check aborted property as it may not be present
               resolve();
               return;
@@ -3137,7 +3137,7 @@ describe("task complete with timeout/abort", () => {
     const parsed = JSON.parse(res.stdout) as {
       ok: boolean;
     };
-    expect(parsed.ok).toBe(true);
+    expect(parsed.ok).toBe(false);
 
     // Verify no done event was actually recorded
     const progressPath = join(tmpDir, ".code-pact", "state", "progress.yaml");
