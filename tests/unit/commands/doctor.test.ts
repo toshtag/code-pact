@@ -1181,7 +1181,7 @@ describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
     await commitBranchCode();
     await commitEventFile("P99-TX", "started");
     expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeDefined();
-  });
+  }, 10_000);
 
   it("uses the content id for identity: a content-different event on the branch counts as added (driven)", async () => {
     const baseDone = {

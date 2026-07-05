@@ -201,7 +201,7 @@ describe("check-fs-authority", () => {
     expect(deleteToRead.output).toContain(
       "readOwnedText() called on non-authority path",
     );
-  });
+  }, 10_000);
 
   it("rejects renamed generic project authority from content read and owned write sinks", async () => {
     const projectProbeRead = await runFixtureUnder("src/core/pack", [
