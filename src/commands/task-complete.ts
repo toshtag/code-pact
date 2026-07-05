@@ -16,6 +16,8 @@ export type TaskCompleteOptions = {
   dryRun?: boolean;
   /** Per-command timeout in milliseconds. Defaults to 300000 (5 min). */
   timeoutMs?: number;
+  /** Optional AbortSignal to cancel command execution. */
+  signal?: AbortSignal;
   /** Date injection for tests. Defaults to new Date(). */
   now?: () => Date;
 };
@@ -78,14 +80,18 @@ export async function runTaskComplete(
       `Task "${taskId}" is blocked. Run \`task resume ${taskId}\` before completing.`,
     );
     (err as NodeJS.ErrnoException).code = "INVALID_TASK_TRANSITION";
-    (err as NodeJS.ErrnoException & {
-      current?: string;
-      next?: string;
-    }).current = state.current;
-    (err as NodeJS.ErrnoException & {
-      current?: string;
-      next?: string;
-    }).next = "done";
+    (
+      err as NodeJS.ErrnoException & {
+        current?: string;
+        next?: string;
+      }
+    ).current = state.current;
+    (
+      err as NodeJS.ErrnoException & {
+        current?: string;
+        next?: string;
+      }
+    ).next = "done";
     throw err;
   }
   // planned / started / resumed / failed: proceed to verify.
@@ -108,6 +114,7 @@ export async function runTaskComplete(
     taskId,
     dryRun,
     timeoutMs: opts.timeoutMs,
+    signal: opts.signal,
     skipConsistencyChecks: true,
   });
 
@@ -130,7 +137,7 @@ export async function runTaskComplete(
     at: now().toISOString(),
     actor: "agent",
     agent: agentName,
-    evidence: verifyResult.checks.filter((c) => c.ok).map((c) => c.name),
+    evidence: verifyResult.checks.filter(c => c.ok).map(c => c.name),
     source: "loop",
     ...(author !== undefined ? { author } : {}),
   };
