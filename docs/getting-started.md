@@ -121,6 +121,9 @@ code-pact task finalize TUTORIAL-T2 --write --json
 code-pact phase runbook TUTORIAL --json
 ```
 
+> [!IMPORTANT]
+> `verify` and `task complete` execute the phase's verification commands as trusted project shell configuration. Review imported or agent-generated plans before running them. Commands time out after five minutes by default; pass `--timeout <milliseconds>` to either command for a reviewed exception. If `SIGINT`/`SIGTERM` is observed before the documented event-write commit point, Code Pact cancels the active verification process tree and `task complete` records no completion event.
+
 If `pnpm test` is not the right verification command for your repo, pass a different one to `init` (`node --version` is a safe placeholder for a smoke test).
 
 > [!NOTE]

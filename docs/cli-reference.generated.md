@@ -178,7 +178,7 @@ yourself — use `task record-done` instead.
 | --- | --- | --- |
 | `--agent` | `<name>` | Agent name. Defaults to project default_agent. |
 | `--dry-run` | — | Show the event without recording it. |
-| `--timeout` | `<ms>` | Per-command timeout in milliseconds (1–2147483647). Defaults to 300000 (5 min). |
+| `--timeout` | `<ms>` | Per-command timeout in milliseconds (default: 300000). |
 | `--json` | — | Emit JSON. |
 
 ```sh

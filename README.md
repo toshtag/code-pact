@@ -32,6 +32,9 @@ code-pact task finalize TUTORIAL-T1 --write --json            # apply it
 code-pact validate                                            # CI-friendly health check
 ```
 
+> [!IMPORTANT]
+> Verification commands are trusted project shell configuration. Review imported or agent-generated plans before running `verify` or `task complete`. Each command is bounded to five minutes by default; use `--timeout <milliseconds>` when a reviewed command legitimately needs a different limit. If `SIGINT`/`SIGTERM` is observed before the documented event-write commit point, Code Pact cancels the active verification process tree and does not record task completion.
+
 `task prepare` is the recommended per-task entry point: one call returns the current state, the execution recommendation, the context pack metadata, and a `commands` dictionary with the exact next commands. `recommend` and `task context` remain available as standalone diagnostics. (A plain `init` without `--sample-phase` starts with an empty roadmap — you add your own phases; see [getting-started](docs/getting-started.md).)
 
 ## Status
