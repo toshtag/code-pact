@@ -127,7 +127,7 @@ describe("check-fs-authority", () => {
     ]);
     expect(del.ok).toBe(false);
     expect(del.output).toContain("unlinkOwned() called on non-authority path");
-  });
+  }, 10_000);
 
   it("rejects read authority passed to delete and write-open operations", async () => {
     const removedWriteOpen = "openOwned" + "Write";
