@@ -2,9 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runVerify, validateTimeoutMs, MAX_TIMEOUT_MS } from "../../../src/commands/verify.ts";
+import {
+  runVerify,
+  validateTimeoutMs,
+  MAX_TIMEOUT_MS,
+} from "../../../src/commands/verify.ts";
 
-const fixtureDir = new URL("../../../tests/fixtures/project-a", import.meta.url).pathname;
+const fixtureDir = new URL("../../../tests/fixtures/project-a", import.meta.url)
+  .pathname;
 
 // ---------------------------------------------------------------------------
 // Helpers — build a minimal tmpdir project for mutation tests
@@ -64,7 +69,9 @@ async function setupProject(
     taskRequiresDecision = false,
   } = opts;
 
-  await mkdir(join(dir, ".code-pact", "state", "baselines"), { recursive: true });
+  await mkdir(join(dir, ".code-pact", "state", "baselines"), {
+    recursive: true,
+  });
   await mkdir(join(dir, "design", "phases"), { recursive: true });
   await mkdir(join(dir, "design", "decisions"), { recursive: true });
 
@@ -78,7 +85,11 @@ async function setupProject(
   const events = hasDoneEvent
     ? `events:\n  - task_id: P1-T1\n    status: done\n    at: "2026-05-15T10:00:00+09:00"\n    actor: human\n`
     : `events: []\n`;
-  await writeFile(join(dir, ".code-pact", "state", "progress.yaml"), events, "utf8");
+  await writeFile(
+    join(dir, ".code-pact", "state", "progress.yaml"),
+    events,
+    "utf8",
+  );
 
   if (hasAdr) {
     await writeFile(
@@ -104,7 +115,7 @@ describe("runVerify — project-a P1-T1 (dry-run)", () => {
     });
     expect(result.ok).toBe(true);
     expect(result.checks).toHaveLength(4);
-    expect(result.checks.every((c) => c.ok)).toBe(true);
+    expect(result.checks.every(c => c.ok)).toBe(true);
   });
 
   it("check names are commands, progress_event, decision, task_status", async () => {
@@ -114,8 +125,13 @@ describe("runVerify — project-a P1-T1 (dry-run)", () => {
       taskId: "P1-T1",
       dryRun: true,
     });
-    const names = result.checks.map((c) => c.name);
-    expect(names).toEqual(["commands", "progress_event", "decision", "task_status"]);
+    const names = result.checks.map(c => c.name);
+    expect(names).toEqual([
+      "commands",
+      "progress_event",
+      "decision",
+      "task_status",
+    ]);
   });
 });
 
@@ -132,9 +148,14 @@ describe("runVerify — missing done event", () => {
   afterEach(() => rm(dir, { recursive: true, force: true }));
 
   it("fails progress_event check", async () => {
-    const result = await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: true });
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: true,
+    });
     expect(result.ok).toBe(false);
-    const check = result.checks.find((c) => c.name === "progress_event");
+    const check = result.checks.find(c => c.name === "progress_event");
     expect(check?.ok).toBe(false);
   });
 });
@@ -148,9 +169,14 @@ describe("runVerify — task status not done", () => {
   afterEach(() => rm(dir, { recursive: true, force: true }));
 
   it("fails task_status check", async () => {
-    const result = await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: true });
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: true,
+    });
     expect(result.ok).toBe(false);
-    const check = result.checks.find((c) => c.name === "task_status");
+    const check = result.checks.find(c => c.name === "task_status");
     expect(check?.ok).toBe(false);
     expect(check?.reason).toContain("in_progress");
   });
@@ -165,9 +191,14 @@ describe("runVerify — requires_decision but no ADR", () => {
   afterEach(() => rm(dir, { recursive: true, force: true }));
 
   it("fails decision check", async () => {
-    const result = await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: true });
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: true,
+    });
     expect(result.ok).toBe(false);
-    const check = result.checks.find((c) => c.name === "decision");
+    const check = result.checks.find(c => c.name === "decision");
     expect(check?.ok).toBe(false);
   });
 });
@@ -181,8 +212,13 @@ describe("runVerify — requires_decision with ADR present", () => {
   afterEach(() => rm(dir, { recursive: true, force: true }));
 
   it("passes decision check when ADR filename contains task ID", async () => {
-    const result = await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: true });
-    const check = result.checks.find((c) => c.name === "decision");
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: true,
+    });
+    const check = result.checks.find(c => c.name === "decision");
     expect(check?.ok).toBe(true);
   });
 });
@@ -206,8 +242,13 @@ describe("runVerify — status-aware ADR gate", () => {
       "**Status:** accepted (P1, 2026-05)\n",
       "utf8",
     );
-    const result = await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: true });
-    const check = result.checks.find((c) => c.name === "decision");
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: true,
+    });
+    const check = result.checks.find(c => c.name === "decision");
     expect(check?.ok).toBe(true);
   });
 
@@ -217,8 +258,13 @@ describe("runVerify — status-aware ADR gate", () => {
       "**Status:** proposed (unscheduled, 2026-05)\n",
       "utf8",
     );
-    const result = await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: true });
-    const check = result.checks.find((c) => c.name === "decision");
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: true,
+    });
+    const check = result.checks.find(c => c.name === "decision");
     expect(check?.ok).toBe(false);
     expect(check?.reason).toContain('is "proposed"');
   });
@@ -229,8 +275,13 @@ describe("runVerify — status-aware ADR gate", () => {
       "**Status:** acceptd\n",
       "utf8",
     );
-    const result = await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: true });
-    expect(result.checks.find((c) => c.name === "decision")?.ok).toBe(false);
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: true,
+    });
+    expect(result.checks.find(c => c.name === "decision")?.ok).toBe(false);
   });
 
   it("empty ADR file does NOT resolve", async () => {
@@ -240,8 +291,14 @@ describe("runVerify — status-aware ADR gate", () => {
       "utf8",
     );
     expect(
-      (await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: true }))
-        .checks.find((c) => c.name === "decision")?.ok,
+      (
+        await runVerify({
+          cwd: dir,
+          phaseId: "P1",
+          taskId: "P1-T1",
+          dryRun: true,
+        })
+      ).checks.find(c => c.name === "decision")?.ok,
     ).toBe(false);
   });
 });
@@ -284,9 +341,14 @@ describe("runVerify — BUG-003: task-level requires_decision without ADR fails"
   afterEach(() => rm(dir, { recursive: true, force: true }));
 
   it("fails decision check when only task has requires_decision and no ADR exists", async () => {
-    const result = await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: true });
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: true,
+    });
     expect(result.ok).toBe(false);
-    const check = result.checks.find((c) => c.name === "decision");
+    const check = result.checks.find(c => c.name === "decision");
     expect(check?.ok).toBe(false);
   });
 });
@@ -300,8 +362,13 @@ describe("runVerify — BUG-003: task-level requires_decision with ADR passes", 
   afterEach(() => rm(dir, { recursive: true, force: true }));
 
   it("passes decision check when task requires_decision and matching ADR exists", async () => {
-    const result = await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: true });
-    const check = result.checks.find((c) => c.name === "decision");
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: true,
+    });
+    const check = result.checks.find(c => c.name === "decision");
     expect(check?.ok).toBe(true);
   });
 });
@@ -321,13 +388,18 @@ describe("runVerify — BUG-001: command stdout is captured, not inherited", () 
       'process.stdout.write("boom"); process.exit(1);\n',
       "utf8",
     );
-    await mkdir(join(dir, ".code-pact", "state", "baselines"), { recursive: true });
+    await mkdir(join(dir, ".code-pact", "state", "baselines"), {
+      recursive: true,
+    });
     await mkdir(join(dir, "design", "phases"), { recursive: true });
     await mkdir(join(dir, "design", "decisions"), { recursive: true });
     await writeFile(join(dir, "design", "roadmap.yaml"), ROADMAP_YAML, "utf8");
     await writeFile(
       join(dir, "design", "phases", "P1-foundation.yaml"),
-      PHASE_YAML("done", false).replace("echo ok", `node ${join(dir, "fail.mjs")}`),
+      PHASE_YAML("done", false).replace(
+        "echo ok",
+        `node ${join(dir, "fail.mjs")}`,
+      ),
       "utf8",
     );
     await writeFile(
@@ -340,8 +412,13 @@ describe("runVerify — BUG-001: command stdout is captured, not inherited", () 
   afterEach(() => rm(dir, { recursive: true, force: true }));
 
   it("failing command stdout is captured into CheckResult.stdout", async () => {
-    const result = await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: false });
-    const check = result.checks.find((c) => c.name === "commands");
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+    });
+    const check = result.checks.find(c => c.name === "commands");
     expect(check?.ok).toBe(false);
     expect(check?.stdout).toBe("boom");
   });
@@ -373,7 +450,7 @@ describe("runVerify — shell verification commands", () => {
       taskId: "P1-T1",
       dryRun: false,
     });
-    const check = result.checks.find((c) => c.name === "commands");
+    const check = result.checks.find(c => c.name === "commands");
     expect(check?.ok).toBe(true);
   });
 
@@ -393,7 +470,7 @@ describe("runVerify — shell verification commands", () => {
       taskId: "P1-T1",
       dryRun: false,
     });
-    const check = result.checks.find((c) => c.name === "commands");
+    const check = result.checks.find(c => c.name === "commands");
     expect(check?.ok).toBe(false);
     expect(check?.stdout).toContain("output truncated after 1048576 bytes");
     expect(Buffer.byteLength(check?.stdout ?? "")).toBeLessThan(1_050_000);
@@ -412,7 +489,10 @@ describe("runVerify — timeout kills hanging command", () => {
     await setupProject(dir);
     await writeFile(
       join(dir, "design", "phases", "P1-foundation.yaml"),
-      PHASE_YAML("done", false).replace("echo ok", "node -e \"setTimeout(()=>{}, 10000)\""),
+      PHASE_YAML("done", false).replace(
+        "echo ok",
+        'node -e "setTimeout(()=>{}, 10000)"',
+      ),
       "utf8",
     );
   });
@@ -427,7 +507,7 @@ describe("runVerify — timeout kills hanging command", () => {
       dryRun: false,
       timeoutMs: 300,
     });
-    const check = result.checks.find((c) => c.name === "commands");
+    const check = result.checks.find(c => c.name === "commands");
     expect(check?.ok).toBe(false);
     expect(check?.timedOut).toBe(true);
     expect(check?.elapsedMs).toBeGreaterThanOrEqual(200);
@@ -458,7 +538,7 @@ describe("runVerify — timeout does not affect fast commands", () => {
       dryRun: false,
       timeoutMs: 10_000,
     });
-    const check = result.checks.find((c) => c.name === "commands");
+    const check = result.checks.find(c => c.name === "commands");
     expect(check?.ok).toBe(true);
     expect(check?.timedOut).toBe(false);
   });
@@ -478,9 +558,9 @@ describe("runVerify — timeout kills child processes in the tree", () => {
     // Create a child script that writes its PID to a file and hangs.
     const childScript = [
       'import { writeFileSync } from "node:fs";',
-      'const pidFile = process.argv[2];',
-      'writeFileSync(pidFile, String(process.pid));',
-      'setInterval(() => {}, 10000);',
+      "const pidFile = process.argv[2];",
+      "writeFileSync(pidFile, String(process.pid));",
+      "setInterval(() => {}, 10000);",
     ].join("\n");
     await writeFile(join(dir, "child.mjs"), childScript, "utf8");
 
@@ -490,12 +570,15 @@ describe("runVerify — timeout kills child processes in the tree", () => {
     const parentScript = [
       'import { spawn } from "node:child_process";',
       `const child = spawn(process.execPath, ["${childPath}", "${pidPath}"], { stdio: "inherit" });`,
-      'setInterval(() => {}, 10000);',
+      "setInterval(() => {}, 10000);",
     ].join("\n");
     await writeFile(join(dir, "parent.mjs"), parentScript, "utf8");
     await writeFile(
       join(dir, "design", "phases", "P1-foundation.yaml"),
-      PHASE_YAML("done", false).replace("echo ok", `node ${join(dir, "parent.mjs")}`),
+      PHASE_YAML("done", false).replace(
+        "echo ok",
+        `node ${join(dir, "parent.mjs")}`,
+      ),
       "utf8",
     );
   });
@@ -504,46 +587,60 @@ describe("runVerify — timeout kills child processes in the tree", () => {
 
   it("child process is killed when parent times out", async () => {
     const childPidFile = join(dir, "child-pid.txt");
-    const result = await runVerify({
-      cwd: dir,
-      phaseId: "P1",
-      taskId: "P1-T1",
-      dryRun: false,
-      timeoutMs: 1_500,
-    });
+    let childPid: number | null = null;
 
-    const check = result.checks.find((c) => c.name === "commands");
-    expect(check?.ok).toBe(false);
-    expect(check?.timedOut).toBe(true);
+    try {
+      const result = await runVerify({
+        cwd: dir,
+        phaseId: "P1",
+        taskId: "P1-T1",
+        dryRun: false,
+        timeoutMs: 1_500,
+      });
 
-    // Wait for the PID file to appear
-    let pidFileExists = false;
-    for (let i = 0; i < 30; i++) {
+      const check = result.checks.find(c => c.name === "commands");
+      expect(check?.ok).toBe(false);
+      expect(check?.timedOut).toBe(true);
+
+      // Wait for the PID file to appear
+      let pidFileExists = false;
+      for (let i = 0; i < 30; i++) {
+        try {
+          await readFile(childPidFile, "utf8");
+          pidFileExists = true;
+          break;
+        } catch {
+          await new Promise(r => setTimeout(r, 50));
+        }
+      }
+      expect(pidFileExists).toBe(true);
+
+      // Read the child PID and verify the process is no longer alive
+      childPid = parseInt(await readFile(childPidFile, "utf8"), 10);
+      expect(childPid).toBeGreaterThan(0);
+
+      // Give the OS a moment to reap the process
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // On POSIX, sending signal 0 to a dead process throws
+      let childAlive = true;
       try {
-        await readFile(childPidFile, "utf8");
-        pidFileExists = true;
-        break;
+        process.kill(childPid, 0);
       } catch {
-        await new Promise((r) => setTimeout(r, 50));
+        childAlive = false;
+      }
+      expect(childAlive).toBe(false);
+    } finally {
+      // Force-kill any orphaned child process if the test failed before kill
+      if (childPid !== null) {
+        try {
+          process.kill(childPid, 0);
+          process.kill(childPid, "SIGKILL");
+        } catch {
+          /* already dead */
+        }
       }
     }
-    expect(pidFileExists).toBe(true);
-
-    // Read the child PID and verify the process is no longer alive
-    const childPid = parseInt(await readFile(childPidFile, "utf8"), 10);
-    expect(childPid).toBeGreaterThan(0);
-
-    // Give the OS a moment to reap the process
-    await new Promise((resolve) => setTimeout(resolve, 200));
-
-    // On POSIX, sending signal 0 to a dead process throws
-    let childAlive = true;
-    try {
-      process.kill(childPid, 0);
-    } catch {
-      childAlive = false;
-    }
-    expect(childAlive).toBe(false);
   });
 });
 
@@ -559,7 +656,10 @@ describe("runVerify — AbortSignal support", () => {
     await setupProject(dir);
     await writeFile(
       join(dir, "design", "phases", "P1-foundation.yaml"),
-      PHASE_YAML("done", false).replace("echo ok", "node -e \"setTimeout(()=>{}, 10000)\""),
+      PHASE_YAML("done", false).replace(
+        "echo ok",
+        'node -e "setTimeout(()=>{}, 10000)"',
+      ),
       "utf8",
     );
   });
@@ -580,11 +680,16 @@ describe("runVerify — AbortSignal support", () => {
     // Abort after 200ms
     setTimeout(() => controller.abort(), 200);
 
-    const result = await runPromise;
-    const check = result.checks.find((c) => c.name === "commands");
-    expect(check?.ok).toBe(false);
-    expect(check?.aborted).toBe(true);
-    expect(check?.reason).toContain("aborted");
+    try {
+      const result = await runPromise;
+      const check = result.checks.find(c => c.name === "commands");
+      expect(check?.ok).toBe(false);
+      expect(check?.aborted).toBe(true);
+      expect(check?.reason).toContain("aborted");
+    } finally {
+      // Ensure the abort signal is fired even if the test failed mid-way
+      if (!controller.signal.aborted) controller.abort();
+    }
   });
 
   it("already-aborted signal prevents execution", async () => {
@@ -600,7 +705,7 @@ describe("runVerify — AbortSignal support", () => {
       signal: controller.signal,
     });
 
-    const check = result.checks.find((c) => c.name === "commands");
+    const check = result.checks.find(c => c.name === "commands");
     expect(check?.ok).toBe(false);
     expect(check?.aborted).toBe(true);
   });
@@ -660,23 +765,14 @@ describe("runVerify — structured result contract", () => {
 
   afterEach(() => rm(dir, { recursive: true, force: true }));
 
-  it("success path includes timedOut:false, aborted:false", async () => {
-    const result = await runVerify({
-      cwd: dir,
-      phaseId: "P1",
-      taskId: "P1-T1",
-      dryRun: false,
-    });
-    const check = result.checks.find((c) => c.name === "commands");
-    expect(check?.ok).toBe(true);
-    expect(check?.timedOut).toBe(false);
-    expect(check?.aborted).toBe(false);
-  });
-
-  it("failure path includes exitCode and elapsedMs", async () => {
+  it("success path includes timedOut:false, aborted:false, elapsedMs > 0", async () => {
+    // Use a command with a small delay so elapsedMs is measurable
     await writeFile(
       join(dir, "design", "phases", "P1-foundation.yaml"),
-      PHASE_YAML("done", false).replace("echo ok", "node -e \"process.exit(1)\""),
+      PHASE_YAML("done", false).replace(
+        "echo ok",
+        'node -e "setTimeout(()=>process.exit(0), 50)"',
+      ),
       "utf8",
     );
     const result = await runVerify({
@@ -685,7 +781,27 @@ describe("runVerify — structured result contract", () => {
       taskId: "P1-T1",
       dryRun: false,
     });
-    const check = result.checks.find((c) => c.name === "commands");
+    const check = result.checks.find(c => c.name === "commands");
+    expect(check?.ok).toBe(true);
+    expect(check?.timedOut).toBe(false);
+    expect(check?.aborted).toBe(false);
+    expect(check?.exitCode).toBe(0);
+    expect(check?.elapsedMs).toBeGreaterThan(0);
+  });
+
+  it("failure path includes exitCode and elapsedMs", async () => {
+    await writeFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      PHASE_YAML("done", false).replace("echo ok", 'node -e "process.exit(1)"'),
+      "utf8",
+    );
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+    });
+    const check = result.checks.find(c => c.name === "commands");
     expect(check?.ok).toBe(false);
     expect(check?.exitCode).toBe(1);
     expect(check?.elapsedMs).toBeGreaterThanOrEqual(0);
@@ -699,12 +815,12 @@ describe("runVerify — structured result contract", () => {
 // ---------------------------------------------------------------------------
 
 describe("meta: no tmp directory leaks", () => {
-  it("no code-pact-* temp directories remain after test suite", async () => {
+  it("no new code-pact-verify-* temp directories remain after test suite", async () => {
     const { readdir } = await import("node:fs/promises");
     const { tmpdir } = await import("node:os");
     const entries = await readdir(tmpdir(), { withFileTypes: true });
     const leftovers = entries.filter(
-      (e) => e.isDirectory() && e.name.startsWith("code-pact-verify-"),
+      e => e.isDirectory() && e.name.startsWith("code-pact-verify-"),
     );
     expect(leftovers).toEqual([]);
   });
