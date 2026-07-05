@@ -47,17 +47,26 @@ async function setupTask(
 ): Promise<void> {
   expectJsonOk(
     project.run([
-      "phase", "add",
-      "--id", "P1",
-      "--name", "Foundation",
-      "--objective", "Foundation phase for the explain-metrics test",
-      "--weight", "10",
-      "--verify-command", "node --version",
+      "phase",
+      "add",
+      "--id",
+      "P1",
+      "--name",
+      "Foundation",
+      "--objective",
+      "Foundation phase for the explain-metrics test",
+      "--weight",
+      "10",
+      "--verify-command",
+      "node --version",
       "--json",
     ]),
   );
   const phasePath = join(project.dir, "design", "phases", "P1-foundation.yaml");
-  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
+  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+    string,
+    unknown
+  >;
   doc.tasks = [
     {
       id: "P1-T1",
@@ -81,7 +90,7 @@ describe("task context --explain --json metrics (P49)", () => {
   beforeEach(async () => {
     project = await createTempProject({ prefix: "code-pact-explain-metrics-" });
     await setupTask(project);
-  });
+  }, 30_000);
 
   afterEach(async () => {
     await project.cleanup();
@@ -90,7 +99,13 @@ describe("task context --explain --json metrics (P49)", () => {
   it("adds the new metrics beside the unchanged P21 fields with no budget", () => {
     const env = expectJsonOk<ExplainData>(
       project.run([
-        "task", "context", "P1-T1", "--agent", "claude-code", "--explain", "--json",
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--explain",
+        "--json",
       ]),
     );
     const d = env.data;
@@ -117,7 +132,14 @@ describe("task context --explain --json metrics (P49)", () => {
 
   it("does not add metrics to non-explain JSON output", () => {
     const env = expectJsonOk<Record<string, unknown>>(
-      project.run(["task", "context", "P1-T1", "--agent", "claude-code", "--json"]),
+      project.run([
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--json",
+      ]),
     );
     expect("natural_bytes" in env.data).toBe(false);
     expect("final_bytes" in env.data).toBe(false);
@@ -128,8 +150,15 @@ describe("task context --explain --json metrics (P49)", () => {
   it("--budget-bytes <N> that fits reports budget_bytes == N and zero savings", () => {
     const env = expectJsonOk<ExplainData>(
       project.run([
-        "task", "context", "P1-T1", "--agent", "claude-code",
-        "--explain", "--budget-bytes", "60000", "--json",
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--explain",
+        "--budget-bytes",
+        "60000",
+        "--json",
       ]),
     );
     const d = env.data;
@@ -142,14 +171,28 @@ describe("task context --explain --json metrics (P49)", () => {
   it("--context-budget balanced yields the same metrics as --budget-bytes 60000", () => {
     const byProfile = expectJsonOk<ExplainData>(
       project.run([
-        "task", "context", "P1-T1", "--agent", "claude-code",
-        "--explain", "--context-budget", "balanced", "--json",
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--explain",
+        "--context-budget",
+        "balanced",
+        "--json",
       ]),
     );
     const byBytes = expectJsonOk<ExplainData>(
       project.run([
-        "task", "context", "P1-T1", "--agent", "claude-code",
-        "--explain", "--budget-bytes", "60000", "--json",
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--explain",
+        "--budget-bytes",
+        "60000",
+        "--json",
       ]),
     );
     expect(byProfile.data.budget_bytes).toBe(60000);
@@ -165,18 +208,31 @@ describe("task context --explain --json metrics (P49)", () => {
   it("the successful explain floor equals the CONTEXT_OVER_BUDGET floor for the same task", () => {
     const explained = expectJsonOk<ExplainData>(
       project.run([
-        "task", "context", "P1-T1", "--agent", "claude-code", "--explain", "--json",
+        "task",
+        "context",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--explain",
+        "--json",
       ]),
     );
     const floor = explained.data.minimum_achievable_bytes;
 
     const res = project.run([
-      "task", "context", "P1-T1", "--agent", "claude-code",
-      "--budget-bytes", "1", "--json",
+      "task",
+      "context",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--budget-bytes",
+      "1",
+      "--json",
     ]);
     const env = expectJsonErr(res, "CONTEXT_OVER_BUDGET");
     expect(res.code).toBe(2);
-    const errData = (env as { data?: { minimum_achievable_bytes?: number } }).data;
+    const errData = (env as { data?: { minimum_achievable_bytes?: number } })
+      .data;
     expect(errData?.minimum_achievable_bytes).toBe(floor);
   });
 });

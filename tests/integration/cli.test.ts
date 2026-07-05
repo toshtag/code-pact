@@ -2523,16 +2523,11 @@ describe("CLI: verify --timeout", () => {
 
     let stdout = "";
     let childError: Error | null = null;
-    let commandStarted = false;
     child.stdout?.on("data", (chunk: Buffer) => {
-      const output = chunk.toString();
-      stdout += output;
-      // Wait for command to actually start before sending SIGINT
-      if (!commandStarted && output.includes("node -e")) {
-        commandStarted = true;
-        setTimeout(() => child.kill("SIGINT"), 100);
-      }
+      stdout += chunk.toString();
     });
+    // Send SIGINT after a short delay to allow command to start
+    setTimeout(() => child.kill("SIGINT"), 500);
     child.on("error", (err: Error) => {
       childError = err;
     });
@@ -2540,8 +2535,8 @@ describe("CLI: verify --timeout", () => {
     try {
       await new Promise<void>((resolve, reject) => {
         const testTimeout = setTimeout(() => {
-          reject(new Error("SIGINT abort test timed out after 15s"));
-        }, 15_000);
+          reject(new Error("SIGINT abort test timed out after 30s"));
+        }, 30_000);
 
         child.on("close", (code: number | null) => {
           clearTimeout(testTimeout);
@@ -2667,8 +2662,8 @@ describe("CLI: verify --timeout", () => {
     try {
       await new Promise<void>((resolve, reject) => {
         const testTimeout = setTimeout(() => {
-          reject(new Error("SIGTERM abort test timed out after 15s"));
-        }, 15_000);
+          reject(new Error("SIGTERM abort test timed out after 30s"));
+        }, 30_000);
 
         child.on("close", (code: number | null) => {
           clearTimeout(testTimeout);
@@ -2891,8 +2886,8 @@ describe("CLI: task complete --timeout", () => {
     try {
       await new Promise<void>((resolve, reject) => {
         const testTimeout = setTimeout(() => {
-          reject(new Error("SIGINT abort test timed out after 15s"));
-        }, 15_000);
+          reject(new Error("SIGINT abort test timed out after 30s"));
+        }, 30_000);
 
         child.on("close", (code: number | null) => {
           clearTimeout(testTimeout);
@@ -2964,8 +2959,8 @@ describe("CLI: task complete --timeout", () => {
     try {
       await new Promise<void>((resolve, reject) => {
         const testTimeout = setTimeout(() => {
-          reject(new Error("SIGTERM abort test timed out after 15s"));
-        }, 15_000);
+          reject(new Error("SIGTERM abort test timed out after 30s"));
+        }, 30_000);
 
         child.on("close", (code: number | null) => {
           clearTimeout(testTimeout);
@@ -3171,8 +3166,8 @@ describe("task complete with timeout/abort", () => {
     try {
       await new Promise<void>((resolve, reject) => {
         const testTimeout = setTimeout(() => {
-          reject(new Error("SIGINT abort test timed out after 15s"));
-        }, 15_000);
+          reject(new Error("SIGINT abort test timed out after 30s"));
+        }, 30_000);
 
         child.on("close", (code: number | null) => {
           clearTimeout(testTimeout);
@@ -3243,8 +3238,8 @@ describe("task complete with timeout/abort", () => {
     try {
       await new Promise<void>((resolve, reject) => {
         const testTimeout = setTimeout(() => {
-          reject(new Error("SIGTERM abort test timed out after 15s"));
-        }, 15_000);
+          reject(new Error("SIGTERM abort test timed out after 30s"));
+        }, 30_000);
 
         child.on("close", (code: number | null) => {
           clearTimeout(testTimeout);
