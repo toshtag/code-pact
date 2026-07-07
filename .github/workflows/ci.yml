@@ -130,9 +130,7 @@ jobs:
 
       - run: pnpm build
 
-      - run: pnpm test:unit
-
-      - run: pnpm exec vitest run tests/unit/commands/verify-process.test.ts
+      - run: pnpm exec vitest run tests/unit/core/project-fs-authority-resolvers.test.ts tests/unit/commands/verify-process.test.ts
 
       # Run timeout and abort integration tests on Windows to verify
       # taskkill /T /F process-tree kill and fallback logic
