@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { cliPath, ensureCliBuilt, run } from "../helpers/cli.ts";
 import { loadMergedProgress } from "../../src/core/progress/io.ts";
 
-function phase(command: string): string {
+function phase(command: string, taskStatus: "planned" | "done" = "planned"): string {
   return [
     "id: P1",
     "name: Timeout integration",
@@ -30,12 +30,16 @@ function phase(command: string): string {
     "    write_surface: low",
     "    verification_strength: weak",
     "    expected_duration: short",
-    "    status: planned",
+    `    status: ${taskStatus}`,
     "",
   ].join("\n");
 }
 
-async function setupProject(dir: string, command: string): Promise<void> {
+async function setupProject(
+  dir: string,
+  command: string,
+  opts: { taskStatus?: "planned" | "done"; progressDone?: boolean } = {},
+): Promise<void> {
   await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
   await mkdir(join(dir, "design", "phases"), { recursive: true });
   await mkdir(join(dir, "design", "decisions"), { recursive: true });
@@ -53,12 +57,27 @@ async function setupProject(dir: string, command: string): Promise<void> {
       "",
     ].join("\n"),
   );
-  await writeFile(join(dir, ".code-pact", "state", "progress.yaml"), "events: []\n");
+  await writeFile(
+    join(dir, ".code-pact", "state", "progress.yaml"),
+    opts.progressDone
+      ? [
+          "events:",
+          "  - task_id: P1-T1",
+          "    status: done",
+          '    at: "2026-07-07T00:00:00.000Z"',
+          "    actor: agent",
+          "",
+        ].join("\n")
+      : "events: []\n",
+  );
   await writeFile(
     join(dir, "design", "roadmap.yaml"),
     "phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 1\n",
   );
-  await writeFile(join(dir, "design", "phases", "P1.yaml"), phase(command));
+  await writeFile(
+    join(dir, "design", "phases", "P1.yaml"),
+    phase(command, opts.taskStatus),
+  );
 }
 
 async function installLongProcessFixture(dir: string): Promise<void> {
@@ -202,7 +221,10 @@ afterEach(async () => {
 
 describe("CLI timeout contract", () => {
   it("accepts --timeout 2 as a valid value", async () => {
-    await setupProject(dir, "node long-parent.mjs");
+    await setupProject(dir, "echo ok", {
+      taskStatus: "done",
+      progressDone: true,
+    });
     const result = run(dir, [
       "verify",
       "--phase",
