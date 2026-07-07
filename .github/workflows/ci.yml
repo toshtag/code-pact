@@ -98,16 +98,16 @@ jobs:
   ci-status:
     name: CI status
     runs-on: ubuntu-latest
-    needs: [build, windows]
+    needs: [build, windows-process-control]
     if: ${{ always() }}
     steps:
       - name: Verify all matrix builds succeeded
-        if: ${{ needs.build.result != 'success' || needs.windows.result != 'success' }}
+        if: ${{ needs.build.result != 'success' || needs['windows-process-control'].result != 'success' }}
         run: |
-          echo "build or windows job did not succeed: build=${{ needs.build.result }} windows=${{ needs.windows.result }}"
+          echo "build or windows job did not succeed: build=${{ needs.build.result }} windows=${{ needs['windows-process-control'].result }}"
           exit 1
 
-  windows:
+  windows-process-control:
     name: Windows (Node 22)
     runs-on: windows-latest
     steps:
@@ -124,14 +124,15 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Verify esbuild version is pinned correctly
-      - run: test "$(pnpm exec esbuild --version)" = "0.28.1"
+      - run: pnpm check:toolchain-binaries
 
       - run: pnpm typecheck
 
       - run: pnpm build
 
       - run: pnpm test:unit
+
+      - run: pnpm exec vitest run tests/unit/commands/verify-process.test.ts
 
       # Run timeout and abort integration tests on Windows to verify
       # taskkill /T /F process-tree kill and fallback logic
