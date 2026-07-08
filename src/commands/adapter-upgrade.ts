@@ -25,7 +25,10 @@ import {
   type LocalFileState,
 } from "../core/adapters/file-state.ts";
 import { loadModelProfilesStrict } from "../core/models/load-model-profiles.ts";
-import { authorizeAdapterMutationPath } from "../core/adapters/manifest-file-ownership.ts";
+import {
+  authorizeAdapterMutationPath,
+  authorizeAdapterOrphanPrunePath,
+} from "../core/adapters/manifest-file-ownership.ts";
 import {
   computeContentHash,
   manifestRelPath,
@@ -45,6 +48,7 @@ import type {
 import {
   FileTransaction,
   adapterDynamicCreateTarget,
+  adapterDynamicHandoffDeleteTarget,
   adapterManifestWriteTarget,
   adapterProfileWriteTarget,
   adapterStaticDeleteTarget,
@@ -171,12 +175,12 @@ function buildFingerprint(
  * preserved unchanged.
  *
  * **Orphan prune:** a path the OLD manifest tracked but the generator no
- * longer emits is auto-deleted ONLY when (a) its path is in the adapter
- * descriptor's owned path set and (b) its content still matches the manifest
- * hash (`action: "prune"`). An owned orphan the user edited is `refuse`d (left
- * in place). An orphan OUTSIDE the owned set is never deleted — even when
- * clean — but surfaced as `warn` and kept tracked, because the manifest is
- * project-controlled and trusting it to authorize a delete would let a forged
+ * longer emits is auto-deleted ONLY when (a) static ownership or a reserved
+ * dynamic handoff proves code-pact ownership and (b) its content still matches
+ * the manifest hash (`action: "prune"`). An owned orphan the user edited is
+ * `refuse`d (left in place). An orphan outside those ownership proofs is never
+ * deleted — even when clean — but surfaced as `warn` and kept tracked, because
+ * the manifest is project-controlled and trusting it alone would let a forged
  * manifest remove arbitrary in-project files (see the security note at the
  * prune loop). `--check` reports the same actions without touching disk. Files
  * never tracked by the manifest (hand-authored skills) are not manifest
@@ -322,6 +326,7 @@ export async function runAdapterUpgrade(
     role: DesiredAdapterFileRole;
     absPath: string;
     action: FileAction;
+    authorityKind: "owned" | "dynamic_handoff";
   }> = [];
 
   for (const desired of desiredFiles) {
@@ -480,33 +485,32 @@ export async function runAdapterUpgrade(
   // ---- Orphan prune ----
   // A path the OLD manifest tracked but the generator no longer emits (it
   // dropped out of `desiredFiles`) is an orphan. This happens when a skill is
-  // renamed — e.g. the self-describing skill-name change turned `claude-code-2`
-  // into `adapter-doctor`, leaving the old file on disk. We delete only orphans
-  // whose disk content still matches the manifest hash (managed-clean): they are
-  // verbatim generator output, safe to remove. An orphan the user edited
-  // (managed-modified) is REFUSED — left on disk and surfaced — so a manual
-  // change is never silently destroyed. A manifest entry whose disk file is
-  // already gone (managed-missing) needs no action. Files never tracked by the
-  // manifest (hand-authored skills like ship-task.md) are not in
+  // renamed — e.g. a reserved `code-pact-*` dynamic skill disappears from the
+  // roadmap, leaving the old file on disk. We delete only orphans whose path is
+  // statically owned OR was created in the reserved dynamic handoff namespace,
+  // and whose disk content still matches the manifest hash (managed-clean):
+  // they are verbatim generator output, safe to remove. An orphan the user
+  // edited (managed-modified) is REFUSED — left on disk and surfaced — so a
+  // manual change is never silently destroyed. A manifest entry whose disk file
+  // is already gone (managed-missing) needs no action. Files never tracked by
+  // the manifest (hand-authored skills like ship-task.md) are not in
   // `existingByPath`, so they are never considered here.
   const desiredPaths = new Set(desiredFiles.map(d => d.path));
   for (const [relPath, entry] of existingByPath) {
     if (desiredPaths.has(relPath)) continue; // still emitted — handled above
     assertSafeRelativePath(relPath);
-    const authority = await authorizeAdapterMutationPath(
+    const authority = await authorizeAdapterOrphanPrunePath(
       cwd,
       descriptor,
       relPath,
-      {
-        expectedRole: entry.role,
-        declaredRole: entry.role,
-        allowDynamicWrite: false,
-      },
+      entry,
     );
     const absPath =
-      authority.kind === "owned" ? authority.absPath : join(cwd, relPath);
+      authority.kind === "owned" || authority.kind === "dynamic_handoff"
+        ? authority.absPath
+        : join(cwd, relPath);
 
-    if (authority.kind === "unowned" || authority.kind === "dynamic_write") {
+    if (authority.kind === "unowned") {
       // Manifest-only unowned paths are never statted or read. Report the same
       // opaque state whether the target is missing, present, or hash-matching.
       plan.push({
@@ -556,7 +560,13 @@ export async function runAdapterUpgrade(
 
     if (mode === "check") continue; // read-only
 
-    orphanApply.push({ relPath, role: entry.role, absPath, action });
+    orphanApply.push({
+      relPath,
+      role: entry.role,
+      absPath,
+      action,
+      authorityKind: authority.kind,
+    });
     if (action !== "prune") {
       // refuse / warn: keep the file on disk AND keep tracking it, so the next
       // run still sees it as a managed orphan (and still refuses/warns) rather
@@ -566,6 +576,7 @@ export async function runAdapterUpgrade(
         sha256: entry.sha256,
         managed: true,
         role: entry.role,
+        ...(entry.ownership ? { ownership: entry.ownership } : {}),
       });
     }
   }
@@ -685,31 +696,59 @@ export async function runAdapterUpgrade(
     }
     for (const item of orphanApply) {
       if (item.action === "prune") {
-        const pruneAuthority = await authorizeAdapterMutationPath(
-          cwd,
-          descriptor,
-          item.relPath,
-          {
-            expectedRole: item.role,
-            declaredRole: item.role,
-            allowDynamicWrite: false,
-          },
-        );
-        if (pruneAuthority.kind !== "owned") {
-          const err = new Error(
-            `Refusing to prune adapter file "${item.relPath}" without path authority.`,
-          );
-          (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-          throw err;
-        }
-        tx.addDelete(
-          adapterStaticDeleteTarget(
-            agentName,
+        if (item.authorityKind === "owned") {
+          const pruneAuthority = await authorizeAdapterMutationPath(
+            cwd,
+            descriptor,
             item.relPath,
-            item.role,
-            pruneAuthority,
-          ),
-        );
+            {
+              expectedRole: item.role,
+              declaredRole: item.role,
+              allowDynamicWrite: false,
+            },
+          );
+          if (pruneAuthority.kind !== "owned") {
+            const err = new Error(
+              `Refusing to prune adapter file "${item.relPath}" without path authority.`,
+            );
+            (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+            throw err;
+          }
+          tx.addDelete(
+            adapterStaticDeleteTarget(
+              agentName,
+              item.relPath,
+              item.role,
+              pruneAuthority,
+            ),
+          );
+        } else {
+          const pruneAuthority = await authorizeAdapterMutationPath(
+            cwd,
+            descriptor,
+            item.relPath,
+            {
+              expectedRole: item.role,
+              declaredRole: item.role,
+              allowDynamicWrite: true,
+            },
+          );
+          if (pruneAuthority.kind !== "dynamic_write") {
+            const err = new Error(
+              `Refusing to prune adapter handoff file "${item.relPath}" without path authority.`,
+            );
+            (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+            throw err;
+          }
+          tx.addDelete(
+            adapterDynamicHandoffDeleteTarget(
+              agentName,
+              item.relPath,
+              item.role,
+              pruneAuthority,
+            ),
+          );
+        }
       }
     }
     await tx.addWrite(

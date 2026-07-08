@@ -1366,17 +1366,19 @@ final files; they surface as `TRANSACTION_CLEANUP_PENDING`.
 
 **Orphan handling (security — CWE-73).** An orphan is a manifest entry the
 generator no longer emits. Because the manifest is project-controlled and
-unauthenticated, an orphan is **auto-deleted (`action: "prune"`) only when its
-path has an exact path-and-role entry in the adapter descriptor's `ownedPathRoles`** AND its content still
-matches the manifest hash. An owned orphan the user edited is `refuse`d (kept on
-disk). An orphan **outside** the owned path set is never deleted — even when
-clean — but surfaced as `action: "warn"` (with a machine-readable
+unauthenticated, an orphan is **auto-deleted (`action: "prune"`) only when
+static ownership (`ownedPathRoles`) or a reserved dynamic handoff
+(`ownership: handed_off` inside the adapter's role-scoped dynamic namespace)
+proves code-pact ownership** AND its content still matches the manifest hash.
+An owned orphan the user edited is `refuse`d (kept on disk). An orphan outside
+those ownership proofs is never deleted — even when clean — but surfaced as
+`action: "warn"` (with a machine-readable
 `reason: "unowned_orphan_not_pruned"` on the plan entry) and kept tracked, so a
-forged manifest entry (any in-project path + that file's real sha256) cannot turn
-`upgrade --write` into an arbitrary in-project delete. The human CLI names each
-kept file and the manual-removal step; a warn-only `--check` exits 1 without
-claiming `--write` would clear it. Files left on disk that are not in the new
-manifest are surfaced by the next `adapter doctor` run as
+forged manifest entry (any in-project path + that file's real sha256) cannot
+turn `upgrade --write` into an arbitrary in-project delete. The human CLI names
+each kept file and the manual-removal step; a warn-only `--check` exits 1
+without claiming `--write` would clear it. Files left on disk that are not in
+the new manifest are surfaced by the next `adapter doctor` run as
 `ADAPTER_UNMANAGED_FILE` if they fall under the adapter's `ownedPathRoles`.
 An unowned orphan is not statted, read, or hashed; its plan state is always
 `local: "unverifiable"`, whether the target is present, missing, hash-matching,
