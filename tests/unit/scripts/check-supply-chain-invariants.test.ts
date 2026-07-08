@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   checkActionShaPins,
+  checkCancellationCoverage,
   checkNoTokenSecrets,
   checkSupplyChainInvariants,
-  checkWindowsCancellationCoverage,
 } from "../../../scripts/check-supply-chain-invariants.mjs";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
@@ -355,15 +355,17 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   ].join("\n");
 
   const wellFormedVerifyTimeoutAbort = [
-    'describe.runIf(process.platform === "win32")("Windows CLI cancellation contract", () => {',
-    "  it(",
-    '    "cancels task complete on SIGINT, removes descendants, and records no event",',
-    "    async () => {",
-    '      expect(JSON.parse(result.stdout)).toMatchObject({ error: { cause_code: "ABORTED" } });',
-    "      expect((await loadMergedProgress(dir)).log.events).toHaveLength(0);",
-    "    },",
-    "  );",
-    "});",
+    'if (process.platform !== "win32") {',
+    '  describe("CLI cancellation contract", () => {',
+    '    it.each(["SIGINT", "SIGTERM"] as const)(',
+    '      "cancels task complete on %s, removes descendants, and records no event",',
+    "      async () => {",
+    '        expect(JSON.parse(result.stdout)).toMatchObject({ error: { cause_code: "ABORTED" } });',
+    "        expect((await loadMergedProgress(dir)).log.events).toHaveLength(0);",
+    "      },",
+    "    );",
+    "  });",
+    "}",
   ].join("\n");
 
   const wellFormedPackage = JSON.stringify(
@@ -475,23 +477,20 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     await cleanup();
   });
 
-  it("fails when Windows cancellation coverage is only POSIX-gated", async () => {
-    const violations = checkWindowsCancellationCoverage(
-      wellFormedVerifyTimeoutAbort.replace(
-        'describe.runIf(process.platform === "win32")("Windows CLI cancellation contract"',
-        'if (process.platform !== "win32") describe("CLI cancellation contract"',
-      ),
+  it("fails when POSIX signal cancellation coverage is missing", async () => {
+    const brokenCoverage = wellFormedVerifyTimeoutAbort
+      .replace('if (process.platform !== "win32") {', '')
+      .replace('it.each(["SIGINT", "SIGTERM"] as const)', 'it(');
+
+    const violations = checkCancellationCoverage(brokenCoverage);
+    expect(violations).toContain(
+      'verify-timeout-abort.test.ts: POSIX CLI signal cancellation must be explicitly POSIX-gated',
     );
     expect(violations).toContain(
-      'verify-timeout-abort.test.ts: Windows cancellation contract must be enabled with process.platform === "win32"',
+      'verify-timeout-abort.test.ts: POSIX SIGINT/SIGTERM cancellation cases are missing',
     );
 
-    root = await buildTree({
-      verifyTimeoutAbortContent: wellFormedVerifyTimeoutAbort.replace(
-        'describe.runIf(process.platform === "win32")("Windows CLI cancellation contract"',
-        'if (process.platform !== "win32") describe("CLI cancellation contract"',
-      ),
-    });
+    root = await buildTree({ verifyTimeoutAbortContent: brokenCoverage });
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBeGreaterThan(0);
     await cleanup();

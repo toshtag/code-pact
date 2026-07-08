@@ -99,7 +99,7 @@ A deterministic completion check did not pass. `task complete` runs two checks �
 
 - `error.cause_code: "COMMANDS_FAILED"` → a verification command failed. `error.message` embeds the failing command's reason. Fix the command (or, if the command itself is wrong — typo, missing dependency — edit `design/phases/<phase>.yaml` `verification.commands`), then re-run.
 - `error.cause_code: "DECISION_REQUIRED"` → the task `requires_decision` and no **accepted** ADR resolves the gate. `error.message` says an accepted ADR is required. Write/accept the ADR (see [`DECISION_REQUIRED` from `task record-done`](#decision_required-from-task-record-done) for the gate semantics), then re-run. `error.code` stays `VERIFICATION_FAILED` at exit 1 (the full structured `DecisionRequiredData` block only appears on `task record-done`).
-- `error.cause_code: "ABORTED"` → the caller, `SIGINT`, or `SIGTERM` cancelled verification. Code Pact terminates the active process tree and does not record a `task complete` event before the atomic event-write commit point. Clear the cancellation source, then re-run.
+- `error.cause_code: "ABORTED"` → the caller, `SIGINT`, or `SIGTERM` cancelled verification. Code Pact terminates the active process tree and does not record a `task complete` event before the atomic event-write commit point. Clear the cancellation source, then re-run. Programmatic signal delivery is platform-dependent; on Windows, prefer timeout or caller-driven `AbortSignal` cancellation for deterministic automation tests.
 
 ```sh
 code-pact verify --phase <phase-id> --task <task-id> --timeout 300000

@@ -132,6 +132,8 @@ jobs:
 
       - run: pnpm exec vitest run tests/unit/core/project-fs-authority-resolvers.test.ts tests/unit/commands/verify-process.test.ts
 
-      # Run the concrete timeout integration file on Windows. Avoid name filters:
-      # Vitest is configured with passWithNoTests, so a stale filter can pass empty.
+      # Run the concrete timeout/abort integration file on Windows. Avoid name
+      # filters: Vitest is configured with passWithNoTests, so a stale filter can
+      # pass empty. POSIX signal translation is tested on Linux; Windows covers
+      # timeout/AbortSignal cancellation and taskkill process-tree cleanup.
       - run: pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts

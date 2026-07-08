@@ -411,38 +411,42 @@ function getJobSteps(doc, jobName) {
   return [];
 }
 
-export function checkWindowsCancellationCoverage(testContent) {
+export function checkCancellationCoverage(testContent) {
   const violations = [];
-  if (
-    !/describe\.runIf\(process\.platform === "win32"\)\("Windows CLI cancellation contract"/.test(
-      testContent,
-    )
-  ) {
+  if (!/if \(process\.platform !== "win32"\)/.test(testContent)) {
     violations.push(
-      "verify-timeout-abort.test.ts: Windows cancellation contract must be enabled with process.platform === \"win32\"",
+      "verify-timeout-abort.test.ts: POSIX CLI signal cancellation must be explicitly POSIX-gated",
     );
   }
-  if (
-    !/cancels task complete on SIGINT, removes descendants, and records no event/.test(
-      testContent,
-    )
-  ) {
+  if (!/it\.each\(\["SIGINT", "SIGTERM"\] as const\)/.test(testContent)) {
     violations.push(
-      "verify-timeout-abort.test.ts: Windows task complete SIGINT cancellation test is missing",
+      "verify-timeout-abort.test.ts: POSIX SIGINT/SIGTERM cancellation cases are missing",
+    );
+  }
+  if (!/cancels task complete on %s, removes descendants, and records no event/.test(testContent)) {
+    violations.push(
+      "verify-timeout-abort.test.ts: task complete signal cancellation test is missing",
     );
   }
   if (!/cause_code:\s*"ABORTED"/.test(testContent)) {
     violations.push(
-      "verify-timeout-abort.test.ts: Windows cancellation test must assert cause_code ABORTED",
+      "verify-timeout-abort.test.ts: cancellation test must assert cause_code ABORTED",
     );
   }
   if (!/loadMergedProgress\(dir\)\)\.log\.events\)\.toHaveLength\(0\)/.test(testContent)) {
     violations.push(
-      "verify-timeout-abort.test.ts: Windows cancellation test must assert no done event is recorded",
+      "verify-timeout-abort.test.ts: cancellation test must assert no done event is recorded",
     );
   }
   return violations;
 }
+
+// Backward-compatible export name for existing tests/imports. The invariant is
+// intentionally no longer Windows-signal-specific: Windows synthetic SIGINT from
+// ChildProcess.kill() is not a reliable contract. Windows CI verifies timeout,
+// AbortSignal, taskkill, and process-tree cleanup; POSIX CI verifies CLI signal
+// translation.
+export const checkWindowsCancellationCoverage = checkCancellationCoverage;
 
 
 /**
@@ -1087,7 +1091,7 @@ export function checkSupplyChainInvariants(root) {
       }
       if (windowsJob?.get("runs-on") === "windows-latest") {
         const scripts = collectRunScripts(ciDoc, "windows-process-control");
-        const windowsCoverageViolations = checkWindowsCancellationCoverage(
+        const cancellationCoverageViolations = checkCancellationCoverage(
           _read("tests/integration/verify-timeout-abort.test.ts"),
         );
         if (
@@ -1100,12 +1104,12 @@ export function checkSupplyChainInvariants(root) {
               "pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts",
           ) &&
           !scripts.some(script => /(?:^|\s)-t\s+|--testNamePattern\b/.test(script)) &&
-          windowsCoverageViolations.length === 0
+          cancellationCoverageViolations.length === 0
         ) {
-          pass("ci.yml: Windows job verifies toolchain, build, and process control without no-op test filters");
+          pass("ci.yml: Windows job verifies toolchain, build, and concrete process control without no-op test filters");
         } else {
           fail("ci.yml: Windows job must verify toolchain, build, and concrete process-control tests without name filters");
-          for (const violation of windowsCoverageViolations) fail(violation);
+          for (const violation of cancellationCoverageViolations) fail(violation);
         }
       } else {
         fail("ci.yml: windows-process-control must run on windows-latest");

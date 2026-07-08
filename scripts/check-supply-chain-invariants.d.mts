@@ -4,6 +4,7 @@
 export function checkActionShaPins(content: string): string[];
 export function checkNoTokenSecrets(content: string): string[];
 export function checkCheckoutPersistCredentials(content: string): string[];
+export function checkCancellationCoverage(testContent: string): string[];
 export function checkWindowsCancellationCoverage(testContent: string): string[];
 export function checkSupplyChainInvariants(root: string): { failures: number };
 
