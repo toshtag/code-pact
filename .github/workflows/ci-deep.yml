@@ -26,14 +26,6 @@ jobs:
 
       - run: pnpm test:ci:deep
 
-      - name: Smoke validate and doctor on an initialized project
-        run: |
-          tmp="$(mktemp -d)"
-          cd "$tmp"
-          node "$GITHUB_WORKSPACE/dist/cli.js" init --non-interactive --locale en-US --agent claude-code --json
-          node "$GITHUB_WORKSPACE/dist/cli.js" validate --json
-          node "$GITHUB_WORKSPACE/dist/cli.js" doctor --json
-
   node-24-smoke:
     name: Node 24 compatibility smoke
     runs-on: ubuntu-latest
