@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -9,6 +9,7 @@ import {
   runVerify,
   validateTimeoutMs,
 } from "../../../src/commands/verify.ts";
+import { terminateProcessTree } from "../../../src/core/process/bounded-command.ts";
 
 const ROADMAP = "phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 1\n";
 
@@ -267,4 +268,87 @@ describe("verification command process lifecycle", () => {
     await new Promise(resolve => setTimeout(resolve, 1_250));
     expect(existsSync(join(dir, "child-survived"))).toBe(false);
   }, 10_000);
+});
+
+describe("Windows process tree termination diagnostics", () => {
+  it("reports successful taskkill termination only after the root process exits", async () => {
+    const kill = vi.fn(() => true);
+    const result = await terminateProcessTree(
+      { pid: 1234, kill },
+      {
+        platform: "win32",
+        runTaskkill: async pid => ({ code: pid === 1234 ? 0 : 1 }),
+        waitForTargetExit: async target => target === 1234,
+      },
+    );
+
+    expect(result).toMatchObject({
+      attempted: true,
+      completed: true,
+      strategy: "taskkill",
+    });
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it("does not claim descendant cleanup when taskkill succeeds but the root remains", async () => {
+    const kill = vi.fn(() => true);
+    const result = await terminateProcessTree(
+      { pid: 1234, kill },
+      {
+        platform: "win32",
+        runTaskkill: async () => ({ code: 0 }),
+        waitForTargetExit: async () => false,
+      },
+    );
+
+    expect(result).toMatchObject({
+      attempted: true,
+      completed: false,
+      strategy: "taskkill",
+      error: "taskkill completed but the root process remained",
+    });
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a direct root kill when taskkill exits non-zero", async () => {
+    const kill = vi.fn(() => true);
+    const result = await terminateProcessTree(
+      { pid: 1234, kill },
+      {
+        platform: "win32",
+        runTaskkill: async () => ({ code: 5 }),
+        waitForTargetExit: async target => target === 1234,
+      },
+    );
+
+    expect(result).toMatchObject({
+      attempted: true,
+      completed: false,
+      strategy: "direct-kill",
+    });
+    expect(result.error).toContain("taskkill exited with code 5");
+    expect(result.error).toContain("descendant cleanup could not be confirmed");
+    expect(kill).toHaveBeenCalledWith("SIGKILL");
+  });
+
+  it("preserves taskkill timeout diagnostics when direct root kill is the fallback", async () => {
+    const kill = vi.fn(() => true);
+    const result = await terminateProcessTree(
+      { pid: 1234, kill },
+      {
+        platform: "win32",
+        runTaskkill: async () => ({ code: null, error: "taskkill timed out" }),
+        waitForTargetExit: async target => target === 1234,
+      },
+    );
+
+    expect(result).toMatchObject({
+      attempted: true,
+      completed: false,
+      strategy: "direct-kill",
+    });
+    expect(result.error).toContain("taskkill timed out");
+    expect(result.error).toContain("descendant cleanup could not be confirmed");
+    expect(kill).toHaveBeenCalledWith("SIGKILL");
+  });
 });

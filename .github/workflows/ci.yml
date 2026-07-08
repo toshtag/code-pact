@@ -132,8 +132,6 @@ jobs:
 
       - run: pnpm exec vitest run tests/unit/core/project-fs-authority-resolvers.test.ts tests/unit/commands/verify-process.test.ts
 
-      # Run timeout and abort integration tests on Windows to verify
-      # taskkill /T /F process-tree kill and fallback logic
-      - run: pnpm exec vitest run --config vitest.integration.config.ts -t "timeout"
-      - run: pnpm exec vitest run --config vitest.integration.config.ts -t "abort"
-      - run: pnpm exec vitest run --config vitest.integration.config.ts -t "SIGINT"
+      # Run the concrete timeout integration file on Windows. Avoid name filters:
+      # Vitest is configured with passWithNoTests, so a stale filter can pass empty.
+      - run: pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts

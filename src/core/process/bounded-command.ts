@@ -32,6 +32,15 @@ const CLOSE_DEADLINE_MS = 3_000;
 
 type CloseResult = { exitCode: number | null };
 type TerminationCause = "timeout" | "abort";
+type TaskkillResult = { code: number | null; error?: string };
+type KillProcess = (pid: number, signal?: NodeJS.Signals | number) => boolean;
+
+export type ProcessTerminationDependencies = {
+  platform?: NodeJS.Platform;
+  killProcess?: KillProcess;
+  waitForTargetExit?: (target: number, timeoutMs: number) => Promise<boolean>;
+  runTaskkill?: (pid: number) => Promise<TaskkillResult>;
+};
 
 function createOutputCapture(): {
   append: (chunk: Buffer) => void;
@@ -63,9 +72,9 @@ function elapsedSince(start: number): number {
   return Math.max(0, Math.round(performance.now() - start));
 }
 
-function processTargetExists(target: number): boolean {
+function processTargetExists(target: number, killProcess: KillProcess): boolean {
   try {
-    process.kill(target, 0);
+    killProcess(target, 0);
     return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM";
@@ -76,16 +85,20 @@ async function delay(ms: number): Promise<void> {
   await new Promise<void>(resolve => setTimeout(resolve, ms));
 }
 
-async function waitForTargetExit(target: number, timeoutMs: number): Promise<boolean> {
+async function waitForTargetExit(
+  target: number,
+  timeoutMs: number,
+  killProcess: KillProcess,
+): Promise<boolean> {
   const deadline = performance.now() + timeoutMs;
   while (performance.now() < deadline) {
-    if (!processTargetExists(target)) return true;
+    if (!processTargetExists(target, killProcess)) return true;
     await delay(40);
   }
-  return !processTargetExists(target);
+  return !processTargetExists(target, killProcess);
 }
 
-async function runTaskkill(pid: number): Promise<{ code: number | null; error?: string }> {
+async function runTaskkill(pid: number): Promise<TaskkillResult> {
   const taskkill = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
     stdio: "ignore",
     shell: false,
@@ -124,9 +137,18 @@ async function runTaskkill(pid: number): Promise<{ code: number | null; error?: 
   });
 }
 
-async function terminateProcessTree(proc: ChildProcess): Promise<ProcessTerminationResult> {
+export async function terminateProcessTree(
+  proc: Pick<ChildProcess, "pid" | "kill">,
+  deps: ProcessTerminationDependencies = {},
+): Promise<ProcessTerminationResult> {
   const started = performance.now();
   const pid = proc.pid;
+  const platform = deps.platform ?? process.platform;
+  const killProcess = deps.killProcess ?? (process.kill.bind(process) as KillProcess);
+  const waitExit =
+    deps.waitForTargetExit ??
+    ((target: number, timeoutMs: number) => waitForTargetExit(target, timeoutMs, killProcess));
+  const taskkill = deps.runTaskkill ?? runTaskkill;
   if (pid === undefined) {
     return {
       attempted: false,
@@ -137,10 +159,10 @@ async function terminateProcessTree(proc: ChildProcess): Promise<ProcessTerminat
     };
   }
 
-  if (process.platform !== "win32") {
+  if (platform !== "win32") {
     try {
-      process.kill(-pid, "SIGKILL");
-      const completed = await waitForTargetExit(-pid, TERMINATION_WAIT_MS);
+      killProcess(-pid, "SIGKILL");
+      const completed = await waitExit(-pid, TERMINATION_WAIT_MS);
       return {
         attempted: true,
         completed,
@@ -155,7 +177,7 @@ async function terminateProcessTree(proc: ChildProcess): Promise<ProcessTerminat
       } catch (directError) {
         error += `; direct kill failed: ${(directError as Error).message}`;
       }
-      await waitForTargetExit(pid, TERMINATION_WAIT_MS);
+      await waitExit(pid, TERMINATION_WAIT_MS);
       // A direct root-process kill cannot prove that descendants are gone.
       return {
         attempted: true,
@@ -167,9 +189,9 @@ async function terminateProcessTree(proc: ChildProcess): Promise<ProcessTerminat
     }
   }
 
-  const taskkillResult = await runTaskkill(pid);
+  const taskkillResult = await taskkill(pid);
   if (taskkillResult.code === 0) {
-    const completed = await waitForTargetExit(pid, TERMINATION_WAIT_MS);
+    const completed = await waitExit(pid, TERMINATION_WAIT_MS);
     return {
       attempted: true,
       completed,
@@ -188,7 +210,7 @@ async function terminateProcessTree(proc: ChildProcess): Promise<ProcessTerminat
   } catch (directError) {
     error += `; direct kill failed: ${(directError as Error).message}`;
   }
-  await waitForTargetExit(pid, TERMINATION_WAIT_MS);
+  await waitExit(pid, TERMINATION_WAIT_MS);
   // taskkill is the only built-in primitive here that can confirm a Windows
   // descendant-tree kill. Direct fallback bounds the root process but cannot
   // honestly claim that every descendant was removed.

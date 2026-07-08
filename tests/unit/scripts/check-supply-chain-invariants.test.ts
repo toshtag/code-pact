@@ -350,6 +350,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "      - run: pnpm check:toolchain-binaries",
     "      - run: pnpm build",
     "      - run: pnpm exec vitest run tests/unit/commands/verify-process.test.ts",
+    "      - run: pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts",
   ].join("\n");
 
   const wellFormedPackage = JSON.stringify(
@@ -440,6 +441,18 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     root = await buildTree();
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBe(0);
+    await cleanup();
+  });
+
+  it("fails when Windows process-control coverage uses a name filter", async () => {
+    root = await buildTree({
+      ciContent: wellFormedCi.replace(
+        "      - run: pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts",
+        '      - run: pnpm exec vitest run --config vitest.integration.config.ts -t "timeout"',
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
     await cleanup();
   });
 

@@ -1055,13 +1055,19 @@ export function checkSupplyChainInvariants(root) {
       if (windowsJob?.get("runs-on") === "windows-latest") {
         const scripts = collectRunScripts(ciDoc, "windows-process-control");
         if (
-          scripts.some(script => /pnpm check:toolchain-binaries/.test(script)) &&
-          scripts.some(script => /pnpm build/.test(script)) &&
-          scripts.some(script => /verify-process\.test\.ts/.test(script))
+          scripts.some(script => script.trim() === "pnpm check:toolchain-binaries") &&
+          scripts.some(script => script.trim() === "pnpm build") &&
+          scripts.some(script => /\btests\/unit\/commands\/verify-process\.test\.ts\b/.test(script)) &&
+          scripts.some(
+            script =>
+              script.trim() ===
+              "pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts",
+          ) &&
+          !scripts.some(script => /(?:^|\s)-t\s+|--testNamePattern\b/.test(script))
         ) {
-          pass("ci.yml: Windows job verifies toolchain, build, and process control");
+          pass("ci.yml: Windows job verifies toolchain, build, and process control without no-op test filters");
         } else {
-          fail("ci.yml: Windows job must verify toolchain, build, and process control");
+          fail("ci.yml: Windows job must verify toolchain, build, and concrete process-control tests without name filters");
         }
       } else {
         fail("ci.yml: windows-process-control must run on windows-latest");
