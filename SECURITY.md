@@ -125,9 +125,11 @@ Both are structural tripwires — exit 0 does not prove semantic invariants. The
 
 ### Dynamic generated-file handoff
 
-Dynamic skill files are generated with a `code-pact-` prefix (for example `.claude/skills/code-pact-verify-2.md`) within the shared `.claude/skills/` directory. The prefix is **not** strong provenance, and dynamic paths never become read authority.
+Dynamic skill files are generated with a `code-pact-` prefix (for example `.claude/skills/code-pact-verify-2.md`) within the shared `.claude/skills/` directory. The prefix is **not** strong provenance by itself; it marks a reserved dynamic namespace that is combined with manifest state and hash checks for limited lifecycle decisions.
 
-The adapter treats dynamic files as create-once. If code-pact creates the file, the manifest records `ownership: handed_off`; later doctor/conformance paths do not read, hash, update, prune, or repeatedly warn on that file. If a dynamic file already exists without a handoff manifest entry, install/upgrade preserve it with `dynamic_file_unverifiable`, and diagnostics may warn, but they still never read or hash the bytes.
+The adapter treats desired dynamic files as create-once. If code-pact creates the file, the manifest records `ownership: handed_off`; later install/upgrade/doctor/conformance paths do not read, hash, or overwrite existing dynamic bytes. They may compare the manifest's recorded sha256 with the current desired content hash and warn if a handed-off dynamic file is stale or no longer generated. If a dynamic file already exists without a handoff manifest entry, install/upgrade preserve it with `dynamic_file_unverifiable`, and diagnostics may warn, but they still never read or hash the bytes.
+
+Orphan cleanup is the narrow exception. A manifest-tracked dynamic orphan may be read/hashed and auto-pruned only when all of these hold: `managed: true`, `ownership: handed_off`, the path is inside the reserved dynamic namespace, and the on-disk bytes still match the manifest hash. A modified handoff orphan is refused and preserved. Legacy dynamic files generated before the reserved prefix existed remain warn-only/manual-removal because their shared-namespace paths cannot distinguish code-pact output from hand-authored skills.
 
 ## Known technical debt
 

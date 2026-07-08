@@ -1154,9 +1154,15 @@ fingerprint of the adapter-output-affecting profile fields. The manifest is the 
 truth for `adapter upgrade` / `adapter doctor`. Schema is documented in
 `src/core/schemas/adapter-manifest.ts`; see `RelativePosixPath` for the path-safety rules
 (no `..`, no leading `/` or `~`, no `\`, no Windows drive letters, no `.` segments).
-Dynamic create-only files may carry `ownership: handed_off`: code-pact created the file once,
-then treats it as user-owned. Later runs do not read, hash, update, prune, or repeatedly warn on
-that file. The `code-pact-*` filename prefix is a naming convention, not provenance.
+Dynamic create-only files may carry `ownership: handed_off`: code-pact created
+the file once, then treats the existing desired path as user-owned. Normal
+install/upgrade/doctor/conformance runs do not read, hash, or overwrite existing
+dynamic bytes; they compare only manifest hashes to current desired hashes.
+Orphan pruning is the one narrow exception: a manifest-tracked orphan may be
+read/hashed and pruned only when `managed: true`, `ownership: handed_off`, the
+path is inside the adapter's reserved dynamic namespace, and the bytes still
+match the manifest hash. The `code-pact-*` filename prefix alone is not
+provenance; it is only one part of that prune authority.
 
 ### `--force` semantics — narrowed in v0.9
 
