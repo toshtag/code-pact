@@ -10,6 +10,8 @@
 import { parseArgs } from "node:util";
 import { strictParse, ConfigError } from "../../lib/argv.ts";
 import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
+import { toParseOptions } from "../spec/render.ts";
+import { PLAN_SPECS } from "../spec/plan.ts";
 import { cmdPhaseImport } from "./phase.ts";
 import { withWriteLock, emitOk, emitError } from "../util.ts";
 import { isInteractive } from "../../lib/tty.ts";
@@ -127,15 +129,7 @@ async function cmdPlanBrief(
   const m = messages[locale];
   const { values } = parseArgs({
     args: argv,
-    options: {
-      force: { type: "boolean" },
-      json: { type: "boolean" },
-      "from-file": { type: "string" },
-      stdin: { type: "boolean" },
-      what: { type: "string" },
-      who: { type: "string" },
-      differentiator: { type: "string" },
-    },
+    options: toParseOptions(PLAN_SPECS.brief),
     strict: false,
     allowPositionals: false,
   });
@@ -261,11 +255,7 @@ async function cmdPlanPrompt(
   const m = messages[locale];
   const { values } = parseArgs({
     args: argv,
-    options: {
-      clipboard: { type: "boolean" },
-      "schema-only": { type: "boolean" },
-      json: { type: "boolean" },
-    },
+    options: toParseOptions(PLAN_SPECS.prompt),
     strict: false,
     allowPositionals: false,
   });
@@ -316,11 +306,7 @@ async function cmdPlanAdopt(argv: string[], globalJson: boolean): Promise<number
     ({ values, positionals } = strictParse(
       "plan adopt",
       argv,
-      {
-        write: { type: "boolean" },
-        "scaffold-decisions": { type: "boolean" },
-        json: { type: "boolean" },
-      },
+      toParseOptions(PLAN_SPECS.adopt),
       { allowPositionals: true },
     ));
   } catch (err) {
@@ -408,14 +394,7 @@ async function cmdPlanConstitution(
   const m = messages[locale];
   const { values } = parseArgs({
     args: argv,
-    options: {
-      force: { type: "boolean" },
-      json: { type: "boolean" },
-      "from-file": { type: "string" },
-      stdin: { type: "boolean" },
-      description: { type: "string" },
-      principle: { type: "string", multiple: true },
-    },
+    options: toParseOptions(PLAN_SPECS.constitution),
     strict: false,
     allowPositionals: false,
   });
@@ -533,11 +512,7 @@ async function cmdPlanLint(
   void locale;
   const { values } = parseArgs({
     args: argv,
-    options: {
-      json: { type: "boolean" },
-      strict: { type: "boolean" },
-      "include-quality": { type: "boolean" },
-    },
+    options: toParseOptions(PLAN_SPECS.lint),
     strict: false,
   });
   const json = globalJson || values.json === true;
@@ -582,11 +557,7 @@ async function cmdPlanNormalize(
   void locale;
   const { values } = parseArgs({
     args: argv,
-    options: {
-      json: { type: "boolean" },
-      check: { type: "boolean" },
-      write: { type: "boolean" },
-    },
+    options: toParseOptions(PLAN_SPECS.normalize),
     strict: false,
   });
   const json = globalJson || values.json === true;
@@ -680,11 +651,7 @@ async function cmdPlanAnalyze(
   void locale;
   const { values } = parseArgs({
     args: argv,
-    options: {
-      json: { type: "boolean" },
-      strict: { type: "boolean" },
-      "include-historical": { type: "boolean" },
-    },
+    options: toParseOptions(PLAN_SPECS.analyze),
     strict: false,
   });
   const json = globalJson || values.json === true;
@@ -733,7 +700,7 @@ async function cmdPlanMigrate(
   void locale;
   const { values } = parseArgs({
     args: argv,
-    options: { json: { type: "boolean" }, write: { type: "boolean" } },
+    options: toParseOptions(PLAN_SPECS.migrate),
     strict: false,
   });
   const json = globalJson || values.json === true;
@@ -793,11 +760,11 @@ async function cmdPlanSyncPaths(
     // positional must fail loudly. Silently degrading to dry-run would defeat a
     // command whose whole job is to fix a CI failure — the user would think
     // they wrote and see exit 0.
-    ({ values } = strictParse("plan sync-paths", argv, {
-      json: { type: "boolean" },
-      write: { type: "boolean" },
-      rename: { type: "string", multiple: true },
-    }));
+    ({ values } = strictParse(
+      "plan sync-paths",
+      argv,
+      toParseOptions(PLAN_SPECS["sync-paths"]),
+    ));
   } catch (err) {
     if (!(err instanceof ConfigError)) throw err;
     emitError(globalJson || argv.includes("--json"), "CONFIG_ERROR", err.message);

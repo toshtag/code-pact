@@ -4,6 +4,7 @@
 // These helpers let each cluster emit usage (exit 0) instead.
 
 import { renderLeafHelp } from "./spec/render.ts";
+import { PLAN_SPECS } from "./spec/plan.ts";
 import { TASK_SPECS } from "./spec/task.ts";
 
 /** The subcommand list shown for each cluster, mirroring the unknown-subcommand hints. */
@@ -63,146 +64,23 @@ const LEAF_USAGE: Record<string, () => string> = {
 
   "task finalize": () => renderLeafHelp(TASK_SPECS.finalize!),
 
-  "plan prompt": () =>
-    [
-      "Usage: code-pact plan prompt [options]",
-      "",
-      "Emit a planning prompt that asks an agent to produce a code-pact roadmap",
-      "YAML. By default it embeds design/brief.md and design/constitution.md; in",
-      "--schema-only mode it emits just the YAML format example and output rules",
-      "for agents that already hold the project context.",
-      "",
-      "Options:",
-      "  --schema-only    Emit only the format example + output rules (no brief/constitution).",
-      "  --clipboard      Copy the prompt to the system clipboard.",
-      "  --json           Emit JSON.",
-      "",
-      "Examples:",
-      "  code-pact plan prompt --schema-only",
-      "  code-pact plan prompt --clipboard",
-    ].join("\n"),
+  "plan brief": () => renderLeafHelp(PLAN_SPECS.brief),
 
-  "plan brief": () =>
-    [
-      "Usage: code-pact plan brief [options]",
-      "",
-      "Write design/brief.md from a structured brief. Mutating — creates the file",
-      "(use --force to overwrite an existing brief). Three mutually-exclusive input",
-      "modes: --from-file <path>, --stdin, or the inline --what/--who/--differentiator",
-      "trio.",
-      "",
-      "Options:",
-      "  --from-file <path>      Read the brief YAML from a file.",
-      "  --stdin                 Read the brief YAML from stdin.",
-      "  --what <text>           Inline mode: what the project is.",
-      "  --who <text>            Inline mode: who it is for.",
-      "  --differentiator <text> Inline mode: what makes it different.",
-      "  --force                 Overwrite an existing design/brief.md.",
-      "  --json                  Emit JSON.",
-      "",
-      "Examples:",
-      "  code-pact plan brief --from-file brief.yaml --json",
-      "  code-pact plan brief --what \"...\" --who \"...\" --differentiator \"...\" --json",
-    ].join("\n"),
+  "plan prompt": () => renderLeafHelp(PLAN_SPECS.prompt),
 
-  "plan constitution": () =>
-    [
-      "Usage: code-pact plan constitution [options]",
-      "",
-      "Write design/constitution.md from a description + principles. Mutating —",
-      "creates the file (use --force to overwrite). Three mutually-exclusive input",
-      "modes: --from-file <path>, --stdin, or inline --description plus repeatable",
-      "--principle.",
-      "",
-      "Options:",
-      "  --from-file <path>    Read the constitution YAML from a file.",
-      "  --stdin               Read the constitution YAML from stdin.",
-      "  --description <text>  Inline mode: the constitution's framing description.",
-      "  --principle <text>    Inline mode: one principle. Repeatable.",
-      "  --force               Overwrite an existing design/constitution.md.",
-      "  --json                Emit JSON.",
-      "",
-      "Examples:",
-      "  code-pact plan constitution --from-file constitution.yaml --json",
-      "  code-pact plan constitution --description \"...\" --principle \"...\" --principle \"...\" --json",
-    ].join("\n"),
+  "plan adopt": () => renderLeafHelp(PLAN_SPECS.adopt),
 
-  "plan adopt": () =>
-    [
-      "Usage: code-pact plan adopt <file> [options]",
-      "",
-      "Adopt an existing roadmap/spec draft into the code-pact control plane.",
-      "Dry-run is the default — pass --write to apply. Mutating only with --write.",
-      "",
-      "Options:",
-      "  --write                Apply the adoption (default is a dry-run preview).",
-      "  --scaffold-decisions   Scaffold a `proposed` ADR stub for each requires_decision task.",
-      "  --json                 Emit JSON.",
-      "",
-      "Examples:",
-      "  code-pact plan adopt design/roadmap-draft.yaml --json",
-      "  code-pact plan adopt design/roadmap-draft.yaml --write --json",
-    ].join("\n"),
+  "plan constitution": () => renderLeafHelp(PLAN_SPECS.constitution),
 
-  "plan normalize": () =>
-    [
-      "Usage: code-pact plan normalize [options]",
-      "",
-      "Rewrite roadmap/phase YAML into canonical form (stable key order, defaults",
-      "applied). Without --write it runs in check mode (reports what would change,",
-      "writes nothing, exits non-zero if anything is not already normalized); pass",
-      "--write to apply. Mutating only with --write. --check and --write are",
-      "mutually exclusive.",
-      "",
-      "Options:",
-      "  --write    Apply the normalization.",
-      "  --check    Check mode (the default): report drift, write nothing.",
-      "  --json     Emit JSON.",
-      "",
-      "Examples:",
-      "  code-pact plan normalize --json          # check mode (default)",
-      "  code-pact plan normalize --write --json  # apply",
-    ].join("\n"),
+  "plan lint": () => renderLeafHelp(PLAN_SPECS.lint),
 
-  "plan sync-paths": () =>
-    [
-      "Usage: code-pact plan sync-paths --rename <old>=<new> [options]",
-      "",
-      "Apply an explicit old=new path rename to the reads/writes of every phase",
-      "task, so renaming or merging a source file referenced by a (often",
-      "historical) phase does not leave plan lint's reads-match invariant to be",
-      "fixed by hand. Dry-run by default; pass --write to apply (under the write",
-      "lock). Repeat --rename for multiple renames; duplicate entries a rename",
-      "introduces are collapsed.",
-      "",
-      "Options:",
-      "  --rename <old>=<new>  Map an exact reads/writes entry to a new path (repeatable).",
-      "  --write               Apply the changes (default is a non-destructive preview).",
-      "  --json                Emit JSON.",
-      "",
-      "Examples:",
-      "  code-pact plan sync-paths --rename src/a.ts=src/b.ts --json          # preview",
-      "  code-pact plan sync-paths --rename src/a.ts=src/b.ts --write --json  # apply",
-    ].join("\n"),
+  "plan normalize": () => renderLeafHelp(PLAN_SPECS.normalize),
 
-  "plan migrate": () =>
-    [
-      "Usage: code-pact plan migrate [options]",
-      "",
-      "Convert a legacy monolithic .code-pact/state/progress.yaml into the",
-      "per-event ledger (one file per event under .code-pact/state/events/).",
-      "Idempotent and dry-run by default; progress.yaml is left in place (readers",
-      "merge it). Reports any task whose derived state changes under the merged",
-      "(at, id) ordering, so review those before committing.",
-      "",
-      "Options:",
-      "  --write    Write the event files (default: dry run).",
-      "  --json     Emit JSON.",
-      "",
-      "Examples:",
-      "  code-pact plan migrate --json          # dry run",
-      "  code-pact plan migrate --write --json  # migrate",
-    ].join("\n"),
+  "plan analyze": () => renderLeafHelp(PLAN_SPECS.analyze),
+
+  "plan sync-paths": () => renderLeafHelp(PLAN_SPECS["sync-paths"]),
+
+  "plan migrate": () => renderLeafHelp(PLAN_SPECS.migrate),
 
   "phase import": () =>
     [
