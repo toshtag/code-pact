@@ -32,11 +32,9 @@
 
 ## Test plan
 
-- [ ] `pnpm typecheck`
-- [ ] `pnpm test:unit`
-- [ ] `pnpm test:integration`
-- [ ] `pnpm build`
-- [ ] Relevant `code-pact` self-checks (typically `plan lint --include-quality --strict --json`, `plan analyze --strict --json`, `validate --json`, `doctor --json` — pick the subset that applies)
+- [ ] Normal PR gate: `pnpm test:ci`
+- [ ] High-risk / release / security / process-control changes: `pnpm test:ci:deep`
+- [ ] Targeted tests relevant to the changed surface
 
 ## Contract checklist
 
