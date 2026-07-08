@@ -162,7 +162,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "      published_now: ${{ steps.publish.outputs.published_now }}",
     "    steps:",
     "      - name: Download release artifact",
-    "        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0",
+    "        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
     "        with:",
     "          name: release-artifact",
     "          path: release-artifact",
@@ -249,7 +249,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          fetch-depth: 1",
     "          persist-credentials: false",
     "      - name: Download release artifact",
-    "        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0",
+    "        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
     "        with:",
     "          name: release-artifact",
     "          path: release-artifact",
@@ -268,12 +268,12 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "      contents: write",
     "    steps:",
     "      - name: Download release artifact",
-    "        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0",
+    "        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
     "        with:",
     "          name: release-artifact",
     "          path: release-artifact",
     "      - name: Download integrity artifact",
-    "        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0",
+    "        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
     "        with:",
     "          name: release-integrity",
     "          path: release-integrity",
@@ -591,8 +591,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when publish job has checkout", async () => {
     root = await buildTree({
       publishContent: wellFormedPublish.replace(
-        "      - name: Download release artifact\n        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0",
-        "      - name: Checkout\n        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2\n        with:\n          persist-credentials: false\n      - name: Download release artifact\n        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0",
+        "      - name: Download release artifact\n        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
+        "      - name: Checkout\n        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2\n        with:\n          persist-credentials: false\n      - name: Download release artifact\n        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1",
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);
@@ -663,8 +663,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when github-release job has checkout", async () => {
     root = await buildTree({
       publishContent: wellFormedPublish.replace(
-        "      - name: Download release artifact\n        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0\n        with:\n          name: release-artifact\n          path: release-artifact\n      - name: Download integrity artifact",
-        "      - name: Checkout\n        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2\n        with:\n          persist-credentials: false\n      - name: Download release artifact\n        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0\n        with:\n          name: release-artifact\n          path: release-artifact\n      - name: Download integrity artifact",
+        "      - name: Download release artifact\n        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n        with:\n          name: release-artifact\n          path: release-artifact\n      - name: Download integrity artifact",
+        "      - name: Checkout\n        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2\n        with:\n          persist-credentials: false\n      - name: Download release artifact\n        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n        with:\n          name: release-artifact\n          path: release-artifact\n      - name: Download integrity artifact",
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);
@@ -911,8 +911,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when download-artifact uses pattern: *", async () => {
     root = await buildTree({
       publishContent: wellFormedPublish.replace(
-        "      - name: Download release artifact\n        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0\n        with:\n          name: release-artifact\n          path: release-artifact\n      - name: Set up Node",
-        '      - name: Download release artifact\n        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0\n        with:\n          pattern: "*"\n          merge-multiple: true\n          path: release-artifact\n      - name: Set up Node',
+        "      - name: Download release artifact\n        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n        with:\n          name: release-artifact\n          path: release-artifact\n      - name: Set up Node",
+        '      - name: Download release artifact\n        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n        with:\n          pattern: "*"\n          merge-multiple: true\n          path: release-artifact\n      - name: Set up Node',
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);

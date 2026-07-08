@@ -80,7 +80,7 @@ export const EXPECTED_CANONICAL_JOBS = {
     steps: [
       {
         name: "Download release artifact",
-        uses: "actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0",
+        uses: "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         with: { name: "release-artifact", path: "release-artifact" },
       },
       {
@@ -111,12 +111,12 @@ export const EXPECTED_CANONICAL_JOBS = {
     steps: [
       {
         name: "Download release artifact",
-        uses: "actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0",
+        uses: "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         with: { name: "release-artifact", path: "release-artifact" },
       },
       {
         name: "Download integrity artifact",
-        uses: "actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0",
+        uses: "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         with: { name: "release-integrity", path: "release-integrity" },
       },
       {
