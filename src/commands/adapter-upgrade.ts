@@ -370,13 +370,17 @@ export async function runAdapterUpgrade(
       // dynamic file is preserved (warn) — not refused — so the rest of the
       // upgrade can proceed (static writes, model pin, manifest refresh).
       if (await authorizedPathExists(authority.absPath, desired.path)) {
-        if (manifestEntry?.ownership === "handed_off") {
+        if (
+          manifestEntry?.ownership === "handed_off" &&
+          manifestHash === desiredHash
+        ) {
           local = "managed-clean";
           desiredState = "current";
           action = "skip";
         } else {
           local = "unverifiable";
-          desiredState = "unverifiable";
+          desiredState =
+            manifestEntry?.ownership === "handed_off" ? "stale" : "unverifiable";
           action = "warn";
           reason = "dynamic_file_unverifiable";
         }

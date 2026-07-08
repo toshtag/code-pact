@@ -1384,6 +1384,14 @@ An unowned orphan is not statted, read, or hashed; its plan state is always
 `local: "unverifiable"`, whether the target is present, missing, hash-matching,
 or divergent.
 
+For `claude-code`, `.claude/skills/code-pact-*.md` is the reserved dynamic
+namespace for code-pact-generated verification-command skills. User-authored
+skills should not use that prefix. Legacy dynamic skills generated before the
+reserved prefix existed remain in the shared `.claude/skills/*.md` namespace;
+they are intentionally warn-only/manual-removal orphans rather than
+auto-pruned, because their path alone cannot distinguish code-pact output from
+hand-authored skills.
+
 ```json
 {
   "ok": true,

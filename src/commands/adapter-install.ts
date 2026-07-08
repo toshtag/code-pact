@@ -368,7 +368,10 @@ export async function runAdapterInstall(
       // dynamic file is preserved (warn) — not refused — so the rest of the
       // install can proceed (static writes, model pin, manifest).
       if (await authorizedPathExists(authority.absPath, desired.path)) {
-        if (manifestEntry?.ownership === "handed_off") {
+        if (
+          manifestEntry?.ownership === "handed_off" &&
+          manifestHash === desiredHash
+        ) {
           action = "skip";
         } else {
           action = "warn";

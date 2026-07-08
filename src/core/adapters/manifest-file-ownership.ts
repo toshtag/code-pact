@@ -135,8 +135,10 @@ export async function authorizeAdapterOrphanPrunePath(
   cwd: string,
   descriptor: AdapterDescriptor,
   relPath: string,
-  entry: Pick<ManifestFile, "role" | "ownership">,
+  entry: Pick<ManifestFile, "managed" | "role" | "ownership">,
 ): Promise<AdapterOrphanPruneAuthority> {
+  if (entry.managed !== true) return { kind: "unowned" };
+
   const staticRole = descriptor.ownedPathRoles[relPath];
   if (staticRole !== undefined) {
     if (staticRole !== entry.role) return { kind: "unowned" };

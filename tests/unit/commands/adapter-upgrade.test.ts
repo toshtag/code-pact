@@ -25,6 +25,7 @@ import {
   manifestPath,
 } from "../../../src/core/adapters/manifest.ts";
 import type { AdapterManifest } from "../../../src/core/schemas/adapter-manifest.ts";
+import { createPhase } from "../../../src/core/services/createPhase.ts";
 
 let dir: string;
 
@@ -1051,6 +1052,38 @@ describe("adapter upgrade — orphan handling", () => {
     expect(m.files.some(f => f.path === orphan)).toBe(false);
   });
 
+  it("does NOT prune a reserved handoff orphan when the manifest marks it unmanaged", async () => {
+    const orphan = ".claude/skills/code-pact-old-renamed-skill.md";
+    const content = "# /code-pact-old-renamed-skill\n\nRuns: pnpm old\n";
+    await writeFile(join(dir, orphan), content, "utf8");
+    const m = await readManifestMut();
+    m.files.push({
+      path: orphan,
+      sha256: computeContentHash(content),
+      managed: false,
+      role: "skill",
+      ownership: "handed_off",
+    });
+    await writeManifest(dir, "claude-code", m);
+
+    const result = await runAdapterUpgrade({
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "write",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+
+    const entry = result.plan.find(p => p.relPath === orphan)!;
+    expect(entry.action).toBe("warn");
+    expect(entry.reason).toBe("unowned_orphan_not_pruned");
+    expect(existsSync(join(dir, orphan))).toBe(true);
+    const after = await readManifestMut();
+    expect(after.files.find(f => f.path === orphan)?.managed).toBe(false);
+  });
+
   it("refuses a modified reserved dynamic handoff orphan and preserves its manifest ownership", async () => {
     const orphan = ".claude/skills/code-pact-old-renamed-skill.md";
     await seedOrphan(
@@ -1210,6 +1243,53 @@ describe("adapter upgrade — orphan handling", () => {
     expect(second.clean).toBe(false);
     expect(second.plan.find(p => p.relPath === orphan)!.action).toBe("warn");
     expect(existsSync(join(dir, orphan))).toBe(true);
+  });
+});
+
+describe("adapter upgrade — dynamic handoff drift", () => {
+  beforeEach(async () => {
+    const phase = await createPhase({
+      cwd: dir,
+      id: "P1",
+      name: "Deploy",
+      weight: 1,
+      objective: "Exercise dynamic skill drift.",
+      confidence: "high",
+      risk: "low",
+      verifyCommands: ["pnpm deploy"],
+    });
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+    const phasePath = join(dir, phase.path);
+    const raw = await readFile(phasePath, "utf8");
+    await writeFile(phasePath, raw.replace("pnpm deploy", "npm deploy"), "utf8");
+  });
+
+  it("--check does not treat a handed-off dynamic skill as current when desired content changes", async () => {
+    const result = await runAdapterUpgrade({
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "check",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
+    });
+
+    const entry = result.plan.find(
+      p => p.relPath === ".claude/skills/code-pact-deploy.md",
+    )!;
+    expect(entry).toMatchObject({
+      local: "unverifiable",
+      desired: "stale",
+      action: "warn",
+      reason: "dynamic_file_unverifiable",
+    });
+    expect(result.clean).toBe(false);
   });
 });
 

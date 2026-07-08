@@ -23,6 +23,7 @@ import {
 } from "../../../src/core/adapters/manifest.ts";
 import { ADAPTER_MANIFEST_DIR_SEGMENTS } from "../../../src/core/adapters/manifest.ts";
 import type { AdapterManifest } from "../../../src/core/schemas/adapter-manifest.ts";
+import { createPhase } from "../../../src/core/services/createPhase.ts";
 
 const { readFileSpy } = vi.hoisted(() => ({ readFileSpy: vi.fn() }));
 
@@ -313,7 +314,7 @@ describe("adapter doctor — forged manifest .env oracle (security)", () => {
     expect(JSON.stringify(result)).not.toContain("doctor-private-marker");
   });
 
-  it("does not warn or read handed-off dynamic manifest entries", async () => {
+  it("warns but does not read a handed-off dynamic entry that is no longer generated", async () => {
     await mkdir(join(dir, ".claude", "skills"), { recursive: true });
     const dynamicPath = join(dir, ".claude", "skills", "code-pact-private.md");
     await writeFile(dynamicPath, "API_TOKEN=doctor-handed-off-marker\n", "utf8");
@@ -329,11 +330,43 @@ describe("adapter doctor — forged manifest .env oracle (security)", () => {
 
     readFileSpy.mockClear();
     const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
-    expect(result.issues.some(i => i.path === dynamicPath)).toBe(false);
+    const issue = result.issues.find(i => i.path === dynamicPath);
+    expect(issue).toMatchObject({
+      code: "ADAPTER_FILE_UNVERIFIABLE",
+      severity: "warning",
+    });
     expect(
       readFileSpy.mock.calls.some(([path]) => String(path) === dynamicPath),
     ).toBe(false);
     expect(JSON.stringify(result)).not.toContain("doctor-handed-off-marker");
+  });
+
+  it("does not warn or read a current handed-off dynamic manifest entry", async () => {
+    await createPhase({
+      cwd: dir,
+      id: "P1",
+      name: "Deploy",
+      weight: 1,
+      objective: "Exercise dynamic doctor checks.",
+      confidence: "high",
+      risk: "low",
+      verifyCommands: ["pnpm deploy"],
+    });
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+    const dynamicPath = join(dir, ".claude", "skills", "code-pact-deploy.md");
+
+    readFileSpy.mockClear();
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.issues.some(i => i.path === dynamicPath)).toBe(false);
+    expect(
+      readFileSpy.mock.calls.some(([path]) => String(path) === dynamicPath),
+    ).toBe(false);
   });
 
   // A `.claude/skills/code-pact-private.md` forged with role: instruction is
