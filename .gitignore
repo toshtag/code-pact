@@ -38,6 +38,7 @@ build/
 /AGENTS.md
 /GEMINI.md
 /.claude/
+/.codex/
 /.cursor/
 
 # Generated context inside test fixtures (written by pack tests)

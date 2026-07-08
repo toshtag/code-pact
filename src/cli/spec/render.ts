@@ -26,7 +26,10 @@ export function toParseOptions(spec: CommandSpec): ParseArgsOptions {
 
 /** The Usage synopsis line, e.g. "Usage: code-pact task prepare <task-id> [options]". */
 function usageLine(spec: CommandSpec): string {
-  const parts = ["Usage: code-pact", spec.cluster, spec.command];
+  const parts =
+    spec.cluster === "root"
+      ? ["Usage: code-pact", spec.command]
+      : ["Usage: code-pact", spec.cluster, spec.command];
   if (spec.positional) parts.push(spec.positional);
   parts.push("[options]");
   return parts.join(" ");
@@ -77,11 +80,13 @@ export function renderLeafHelp(spec: CommandSpec): string {
  */
 export function renderReference(spec: CommandSpec): string {
   const out: string[] = [];
-  out.push(`## \`${spec.cluster} ${spec.command}\``, "");
+  const commandLabel =
+    spec.cluster === "root" ? spec.command : `${spec.cluster} ${spec.command}`;
+  out.push(`## \`${commandLabel}\``, "");
 
   const synopsis = spec.positional
-    ? `\`code-pact ${spec.cluster} ${spec.command} ${spec.positional} [options]\``
-    : `\`code-pact ${spec.cluster} ${spec.command} [options]\``;
+    ? `\`code-pact ${commandLabel} ${spec.positional} [options]\``
+    : `\`code-pact ${commandLabel} [options]\``;
   out.push(synopsis, "");
 
   const summary = spec.readOnly

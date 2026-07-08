@@ -1,40 +1,52 @@
 import { loadPhase } from "../core/plan/load-phase.ts";
-import { spawn } from "node:child_process";
+import {
+  runBoundedCommand,
+  type CommandExecutionResult,
+  type ProcessTerminationResult,
+} from "../core/process/bounded-command.ts";
 import { resolvePhaseInRoadmap } from "../core/plan/resolve-phase.ts";
-import { Phase } from "../core/schemas/phase.ts";
-import { Task } from "../core/schemas/task.ts";
-import { ProgressLog } from "../core/schemas/progress-event.ts";
+import type { Phase } from "../core/schemas/phase.ts";
+import type { Task } from "../core/schemas/task.ts";
+import type { ProgressLog } from "../core/schemas/progress-event.ts";
 import { loadMergedProgress } from "../core/progress/io.ts";
 import {
   resolveDecisionGate,
   isDecisionRequiredForTask,
   type DecisionResolution,
 } from "../core/decisions/adr.ts";
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+import {
+  DEFAULT_COMMAND_TIMEOUT_MS,
+  MAX_TIMEOUT_MS,
+  validateTimeoutMs,
+} from "../lib/timeout.ts";
 
 export type VerifyOptions = {
   cwd: string;
   phaseId: string;
   taskId: string;
   dryRun: boolean;
-  /**
-   * When true, skip the `progress_event` and `task_status` checks.
-   * Used by `task complete` to evaluate the deterministic preconditions
-   * (commands, decision) without requiring the state that task complete
-   * is itself about to produce.
-   */
+  /** Per-command timeout in milliseconds. Defaults to five minutes. */
+  timeoutMs?: number;
+  /** Cancels the active verification command and prevents later checks. */
+  signal?: AbortSignal;
+  /** Skip checks for state that `task complete` is about to create. */
   skipConsistencyChecks?: boolean;
 };
+
+export type { CommandExecutionResult, ProcessTerminationResult };
 
 export type CheckResult = {
   name: string;
   ok: boolean;
   reason?: string;
+  command?: string;
   stdout?: string;
   stderr?: string;
+  timedOut?: boolean;
+  aborted?: boolean;
+  exitCode?: number | null;
+  elapsedMs?: number;
+  commands?: CommandExecutionResult[];
 };
 
 export type VerifyResult = {
@@ -42,146 +54,133 @@ export type VerifyResult = {
   checks: CheckResult[];
 };
 
-// ---------------------------------------------------------------------------
-// Loaders
-// ---------------------------------------------------------------------------
+export { DEFAULT_COMMAND_TIMEOUT_MS, MAX_TIMEOUT_MS, validateTimeoutMs };
+
+export function createAbortError(): Error {
+  const error = new Error("Operation aborted");
+  (error as NodeJS.ErrnoException).code = "ABORTED";
+  return error;
+}
+
+export function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw createAbortError();
+}
 
 async function loadProgressLog(cwd: string): Promise<ProgressLog> {
   return (await loadMergedProgress(cwd)).log;
-}
-
-// ---------------------------------------------------------------------------
-// Individual checks
-// ---------------------------------------------------------------------------
-
-type CommandRun = { exitCode: number; stdout: string; stderr: string };
-
-const MAX_COMMAND_OUTPUT_BYTES = 1_048_576;
-const TRUNCATED_OUTPUT_MESSAGE = `\n[code-pact: output truncated after ${MAX_COMMAND_OUTPUT_BYTES} bytes]\n`;
-
-function createOutputCapture(): { append: (chunk: Buffer) => void; value: () => string } {
-  let text = "";
-  let bytes = 0;
-  let truncated = false;
-
-  return {
-    append(chunk: Buffer): void {
-      if (truncated) return;
-
-      const remaining = MAX_COMMAND_OUTPUT_BYTES - bytes;
-      if (chunk.byteLength <= remaining) {
-        text += chunk.toString();
-        bytes += chunk.byteLength;
-        return;
-      }
-
-      if (remaining > 0) {
-        text += chunk.subarray(0, remaining).toString();
-      }
-      text += TRUNCATED_OUTPUT_MESSAGE;
-      bytes = MAX_COMMAND_OUTPUT_BYTES;
-      truncated = true;
-    },
-    value(): string {
-      return text;
-    },
-  };
-}
-
-function runCommand(cmd: string, cwd: string): Promise<CommandRun> {
-  return new Promise((resolve) => {
-    const shellCommand = cmd.trim();
-    if (!shellCommand) {
-      resolve({ exitCode: 1, stdout: "", stderr: "empty verification command" });
-      return;
-    }
-
-    const proc = spawn(shellCommand, {
-      cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: true,
-    });
-    const stdout = createOutputCapture();
-    const stderr = createOutputCapture();
-    proc.stdout?.on("data", (chunk: Buffer) => {
-      stdout.append(chunk);
-    });
-    proc.stderr?.on("data", (chunk: Buffer) => {
-      stderr.append(chunk);
-    });
-    proc.on("close", (code) =>
-      resolve({ exitCode: code ?? 1, stdout: stdout.value(), stderr: stderr.value() }),
-    );
-    proc.on("error", () =>
-      resolve({ exitCode: 1, stdout: stdout.value(), stderr: stderr.value() }),
-    );
-  });
 }
 
 async function checkCommands(
   commands: string[],
   cwd: string,
   dryRun: boolean,
+  timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<CheckResult> {
+  const commandResults: CommandExecutionResult[] = [];
+
   if (dryRun) {
+    for (const command of commands) {
+      commandResults.push({
+        command,
+        ok: true,
+        exitCode: null,
+        timedOut: false,
+        aborted: false,
+        elapsedMs: 0,
+        stdout: "",
+        stderr: "",
+      });
+    }
     return {
       name: "commands",
       ok: true,
       reason: `dry-run: would execute: ${commands.join(", ")}`,
+      command: commands.join("; "),
+      timedOut: false,
+      aborted: false,
+      exitCode: null,
+      elapsedMs: 0,
+      stdout: "",
+      stderr: "",
+      commands: commandResults,
     };
   }
 
-  for (const cmd of commands) {
-    const { exitCode, stdout, stderr } = await runCommand(cmd, cwd);
-    if (exitCode !== 0) {
+  let totalElapsedMs = 0;
+  for (const command of commands) {
+    const run = await runBoundedCommand(command, cwd, timeoutMs, signal);
+    const result: CommandExecutionResult = {
+      command,
+      ok: !run.timedOut && !run.aborted && run.exitCode === 0,
+      ...run,
+    };
+    commandResults.push(result);
+    totalElapsedMs += run.elapsedMs;
+
+    if (!result.ok) {
+      const reason = result.aborted
+        ? `"${command}" was aborted`
+        : result.timedOut
+          ? `"${command}" timed out after ${timeoutMs} ms`
+          : result.exitCode === null
+            ? `"${command}" failed to start`
+            : `"${command}" exited with code ${result.exitCode}`;
       return {
         name: "commands",
         ok: false,
-        reason: `"${cmd}" exited with code ${exitCode}`,
-        ...(stdout && { stdout }),
-        ...(stderr && { stderr }),
+        reason,
+        command,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        timedOut: result.timedOut,
+        aborted: result.aborted,
+        exitCode: result.exitCode,
+        elapsedMs: totalElapsedMs,
+        commands: commandResults,
       };
     }
   }
-  return { name: "commands", ok: true };
+
+  return {
+    name: "commands",
+    ok: true,
+    command: commands.join("; "),
+    stdout: "",
+    stderr: "",
+    timedOut: false,
+    aborted: false,
+    exitCode: 0,
+    elapsedMs: totalElapsedMs,
+    commands: commandResults,
+  };
 }
 
-async function checkProgressEvent(
-  log: ProgressLog,
-  taskId: string,
-): Promise<CheckResult> {
-  const event = log.events.find((e) => e.task_id === taskId && e.status === "done");
-  if (!event) {
-    return {
-      name: "progress_event",
-      ok: false,
-      reason: `No "done" event for task "${taskId}" in the progress ledger`,
-    };
-  }
-  // Zod already validates the datetime format, so if it parsed it's valid
-  return { name: "progress_event", ok: true };
+async function checkProgressEvent(log: ProgressLog, taskId: string): Promise<CheckResult> {
+  const event = log.events.find(
+    (candidate: ProgressLog["events"][number]) =>
+      candidate.task_id === taskId && candidate.status === "done",
+  );
+  return event
+    ? { name: "progress_event", ok: true }
+    : {
+        name: "progress_event",
+        ok: false,
+        reason: `No "done" event for task "${taskId}" in the progress ledger`,
+      };
 }
 
 export type DecisionGateResult = {
   check: CheckResult;
-  /** The underlying resolution, or null when the task has no decision gate. */
   resolution: DecisionResolution | null;
 };
 
-/** Project a status-aware resolution onto the verify CheckResult shape. */
-export function decisionResolutionToCheck(res: DecisionResolution): CheckResult {
-  return res.resolved
+export function decisionResolutionToCheck(resolution: DecisionResolution): CheckResult {
+  return resolution.resolved
     ? { name: "decision", ok: true }
-    : { name: "decision", ok: false, reason: res.reason };
+    : { name: "decision", ok: false, reason: resolution.reason };
 }
 
-/**
- * The single decision gate. Routes through the shared status-aware resolver
- * so verify, task complete, task record-done, and plan lint cannot
- * diverge on what "resolved" means. Returns both the CheckResult (for
- * runVerify) and the full resolution (so record-done can surface `considered`
- * / `via` without re-resolving).
- */
 export async function checkDecision(
   cwd: string,
   phase: Phase,
@@ -195,7 +194,7 @@ export async function checkDecision(
 }
 
 function checkTaskStatus(phase: Phase, taskId: string): CheckResult {
-  const task = phase.tasks?.find((t) => t.id === taskId);
+  const task = phase.tasks?.find((candidate: Task) => candidate.id === taskId);
   if (!task) {
     return {
       name: "task_status",
@@ -203,71 +202,65 @@ function checkTaskStatus(phase: Phase, taskId: string): CheckResult {
       reason: `Task "${taskId}" not found in phase definition`,
     };
   }
-  if (task.status !== "done") {
-    return {
-      name: "task_status",
-      ok: false,
-      reason: `Task "${taskId}" status is "${task.status}", expected "done"`,
-    };
-  }
-  return { name: "task_status", ok: true };
+  return task.status === "done"
+    ? { name: "task_status", ok: true }
+    : {
+        name: "task_status",
+        ok: false,
+        reason: `Task "${taskId}" status is "${task.status}", expected "done"`,
+      };
 }
 
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
 export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
-  const { cwd, phaseId, taskId, dryRun } = opts;
-  const skipConsistency = opts.skipConsistencyChecks === true;
+  const { cwd, phaseId, taskId, dryRun, signal } = opts;
+  const timeoutMs = validateTimeoutMs(opts.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS);
+  const skipConsistencyChecks = opts.skipConsistencyChecks === true;
 
-  // Resolve phase
+  throwIfAborted(signal);
   const ref = await resolvePhaseInRoadmap(cwd, phaseId);
-
-  // The progress ledger is only loaded when the consistency checks need it.
+  throwIfAborted(signal);
   const phase = await loadPhase(cwd, ref.path);
+  throwIfAborted(signal);
 
-  // Verify task exists in phase before running checks
-  const taskExists = phase.tasks?.some((t) => t.id === taskId) ?? false;
-  if (!taskExists) {
-    const err = new Error(`Task "${taskId}" not found in phase "${phaseId}".`);
-    (err as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
-    throw err;
+  const task = phase.tasks?.find((candidate: Task) => candidate.id === taskId);
+  if (!task) {
+    const error = new Error(`Task "${taskId}" not found in phase "${phaseId}".`);
+    (error as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
+    throw error;
   }
 
-  const task = phase.tasks!.find((t) => t.id === taskId)!;
+  const commandsCheck = await checkCommands(
+    phase.verification.commands,
+    cwd,
+    dryRun,
+    timeoutMs,
+    signal,
+  );
+  const checks: CheckResult[] = [commandsCheck];
 
-  // Deterministic preflight checks: would always be runnable on a fresh
-  // task before any state mutation. `task complete` calls runVerify with
-  // skipConsistencyChecks: true so these are the only checks evaluated.
-  const checks: CheckResult[] = [
-    await checkCommands(phase.verification.commands, cwd, dryRun),
-    (await checkDecision(cwd, phase, task)).check,
-  ];
+  if (commandsCheck.aborted || commandsCheck.timedOut) {
+    return { ok: false, checks };
+  }
 
-  // State-consistency checks: only meaningful AFTER the task has been
-  // recorded as done. `verify` (standalone) runs them; `task complete`
-  // skips them because it is the action that produces that state.
-  if (!skipConsistency) {
+  throwIfAborted(signal);
+  const decisionCheck = (await checkDecision(cwd, phase, task)).check;
+  checks.push(decisionCheck);
+  throwIfAborted(signal);
+
+  if (!skipConsistencyChecks) {
     const log = await loadProgressLog(cwd);
+    throwIfAborted(signal);
     checks.splice(1, 0, await checkProgressEvent(log, taskId));
     checks.push(checkTaskStatus(phase, taskId));
   }
 
-  const ok = checks.every((c) => c.ok);
-  return { ok, checks };
+  return { ok: checks.every(check => check.ok), checks };
 }
 
-// ---------------------------------------------------------------------------
-// Human-readable formatter
-// ---------------------------------------------------------------------------
-
 export function formatVerify(result: VerifyResult): string {
-  const lines = result.checks.map((c) => {
-    const mark = c.ok ? "✓" : "✗";
-    const reason = c.reason ? `  → ${c.reason}` : "";
-    return `  ${mark} ${c.name}${reason}`;
+  const lines = result.checks.map(check => {
+    const mark = check.ok ? "✓" : "✗";
+    return `  ${mark} ${check.name}${check.reason ? `  → ${check.reason}` : ""}`;
   });
-  const summary = result.ok ? "All checks passed." : "Verification failed.";
-  return [summary, ...lines].join("\n");
+  return [result.ok ? "All checks passed." : "Verification failed.", ...lines].join("\n");
 }

@@ -14,7 +14,13 @@ import { toParseOptions } from "../spec/render.ts";
 import { TASK_SPECS } from "../spec/task.ts";
 import { isInteractive } from "../../lib/tty.ts";
 import { messages, type Locale } from "../../i18n/index.ts";
-import { withWriteLock, emitOk, emitError } from "../util.ts";
+import {
+  withWriteLock,
+  emitOk,
+  emitError,
+  createCliAbortSignal,
+  parseTimeoutArg,
+} from "../util.ts";
 import { runTaskContext } from "../../commands/task-context.ts";
 import {
   resolveContextBudgetProfile,
@@ -833,23 +839,35 @@ async function cmdTaskComplete(
       toParseOptions(TASK_SPECS.complete!),
       { allowPositionals: true },
     ));
-  } catch (err) {
-    return emitParseConfigError(err, argv, globalJson);
+  } catch (error) {
+    return emitParseConfigError(error, argv, globalJson);
   }
 
   const json = globalJson || values.json === true;
   const dryRun = values["dry-run"] === true;
   const taskId = positionals[0];
   if (!taskId) {
-    const msg = "task complete requires a task id (e.g. `task complete P1-T1`).";
-    emitError(json, "CONFIG_ERROR", msg);
+    emitError(
+      json,
+      "CONFIG_ERROR",
+      "task complete requires a task id (e.g. `task complete P1-T1`).",
+    );
     return 2;
   }
-  const agent = values.agent as string | undefined;
-  const cwd = process.cwd();
+  const parsedTimeout = parseTimeoutArg(values.timeout as string | undefined, json);
+  if (!parsedTimeout.ok) return parsedTimeout.exitCode;
 
+  const agent = values.agent as string | undefined;
+  const { signal, cleanup } = createCliAbortSignal();
   try {
-    const result = await runTaskComplete({ cwd, taskId, agent, dryRun });
+    const result = await runTaskComplete({
+      cwd: process.cwd(),
+      taskId,
+      agent,
+      dryRun,
+      timeoutMs: parsedTimeout.value,
+      signal,
+    });
 
     if (result.kind === "already_done") {
       if (json) {
@@ -880,7 +898,6 @@ async function cmdTaskComplete(
       return 0;
     }
 
-    // result.kind === "done"
     if (json) {
       emitOk({
         task_id: result.task_id,
@@ -893,52 +910,74 @@ async function cmdTaskComplete(
       process.stdout.write(`${m.task.complete.success(taskId, result.agent)}\n`);
     }
     return 0;
-  } catch (err: unknown) {
-    if (!(err instanceof Error)) throw err;
-    const code = (err as NodeJS.ErrnoException).code;
+  } catch (error: unknown) {
+    if (!(error instanceof Error)) throw error;
+    const code = (error as NodeJS.ErrnoException).code;
+
+    if (code === "ABORTED") {
+      const errorObj = {
+        code: "VERIFICATION_FAILED",
+        cause_code: "ABORTED",
+        message: m.task.complete.aborted(taskId),
+      };
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({
+            ok: false,
+            error: errorObj,
+            data: { task_id: taskId, aborted: true },
+          })}\n`,
+        );
+      } else {
+        process.stderr.write(`${errorObj.message}\n`);
+      }
+      return 1;
+    }
 
     if (code === "VERIFICATION_FAILED") {
       const checks =
-        (err as NodeJS.ErrnoException & { checks?: FailureCheckLike[] }).checks ?? [];
+        (error as NodeJS.ErrnoException & { checks?: FailureCheckLike[] }).checks ?? [];
       const summary = buildFailureSummaryFromChecks(checks, taskId);
-      // Name the real cause on the primary error face. error.code stays
-      // VERIFICATION_FAILED (exit 1); add an additive cause_code + an
-      // actionable message derived from the first failing check. The
-      // cause_code literals live here (as `cause_code: "..."`) so the
-      // error-code-surface scan pins them. task complete runs only the
-      // `commands` + `decision` checks, so those are the only two causes.
+      const wasAborted = checks.some(
+        check => (check as FailureCheckLike & { aborted?: boolean }).aborted === true,
+      );
       let errorObj: { code: string; cause_code?: string; message: string };
-      switch (summary.first_failure?.name) {
-        case "decision":
-          errorObj = {
-            code: "VERIFICATION_FAILED",
-            cause_code: "DECISION_REQUIRED",
-            message: m.task.complete.causeDecision(
-              taskId,
-              summary.first_failure?.reason ?? "",
-            ),
-          };
-          break;
-        case "commands":
-          errorObj = {
-            code: "VERIFICATION_FAILED",
-            cause_code: "COMMANDS_FAILED",
-            message: m.task.complete.causeCommands(
-              taskId,
-              summary.first_failure?.reason ?? "",
-            ),
-          };
-          break;
-        default:
-          errorObj = {
-            code: "VERIFICATION_FAILED",
-            message: m.task.complete.verificationFailed(taskId),
-          };
+      if (wasAborted) {
+        errorObj = {
+          code: "VERIFICATION_FAILED",
+          cause_code: "ABORTED",
+          message: m.task.complete.aborted(taskId),
+        };
+      } else {
+        switch (summary.first_failure?.name) {
+          case "decision":
+            errorObj = {
+              code: "VERIFICATION_FAILED",
+              cause_code: "DECISION_REQUIRED",
+              message: m.task.complete.causeDecision(
+                taskId,
+                summary.first_failure?.reason ?? "",
+              ),
+            };
+            break;
+          case "commands":
+            errorObj = {
+              code: "VERIFICATION_FAILED",
+              cause_code: "COMMANDS_FAILED",
+              message: m.task.complete.causeCommands(
+                taskId,
+                summary.first_failure?.reason ?? "",
+              ),
+            };
+            break;
+          default:
+            errorObj = {
+              code: "VERIFICATION_FAILED",
+              message: m.task.complete.verificationFailed(taskId),
+            };
+        }
       }
-      const msg = errorObj.message;
-      // Emitted raw (not via emitError): this is the only task envelope whose
-      // `error` object carries a `cause_code`, which emitError's {code,message}
-      // shape does not model. Preserving cause_code is a hard contract requirement.
+
       if (json) {
         process.stdout.write(
           `${JSON.stringify({
@@ -950,68 +989,64 @@ async function cmdTaskComplete(
               failed_checks: summary.failed_checks,
               first_failure: summary.first_failure,
               suggested_next_command: summary.suggested_next_command,
+              ...(wasAborted ? { aborted: true } : {}),
             },
           })}\n`,
         );
       } else {
-        process.stderr.write(`${msg}\n`);
+        process.stderr.write(`${errorObj.message}\n`);
         const lines = renderFailureSummaryLines(m.task.failure, summary);
         if (lines.length > 0) process.stderr.write(`${lines.join("\n")}\n`);
       }
       return 1;
     }
 
-    let msg: string;
+    let message: string;
     let outCode: string;
     switch (code) {
       case "TASK_NOT_FOUND":
-        msg = m.task.complete.taskNotFound(taskId);
+        message = m.task.complete.taskNotFound(taskId);
         outCode = "TASK_NOT_FOUND";
         break;
       case "AMBIGUOUS_TASK_ID": {
         const phases =
-          (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
-        msg = m.task.complete.ambiguous(taskId, phases);
+          (error as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+        message = m.task.complete.ambiguous(taskId, phases);
         outCode = "AMBIGUOUS_TASK_ID";
         break;
       }
       case "AGENT_NOT_ENABLED":
-        msg = m.task.complete.agentNotEnabled(agent ?? "");
+        message = m.task.complete.agentNotEnabled(agent ?? "");
         outCode = "AGENT_NOT_ENABLED";
         break;
       case "AGENT_NOT_FOUND":
-        msg = m.task.complete.agentNotFound(agent ?? "");
+        message = m.task.complete.agentNotFound(agent ?? "");
         outCode = "AGENT_NOT_FOUND";
         break;
       case "INVALID_TASK_TRANSITION": {
         const current =
-          (err as NodeJS.ErrnoException & { current?: string }).current ?? "";
-        msg = m.task.complete.invalidTransition(taskId, current);
+          (error as NodeJS.ErrnoException & { current?: string }).current ?? "";
+        message = m.task.complete.invalidTransition(taskId, current);
         outCode = "INVALID_TASK_TRANSITION";
         break;
       }
       case "PHASE_SNAPSHOT_INVALID":
-        msg = err.message;
+        message = error.message;
         outCode = "PHASE_SNAPSHOT_INVALID";
         break;
-      // A path-safety refusal / malformed roadmap or phase from the now-contained
-      // control-plane loaders (resolveTaskInRoadmap → loadRoadmap → loadPhase):
-      // structured (exit 2), never an uncoded internal error (exit 3).
       case "CONFIG_ERROR":
-        msg = err.message;
+        message = error.message;
         outCode = "CONFIG_ERROR";
         break;
       default:
-        throw err;
+        throw error;
     }
-    emitError(json, outCode, msg);
+    emitError(json, outCode, message);
     return 2;
+  } finally {
+    cleanup();
   }
 }
-
-// ---------------------------------------------------------------------------
-// Command: task record-done
-// ---------------------------------------------------------------------------
 
 async function cmdTaskRecordDone(
   argv: string[],

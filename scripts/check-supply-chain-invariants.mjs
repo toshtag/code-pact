@@ -411,6 +411,151 @@ function getJobSteps(doc, jobName) {
   return [];
 }
 
+export function checkCancellationCoverage(testContent) {
+  const violations = [];
+  if (!/if \(process\.platform !== "win32"\)/.test(testContent)) {
+    violations.push(
+      "verify-timeout-abort.test.ts: POSIX CLI signal cancellation must be explicitly POSIX-gated",
+    );
+  }
+  if (!/it\.each\(\["SIGINT", "SIGTERM"\] as const\)/.test(testContent)) {
+    violations.push(
+      "verify-timeout-abort.test.ts: POSIX SIGINT/SIGTERM cancellation cases are missing",
+    );
+  }
+  if (!/cancels task complete on %s, removes descendants, and records no event/.test(testContent)) {
+    violations.push(
+      "verify-timeout-abort.test.ts: task complete signal cancellation test is missing",
+    );
+  }
+  if (!/cause_code:\s*"ABORTED"/.test(testContent)) {
+    violations.push(
+      "verify-timeout-abort.test.ts: cancellation test must assert cause_code ABORTED",
+    );
+  }
+  if (!/loadMergedProgress\(dir\)\)\.log\.events\)\.toHaveLength\(0\)/.test(testContent)) {
+    violations.push(
+      "verify-timeout-abort.test.ts: cancellation test must assert no done event is recorded",
+    );
+  }
+  if (
+    !/describe\.runIf\(process\.platform === "win32"\)\("Windows bounded-command cancellation contract"/.test(
+      testContent,
+    )
+  ) {
+    violations.push(
+      "verify-timeout-abort.test.ts: Windows bounded-command cancellation coverage is missing",
+    );
+  }
+  if (!/runBoundedCommand\("node long-parent\.mjs", dir,/.test(testContent)) {
+    violations.push(
+      "verify-timeout-abort.test.ts: Windows coverage must exercise runBoundedCommand directly",
+    );
+  }
+  if (!/timedOut:\s*true/.test(testContent) || !/aborted:\s*true/.test(testContent)) {
+    violations.push(
+      "verify-timeout-abort.test.ts: Windows coverage must assert timeout and AbortSignal cancellation",
+    );
+  }
+  if (!/strategy:\s*"taskkill"/.test(testContent)) {
+    violations.push("verify-timeout-abort.test.ts: Windows coverage must assert taskkill cleanup");
+  }
+  return violations;
+}
+
+// Backward-compatible export name for existing tests/imports. The invariant is
+// intentionally no longer Windows-signal-specific: Windows synthetic SIGINT from
+// ChildProcess.kill() is not a reliable contract. Windows CI verifies timeout,
+// AbortSignal, taskkill, and process-tree cleanup; POSIX CI verifies CLI signal
+// translation.
+export const checkWindowsCancellationCoverage = checkCancellationCoverage;
+
+
+/**
+ * Verify the reviewed pnpm/Vite/esbuild versions and the explicit lifecycle-script
+ * policy in package.json, pnpm-workspace.yaml, and pnpm-lock.yaml.
+ */
+export function checkToolchainPins(packageContent, workspaceContent, lockContent) {
+  const violations = [];
+  let pkg;
+  try {
+    pkg = JSON.parse(packageContent);
+  } catch (error) {
+    return [
+      `package.json parse error: ${error instanceof Error ? error.message : String(error)}`,
+    ];
+  }
+
+  if (pkg.packageManager !== "pnpm@10.34.2") {
+    violations.push('package.json: packageManager must be exactly "pnpm@10.34.2"');
+  }
+  if (pkg.devDependencies?.vite !== "^6.4.3") {
+    violations.push('package.json: devDependencies.vite must be "^6.4.3"');
+  }
+  if (pkg.devDependencies?.esbuild !== "0.28.1") {
+    violations.push('package.json: devDependencies.esbuild must be exactly "0.28.1"');
+  }
+
+  const workspace = parseDocument(workspaceContent);
+  if (workspace.errors.length > 0) {
+    violations.push(`pnpm-workspace.yaml parse error: ${workspace.errors[0].message}`);
+  } else {
+    if (workspace.getIn(["overrides", "esbuild"]) !== "0.28.1") {
+      violations.push('pnpm-workspace.yaml: overrides.esbuild must be exactly "0.28.1"');
+    }
+    if (workspace.getIn(["allowBuilds", "esbuild"]) !== false) {
+      violations.push("pnpm-workspace.yaml: allowBuilds.esbuild must be false");
+    }
+  }
+
+  const lock = parseDocument(lockContent);
+  if (lock.errors.length > 0) {
+    violations.push(`pnpm-lock.yaml parse error: ${lock.errors[0].message}`);
+    return violations;
+  }
+  const lockObject = lock.toJSON();
+  const importer = lockObject?.importers?.["."]?.devDependencies ?? {};
+  const baseVersion = value => String(value ?? "").split("(", 1)[0];
+  if (
+    importer.vite?.specifier !== "^6.4.3" ||
+    baseVersion(importer.vite?.version) !== "6.4.3"
+  ) {
+    violations.push("pnpm-lock.yaml: root importer must resolve vite 6.4.3 from ^6.4.3");
+  }
+  if (
+    importer.esbuild?.specifier !== "0.28.1" ||
+    baseVersion(importer.esbuild?.version) !== "0.28.1"
+  ) {
+    violations.push("pnpm-lock.yaml: root importer must resolve esbuild 0.28.1 exactly");
+  }
+
+  const lockKeys = [
+    ...Object.keys(lockObject?.packages ?? {}),
+    ...Object.keys(lockObject?.snapshots ?? {}),
+  ];
+  const viteVersions = lockKeys
+    .map(key => /^vite@([^()]+)(?:\(|$)/.exec(key)?.[1])
+    .filter(Boolean);
+  const esbuildVersions = lockKeys
+    .map(key => /^esbuild@([^()]+)(?:\(|$)/.exec(key)?.[1])
+    .filter(Boolean);
+  if (viteVersions.length === 0 || viteVersions.some(version => version !== "6.4.3")) {
+    violations.push(
+      `pnpm-lock.yaml: every vite package must be 6.4.3 (found: ${viteVersions.join(", ") || "none"})`,
+    );
+  }
+  if (
+    esbuildVersions.length === 0 ||
+    esbuildVersions.some(version => version !== "0.28.1")
+  ) {
+    violations.push(
+      `pnpm-lock.yaml: every esbuild package must be 0.28.1 (found: ${esbuildVersions.join(", ") || "none"})`,
+    );
+  }
+
+  return violations;
+}
+
 /**
  * Run all supply-chain invariant checks.
  * @param {string} root - repo root path
@@ -956,6 +1101,48 @@ export function checkSupplyChainInvariants(root) {
       if (ciCheckoutOk) {
         pass("ci.yml: all checkout steps have persist-credentials: false");
       }
+
+      let windowsJob = null;
+      if (ciJobs && ciJobs.items) {
+        for (const jobPair of ciJobs.items) {
+          if (String(jobPair.key.value ?? jobPair.key) === "windows-process-control") {
+            windowsJob = jobPair.value;
+            break;
+          }
+        }
+      }
+      if (windowsJob?.get("runs-on") === "windows-latest") {
+        const scripts = collectRunScripts(ciDoc, "windows-process-control");
+        const cancellationCoverageViolations = checkCancellationCoverage(
+          _read("tests/integration/verify-timeout-abort.test.ts"),
+        );
+        if (
+          scripts.some(script => script.trim() === "pnpm check:toolchain-binaries") &&
+          scripts.some(script => script.trim() === "pnpm build") &&
+          scripts.some(script => /\btests\/unit\/commands\/verify-process\.test\.ts\b/.test(script)) &&
+          scripts.some(
+            script =>
+              script.trim() ===
+              "pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts",
+          ) &&
+          !scripts.some(script => /(?:^|\s)-t\s+|--testNamePattern\b/.test(script)) &&
+          cancellationCoverageViolations.length === 0
+        ) {
+          pass("ci.yml: Windows job verifies toolchain, build, and concrete process control without no-op test filters");
+        } else {
+          fail("ci.yml: Windows job must verify toolchain, build, and concrete process-control tests without name filters");
+          for (const violation of cancellationCoverageViolations) fail(violation);
+        }
+      } else {
+        fail("ci.yml: windows-process-control must run on windows-latest");
+      }
+
+      const linuxScripts = collectRunScripts(ciDoc, "build");
+      if (linuxScripts.some(script => /pnpm check:toolchain-binaries|pnpm check:supply-chain/.test(script))) {
+        pass("ci.yml: Linux build verifies the esbuild binary");
+      } else {
+        fail("ci.yml: Linux build must verify the esbuild binary");
+      }
     }
 
     // Also check SHA pins in ci.yml
@@ -967,7 +1154,26 @@ export function checkSupplyChainInvariants(root) {
     // ci.yml might not exist in some test contexts
   }
 
-  // 4. Check SECURITY.md does not reference "built locally"
+  // 4. Pin the reviewed development toolchain and lifecycle-script policy.
+  try {
+    const violations = checkToolchainPins(
+      _read("package.json"),
+      _read("pnpm-workspace.yaml"),
+      _read("pnpm-lock.yaml"),
+    );
+    if (violations.length === 0) {
+      pass("pnpm/Vite/esbuild versions and esbuild build-script policy are pinned");
+    } else {
+      for (const violation of violations) fail(violation);
+    }
+  } catch (error) {
+    fail(
+      "toolchain pin files must exist",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  // 5. Check SECURITY.md does not reference "built locally"
   let securityContent;
   try {
     securityContent = _read("SECURITY.md");

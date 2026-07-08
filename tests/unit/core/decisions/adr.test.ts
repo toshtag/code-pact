@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, rm, writeFile, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   readDecisionAdrFiles,
   readLiveDecisionDir,
@@ -15,6 +15,7 @@ import {
   resolveDecisionGate,
   makeDecisionResolver,
   classifyDecisionAdrs,
+  type DecisionDirLister,
 } from "../../../../src/core/decisions/adr.ts";
 import { loadDeclaredDecisions } from "../../../../src/core/pack/loaders.ts";
 
@@ -1107,24 +1108,18 @@ describe("listLiveDecisionFiles — directory-list EACCES → DECISION_SCAN_UNRE
     await rm(cwd, { recursive: true, force: true });
   });
 
+  const permissionDenied = (): NodeJS.ErrnoException =>
+    Object.assign(new Error("permission denied"), { code: "EACCES" });
+
   it("EACCES on design/decisions/ → throws with DECISION_SCAN_UNREADABLE", async () => {
     await mkdir(join(cwd, "design", "decisions"), { recursive: true });
-    await writeFile(
-      join(cwd, "design", "decisions", "P1-T1.md"),
-      "**Status:** accepted\n",
-    );
-    await (
-      await import("node:fs/promises")
-    ).chmod(join(cwd, "design", "decisions"), 0o000);
-    try {
-      await expect(readLiveDecisionDir(cwd)).rejects.toMatchObject({
-        code: "DECISION_SCAN_UNREADABLE",
-      });
-    } finally {
-      await (
-        await import("node:fs/promises")
-      ).chmod(join(cwd, "design", "decisions"), 0o755);
-    }
+    const listFn: DecisionDirLister = async () => {
+      throw permissionDenied();
+    };
+
+    await expect(readLiveDecisionDir(cwd, listFn)).rejects.toMatchObject({
+      code: "DECISION_SCAN_UNREADABLE",
+    });
   });
 
   it("EACCES on a nested subdirectory → throws with DECISION_SCAN_UNREADABLE", async () => {
@@ -1133,37 +1128,26 @@ describe("listLiveDecisionFiles — directory-list EACCES → DECISION_SCAN_UNRE
       join(cwd, "design", "decisions", "sub", "P1-T1.md"),
       "**Status:** accepted\n",
     );
-    await (
-      await import("node:fs/promises")
-    ).chmod(join(cwd, "design", "decisions", "sub"), 0o000);
-    try {
-      await expect(readLiveDecisionDir(cwd)).rejects.toMatchObject({
-        code: "DECISION_SCAN_UNREADABLE",
-      });
-    } finally {
-      await (
-        await import("node:fs/promises")
-      ).chmod(join(cwd, "design", "decisions", "sub"), 0o755);
-    }
+    const listFn: DecisionDirLister = async path => {
+      if (basename(String(path)) === "sub") {
+        throw permissionDenied();
+      }
+      return readdir(String(path), { withFileTypes: true });
+    };
+
+    await expect(readLiveDecisionDir(cwd, listFn)).rejects.toMatchObject({
+      code: "DECISION_SCAN_UNREADABLE",
+    });
   });
 
   it("DECISION_SCAN_UNREADABLE propagates through resolveDecisionGate (filename-scan)", async () => {
     await mkdir(join(cwd, "design", "decisions"), { recursive: true });
-    await writeFile(
-      join(cwd, "design", "decisions", "P1-T1.md"),
-      "**Status:** accepted\n",
-    );
-    await (
-      await import("node:fs/promises")
-    ).chmod(join(cwd, "design", "decisions"), 0o000);
-    try {
-      const res = await resolveDecisionGate(cwd, "P1-T1", undefined);
-      expect(res.resolved).toBe(false);
-      expect(res.reason).toContain("DECISION_SCAN_UNREADABLE");
-    } finally {
-      await (
-        await import("node:fs/promises")
-      ).chmod(join(cwd, "design", "decisions"), 0o755);
-    }
+    const listFn: DecisionDirLister = async () => {
+      throw permissionDenied();
+    };
+
+    const result = await resolveDecisionGate(cwd, "P1-T1", undefined, listFn);
+    expect(result.resolved).toBe(false);
+    expect(result.reason).toContain("DECISION_SCAN_UNREADABLE");
   });
 });

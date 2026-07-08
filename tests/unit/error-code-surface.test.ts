@@ -58,6 +58,7 @@ const KNOWN_CODES: Record<
   ALREADY_INITIALIZED: "public",
   AMBIGUOUS_TASK_ID: "public",
   AMBIGUOUS_PHASE_ID: "public",
+  ABORTED: "public",
   ARCHIVE_BUNDLE_WRITE_FAILED: "public",
   BASELINE_NOT_FOUND: "public",
   COMMANDS_FAILED: "public",
@@ -323,6 +324,12 @@ const EMISSION_PATTERNS: RegExp[] = [
 // `error.code`, and never affect the exit code. Documented under the
 // `plan adopt` section of docs/cli-contract.md.
 const NON_ERROR_CODES = new Set<string>([
+  // Node errno-compatible `NodeJS.ErrnoException.code` values. These are
+  // intentionally not CLI envelope error codes and should not be documented as
+  // agent-facing contract surface.
+  "EAGAIN",
+  "ELOOP",
+  "ENOTDIR",
   "MERGE_BASE_NOT_FOUND",
   "REF_NOT_FOUND",
   "PHASE_VERIFY_COMMANDS_MISSHAPED",

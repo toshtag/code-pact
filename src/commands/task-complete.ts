@@ -5,7 +5,7 @@ import { writeEventFile } from "../core/progress/events-io.ts";
 import { resolveEventAuthor } from "../core/progress/author.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
-import { runVerify, type CheckResult } from "./verify.ts";
+import { runVerify, throwIfAborted, type CheckResult } from "./verify.ts";
 
 export type TaskCompleteOptions = {
   cwd: string;
@@ -14,6 +14,10 @@ export type TaskCompleteOptions = {
   agent?: string;
   /** When true, do not record a progress event (the ledger is unchanged). */
   dryRun?: boolean;
+  /** Per-command timeout in milliseconds. */
+  timeoutMs?: number;
+  /** Cancels verification and prevents a pre-commit event write. */
+  signal?: AbortSignal;
   /** Date injection for tests. Defaults to new Date(). */
   now?: () => Date;
 };
@@ -49,16 +53,17 @@ export async function runTaskComplete(
   const dryRun = opts.dryRun === true;
   const now = opts.now ?? (() => new Date());
 
-  // ---- Step 0: agent validation (same order as task context) ----
+  throwIfAborted(opts.signal);
   const project = await loadProject(cwd);
   const agentName = resolveEnabledAgent(project, opts.agent);
+  throwIfAborted(opts.signal);
 
-  // ---- Step 1: resolve phase from task id ----
   const { phaseId } = await resolveTaskInRoadmap(cwd, taskId);
+  throwIfAborted(opts.signal);
 
-  // ---- Step 2: derive current state ----
   const { log } = await loadProgressLog(cwd);
   const state = deriveTaskState(log.events, taskId);
+  throwIfAborted(opts.signal);
 
   if (state.current === "done") {
     return {
@@ -69,70 +74,53 @@ export async function runTaskComplete(
     };
   }
 
-  // Reject completion from blocked. Task must be explicitly resumed first
-  // so the resume event records the unblock decision in the log.
   if (state.current === "blocked") {
-    const err = new Error(
+    const error = new Error(
       `Task "${taskId}" is blocked. Run \`task resume ${taskId}\` before completing.`,
     );
-    (err as NodeJS.ErrnoException).code = "INVALID_TASK_TRANSITION";
-    (err as NodeJS.ErrnoException & {
-      current?: string;
-      next?: string;
-    }).current = state.current;
-    (err as NodeJS.ErrnoException & {
-      current?: string;
-      next?: string;
-    }).next = "done";
-    throw err;
+    (error as NodeJS.ErrnoException).code = "INVALID_TASK_TRANSITION";
+    (error as NodeJS.ErrnoException & { current?: string; next?: string }).current =
+      state.current;
+    (error as NodeJS.ErrnoException & { current?: string; next?: string }).next =
+      "done";
+    throw error;
   }
-  // planned / started / resumed / failed: proceed to verify.
-  // planned→done is permitted at the command layer for compatibility;
-  // assertTransition rejects it, so we intentionally do not call that here.
 
-  // ---- Step 3: run verify in preflight mode ----
-  // skipConsistencyChecks: true skips the progress_event + task_status
-  // checks that task complete is itself about to produce. The remaining
-  // checks (commands, decision) are the deterministic preconditions.
-  //
-  // Propagate the caller's `dryRun`: a `--dry-run` completion must NOT execute
-  // the project-controlled `verification.commands` (spawned with shell: true).
-  // With dryRun the commands check returns a "would execute" preview instead of
-  // running, so a dry run has no side effects. The decision gate is a read and
-  // still runs, so an unresolved-decision dry run still surfaces the gate.
   const verifyResult = await runVerify({
     cwd,
     phaseId,
     taskId,
     dryRun,
+    timeoutMs: opts.timeoutMs,
+    signal: opts.signal,
     skipConsistencyChecks: true,
   });
 
   if (!verifyResult.ok) {
-    // Surface verify result without recording an event.
-    const err = new Error(
+    const error = new Error(
       `Verification failed for "${taskId}". No progress event was recorded.`,
     );
-    (err as NodeJS.ErrnoException).code = "VERIFICATION_FAILED";
-    (err as NodeJS.ErrnoException & { checks?: CheckResult[] }).checks =
+    (error as NodeJS.ErrnoException).code = "VERIFICATION_FAILED";
+    (error as NodeJS.ErrnoException & { checks?: CheckResult[] }).checks =
       verifyResult.checks;
-    throw err;
+    throw error;
   }
 
-  // ---- Step 4: build the done event ----
+  throwIfAborted(opts.signal);
   const author = await resolveEventAuthor(cwd);
+  throwIfAborted(opts.signal);
   const event: ProgressEvent = {
     task_id: taskId,
     status: "done",
     at: now().toISOString(),
     actor: "agent",
     agent: agentName,
-    evidence: verifyResult.checks.filter((c) => c.ok).map((c) => c.name),
+    evidence: verifyResult.checks.filter(check => check.ok).map(check => check.name),
     source: "loop",
     ...(author !== undefined ? { author } : {}),
   };
+  throwIfAborted(opts.signal);
 
-  // ---- Step 5: dry-run short circuit ----
   if (dryRun) {
     return {
       kind: "dry_run",
@@ -144,7 +132,9 @@ export async function runTaskComplete(
     };
   }
 
-  // ---- Step 6: append + atomic write (shared helper) ----
+  // Cancellation before this call writes nothing. Once the atomic event write
+  // starts, it is the commit point and is allowed to finish.
+  throwIfAborted(opts.signal);
   await writeEventFile(cwd, event);
 
   return {

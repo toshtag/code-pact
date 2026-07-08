@@ -15,7 +15,7 @@
 //     error), the human-facing message names the alias, not the canonical
 //     command.
 
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -40,7 +40,7 @@ beforeEach(async () => {
   run(["init", "--non-interactive", "--agent", "claude-code", "--locale", "en-US", "--sample-phase", "--json"]);
 });
 
-afterAll(async () => {
+afterEach(async () => {
   if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
 });
 

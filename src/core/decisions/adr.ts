@@ -3,6 +3,7 @@ import {
   listOwnedDirents,
   resolveDecisionReadPath,
   resolveOwnedDirectoryReadPath,
+  type OwnedListPath,
 } from "../project-fs/index.ts";
 import { parseFrontMatter } from "../pack/front-matter.ts";
 import {
@@ -35,8 +36,11 @@ export function isAbsentDecisionsDirError(error: unknown): boolean {
  * convert a real environment problem into a spurious
  * `TASK_DECISION_UNRESOLVED` advisory.
  */
-export async function readDecisionAdrFiles(cwd: string): Promise<string[]> {
-  return (await listLiveDecisionFiles(cwd)).paths;
+export async function readDecisionAdrFiles(
+  cwd: string,
+  listFn?: DecisionDirLister,
+): Promise<string[]> {
+  return (await listLiveDecisionFiles(cwd, listFn)).paths;
 }
 
 /**
@@ -62,6 +66,15 @@ function codedDecisionScanError(message: string, cause?: unknown): Error {
 }
 
 /**
+ * Optional injection seam for directory listing. Tests use this to
+ * simulate EACCES errors without relying on chmod (which root bypasses).
+ * Production code leaves this undefined and uses the real fs.
+ */
+export type DecisionDirLister = (
+  path: OwnedListPath,
+) => Promise<import("node:fs").Dirent[]>;
+
+/**
  * The shared LIVE `design/decisions/` directory-listing seam: returns whether
  * the dir is present and its decision filenames (with `normalizeDecisionRefPath`
  * filtering out the index + `PRUNED.md` ledger). Like
@@ -83,18 +96,28 @@ function codedDecisionScanError(message: string, cause?: unknown): Error {
  * context-source callers (the pack loaders) wrap this in their own `catch → []`
  * to keep their degrade-on-any-error contract; that leniency stays at the call
  * site, not pushed down here.
+ *
+ * @param listFn Optional injection seam for directory listing. When provided,
+ * replaces the real `listOwnedDirents` call so tests can simulate EACCES without
+ * relying on `chmod 000` (which root bypasses).
  */
 export async function listLiveDecisionFiles(
   cwd: string,
+  listFn?: DecisionDirLister,
 ): Promise<LiveDecisionListing> {
   const out: string[] = [];
 
   async function walk(relDir: string): Promise<void> {
     let dirents: import("node:fs").Dirent[];
     try {
-      dirents = await listOwnedDirents(
-        await resolveOwnedDirectoryReadPath(cwd, relDir),
-      );
+      if (listFn) {
+        const absPath = await resolveOwnedDirectoryReadPath(cwd, relDir);
+        dirents = await listFn(absPath);
+      } else {
+        dirents = await listOwnedDirents(
+          await resolveOwnedDirectoryReadPath(cwd, relDir),
+        );
+      }
     } catch (error) {
       if (relDir === "design/decisions" && isAbsentDecisionsDirError(error)) {
         throw error;
@@ -131,8 +154,9 @@ export async function listLiveDecisionFiles(
 
 export async function readLiveDecisionDir(
   cwd: string,
+  listFn?: DecisionDirLister,
 ): Promise<{ present: boolean; entries: string[] }> {
-  const listing = await listLiveDecisionFiles(cwd);
+  const listing = await listLiveDecisionFiles(cwd, listFn);
   return { present: listing.present, entries: listing.paths };
 }
 
@@ -609,6 +633,7 @@ export async function resolveDecisionGate(
   cwd: string,
   taskId: string,
   decisionRefs?: string[],
+  listFn?: DecisionDirLister,
 ): Promise<DecisionResolution> {
   if (decisionRefs && decisionRefs.length > 0) {
     return resolveWith(
@@ -622,7 +647,7 @@ export async function resolveDecisionGate(
   }
   let dir: { present: boolean; entries: string[] };
   try {
-    dir = await readLiveDecisionDir(cwd);
+    dir = await readLiveDecisionDir(cwd, listFn);
   } catch (error) {
     return listingErrorResolution(taskId, "filename-scan", error);
   }

@@ -167,6 +167,7 @@ export const messages = {
       `コンテキストパックを ${path} に書き込みました (${chars} 文字)`,
   },
   verify: {
+    aborted: "検証はキャンセルされました。",
     phaseNotFound: (id: string): string =>
       `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
     taskNotFound: (taskId: string, phaseId: string): string =>
@@ -294,6 +295,8 @@ export const messages = {
         reason
           ? `${taskId}: 検証コマンドが失敗しました: ${reason}。progress イベントは記録されていません。`
           : `${taskId}: 検証コマンドが失敗しました。progress イベントは記録されていません。`,
+      aborted: (taskId: string): string =>
+        `タスク "${taskId}" の完了処理はキャンセルされました。progress イベントは記録されていません。`,
       alreadyDone: (taskId: string): string =>
         `タスク "${taskId}" には既に done イベントが存在します。再 verify をスキップしました (idempotent)。`,
       success: (taskId: string, agent: string): string =>

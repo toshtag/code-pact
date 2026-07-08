@@ -503,3 +503,55 @@ describe("runTaskComplete — state transitions (v0.6)", () => {
     expect(after).toBe(before);
   });
 });
+
+describe("runTaskComplete — bounded verification and cancellation", () => {
+  it("times out without recording a done event", async () => {
+    await setupProject(dir, { command: "node hang.mjs" });
+    await writeFile(join(dir, "hang.mjs"), "setInterval(() => {}, 10000);\n");
+
+    await expect(
+      runTaskComplete({
+        cwd: dir,
+        taskId: "P1-T1",
+        agent: "claude-code",
+        timeoutMs: 100,
+      }),
+    ).rejects.toMatchObject({ code: "VERIFICATION_FAILED" });
+    expect((await loadMergedProgress(dir)).log.events).toHaveLength(0);
+  }, 10_000);
+
+  it("rejects an already-aborted operation without recording an event", async () => {
+    await setupProject(dir);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      runTaskComplete({
+        cwd: dir,
+        taskId: "P1-T1",
+        agent: "claude-code",
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ code: "ABORTED" });
+    expect((await loadMergedProgress(dir)).log.events).toHaveLength(0);
+  });
+
+  it("honours cancellation immediately before the event-write commit point", async () => {
+    await setupProject(dir);
+    const controller = new AbortController();
+
+    await expect(
+      runTaskComplete({
+        cwd: dir,
+        taskId: "P1-T1",
+        agent: "claude-code",
+        signal: controller.signal,
+        now: () => {
+          controller.abort();
+          return new Date("2026-07-05T00:00:00Z");
+        },
+      }),
+    ).rejects.toMatchObject({ code: "ABORTED" });
+    expect((await loadMergedProgress(dir)).log.events).toHaveLength(0);
+  });
+});

@@ -1,7 +1,7 @@
 // CLI integration suite — spawns the built CLI (`dist/cli.js`) via
 // `spawnSync`. The integration test script builds dist once before Vitest
 // starts so files can run in parallel without racing tsup cleanup.
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { mkdtemp, mkdir, rm, readFile, readdir, writeFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -23,7 +23,7 @@ beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "code-pact-cli-test-"));
 });
 
-afterAll(async () => {
+afterEach(async () => {
   if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -1786,24 +1786,49 @@ describe("CLI: --scaffold-decisions (RFC §3-D)", () => {
     );
 
     // With the flag, on a fresh project: stub scaffolded.
-    tmpDir = await mkdtemp(join(tmpdir(), "code-pact-cli-test-"));
-    await initEmpty();
-    await writeFile(join(tmpDir, "draft.yaml"), DRAFT, "utf8");
-    const withFlag = run(["phase", "import", "draft.yaml", "--scaffold-decisions", "--json"]);
-    expect(withFlag.code).toBe(0);
-    const withFlagData = JSON.parse(withFlag.stdout) as {
-      data: { scaffolded_decisions: string[] };
-    };
-    expect(withFlagData.data.scaffolded_decisions).toEqual(["design/decisions/P1-T1.md"]);
-    const stub = await readFile(join(tmpDir, "design", "decisions", "P1-T1.md"), "utf8");
-    expect(stub).toContain("**Status:** proposed");
+    const originalTmpDir = tmpDir;
+    const freshTmpDir = await mkdtemp(join(tmpdir(), "code-pact-cli-test-"));
+    try {
+      tmpDir = freshTmpDir;
+      await initEmpty();
+      await writeFile(join(tmpDir, "draft.yaml"), DRAFT, "utf8");
+      const withFlag = run([
+        "phase",
+        "import",
+        "draft.yaml",
+        "--scaffold-decisions",
+        "--json",
+      ]);
+      expect(withFlag.code).toBe(0);
+      const withFlagData = JSON.parse(withFlag.stdout) as {
+        data: { scaffolded_decisions: string[] };
+      };
+      expect(withFlagData.data.scaffolded_decisions).toEqual([
+        "design/decisions/P1-T1.md",
+      ]);
+      const stub = await readFile(
+        join(tmpDir, "design", "decisions", "P1-T1.md"),
+        "utf8",
+      );
+      expect(stub).toContain("**Status:** proposed");
 
-    // The proposed stub still blocks record-done (status-aware gate).
-    const stillBlocked = run(["task", "record-done", "P1-T1", "--evidence", "PR #1", "--json"]);
-    expect(stillBlocked.code).toBe(2);
-    expect((JSON.parse(stillBlocked.stdout) as { error: { code: string } }).error.code).toBe(
-      "DECISION_REQUIRED",
-    );
+      // The proposed stub still blocks record-done (status-aware gate).
+      const stillBlocked = run([
+        "task",
+        "record-done",
+        "P1-T1",
+        "--evidence",
+        "PR #1",
+        "--json",
+      ]);
+      expect(stillBlocked.code).toBe(2);
+      expect(
+        (JSON.parse(stillBlocked.stdout) as { error: { code: string } }).error.code,
+      ).toBe("DECISION_REQUIRED");
+    } finally {
+      tmpDir = originalTmpDir;
+      await rm(freshTmpDir, { recursive: true, force: true });
+    }
   });
 
   it("plan adopt --write --scaffold-decisions scaffolds for a requires_decision task", async () => {

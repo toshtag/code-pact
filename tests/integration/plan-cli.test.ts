@@ -14,7 +14,7 @@
 // shells out to pbcopy / xclip, which is brittle in CI; that branch
 // is covered by tests/unit/commands/plan-prompt.test.ts.
 
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -34,7 +34,7 @@ beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "code-pact-plan-cli-test-"));
 });
 
-afterAll(async () => {
+afterEach(async () => {
   if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
 });
 
