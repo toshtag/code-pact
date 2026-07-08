@@ -3,6 +3,7 @@ import {
   checkActionShaPins,
   checkNoTokenSecrets,
   checkSupplyChainInvariants,
+  checkWindowsCancellationCoverage,
 } from "../../../scripts/check-supply-chain-invariants.mjs";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
@@ -353,6 +354,18 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "      - run: pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts",
   ].join("\n");
 
+  const wellFormedVerifyTimeoutAbort = [
+    'describe.runIf(process.platform === "win32")("Windows CLI cancellation contract", () => {',
+    "  it(",
+    '    "cancels task complete on SIGINT, removes descendants, and records no event",',
+    "    async () => {",
+    '      expect(JSON.parse(result.stdout)).toMatchObject({ error: { cause_code: "ABORTED" } });',
+    "      expect((await loadMergedProgress(dir)).log.events).toHaveLength(0);",
+    "    },",
+    "  );",
+    "});",
+  ].join("\n");
+
   const wellFormedPackage = JSON.stringify(
     {
       packageManager: "pnpm@10.34.2",
@@ -399,10 +412,12 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
       packageContent?: string;
       workspaceContent?: string;
       lockContent?: string;
+      verifyTimeoutAbortContent?: string;
     } = {},
   ): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), "sci-"));
     await mkdir(join(dir, ".github", "workflows"), { recursive: true });
+    await mkdir(join(dir, "tests", "integration"), { recursive: true });
     await writeFile(
       join(dir, ".github", "workflows", "publish.yml"),
       overrides.publishContent ?? wellFormedPublish,
@@ -427,6 +442,10 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
       join(dir, "pnpm-lock.yaml"),
       overrides.lockContent ?? wellFormedLock,
     );
+    await writeFile(
+      join(dir, "tests", "integration", "verify-timeout-abort.test.ts"),
+      overrides.verifyTimeoutAbortContent ?? wellFormedVerifyTimeoutAbort,
+    );
     return dir;
   }
 
@@ -449,6 +468,28 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
       ciContent: wellFormedCi.replace(
         "      - run: pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts",
         '      - run: pnpm exec vitest run --config vitest.integration.config.ts -t "timeout"',
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when Windows cancellation coverage is only POSIX-gated", async () => {
+    const violations = checkWindowsCancellationCoverage(
+      wellFormedVerifyTimeoutAbort.replace(
+        'describe.runIf(process.platform === "win32")("Windows CLI cancellation contract"',
+        'if (process.platform !== "win32") describe("CLI cancellation contract"',
+      ),
+    );
+    expect(violations).toContain(
+      'verify-timeout-abort.test.ts: Windows cancellation contract must be enabled with process.platform === "win32"',
+    );
+
+    root = await buildTree({
+      verifyTimeoutAbortContent: wellFormedVerifyTimeoutAbort.replace(
+        'describe.runIf(process.platform === "win32")("Windows CLI cancellation contract"',
+        'if (process.platform !== "win32") describe("CLI cancellation contract"',
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);

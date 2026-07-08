@@ -411,6 +411,39 @@ function getJobSteps(doc, jobName) {
   return [];
 }
 
+export function checkWindowsCancellationCoverage(testContent) {
+  const violations = [];
+  if (
+    !/describe\.runIf\(process\.platform === "win32"\)\("Windows CLI cancellation contract"/.test(
+      testContent,
+    )
+  ) {
+    violations.push(
+      "verify-timeout-abort.test.ts: Windows cancellation contract must be enabled with process.platform === \"win32\"",
+    );
+  }
+  if (
+    !/cancels task complete on SIGINT, removes descendants, and records no event/.test(
+      testContent,
+    )
+  ) {
+    violations.push(
+      "verify-timeout-abort.test.ts: Windows task complete SIGINT cancellation test is missing",
+    );
+  }
+  if (!/cause_code:\s*"ABORTED"/.test(testContent)) {
+    violations.push(
+      "verify-timeout-abort.test.ts: Windows cancellation test must assert cause_code ABORTED",
+    );
+  }
+  if (!/loadMergedProgress\(dir\)\)\.log\.events\)\.toHaveLength\(0\)/.test(testContent)) {
+    violations.push(
+      "verify-timeout-abort.test.ts: Windows cancellation test must assert no done event is recorded",
+    );
+  }
+  return violations;
+}
+
 
 /**
  * Verify the reviewed pnpm/Vite/esbuild versions and the explicit lifecycle-script
@@ -1054,6 +1087,9 @@ export function checkSupplyChainInvariants(root) {
       }
       if (windowsJob?.get("runs-on") === "windows-latest") {
         const scripts = collectRunScripts(ciDoc, "windows-process-control");
+        const windowsCoverageViolations = checkWindowsCancellationCoverage(
+          _read("tests/integration/verify-timeout-abort.test.ts"),
+        );
         if (
           scripts.some(script => script.trim() === "pnpm check:toolchain-binaries") &&
           scripts.some(script => script.trim() === "pnpm build") &&
@@ -1063,11 +1099,13 @@ export function checkSupplyChainInvariants(root) {
               script.trim() ===
               "pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts",
           ) &&
-          !scripts.some(script => /(?:^|\s)-t\s+|--testNamePattern\b/.test(script))
+          !scripts.some(script => /(?:^|\s)-t\s+|--testNamePattern\b/.test(script)) &&
+          windowsCoverageViolations.length === 0
         ) {
           pass("ci.yml: Windows job verifies toolchain, build, and process control without no-op test filters");
         } else {
           fail("ci.yml: Windows job must verify toolchain, build, and concrete process-control tests without name filters");
+          for (const violation of windowsCoverageViolations) fail(violation);
         }
       } else {
         fail("ci.yml: windows-process-control must run on windows-latest");
