@@ -113,6 +113,7 @@ type AdapterTransactionEntryV2 = {
     | "adapter_manifest"
     | "adapter_static_file"
     | "adapter_dynamic_create"
+    | "adapter_dynamic_handoff"
     | "test_only";
   target_rel_path: string;
   role?: DesiredAdapterFileRole;
@@ -164,6 +165,13 @@ export type AdapterWriteTarget =
 export type AdapterDeleteTarget =
   | {
       kind: "adapter_static_file";
+      agentName: SupportedAgent;
+      relPath: string;
+      role: DesiredAdapterFileRole;
+      absPath: OwnedDeletePath & AdapterAuthorityPath;
+    }
+  | {
+      kind: "adapter_dynamic_handoff";
       agentName: SupportedAgent;
       relPath: string;
       role: DesiredAdapterFileRole;
@@ -271,6 +279,21 @@ export function adapterStaticDeleteTarget(
 ): AdapterDeleteTarget {
   return {
     kind: "adapter_static_file",
+    agentName,
+    relPath,
+    role,
+    absPath: adapterDeletePath(authority.absPath),
+  };
+}
+
+export function adapterDynamicHandoffDeleteTarget(
+  agentName: SupportedAgent,
+  relPath: string,
+  role: DesiredAdapterFileRole,
+  authority: Extract<AdapterMutationPathAuthority, { kind: "dynamic_write" }>,
+): AdapterDeleteTarget {
+  return {
+    kind: "adapter_dynamic_handoff",
     agentName,
     relPath,
     role,
@@ -541,7 +564,11 @@ export class FileTransaction {
     this.assertCanStage(path);
     const cwd = this.resolveCwd(path);
     const relPath = toRel(cwd, path);
-    if (target.kind === "adapter_static_file" && target.relPath !== relPath) {
+    if (
+      (target.kind === "adapter_static_file" ||
+        target.kind === "adapter_dynamic_handoff") &&
+      target.relPath !== relPath
+    ) {
       throw new Error(
         `transaction target metadata does not match authority path: ${target.relPath} !== ${relPath}`,
       );
@@ -551,7 +578,11 @@ export class FileTransaction {
       kind: "delete",
       targetKind: target.kind,
       agentName: target.kind === "test_only" ? undefined : target.agentName,
-      role: target.kind === "adapter_static_file" ? target.role : undefined,
+      role:
+        target.kind === "adapter_static_file" ||
+        target.kind === "adapter_dynamic_handoff"
+          ? target.role
+          : undefined,
       tempPath: fromRel(
         cwd,
         `${relPath}.code-pact-tx-${this.transactionId}-${index}.tmp`,
@@ -873,7 +904,8 @@ function isJournalEntryV2(value: unknown): value is AdapterTransactionEntryV2 {
     (entry.target_kind === "agent_profile" ||
       entry.target_kind === "adapter_manifest" ||
       entry.target_kind === "adapter_static_file" ||
-      entry.target_kind === "adapter_dynamic_create") &&
+      entry.target_kind === "adapter_dynamic_create" ||
+      entry.target_kind === "adapter_dynamic_handoff") &&
     typeof entry.target_rel_path === "string" &&
     (entry.role === undefined || typeof entry.role === "string") &&
     isFileState(entry.pre_state) &&
@@ -980,7 +1012,8 @@ async function loadJournal(
     }
     if (
       entry.operation === "delete" &&
-      entry.target_kind !== "adapter_static_file"
+      entry.target_kind !== "adapter_static_file" &&
+      entry.target_kind !== "adapter_dynamic_handoff"
     ) {
       throw new TransactionRecoveryError(
         "adapter transaction journal has invalid delete target",
@@ -1235,6 +1268,28 @@ async function assertTransactionTargetStillOwned(
     ) {
       throw new Error(
         "adapter transaction target is not an authorized static adapter file",
+      );
+    }
+    return;
+  }
+  if (entry.target_kind === "adapter_dynamic_handoff") {
+    const dynamicAuthority = await authorizeAdapterMutationPath(
+      cwd,
+      descriptor,
+      entry.target_rel_path,
+      {
+        expectedRole: entry.role,
+        declaredRole: entry.role,
+        allowDynamicWrite: true,
+      },
+    );
+    if (
+      entry.operation !== "delete" ||
+      dynamicAuthority.kind !== "dynamic_write" ||
+      unbrand(dynamicAuthority.absPath) !== finalPath
+    ) {
+      throw new Error(
+        "adapter transaction target is not an authorized dynamic handoff file",
       );
     }
     return;

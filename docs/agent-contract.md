@@ -247,7 +247,9 @@ ids require an RFC and an entry in `src/core/adapters/conformance-spec.ts`.
 | `cannot_switch_model_fallback_present` | The guidance tells the agent to report a limitation when it `cannot switch model` rather than ignore the recommendation |
 | `file_checksum_match` | Per-file: on-disk sha256 equals manifest |
 | `adapter_file_path_unowned` | Manifest entry names a path this adapter could not have generated (narrow built-in read authority, not the broad write namespace — so `.claude/skills/private.md` is refused), or one resolving through a symlink. Target is not read (no `actual_sha256`, no heading inspection) — forged-manifest content/SHA-oracle guard. Always `required` |
-| `file_checksum_skipped_unverifiable` | Manifest entry is a dynamic skill in the shared `.claude/skills/` namespace without `ownership: handed_off` — read-ownership cannot be proven, so it is not read/checksummed. `advisory`; handed-off dynamic files are also not read, but normally do not emit this advisory |
+| `file_checksum_skipped_unverifiable` | Manifest entry is a dynamic skill in the shared `.claude/skills/` namespace without `ownership: handed_off` — read-ownership cannot be proven, so it is not read/checksummed. Always `advisory` |
+| `dynamic_handoff_orphan_unverified` | Manifest entry is `ownership: handed_off` and names a dynamic skill under the adapter's create namespace, but the file is missing. Existing bytes are not read; conformance compares only current desired output hash with manifest hash. Always `advisory` |
+| `dynamic_handoff_manifest_stale` | Manifest entry is `ownership: handed_off` and names a dynamic skill under the adapter's create namespace, but current desired output hash differs from manifest hash. Existing bytes are not read/checksummed. Always `advisory` |
 
 **Severity.** Each check carries a `severity` of `required`
 or `advisory`. `compliant` is `true` unless a **required** check fails;
@@ -264,8 +266,11 @@ hard-fails until it is re-upgraded. The three consumption-guidance checks
 are gated the same way but on their **own** threshold
 (`RECOMMENDATION_CONSUMPTION_FROM_VERSION`), so an adapter generated after
 the hardening threshold but before the consumption templates stays
-advisory rather than failing all at once. All other checks are `required`.
-Exit is 0 when `compliant`, 1 otherwise.
+advisory rather than failing all at once. Dynamic read-authority checks
+that cannot prove safe byte reads (`file_checksum_skipped_unverifiable`,
+`dynamic_handoff_orphan_unverified`, `dynamic_handoff_manifest_stale`) are
+always `advisory`. All other checks are `required`. Exit is 0 when
+`compliant`, 1 otherwise.
 
 ## 3. Recommended lifecycle
 

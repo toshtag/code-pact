@@ -358,11 +358,14 @@ export const claudeAdapterDescriptor: AdapterDescriptor = {
     ".claude/skills/verify.md": "skill",
     ".claude/skills/progress.md": "skill",
   } as const,
-  // Role-scoped create-only authority: missing skill files in the reserved
-  // `.claude/skills/code-pact-*.md` namespace may be CREATED, but existing
-  // files there are never read/hashed/overwritten — create-only policy.
+  // Role-scoped create-only authority: missing desired skill files in the
+  // reserved `.claude/skills/code-pact-*.md` namespace may be CREATED, but
+  // normal install/upgrade/doctor/conformance flows do not read/hash/overwrite
+  // existing dynamic files. The only read/hash/delete exception is upgrade's
+  // orphan pruning for manifest-tracked files with managed:true,
+  // ownership:handed_off, this reserved namespace, and a matching manifest hash.
   // Legacy shared-namespace files (`.claude/skills/*.md` without the prefix)
-  // are also never read/hashed/overwritten/deleted.
+  // remain warn/manual-removal and are never read/hashed/overwritten/deleted.
   createPathGlobsByRole: {
     skill: [".claude/skills/code-pact-*.md"],
   } as const,

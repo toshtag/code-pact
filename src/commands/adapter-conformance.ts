@@ -18,10 +18,14 @@ import {
 import { readManifest } from "../core/adapters/manifest.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
 import { classifyManifestFileForRead } from "../core/adapters/manifest-file-ownership.ts";
+import { loadAdapterProfileForAdapter } from "../core/agent-profile-path.ts";
+import { loadModelProfilesSafe } from "../core/models/load-model-profiles.ts";
+import { dedupeDesiredFiles } from "../core/adapters/desired.ts";
 import type {
   AdapterManifest,
   ManifestFile,
 } from "../core/schemas/adapter-manifest.ts";
+import type { AdapterDescriptor } from "../core/adapters/types.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -99,6 +103,34 @@ function fail(
   if (file !== undefined) c.file = file;
   if (details !== undefined) c.details = details;
   return c;
+}
+
+async function desiredHashesForConformance(
+  cwd: string,
+  agentName: SupportedAgent,
+  descriptor: AdapterDescriptor,
+): Promise<Map<string, string> | null> {
+  try {
+    const profileLoad = await loadAdapterProfileForAdapter(
+      cwd,
+      agentName,
+      descriptor,
+    );
+    if (profileLoad.kind !== "ok") return null;
+    const modelProfiles = await loadModelProfilesSafe(cwd);
+    const desiredFiles = dedupeDesiredFiles(
+      await descriptor.generateDesiredFiles({
+        cwd,
+        profile: profileLoad.profile,
+        modelProfiles,
+        locale: "en-US",
+        modelVersion: profileLoad.profile.model_version,
+      }),
+    );
+    return new Map(desiredFiles.map(f => [f.path, hashContent(f.content)]));
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +333,7 @@ export async function runAdapterConformance(
   // which is in the shared create namespace but NOT in the narrow read-authority
   // set.
   const descriptor = adapterRegistry[agentName];
+  let desiredHashes: Map<string, string> | null | undefined;
 
   const instructionEntry = findInstructionFile(manifest);
   if (instructionEntry === null) {
@@ -510,6 +543,37 @@ export async function runAdapterConformance(
     );
     if (ownership.kind === "unverifiable_dynamic") {
       if (entry.ownership === "handed_off") {
+        desiredHashes ??= await desiredHashesForConformance(
+          cwd,
+          agentName,
+          descriptor,
+        );
+        const desiredHash = desiredHashes?.get(entry.path);
+        if (desiredHash === undefined && desiredHashes !== null) {
+          checks.push(
+            fail(
+              "dynamic_handoff_orphan_unverified",
+              entry.path,
+              {
+                reason:
+                  "handed-off dynamic file is no longer generated; existing bytes were not read",
+              },
+              "advisory",
+            ),
+          );
+        } else if (desiredHash !== undefined && desiredHash !== entry.sha256) {
+          checks.push(
+            fail(
+              "dynamic_handoff_manifest_stale",
+              entry.path,
+              {
+                reason:
+                  "handed-off dynamic file manifest hash differs from current desired output; existing bytes were not read",
+              },
+              "advisory",
+            ),
+          );
+        }
         continue;
       }
       // A legitimately generated dynamic skill in the shared namespace. Its name

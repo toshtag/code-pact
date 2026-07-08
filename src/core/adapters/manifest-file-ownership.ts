@@ -8,6 +8,7 @@ import {
   type OwnedWritePath,
 } from "../project-fs/authorities/adapter-authority.ts";
 import type { AdapterDescriptor, DesiredAdapterFileRole } from "./types.ts";
+import type { ManifestFile } from "../schemas/adapter-manifest.ts";
 
 /**
  * Verdict for "may this manifest entry path be READ by a diagnostic
@@ -42,6 +43,12 @@ export type ManifestFileOwnership =
 export type AdapterMutationPathAuthority =
   | { kind: "owned"; absPath: OwnedWritePath & AdapterAuthorityPath }
   | { kind: "dynamic_write"; absPath: OwnedWritePath & AdapterAuthorityPath }
+  | { kind: "unowned" }
+  | { kind: "unsafe" };
+
+export type AdapterOrphanPruneAuthority =
+  | { kind: "owned"; absPath: OwnedWritePath & AdapterAuthorityPath }
+  | { kind: "dynamic_handoff"; absPath: OwnedWritePath & AdapterAuthorityPath }
   | { kind: "unowned" }
   | { kind: "unsafe" };
 
@@ -103,6 +110,60 @@ export async function authorizeAdapterMutationPath(
   try {
     return {
       kind: "dynamic_write",
+      absPath: adapterWritePath(
+        await resolveAdapterProjectAuthorityPath(cwd, relPath),
+      ),
+    };
+  } catch {
+    return { kind: "unsafe" };
+  }
+}
+
+/**
+ * Authorize an OLD manifest entry for orphan pruning. Static owned paths keep
+ * the historical exact-path authority. Dynamic paths are prunable only when
+ * BOTH signals hold:
+ *
+ *  - the path is inside the adapter's reserved role-scoped dynamic namespace;
+ *  - the manifest entry says code-pact created and handed off that file.
+ *
+ * This intentionally does not grant broad read/delete authority to shared skill
+ * directories. A forged `.claude/skills/private.md` entry remains unowned, and
+ * a dynamic-looking entry without `ownership: handed_off` remains warn-only.
+ */
+export async function authorizeAdapterOrphanPrunePath(
+  cwd: string,
+  descriptor: AdapterDescriptor,
+  relPath: string,
+  entry: Pick<ManifestFile, "managed" | "role" | "ownership">,
+): Promise<AdapterOrphanPruneAuthority> {
+  if (entry.managed !== true) return { kind: "unowned" };
+
+  const staticRole = descriptor.ownedPathRoles[relPath];
+  if (staticRole !== undefined) {
+    if (staticRole !== entry.role) return { kind: "unowned" };
+    try {
+      return {
+        kind: "owned",
+        absPath: adapterWritePath(
+          await resolveAdapterProjectAuthorityPath(cwd, relPath),
+        ),
+      };
+    } catch {
+      return { kind: "unsafe" };
+    }
+  }
+
+  if (entry.ownership !== "handed_off") return { kind: "unowned" };
+
+  const createGlobs = descriptor.createPathGlobsByRole?.[entry.role] ?? [];
+  if (!createGlobs.some(g => matchGlob(g, relPath))) {
+    return { kind: "unowned" };
+  }
+
+  try {
+    return {
+      kind: "dynamic_handoff",
       absPath: adapterWritePath(
         await resolveAdapterProjectAuthorityPath(cwd, relPath),
       ),

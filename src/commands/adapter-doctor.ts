@@ -485,6 +485,22 @@ export async function inspectAgent(
       }
       if (ownership.kind === "unverifiable_dynamic") {
         if (entry.ownership === "handed_off") {
+          const desired = desiredByPath.get(entry.path);
+          const desiredHash =
+            desired === undefined ? null : computeContentHash(desired.content);
+          if (desiredHash === entry.sha256) {
+            continue;
+          }
+          issues.push({
+            code: "ADAPTER_FILE_UNVERIFIABLE",
+            severity: "warning",
+            message:
+              desiredHash === null
+                ? `Managed handoff file "${entry.path}" is no longer generated. It is in the reserved dynamic namespace, but existing bytes are not read or verified. Run "adapter upgrade ${agentName} --write" to prune it if it is still clean.`
+                : `Managed handoff file "${entry.path}" no longer matches the current generated output recorded by the manifest. Existing bytes are not read or verified. Move or delete it, then run "adapter upgrade ${agentName} --write" to regenerate.`,
+            agent: agentName,
+            path: join(cwd, entry.path),
+          });
           continue;
         }
         issues.push({

@@ -418,9 +418,9 @@ async function cmdAdapterUpgrade(
       }
 
       // Unowned orphans: files the manifest tracked but the generator no longer
-      // emits, whose path is NOT in this adapter's owned set. code-pact will not
-      // delete a file based on a project-supplied (unauthenticated) manifest
-      // alone, so it keeps them and tells the user exactly what to inspect.
+      // emits, whose path has no static ownership or reserved dynamic handoff
+      // proof. code-pact will not delete a file based on a project-supplied
+      // manifest alone, so it keeps them and tells the user what to inspect.
       const orphanWarnings = result.plan.filter(
         p => p.action === "warn" && p.reason === "unowned_orphan_not_pruned",
       );
@@ -429,7 +429,7 @@ async function cmdAdapterUpgrade(
           mode === "check" ? "are still on disk" : "were kept on disk";
         process.stderr.write(
           `${orphanWarnings.length} orphaned file(s) ${verb} — no longer generated, but not auto-removed ` +
-            `(not in this adapter's owned path set, so deleting on a project-supplied manifest alone is unsafe):\n`,
+            `(no adapter ownership proof, so deleting on a project-supplied manifest alone is unsafe):\n`,
         );
         for (const w of orphanWarnings)
           process.stderr.write(`  ${w.relPath}\n`);

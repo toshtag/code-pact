@@ -25,6 +25,7 @@ import {
   manifestPath,
 } from "../../../src/core/adapters/manifest.ts";
 import type { AdapterManifest } from "../../../src/core/schemas/adapter-manifest.ts";
+import { createPhase } from "../../../src/core/services/createPhase.ts";
 
 let dir: string;
 
@@ -949,18 +950,20 @@ describe("adapter install — manifest trust", () => {
 // ---------------------------------------------------------------------------
 // Orphan handling — a path the OLD manifest tracked but the generator no longer
 // emits. SECURITY (CWE-73): the manifest is project-controlled, so an orphan is
-// AUTO-DELETED only when its path is in the adapter descriptor's owned path set.
-// An orphan outside that set is surfaced (`warn`) and kept — never deleted —
-// so a forged manifest cannot turn `upgrade --write` into an arbitrary delete.
-// (claude's owned set is exactly its current generated files, so an arbitrarily
-// named renamed-skill orphan is reported, not silently removed.)
+// AUTO-DELETED only when static ownership or a reserved dynamic handoff proves
+// code-pact ownership. Everything else is surfaced (`warn`) and kept, so a
+// forged manifest cannot turn `upgrade --write` into an arbitrary delete.
 // ---------------------------------------------------------------------------
 
 describe("adapter upgrade — orphan handling", () => {
   // Inject an orphan: a managed file the generator does NOT produce. We write
   // it to disk and register it in the manifest with a matching hash, so it is
   // managed-clean and (because the generator never emits this path) an orphan.
-  async function seedOrphan(relPath: string, content: string): Promise<void> {
+  async function seedOrphan(
+    relPath: string,
+    content: string,
+    ownership?: "managed" | "handed_off",
+  ): Promise<void> {
     await writeFile(join(dir, relPath), content, "utf8");
     const m = await readManifestMut();
     m.files.push({
@@ -968,6 +971,7 @@ describe("adapter upgrade — orphan handling", () => {
       sha256: computeContentHash(content),
       managed: true,
       role: "skill",
+      ...(ownership ? { ownership } : {}),
     });
     await writeManifest(dir, "claude-code", m);
   }
@@ -1020,6 +1024,91 @@ describe("adapter upgrade — orphan handling", () => {
     // Kept tracked so it stays surfaced on the next run.
     const m = await readManifestMut();
     expect(m.files.some(f => f.path === orphan)).toBe(true);
+  });
+
+  it("--write prunes a clean reserved dynamic handoff orphan and drops its manifest entry", async () => {
+    const orphan = ".claude/skills/code-pact-old-renamed-skill.md";
+    await seedOrphan(
+      orphan,
+      "# /code-pact-old-renamed-skill — pnpm old\n\nUsage: /code-pact-old-renamed-skill\n\nRuns: pnpm old\n",
+      "handed_off",
+    );
+
+    const result = await runAdapterUpgrade({
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "write",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+
+    const entry = result.plan.find(p => p.relPath === orphan)!;
+    expect(entry.action).toBe("prune");
+    expect(entry.local).toBe("managed-clean");
+    expect(existsSync(join(dir, orphan))).toBe(false);
+    const m = await readManifestMut();
+    expect(m.files.some(f => f.path === orphan)).toBe(false);
+  });
+
+  it("does NOT prune a reserved handoff orphan when the manifest marks it unmanaged", async () => {
+    const orphan = ".claude/skills/code-pact-old-renamed-skill.md";
+    const content = "# /code-pact-old-renamed-skill\n\nRuns: pnpm old\n";
+    await writeFile(join(dir, orphan), content, "utf8");
+    const m = await readManifestMut();
+    m.files.push({
+      path: orphan,
+      sha256: computeContentHash(content),
+      managed: false,
+      role: "skill",
+      ownership: "handed_off",
+    });
+    await writeManifest(dir, "claude-code", m);
+
+    const result = await runAdapterUpgrade({
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "write",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+
+    const entry = result.plan.find(p => p.relPath === orphan)!;
+    expect(entry.action).toBe("warn");
+    expect(entry.reason).toBe("unowned_orphan_not_pruned");
+    expect(existsSync(join(dir, orphan))).toBe(true);
+    const after = await readManifestMut();
+    expect(after.files.find(f => f.path === orphan)?.managed).toBe(false);
+  });
+
+  it("refuses a modified reserved dynamic handoff orphan and preserves its manifest ownership", async () => {
+    const orphan = ".claude/skills/code-pact-old-renamed-skill.md";
+    await seedOrphan(
+      orphan,
+      "# /code-pact-old-renamed-skill\n\nRuns: pnpm old\n",
+      "handed_off",
+    );
+    await writeFile(join(dir, orphan), "# user edit\n", "utf8");
+
+    const result = await runAdapterUpgrade({
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "write",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+
+    const entry = result.plan.find(p => p.relPath === orphan)!;
+    expect(entry.action).toBe("refuse");
+    expect(entry.local).toBe("managed-modified");
+    expect(await readFile(join(dir, orphan), "utf8")).toBe("# user edit\n");
+    const m = await readManifestMut();
+    expect(m.files.find(f => f.path === orphan)?.ownership).toBe("handed_off");
   });
 
   it("leaves an unowned managed-modified orphan in place (warn), preserving the user edit", async () => {
@@ -1079,6 +1168,36 @@ describe("adapter upgrade — orphan handling", () => {
     expect(await readFile(join(dir, victim), "utf8")).toBe(content);
   });
 
+  it("SECURITY: a forged manifest entry for a hand-authored shared skill is NOT deleted on --write", async () => {
+    const victim = ".claude/skills/private.md";
+    const content = "# private\n";
+    await writeFile(join(dir, victim), content, "utf8");
+    const m = await readManifestMut();
+    m.files.push({
+      path: victim,
+      sha256: computeContentHash(content),
+      managed: true,
+      role: "skill",
+    });
+    await writeManifest(dir, "claude-code", m);
+
+    const result = await runAdapterUpgrade({
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "write",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+
+    const entry = result.plan.find(p => p.relPath === victim)!;
+    expect(entry.action).toBe("warn");
+    expect(entry.reason).toBe("unowned_orphan_not_pruned");
+    expect(existsSync(join(dir, victim))).toBe(true);
+    expect(await readFile(join(dir, victim), "utf8")).toBe(content);
+  });
+
   it("never touches a hand-authored skill that was never in the manifest", async () => {
     // ship-task.md / release.md are authored by hand and never manifest-tracked.
     const manual = ".claude/skills/my-hand-authored.md";
@@ -1124,6 +1243,53 @@ describe("adapter upgrade — orphan handling", () => {
     expect(second.clean).toBe(false);
     expect(second.plan.find(p => p.relPath === orphan)!.action).toBe("warn");
     expect(existsSync(join(dir, orphan))).toBe(true);
+  });
+});
+
+describe("adapter upgrade — dynamic handoff drift", () => {
+  beforeEach(async () => {
+    const phase = await createPhase({
+      cwd: dir,
+      id: "P1",
+      name: "Deploy",
+      weight: 1,
+      objective: "Exercise dynamic skill drift.",
+      confidence: "high",
+      risk: "low",
+      verifyCommands: ["pnpm deploy"],
+    });
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+    const phasePath = join(dir, phase.path);
+    const raw = await readFile(phasePath, "utf8");
+    await writeFile(phasePath, raw.replace("pnpm deploy", "npm deploy"), "utf8");
+  });
+
+  it("--check does not treat a handed-off dynamic skill as current when desired content changes", async () => {
+    const result = await runAdapterUpgrade({
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "check",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
+    });
+
+    const entry = result.plan.find(
+      p => p.relPath === ".claude/skills/code-pact-deploy.md",
+    )!;
+    expect(entry).toMatchObject({
+      local: "unverifiable",
+      desired: "stale",
+      action: "warn",
+      reason: "dynamic_file_unverifiable",
+    });
+    expect(result.clean).toBe(false);
   });
 });
 

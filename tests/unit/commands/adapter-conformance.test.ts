@@ -1,9 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runAdapterConformance } from "../../../src/commands/adapter-conformance.ts";
+import { runInit } from "../../../src/commands/init.ts";
+import { runAdapterInstall } from "../../../src/commands/adapter-install.ts";
+import { createPhase } from "../../../src/core/services/createPhase.ts";
+import {
+  computeContentHash,
+  readManifest,
+  writeManifest,
+} from "../../../src/core/adapters/manifest.ts";
 
 const VALID_CONTRACT_BODY = `# Some Adapter
 
@@ -167,6 +175,110 @@ describe("runAdapterConformance — missing manifest", () => {
     expect(result.checks).toHaveLength(1);
     expect(result.checks[0]!.id).toBe("manifest_present");
     expect(result.checks[0]!.status).toBe("fail");
+  });
+});
+
+describe("runAdapterConformance — dynamic handoff advisories", () => {
+  async function initAndInstallWithDynamicSkill(): Promise<string> {
+    await runInit({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["claude-code"],
+      force: false,
+      json: false,
+    });
+    const phase = await createPhase({
+      cwd: dir,
+      id: "P1",
+      name: "Deploy",
+      weight: 1,
+      objective: "Exercise dynamic conformance checks.",
+      confidence: "high",
+      risk: "low",
+      verifyCommands: ["pnpm deploy"],
+    });
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+    return phase.path;
+  }
+
+  it("surfaces a handed-off dynamic orphan as advisory without reading existing bytes", async () => {
+    await runInit({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["claude-code"],
+      force: false,
+      json: false,
+    });
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+    const dynamic = ".claude/skills/code-pact-private.md";
+    const secret = "API_TOKEN=conformance-orphan-marker\n";
+    await mkdir(join(dir, ".claude", "skills"), { recursive: true });
+    await writeFile(join(dir, dynamic), secret, "utf8");
+    const manifest = await readManifest(dir, "claude-code");
+    if (manifest === null) throw new Error("manifest expected");
+    manifest.files.push({
+      path: dynamic,
+      sha256: computeContentHash(secret),
+      managed: true,
+      role: "skill",
+      ownership: "handed_off",
+    });
+    await writeManifest(dir, "claude-code", manifest);
+
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    const advisory = result.checks.find(
+      c => c.id === "dynamic_handoff_orphan_unverified" && c.file === dynamic,
+    );
+    expect(advisory).toMatchObject({
+      status: "fail",
+      severity: "advisory",
+    });
+    expect(result.compliant).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("conformance-orphan-marker");
+  });
+
+  it("surfaces handed-off dynamic desired-hash drift as advisory without reading existing bytes", async () => {
+    const phasePath = await initAndInstallWithDynamicSkill();
+    const dynamic = ".claude/skills/code-pact-deploy.md";
+    await writeFile(
+      join(dir, dynamic),
+      "API_TOKEN=conformance-drift-marker\n",
+      "utf8",
+    );
+    const phaseAbs = join(dir, phasePath);
+    const raw = await readFile(phaseAbs, "utf8");
+    await writeFile(phaseAbs, raw.replace("pnpm deploy", "npm deploy"), "utf8");
+
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    const advisory = result.checks.find(
+      c => c.id === "dynamic_handoff_manifest_stale" && c.file === dynamic,
+    );
+    expect(advisory).toMatchObject({
+      status: "fail",
+      severity: "advisory",
+    });
+    expect(result.compliant).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("conformance-drift-marker");
   });
 });
 
