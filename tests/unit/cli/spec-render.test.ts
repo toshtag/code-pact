@@ -8,6 +8,7 @@
 // example runnability are covered by command/contract tests, by design.
 
 import { describe, it, expect } from "vitest";
+import { ROOT_SPECS } from "../../../src/cli/spec/root.ts";
 import { TASK_SPECS } from "../../../src/cli/spec/task.ts";
 import {
   toParseOptions,
@@ -15,10 +16,13 @@ import {
   renderReference,
 } from "../../../src/cli/spec/render.ts";
 
-const SPECS = Object.entries(TASK_SPECS);
+const ALL_SPECS = [
+  ...Object.entries(ROOT_SPECS).map(([name, spec]) => [name, spec, name] as const),
+  ...Object.entries(TASK_SPECS).map(([name, spec]) => [name, spec, `task ${name}`] as const),
+];
 
 describe("CommandSpec derivation (P46)", () => {
-  it.each(SPECS)("`task %s` toParseOptions maps flags to parseArgs config", (_name, spec) => {
+  it.each(ALL_SPECS)("`%s` toParseOptions maps flags to parseArgs config", (_name, spec) => {
     const opts = toParseOptions(spec);
     expect(Object.keys(opts)).toEqual(spec.flags.map((f) => f.name));
     for (const f of spec.flags) {
@@ -30,9 +34,9 @@ describe("CommandSpec derivation (P46)", () => {
     }
   });
 
-  it.each(SPECS)("`task %s` help carries the Usage line, every flag, and examples", (name, spec) => {
+  it.each(ALL_SPECS)("`%s` help carries the Usage line, every flag, and examples", (_name, spec, label) => {
     const help = renderLeafHelp(spec);
-    expect(help).toContain(`Usage: code-pact task ${name}`);
+    expect(help).toContain(`Usage: code-pact ${label}`);
     if (spec.positional) expect(help).toContain(spec.positional);
     for (const f of spec.flags) expect(help).toContain(`--${f.name}`);
     expect(help).toContain("Examples:");
@@ -40,9 +44,9 @@ describe("CommandSpec derivation (P46)", () => {
     if (spec.readOnly) expect(help).toContain("Read-only");
   });
 
-  it.each(SPECS)("`task %s` reference carries the heading, every flag, and examples", (name, spec) => {
+  it.each(ALL_SPECS)("`%s` reference carries the heading, every flag, and examples", (_name, spec, label) => {
     const ref = renderReference(spec);
-    expect(ref).toContain(`## \`task ${name}\``);
+    expect(ref).toContain(`## \`${label}\``);
     for (const f of spec.flags) expect(ref).toContain(`\`--${f.name}\``);
     for (const ex of spec.examples) expect(ref).toContain(ex);
   });
@@ -84,7 +88,7 @@ describe("CommandSpec derivation (P46)", () => {
     // A synthetic spec with a required flag must still produce a plain
     // string/boolean parseArgs entry — no "required" key leaks through.
     const opts = toParseOptions({
-      cluster: "task",
+      cluster: "root",
       command: "synthetic",
       summary: "x",
       flags: [{ name: "reason", value: "<text>", required: true, description: "why" }],

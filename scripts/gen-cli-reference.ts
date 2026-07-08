@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { TASK_SPECS } from "../src/cli/spec/task.ts";
+import { ROOT_SPECS } from "../src/cli/spec/root.ts";
 import { renderReference } from "../src/cli/spec/render.ts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -28,17 +29,21 @@ function render(): string {
   const sections: string[] = [
     BANNER,
     "",
-    "# Task CLI reference (generated)",
+    "# CLI reference (generated)",
     "",
-    "Per-command flags, usage, and examples for the **task** cluster, derived",
-    "from the `CommandSpec` single source (`src/cli/spec/`). Other clusters",
-    "(plan / phase / adapter) are not generated — their flags live in each",
-    "command's `--help`, and their semantics in",
+    "Per-command flags, usage, and examples for the generated CLI surfaces,",
+    "derived from the `CommandSpec` single source (`src/cli/spec/`). Most",
+    "non-task clusters (plan / phase / adapter) are not generated yet — their",
+    "flags live in each command's `--help`, and their semantics in",
     "[`cli-contract.md`](cli-contract.md). The stable CLI contract — JSON",
     "envelope, exit codes, error codes, stability taxonomy — also lives in",
     "[`cli-contract.md`](cli-contract.md).",
     "",
   ];
+
+  sections.push("## Top-level commands", "");
+  sections.push(renderReference(ROOT_SPECS.verify), "");
+  sections.push("## Task commands", "");
 
   // Deterministic order: lifecycle reading order, then any others by key.
   const order = [

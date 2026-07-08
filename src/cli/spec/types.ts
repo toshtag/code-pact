@@ -37,8 +37,8 @@ export type FlagSpec = {
 
 /** The single source for one subcommand. */
 export type CommandSpec = {
-  /** Cluster the command belongs to. P46 is task-only; widen additively later. */
-  cluster: "task";
+  /** Cluster the command belongs to, or "root" for a top-level command. */
+  cluster: "task" | "root";
   /** Subcommand name, e.g. "prepare". */
   command: string;
   /** Positional placeholder for the synopsis, e.g. "<task-id>". Omit if none. */
