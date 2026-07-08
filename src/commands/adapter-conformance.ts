@@ -333,11 +333,7 @@ export async function runAdapterConformance(
   // which is in the shared create namespace but NOT in the narrow read-authority
   // set.
   const descriptor = adapterRegistry[agentName];
-  const desiredHashes = await desiredHashesForConformance(
-    cwd,
-    agentName,
-    descriptor,
-  );
+  let desiredHashes: Map<string, string> | null | undefined;
 
   const instructionEntry = findInstructionFile(manifest);
   if (instructionEntry === null) {
@@ -547,6 +543,11 @@ export async function runAdapterConformance(
     );
     if (ownership.kind === "unverifiable_dynamic") {
       if (entry.ownership === "handed_off") {
+        desiredHashes ??= await desiredHashesForConformance(
+          cwd,
+          agentName,
+          descriptor,
+        );
         const desiredHash = desiredHashes?.get(entry.path);
         if (desiredHash === undefined && desiredHashes !== null) {
           checks.push(
