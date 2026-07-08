@@ -464,6 +464,13 @@ function workflowHasPushMainAndPullRequest(doc) {
   return branches.items.some(item => String(item.value ?? item) === "main");
 }
 
+function workflowHasOnlyWorkflowDispatch(doc) {
+  const on = doc.get("on") ?? doc.get(true);
+  if (!on || typeof on !== "object") return false;
+  const onKeys = on.items ? on.items.map(p => String(p.key.value ?? p.key)) : [];
+  return onKeys.length === 1 && onKeys[0] === "workflow_dispatch";
+}
+
 function jobRunsOn(job, expected) {
   return job?.get("runs-on") === expected;
 }
@@ -548,6 +555,60 @@ function checkFastCiWorkflow(ciDoc, ciContent) {
   return violations;
 }
 
+function checkDeepCiWorkflow(deepDoc) {
+  const violations = [];
+
+  if (!workflowHasOnlyWorkflowDispatch(deepDoc)) {
+    violations.push("ci-deep.yml: must run only on workflow_dispatch");
+  }
+
+  const jobNames = getWorkflowJobNames(deepDoc);
+  for (const jobName of ["linux-deep", "node-24-smoke", "windows-process-control"]) {
+    if (!jobNames.includes(jobName)) {
+      violations.push(`ci-deep.yml: missing ${jobName} job`);
+    }
+  }
+
+  const linuxDeep = getJobNode(deepDoc, "linux-deep");
+  if (linuxDeep) {
+    if (!jobRunsOn(linuxDeep, "ubuntu-latest")) {
+      violations.push("ci-deep.yml: linux-deep must run on ubuntu-latest");
+    }
+    if (jobSetupNodeVersion(deepDoc, "linux-deep") !== "22") {
+      violations.push("ci-deep.yml: linux-deep must use Node 22");
+    }
+    const scripts = collectRunScripts(deepDoc, "linux-deep");
+    if (!scripts.some(script => script.trim() === "pnpm test:ci:deep")) {
+      violations.push("ci-deep.yml: linux-deep must run pnpm test:ci:deep");
+    }
+  }
+
+  const node24 = getJobNode(deepDoc, "node-24-smoke");
+  if (node24) {
+    if (!jobRunsOn(node24, "ubuntu-latest")) {
+      violations.push("ci-deep.yml: node-24-smoke must run on ubuntu-latest");
+    }
+    if (jobSetupNodeVersion(deepDoc, "node-24-smoke") !== "24") {
+      violations.push("ci-deep.yml: node-24-smoke must use Node 24");
+    }
+    const scripts = collectRunScripts(deepDoc, "node-24-smoke");
+    const required = [
+      "pnpm typecheck",
+      "pnpm test:unit",
+      "pnpm build",
+      "node dist/cli.js --version",
+      "node dist/cli.js --json --version",
+    ];
+    for (const command of required) {
+      if (!scripts.some(script => script.trim() === command)) {
+        violations.push(`ci-deep.yml: node-24-smoke must run ${command}`);
+      }
+    }
+  }
+
+  return violations;
+}
+
 function findWindowsProcessControlWorkflow(workflowDocs, cancellationCoverageViolations) {
   for (const { rel, doc } of workflowDocs) {
     for (const jobPair of getWorkflowJobs(doc)) {
@@ -573,6 +634,76 @@ function findWindowsProcessControlWorkflow(workflowDocs, cancellationCoverageVio
     }
   }
   return null;
+}
+
+export function checkCiPackageScripts(packageContent) {
+  const violations = [];
+  let pkg;
+  try {
+    pkg = JSON.parse(packageContent);
+  } catch (error) {
+    return [
+      `package.json parse error: ${error instanceof Error ? error.message : String(error)}`,
+    ];
+  }
+
+  const scripts = pkg.scripts ?? {};
+  const testCi = String(scripts["test:ci"] ?? "");
+  const testCiDeep = String(scripts["test:ci:deep"] ?? "");
+
+  const requiredFast = [
+    "pnpm check:supply-chain",
+    "pnpm typecheck",
+    "pnpm test:unit",
+    "pnpm build",
+    "pnpm test:integration:smoke",
+    "node dist/cli.js --version",
+    "node dist/cli.js --json --version",
+  ];
+  for (const command of requiredFast) {
+    if (!testCi.includes(command)) {
+      violations.push(`package.json: scripts.test:ci must include ${command}`);
+    }
+  }
+
+  const forbiddenFast = [
+    ["pnpm check:docs", /pnpm\s+check:docs\b/],
+    ["pnpm check:fs-containment", /pnpm\s+check:fs-containment\b/],
+    ["pnpm check:fs-authority", /pnpm\s+check:fs-authority\b/],
+    ["pnpm check:security-hardening", /pnpm\s+check:security-hardening\b/],
+    ["vitest.integration.config.ts", /vitest\.integration\.config\.ts/],
+    ["pnpm test:integration", /pnpm\s+test:integration(?:\s|$)/],
+    ["pnpm test:integration:full", /pnpm\s+test:integration:full\b/],
+    ["plan lint --include-quality --strict --json", /plan\s+lint\s+--include-quality\s+--strict\s+--json/],
+    ["plan analyze --strict --json", /plan\s+analyze\s+--strict\s+--json/],
+  ];
+  for (const [label, pattern] of forbiddenFast) {
+    if (pattern.test(testCi)) {
+      violations.push(`package.json: scripts.test:ci must not include ${label}`);
+    }
+  }
+
+  const requiredDeep = [
+    "pnpm check:docs",
+    "pnpm check:fs-containment",
+    "pnpm check:fs-authority",
+    "pnpm check:security-hardening",
+    "pnpm check:supply-chain",
+    "pnpm typecheck",
+    "pnpm test:unit",
+    "pnpm build",
+    "vitest run --config vitest.integration.config.ts",
+    "node dist/cli.js plan lint --include-quality --strict --json",
+    "node dist/cli.js plan analyze --strict --json",
+    "pnpm test:cli:init-smoke",
+  ];
+  for (const command of requiredDeep) {
+    if (!testCiDeep.includes(command)) {
+      violations.push(`package.json: scripts.test:ci:deep must include ${command}`);
+    }
+  }
+
+  return violations;
 }
 
 export function checkCancellationCoverage(testContent) {
@@ -1279,6 +1410,23 @@ export function checkSupplyChainInvariants(root) {
     // ci.yml might not exist in some test contexts
   }
 
+  try {
+    const deepContent = _read(".github/workflows/ci-deep.yml");
+    const deepDoc = parseDocument(deepContent);
+    if (deepDoc.errors.length > 0) {
+      fail("ci-deep.yml: YAML parse error", deepDoc.errors[0].message);
+    } else {
+      const deepViolations = checkDeepCiWorkflow(deepDoc);
+      if (deepViolations.length === 0) {
+        pass("ci-deep.yml: manual Deep CI has Linux deep, Node 24 smoke, and Windows process-control jobs");
+      } else {
+        for (const violation of deepViolations) fail(violation);
+      }
+    }
+  } catch {
+    fail("ci-deep.yml: file not found");
+  }
+
   for (const { rel, content, doc } of workflowDocs) {
     const tokenViolations = checkNoTokenSecrets(content);
     for (const violation of tokenViolations) fail(`${rel}: ${violation}`);
@@ -1326,6 +1474,20 @@ export function checkSupplyChainInvariants(root) {
   } catch (error) {
     fail(
       "toolchain pin files must exist",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  try {
+    const violations = checkCiPackageScripts(_read("package.json"));
+    if (violations.length === 0) {
+      pass("package.json: fast and deep CI package scripts match the tiered policy");
+    } else {
+      for (const violation of violations) fail(violation);
+    }
+  } catch (error) {
+    fail(
+      "package.json CI scripts must be readable",
       error instanceof Error ? error.message : String(error),
     );
   }

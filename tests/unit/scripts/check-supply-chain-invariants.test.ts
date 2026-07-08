@@ -372,6 +372,40 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "  contents: read",
     "",
     "jobs:",
+    "  linux-deep:",
+    "    name: Linux deep gate (Node 22)",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
+    "        with:",
+    "          persist-credentials: false",
+    "      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9",
+    "      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0",
+    "        with:",
+    "          node-version: 22",
+    "          cache: pnpm",
+    "      - run: pnpm install --frozen-lockfile",
+    "      - run: pnpm test:ci:deep",
+    "",
+    "  node-24-smoke:",
+    "    name: Node 24 compatibility smoke",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
+    "        with:",
+    "          persist-credentials: false",
+    "      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9",
+    "      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0",
+    "        with:",
+    "          node-version: 24",
+    "          cache: pnpm",
+    "      - run: pnpm install --frozen-lockfile",
+    "      - run: pnpm typecheck",
+    "      - run: pnpm test:unit",
+    "      - run: pnpm build",
+    "      - run: node dist/cli.js --version",
+    "      - run: node dist/cli.js --json --version",
+    "",
     "  windows-process-control:",
     "    name: Windows process-control (Node 22)",
     "    runs-on: windows-latest",
@@ -429,6 +463,12 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   const wellFormedPackage = JSON.stringify(
     {
       packageManager: "pnpm@10.34.2",
+      scripts: {
+        "test:ci":
+          "pnpm check:supply-chain && pnpm typecheck && pnpm test:unit && pnpm build && pnpm test:integration:smoke && node dist/cli.js --version && node dist/cli.js --json --version",
+        "test:ci:deep":
+          "pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm check:supply-chain && pnpm typecheck && pnpm test:unit && pnpm build && vitest run --config vitest.integration.config.ts && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json && pnpm test:cli:init-smoke",
+      },
       devDependencies: {
         esbuild: "0.28.1",
         vite: "^6.4.3",
@@ -521,6 +561,14 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     }
   }
 
+  function packageWithScript(name: string, value: string): string {
+    const pkg = JSON.parse(wellFormedPackage) as {
+      scripts: Record<string, string>;
+    };
+    pkg.scripts[name] = value;
+    return JSON.stringify(pkg, null, 2);
+  }
+
   it("passes on a well-formed tree", async () => {
     root = await buildTree();
     const { failures } = checkSupplyChainInvariants(root);
@@ -566,6 +614,78 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when Windows process-control coverage is missing from all workflows", async () => {
     root = await buildTree({
       ciDeepContent: wellFormedCiDeep.replace("windows-latest", "ubuntu-latest"),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when test:ci accidentally includes full integration", async () => {
+    root = await buildTree({
+      packageContent: packageWithScript(
+        "test:ci",
+        "pnpm check:supply-chain && pnpm typecheck && pnpm test:unit && pnpm build && vitest run --config vitest.integration.config.ts && pnpm test:integration:smoke && node dist/cli.js --version && node dist/cli.js --json --version",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when test:ci accidentally includes docs checks", async () => {
+    root = await buildTree({
+      packageContent: packageWithScript(
+        "test:ci",
+        "pnpm check:supply-chain && pnpm check:docs && pnpm typecheck && pnpm test:unit && pnpm build && pnpm test:integration:smoke && node dist/cli.js --version && node dist/cli.js --json --version",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when test:ci omits smoke integration", async () => {
+    root = await buildTree({
+      packageContent: packageWithScript(
+        "test:ci",
+        "pnpm check:supply-chain && pnpm typecheck && pnpm test:unit && pnpm build && node dist/cli.js --version && node dist/cli.js --json --version",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when test:ci:deep omits full integration", async () => {
+    root = await buildTree({
+      packageContent: packageWithScript(
+        "test:ci:deep",
+        "pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm check:supply-chain && pnpm typecheck && pnpm test:unit && pnpm build && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json && pnpm test:cli:init-smoke",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when ci-deep.yml omits Node 24 smoke", async () => {
+    root = await buildTree({
+      ciDeepContent: wellFormedCiDeep.replace(
+        "  node-24-smoke:",
+        "  node-24-smoke-removed:",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when ci-deep.yml is not workflow_dispatch-only", async () => {
+    root = await buildTree({
+      ciDeepContent: wellFormedCiDeep.replace(
+        "on:\n  workflow_dispatch:",
+        "on:\n  pull_request:",
+      ),
     });
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBeGreaterThan(0);
