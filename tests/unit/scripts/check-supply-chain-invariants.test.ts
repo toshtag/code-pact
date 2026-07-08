@@ -355,6 +355,25 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   ].join("\n");
 
   const wellFormedVerifyTimeoutAbort = [
+    'import { runBoundedCommand } from "../../src/core/process/bounded-command.ts";',
+    "",
+    'describe.runIf(process.platform === "win32")("Windows bounded-command cancellation contract", () => {',
+    '  it("times out a command tree through taskkill cleanup", async () => {',
+    '    const result = await runBoundedCommand("node long-parent.mjs", dir, 750);',
+    "    expect(result).toMatchObject({",
+    "      timedOut: true,",
+    '      termination: { strategy: "taskkill" },',
+    "    });",
+    "  });",
+    '  it("aborts a command tree through taskkill cleanup", async () => {',
+    '    const result = await runBoundedCommand("node long-parent.mjs", dir, 10_000, signal);',
+    "    expect(result).toMatchObject({",
+    "      aborted: true,",
+    '      termination: { strategy: "taskkill" },',
+    "    });",
+    "  });",
+    "});",
+    "",
     'if (process.platform !== "win32") {',
     '  describe("CLI cancellation contract", () => {',
     '    it.each(["SIGINT", "SIGTERM"] as const)(',
@@ -488,6 +507,28 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     );
     expect(violations).toContain(
       'verify-timeout-abort.test.ts: POSIX SIGINT/SIGTERM cancellation cases are missing',
+    );
+
+    root = await buildTree({ verifyTimeoutAbortContent: brokenCoverage });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when Windows bounded-command cancellation coverage is missing", async () => {
+    const brokenCoverage = wellFormedVerifyTimeoutAbort
+      .replace(
+        'describe.runIf(process.platform === "win32")("Windows bounded-command cancellation contract"',
+        'describe.skip("Windows bounded-command cancellation contract"',
+      )
+      .replaceAll('termination: { strategy: "taskkill" },', "termination: undefined,");
+
+    const violations = checkCancellationCoverage(brokenCoverage);
+    expect(violations).toContain(
+      "verify-timeout-abort.test.ts: Windows bounded-command cancellation coverage is missing",
+    );
+    expect(violations).toContain(
+      "verify-timeout-abort.test.ts: Windows coverage must assert taskkill cleanup",
     );
 
     root = await buildTree({ verifyTimeoutAbortContent: brokenCoverage });

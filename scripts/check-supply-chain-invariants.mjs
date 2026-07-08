@@ -438,6 +438,28 @@ export function checkCancellationCoverage(testContent) {
       "verify-timeout-abort.test.ts: cancellation test must assert no done event is recorded",
     );
   }
+  if (
+    !/describe\.runIf\(process\.platform === "win32"\)\("Windows bounded-command cancellation contract"/.test(
+      testContent,
+    )
+  ) {
+    violations.push(
+      "verify-timeout-abort.test.ts: Windows bounded-command cancellation coverage is missing",
+    );
+  }
+  if (!/runBoundedCommand\("node long-parent\.mjs", dir,/.test(testContent)) {
+    violations.push(
+      "verify-timeout-abort.test.ts: Windows coverage must exercise runBoundedCommand directly",
+    );
+  }
+  if (!/timedOut:\s*true/.test(testContent) || !/aborted:\s*true/.test(testContent)) {
+    violations.push(
+      "verify-timeout-abort.test.ts: Windows coverage must assert timeout and AbortSignal cancellation",
+    );
+  }
+  if (!/strategy:\s*"taskkill"/.test(testContent)) {
+    violations.push("verify-timeout-abort.test.ts: Windows coverage must assert taskkill cleanup");
+  }
   return violations;
 }
 

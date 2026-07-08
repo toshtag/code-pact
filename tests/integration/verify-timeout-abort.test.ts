@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { cliPath, ensureCliBuilt, run } from "../helpers/cli.ts";
 import { loadMergedProgress } from "../../src/core/progress/io.ts";
+import { runBoundedCommand } from "../../src/core/process/bounded-command.ts";
 
 function phase(command: string, taskStatus: "planned" | "done" = "planned"): string {
   return [
@@ -219,7 +220,7 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-describe("CLI timeout contract", () => {
+describe.runIf(process.platform !== "win32")("CLI timeout contract", () => {
   it("accepts --timeout 2 as a valid value", async () => {
     await setupProject(dir, "echo ok", {
       taskStatus: "done",
@@ -306,6 +307,59 @@ describe("CLI timeout contract", () => {
     expect(JSON.parse(result.stdout)).toMatchObject({ ok: true });
     expect((await loadMergedProgress(dir)).log.events).toHaveLength(1);
   });
+});
+
+describe.runIf(process.platform === "win32")("Windows bounded-command cancellation contract", () => {
+  it("times out a command tree through taskkill cleanup", async () => {
+    await installLongProcessFixture(dir);
+    const result = await runBoundedCommand("node long-parent.mjs", dir, 750);
+
+    expect(result).toMatchObject({
+      timedOut: true,
+      aborted: false,
+      termination: {
+        attempted: true,
+        completed: true,
+        strategy: "taskkill",
+        closeObserved: true,
+      },
+    });
+    const pids = await readPids(dir);
+    expect(pids).toBeDefined();
+    await waitForPidExit(pids!.parent);
+    await waitForPidExit(pids!.child);
+    expect(pidExists(pids!.parent)).toBe(false);
+    expect(pidExists(pids!.child)).toBe(false);
+    expect(existsSync(join(dir, "long-child-survived"))).toBe(false);
+  }, 15_000);
+
+  it("aborts a command tree through taskkill cleanup", async () => {
+    await installLongProcessFixture(dir);
+    const controller = new AbortController();
+    const pending = runBoundedCommand("node long-parent.mjs", dir, 10_000, controller.signal);
+
+    await waitForFile(join(dir, "long-ready"));
+    controller.abort();
+    const result = await pending;
+
+    expect(result).toMatchObject({
+      timedOut: false,
+      aborted: true,
+      termination: {
+        attempted: true,
+        completed: true,
+        strategy: "taskkill",
+        closeObserved: true,
+      },
+    });
+    const pids = await readPids(dir);
+    expect(pids).toBeDefined();
+    await waitForPidExit(pids!.parent);
+    await waitForPidExit(pids!.child);
+    expect(pidExists(pids!.parent)).toBe(false);
+    expect(pidExists(pids!.child)).toBe(false);
+    expect(existsSync(join(dir, "long-child-survived"))).toBe(false);
+  }, 15_000);
 });
 
 if (process.platform !== "win32") {
