@@ -246,6 +246,39 @@ describe("adapter doctor — forged manifest .env oracle (security)", () => {
     expect(JSON.stringify(result)).not.toContain("top-secret-doctor-marker");
   });
 
+  it("refuses a manifest-tracked file that is a symlink to an outside file", async () => {
+    const outsideDir = await mkdtemp(
+      join(tmpdir(), "code-pact-adapter-doctor-outside-"),
+    );
+    try {
+      const outsideFile = join(outsideDir, "CLAUDE.md");
+      await writeFile(
+        outsideFile,
+        "## Agent contract\nAPI_TOKEN=outside-symlink-marker\n",
+        "utf8",
+      );
+      await unlink(join(dir, "CLAUDE.md"));
+      await symlink(outsideFile, join(dir, "CLAUDE.md"), "file");
+
+      readFileSpy.mockClear();
+      const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+
+      const issue = result.issues.find(
+        i =>
+          i.code === "ADAPTER_FILE_PATH_UNSAFE" &&
+          (i.path ?? "").endsWith("CLAUDE.md"),
+      );
+      expect(issue).toBeDefined();
+      expect(issue?.severity).toBe("error");
+      expect(JSON.stringify(result)).not.toContain("outside-symlink-marker");
+      expect(
+        readFileSpy.mock.calls.some(([path]) => String(path) === outsideFile),
+      ).toBe(false);
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
   // SECURITY (Blocker 1 — shared skills namespace): a victim's hand-authored
   // `.claude/skills/code-pact-private.md` is in the reserved create namespace
   // (for role=skill) but is NOT in doctor's current exact generated set. It is
