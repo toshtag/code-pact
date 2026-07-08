@@ -334,23 +334,62 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "  contents: read",
     "",
     "jobs:",
-    "  build:",
+    "  fast:",
+    "    name: Fast gate (Node 22)",
     "    runs-on: ubuntu-latest",
     "    steps:",
     "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
     "        with:",
     "          persist-credentials: false",
-    "      - run: pnpm check:supply-chain",
+    "      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9",
+    "      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0",
+    "        with:",
+    "          node-version: 22",
+    "          cache: pnpm",
+    "      - run: pnpm install --frozen-lockfile",
+    "      - run: pnpm test:ci",
     "",
+    "  ci-status:",
+    "    name: CI status",
+    "    runs-on: ubuntu-latest",
+    "    needs: [fast]",
+    "    if: ${{ always() }}",
+    "    steps:",
+    "      - name: Verify fast gate succeeded",
+    "        if: ${{ needs.fast.result != 'success' }}",
+    "        run: |",
+    "          echo \"fast gate did not succeed: fast=${{ needs.fast.result }}\"",
+    "          exit 1",
+  ].join("\n");
+
+  const wellFormedCiDeep = [
+    "name: Deep CI",
+    "",
+    "on:",
+    "  workflow_dispatch:",
+    "",
+    "permissions:",
+    "  contents: read",
+    "",
+    "jobs:",
     "  windows-process-control:",
+    "    name: Windows process-control (Node 22)",
     "    runs-on: windows-latest",
     "    steps:",
     "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
     "        with:",
     "          persist-credentials: false",
+    "      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9",
+    "      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0",
+    "        with:",
+    "          node-version: 22",
+    "          cache: pnpm",
+    "      - run: pnpm install --frozen-lockfile",
+    "",
     "      - run: pnpm check:toolchain-binaries",
+    "      - run: pnpm typecheck",
     "      - run: pnpm build",
-    "      - run: pnpm exec vitest run tests/unit/commands/verify-process.test.ts",
+    "      - run: pnpm exec vitest run tests/unit/core/project-fs-authority-resolvers.test.ts tests/unit/commands/verify-process.test.ts",
     "      - run: pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts",
   ].join("\n");
 
@@ -429,6 +468,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     overrides: {
       publishContent?: string;
       ciContent?: string;
+      ciDeepContent?: string;
       securityContent?: string;
       packageContent?: string;
       workspaceContent?: string;
@@ -446,6 +486,10 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     await writeFile(
       join(dir, ".github", "workflows", "ci.yml"),
       overrides.ciContent ?? wellFormedCi,
+    );
+    await writeFile(
+      join(dir, ".github", "workflows", "ci-deep.yml"),
+      overrides.ciDeepContent ?? wellFormedCiDeep,
     );
     await writeFile(
       join(dir, "SECURITY.md"),
@@ -486,10 +530,42 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
 
   it("fails when Windows process-control coverage uses a name filter", async () => {
     root = await buildTree({
-      ciContent: wellFormedCi.replace(
+      ciDeepContent: wellFormedCiDeep.replace(
         "      - run: pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts",
         '      - run: pnpm exec vitest run --config vitest.integration.config.ts -t "timeout"',
       ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when required PR CI includes a Windows job", async () => {
+    root = await buildTree({
+      ciContent:
+        wellFormedCi +
+        "\n\n  windows-process-control:\n    runs-on: windows-latest\n    steps:\n      - run: pnpm build\n",
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when required PR CI runs full integration directly", async () => {
+    root = await buildTree({
+      ciContent: wellFormedCi.replace(
+        "      - run: pnpm test:ci",
+        "      - run: pnpm exec vitest run --config vitest.integration.config.ts",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when Windows process-control coverage is missing from all workflows", async () => {
+    root = await buildTree({
+      ciDeepContent: wellFormedCiDeep.replace("windows-latest", "ubuntu-latest"),
     });
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBeGreaterThan(0);
