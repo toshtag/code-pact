@@ -1,10 +1,6 @@
 import {
   readOwnedText,
-  readExplicitUserText,
-  statExplicitUser,
   resolveProjectConfigReadPath,
-  resolveExplicitUserReadPath,
-  type ExplicitUserReadPath,
 } from "../core/project-fs/index.ts";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -21,7 +17,10 @@ import {
   manifestPath,
   readManifest,
 } from "../core/adapters/manifest.ts";
-import { classifyFileState } from "../core/adapters/file-state.ts";
+import {
+  classifyFileState,
+  readAuthorizedRegularFileMaybe,
+} from "../core/adapters/file-state.ts";
 import { dedupeDesiredFiles } from "../core/adapters/desired.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import type {
@@ -128,35 +127,23 @@ async function loadModelProfilesForDoctor(cwd: string): Promise<{
 
 type ProjectReadResult =
   | { kind: "content"; absPath: string; content: string }
-  | { kind: "missing"; absPath: string }
-  | { kind: "unsafe"; absPath: string; message: string };
+  | { kind: "missing"; absPath: string };
 
 async function readProjectFileForDoctor(
-  cwd: string,
   relPath: string,
+  absPath: Parameters<typeof readAuthorizedRegularFileMaybe>[0],
 ): Promise<ProjectReadResult> {
-  const absPath = join(cwd, relPath);
-  let ownedPath: ExplicitUserReadPath;
   try {
-    ownedPath = await resolveExplicitUserReadPath(cwd, relPath);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return { kind: "missing", absPath };
-    }
-    return { kind: "unsafe", absPath, message: (err as Error).message };
-  }
-
-  try {
-    const s = await statExplicitUser(ownedPath);
-    if (!s.isFile()) return { kind: "missing", absPath };
+    const content = await readAuthorizedRegularFileMaybe(absPath, relPath);
+    if (content === null) return { kind: "missing", absPath: absPath };
     return {
       kind: "content",
-      absPath,
-      content: await readExplicitUserText(ownedPath),
+      absPath: absPath,
+      content,
     };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return { kind: "missing", absPath };
+      return { kind: "missing", absPath: absPath };
     }
     // Best-effort DIAGNOSTIC read: any failure degrades to null. ENOENT is a
     // missing file; EISDIR (a manifest-declared path that is actually a directory,
@@ -164,7 +151,7 @@ async function readProjectFileForDoctor(
     // "not a readable managed file" — surfaced via the existing FILE_MISSING /
     // DRIFT advisories, never re-thrown as an uncoded errno that crashes doctor
     // (exit 3). doctor must report problems, not abort on them.
-    return { kind: "missing", absPath };
+    return { kind: "missing", absPath: absPath };
   }
 }
 
@@ -509,19 +496,11 @@ export async function inspectAgent(
         });
         continue;
       }
-      const diskRead = await readProjectFileForDoctor(cwd, entry.path);
+      const diskRead = await readProjectFileForDoctor(
+        entry.path,
+        ownership.absPath,
+      );
       const absPath = diskRead.absPath;
-      if (diskRead.kind === "unsafe") {
-        issues.push(
-          unsafeAdapterFileIssue(
-            agentName as SupportedAgent,
-            entry.path,
-            absPath,
-            diskRead.message,
-          ),
-        );
-        continue;
-      }
       const diskContent = diskRead.kind === "content" ? diskRead.content : null;
       const diskHash =
         diskContent === null ? null : computeContentHash(diskContent);
@@ -596,7 +575,28 @@ export async function inspectAgent(
     const manifestPaths = new Set(manifest.files.map(f => f.path));
     for (const ownedPath of Object.keys(descriptor.ownedPathRoles)) {
       if (manifestPaths.has(ownedPath)) continue;
-      const exists = await readProjectFileForDoctor(cwd, ownedPath);
+      const ownership = await classifyManifestFileForRead(
+        cwd,
+        descriptor,
+        ownedPath,
+        descriptor.ownedPathRoles[ownedPath]!,
+      );
+      if (ownership.kind === "unsafe") {
+        issues.push(
+          unsafeAdapterFileIssue(
+            agentName as SupportedAgent,
+            ownedPath,
+            join(cwd, ownedPath),
+            "resolves through a symlink or escapes the project root",
+          ),
+        );
+        continue;
+      }
+      if (ownership.kind !== "owned") continue;
+      const exists = await readProjectFileForDoctor(
+        ownedPath,
+        ownership.absPath,
+      );
       if (exists.kind === "content") {
         issues.push({
           code: "ADAPTER_UNMANAGED_FILE",
