@@ -9,7 +9,11 @@ import {
   runVerify,
   validateTimeoutMs,
 } from "../../../src/commands/verify.ts";
-import { terminateProcessTree } from "../../../src/core/process/bounded-command.ts";
+import {
+  runBoundedCommand,
+  terminateProcessTree,
+  type CommandExecutionResult,
+} from "../../../src/core/process/bounded-command.ts";
 
 const ROADMAP = "phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 1\n";
 
@@ -138,6 +142,32 @@ async function installProcessTreeFixture(dir: string): Promise<void> {
   );
 }
 
+async function runProcessTreeCommand(opts: {
+  command: string;
+  timeoutMs: number;
+  signal?: AbortSignal;
+}): Promise<CommandExecutionResult> {
+  if (process.platform === "win32") {
+    const result = await runBoundedCommand(opts.command, dir, opts.timeoutMs, opts.signal);
+    return {
+      command: opts.command,
+      ok: result.exitCode === 0 && !result.timedOut && !result.aborted,
+      ...result,
+    };
+  }
+  const result = await runVerify({
+    cwd: dir,
+    phaseId: "P1",
+    taskId: "P1-T1",
+    dryRun: false,
+    timeoutMs: opts.timeoutMs,
+    signal: opts.signal,
+  });
+  const command = result.checks[0]?.commands?.[0];
+  if (!command) throw new Error("missing command result");
+  return command;
+}
+
 let dir: string;
 
 beforeEach(async () => {
@@ -158,7 +188,9 @@ describe("verification command process lifecycle", () => {
       expect(() => validateTimeoutMs(value)).toThrow();
     }
   });
+});
 
+describe.runIf(process.platform !== "win32")("verification command structured results", () => {
   it("preserves a structured result for every successful command", async () => {
     await writeFile(
       join(dir, "success.mjs"),
@@ -214,19 +246,17 @@ describe("verification command process lifecycle", () => {
       stderr: "second-failed\n",
     });
   });
+});
 
+describe("bounded command process tree lifecycle", () => {
   it("times out and removes the complete parent/child process tree", async () => {
     await installProcessTreeFixture(dir);
-    await setupProject(dir, ["node tree-parent.mjs"]);
-    const result = await runVerify({
-      cwd: dir,
-      phaseId: "P1",
-      taskId: "P1-T1",
-      dryRun: false,
+    if (process.platform !== "win32") await setupProject(dir, ["node tree-parent.mjs"]);
+    const command = await runProcessTreeCommand({
+      command: "node tree-parent.mjs",
       timeoutMs: process.platform === "win32" ? 750 : 300,
     });
 
-    const command = result.checks[0]?.commands?.[0];
     expect(command).toMatchObject({ ok: false, timedOut: true, aborted: false });
     expect(command?.termination).toMatchObject({ completed: true, closeObserved: true });
     const pids = await readPids(dir);
@@ -241,22 +271,17 @@ describe("verification command process lifecycle", () => {
 
   it("aborts promptly and removes the complete parent/child process tree", async () => {
     await installProcessTreeFixture(dir);
-    await setupProject(dir, ["node tree-parent.mjs"]);
+    if (process.platform !== "win32") await setupProject(dir, ["node tree-parent.mjs"]);
     const controller = new AbortController();
-    const pending = runVerify({
-      cwd: dir,
-      phaseId: "P1",
-      taskId: "P1-T1",
-      dryRun: false,
+    const pending = runProcessTreeCommand({
+      command: "node tree-parent.mjs",
       timeoutMs: 10_000,
       signal: controller.signal,
     });
     await waitForFile(join(dir, "tree-ready"));
     controller.abort();
-    const result = await pending;
 
-    expect(result.checks).toHaveLength(1);
-    const command = result.checks[0]?.commands?.[0];
+    const command = await pending;
     expect(command).toMatchObject({ ok: false, timedOut: false, aborted: true });
     expect(command?.termination).toMatchObject({ completed: true, closeObserved: true });
     const pids = await readPids(dir);
