@@ -4,9 +4,9 @@
 # CLI reference (generated)
 
 Per-command flags, usage, and examples for the generated CLI surfaces,
-derived from the `CommandSpec` single source (`src/cli/spec/`). Most
-non-task clusters (plan / phase / adapter) are not generated yet — their
-flags live in each command's `--help`, and their semantics in
+derived from the `CommandSpec` single source (`src/cli/spec/`). Some
+clusters are not generated yet — their flags live in each command's `--help`,
+and their semantics in
 [`cli-contract.md`](cli-contract.md). The stable CLI contract — JSON
 envelope, exit codes, error codes, stability taxonomy — also lives in
 [`cli-contract.md`](cli-contract.md).
@@ -261,3 +261,192 @@ code-pact task finalize P1-T1 --json
 code-pact task finalize P1-T1 --write --json
 code-pact task finalize P1-T1 --audit-strict --base-ref origin/main --write --json
 ```
+
+## Plan commands
+
+## `plan brief`
+
+`code-pact plan brief [options]`
+
+Write design/brief.md from a structured brief. Mutating — creates the file
+(use --force to overwrite an existing brief). Three mutually-exclusive input
+modes: --from-file <path>, --stdin, or the inline --what/--who/--differentiator
+trio.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--from-file` | `<path>` | Read the brief YAML from a file. |
+| `--stdin` | — | Read the brief YAML from stdin. |
+| `--what` | `<text>` | Inline mode: what the project is. |
+| `--who` | `<text>` | Inline mode: who it is for. |
+| `--differentiator` | `<text>` | Inline mode: what makes it different. |
+| `--force` | — | Overwrite an existing design/brief.md. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact plan brief --from-file brief.yaml --json
+code-pact plan brief --what "..." --who "..." --differentiator "..." --json
+```
+
+## `plan prompt`
+
+`code-pact plan prompt [options]`
+
+Emit a planning prompt that asks an agent to produce a code-pact roadmap
+YAML. By default it embeds design/brief.md and design/constitution.md; in
+--schema-only mode it emits just the YAML format example and output rules
+for agents that already hold the project context. Read-only — never records a progress event.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--schema-only` | — | Emit only the format example + output rules (no brief/constitution). |
+| `--clipboard` | — | Copy the prompt to the system clipboard. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact plan prompt --schema-only
+code-pact plan prompt --clipboard
+```
+
+## `plan adopt`
+
+`code-pact plan adopt <file> [options]`
+
+Adopt an existing roadmap/spec draft into the code-pact control plane.
+Dry-run is the default — pass --write to apply. Mutating only with --write.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--write` | — | Apply the adoption (default is a dry-run preview). |
+| `--scaffold-decisions` | — | Scaffold a `proposed` ADR stub for each requires_decision task. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact plan adopt design/roadmap-draft.yaml --json
+code-pact plan adopt design/roadmap-draft.yaml --write --json
+```
+
+## `plan constitution`
+
+`code-pact plan constitution [options]`
+
+Write design/constitution.md from a description + principles. Mutating —
+creates the file (use --force to overwrite). Three mutually-exclusive input
+modes: --from-file <path>, --stdin, or inline --description plus repeatable
+--principle.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--from-file` | `<path>` | Read the constitution YAML from a file. |
+| `--stdin` | — | Read the constitution YAML from stdin. |
+| `--description` | `<text>` | Inline mode: the constitution's framing description. |
+| `--principle` | `<text>` | Inline mode: one principle. (repeatable) |
+| `--force` | — | Overwrite an existing design/constitution.md. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact plan constitution --from-file constitution.yaml --json
+code-pact plan constitution --description "..." --principle "..." --principle "..." --json
+```
+
+## `plan lint`
+
+`code-pact plan lint [options]`
+
+Read-only static integrity check over design/roadmap.yaml and every
+referenced phase file. Use --strict to promote exit-relevant warnings and
+--include-quality to opt into readiness/quality advisories. Read-only — never records a progress event.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--strict` | — | Promote exit-relevant warnings to failures. |
+| `--include-quality` | — | Include opt-in quality/readiness advisories. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact plan lint --json
+code-pact plan lint --include-quality --strict --json
+```
+
+## `plan normalize`
+
+`code-pact plan normalize [options]`
+
+Rewrite roadmap/phase YAML into canonical form (stable key order, defaults
+applied). Without --write it runs in check mode (reports what would change,
+writes nothing, exits non-zero if anything is not already normalized); pass
+--write to apply. Mutating only with --write. --check and --write are
+mutually exclusive.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--write` | — | Apply the normalization. |
+| `--check` | — | Check mode (the default): report drift, write nothing. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact plan normalize --json          # check mode (default)
+code-pact plan normalize --write --json  # apply
+```
+
+## `plan analyze`
+
+`code-pact plan analyze [options]`
+
+Read-only cross-artifact integrity check. Compares design task/phase status
+against derived progress state and reports drift. Use --strict to promote
+exit-relevant warnings and --include-historical to show hidden historical
+done-without-event drift. Read-only — never records a progress event.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--strict` | — | Promote exit-relevant warnings to failures. |
+| `--include-historical` | — | Render historical issues that are hidden by default. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact plan analyze --json
+code-pact plan analyze --include-historical --strict --json
+```
+
+## `plan sync-paths`
+
+`code-pact plan sync-paths [options]`
+
+Apply explicit old=new path renames to the reads/writes of every phase task,
+so renaming or merging a referenced source file does not leave plan lint's
+reads-match invariant to be fixed by hand. Dry-run by default; pass --write
+to apply under the write lock. Repeat --rename for multiple renames.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--rename` (required) | `<old>=<new>` | Map an exact reads/writes entry to a new path. (repeatable) |
+| `--write` | — | Apply the changes (default is a non-destructive preview). |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact plan sync-paths --rename src/a.ts=src/b.ts --json          # preview
+code-pact plan sync-paths --rename src/a.ts=src/b.ts --write --json  # apply
+```
+
+## `plan migrate`
+
+`code-pact plan migrate [options]`
+
+Convert a legacy monolithic .code-pact/state/progress.yaml into the
+per-event ledger (one file per event under .code-pact/state/events/).
+Idempotent and dry-run by default; progress.yaml is left in place.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--write` | — | Write the event files (default: dry run). |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact plan migrate --json          # dry run
+code-pact plan migrate --write --json  # migrate
+```
+
+### `plan import`
+
+`code-pact plan import <file> [options]` is an alias for `code-pact phase import <file> [options]`. Its flag surface is intentionally not duplicated here; run `code-pact phase import --help` for the source command until the phase cluster is CommandSpec-backed.
