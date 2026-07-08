@@ -242,7 +242,7 @@ describe("CLI timeout contract", () => {
 
   it("rejects timeout values outside the documented integer range", async () => {
     await setupProject(dir, "echo ok");
-    for (const value of ["0", "0.5", "2147483648"]) {
+    for (const value of ["0", "0.5", "1e3", "0x10", " 2", "2147483648"]) {
       const result = run(dir, [
         "verify",
         "--phase",

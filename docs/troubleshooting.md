@@ -103,7 +103,7 @@ A deterministic completion check did not pass. `task complete` runs two checks â
 
 ```sh
 code-pact verify --phase <phase-id> --task <task-id> --timeout 300000
-# --timeout is per command, in milliseconds; valid range: 1..2147483647.
+# --timeout is per command, in decimal milliseconds; valid range: 1..2147483647.
 # Runs the same checks stand-alone so you can read the full output.
 # No progress event is recorded when verify fails; re-run task complete
 # after fixing the underlying issue.
