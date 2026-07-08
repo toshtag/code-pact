@@ -43,8 +43,12 @@ test(progress): cover expanded_work for project-b fixture
 - Open a PR even for solo work; do not push directly to `main`.
 - Inside a PR, prefer many small commits. Squash-merge at PR merge time is acceptable.
 - Fast local loop: `pnpm test:unit`.
-- Full local gate before merge: `pnpm test:ci`.
-- CI must be green before merge. Node 22 runs the full gate; Node 24 runs typecheck, unit tests, build, and CLI smoke checks.
+- Fast required gate before merge: `pnpm test:ci`.
+- Deep local/manual gate for high-risk changes: `pnpm test:ci:deep`.
+- Release remains strict through `pnpm release:check`.
+- CI must be green before merge. Required PR CI runs the fast Node 22 gate; manual Deep CI covers full integration, Node 24, Windows process-control, docs, and invariant checks.
+- Maintainers who want a local pre-push gate can opt in with a gitignored hook:
+  `mkdir -p .local/hooks && cp scripts/local/pre-push.example.sh .local/hooks/pre-push && chmod +x .local/hooks/pre-push && git config core.hooksPath .local/hooks`.
 - Touching docs? See [`docs/maintainers/docs-maintenance.md`](docs/maintainers/docs-maintenance.md) for which doc owns which kind of change, so updates don't drift across files.
 
 ## Runtime dependency policy

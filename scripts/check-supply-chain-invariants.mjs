@@ -411,6 +411,301 @@ function getJobSteps(doc, jobName) {
   return [];
 }
 
+function getWorkflowJobs(doc) {
+  const jobs = doc.get("jobs");
+  return jobs?.items ?? [];
+}
+
+function getJobNode(doc, jobName) {
+  for (const jobPair of getWorkflowJobs(doc)) {
+    const key = String(jobPair.key.value ?? jobPair.key);
+    if (key === jobName) return jobPair.value;
+  }
+  return null;
+}
+
+function getWorkflowJobNames(doc) {
+  return getWorkflowJobs(doc).map(jobPair =>
+    String(jobPair.key.value ?? jobPair.key),
+  );
+}
+
+function workflowCheckoutCredentialsViolations(doc, rel) {
+  const violations = [];
+  for (const jobPair of getWorkflowJobs(doc)) {
+    const job = jobPair.value;
+    if (!job) continue;
+    const steps = job.get("steps");
+    if (!steps || !steps.items) continue;
+    for (const step of steps.items) {
+      const uses = step.get("uses");
+      if (typeof uses !== "string" || !uses.startsWith("actions/checkout")) {
+        continue;
+      }
+      const withBlock = step.get("with");
+      if (!withBlock || withBlock.get("persist-credentials") !== false) {
+        violations.push(
+          `${rel}: checkout in job "${jobPair.key.value ?? jobPair.key}" missing persist-credentials: false`,
+        );
+      }
+    }
+  }
+  return violations;
+}
+
+function workflowHasPushMainAndPullRequest(doc) {
+  const on = doc.get("on") ?? doc.get(true);
+  if (!on || typeof on !== "object") return false;
+  const onKeys = on.items ? on.items.map(p => String(p.key.value ?? p.key)) : [];
+  if (!onKeys.includes("pull_request") || !onKeys.includes("push")) return false;
+  const push = on.get("push");
+  const branches = push?.get("branches");
+  if (!branches?.items) return false;
+  return branches.items.some(item => String(item.value ?? item) === "main");
+}
+
+function workflowHasOnlyWorkflowDispatch(doc) {
+  const on = doc.get("on") ?? doc.get(true);
+  if (!on || typeof on !== "object") return false;
+  const onKeys = on.items ? on.items.map(p => String(p.key.value ?? p.key)) : [];
+  return onKeys.length === 1 && onKeys[0] === "workflow_dispatch";
+}
+
+function jobRunsOn(job, expected) {
+  return job?.get("runs-on") === expected;
+}
+
+function jobSetupNodeVersion(doc, jobName) {
+  for (const step of getJobSteps(doc, jobName)) {
+    const uses = step.get("uses");
+    if (typeof uses !== "string" || !uses.startsWith("actions/setup-node")) {
+      continue;
+    }
+    const withBlock = step.get("with");
+    const value = withBlock?.get("node-version");
+    return String(value);
+  }
+  return null;
+}
+
+function checkFastCiWorkflow(ciDoc, ciContent) {
+  const violations = [];
+  const jobNames = getWorkflowJobNames(ciDoc);
+  const expectedJobs = ["fast", "ci-status"];
+  const hasOnlyExpectedJobs =
+    expectedJobs.every(job => jobNames.includes(job)) &&
+    jobNames.every(job => expectedJobs.includes(job));
+  if (!hasOnlyExpectedJobs) {
+    violations.push(
+      `ci.yml: required PR CI must contain only fast and ci-status jobs (found: ${jobNames.join(", ")})`,
+    );
+  }
+
+  if (!workflowHasPushMainAndPullRequest(ciDoc)) {
+    violations.push("ci.yml: must run on pull_request and push to main");
+  }
+
+  const fastJob = getJobNode(ciDoc, "fast");
+  if (!fastJob) {
+    violations.push("ci.yml: missing fast job");
+    return violations;
+  }
+
+  if (!jobRunsOn(fastJob, "ubuntu-latest")) {
+    violations.push("ci.yml: fast job must run on ubuntu-latest");
+  }
+  if (jobSetupNodeVersion(ciDoc, "fast") !== "22") {
+    violations.push("ci.yml: fast job must use Node 22");
+  }
+
+  const fastScripts = collectRunScripts(ciDoc, "fast");
+  if (!fastScripts.some(script => script.trim() === "pnpm install --frozen-lockfile")) {
+    violations.push("ci.yml: fast job must install with pnpm install --frozen-lockfile");
+  }
+  if (!fastScripts.some(script => script.trim() === "pnpm test:ci")) {
+    violations.push("ci.yml: fast job must run pnpm test:ci");
+  }
+
+  const forbiddenFastPatterns = [
+    ["full integration", /vitest\s+run\s+--config\s+vitest\.integration\.config\.ts|test:integration:full|pnpm\s+test:integration(?!:smoke)/],
+    ["docs checks", /pnpm\s+check:docs/],
+    ["filesystem containment checks", /pnpm\s+check:fs-containment/],
+    ["filesystem authority checks", /pnpm\s+check:fs-authority/],
+    ["security hardening checks", /pnpm\s+check:security-hardening/],
+    ["plan lint", /plan\s+lint\s+--include-quality\s+--strict\s+--json/],
+    ["plan analyze", /plan\s+analyze\s+--strict\s+--json/],
+    ["initialized-project smoke", /init\s+--non-interactive|doctor\s+--json/],
+  ];
+  for (const [label, pattern] of forbiddenFastPatterns) {
+    if (fastScripts.some(script => pattern.test(script))) {
+      violations.push(`ci.yml: fast job must not run ${label}`);
+    }
+  }
+
+  if (/windows-latest/.test(ciContent)) {
+    violations.push("ci.yml: required PR CI must not run Windows jobs");
+  }
+  if (/node-version:\s*(?:\$\{\{\s*matrix\.node-version\s*\}\}|24)\b/.test(ciContent)) {
+    violations.push("ci.yml: required PR CI must not run Node 24 or a Node version matrix");
+  }
+  if (/matrix:/.test(ciContent)) {
+    violations.push("ci.yml: required PR CI must not use a matrix");
+  }
+
+  return violations;
+}
+
+function checkDeepCiWorkflow(deepDoc) {
+  const violations = [];
+
+  if (!workflowHasOnlyWorkflowDispatch(deepDoc)) {
+    violations.push("ci-deep.yml: must run only on workflow_dispatch");
+  }
+
+  const jobNames = getWorkflowJobNames(deepDoc);
+  for (const jobName of ["linux-deep", "node-24-smoke", "windows-process-control"]) {
+    if (!jobNames.includes(jobName)) {
+      violations.push(`ci-deep.yml: missing ${jobName} job`);
+    }
+  }
+
+  const linuxDeep = getJobNode(deepDoc, "linux-deep");
+  if (linuxDeep) {
+    if (!jobRunsOn(linuxDeep, "ubuntu-latest")) {
+      violations.push("ci-deep.yml: linux-deep must run on ubuntu-latest");
+    }
+    if (jobSetupNodeVersion(deepDoc, "linux-deep") !== "22") {
+      violations.push("ci-deep.yml: linux-deep must use Node 22");
+    }
+    const scripts = collectRunScripts(deepDoc, "linux-deep");
+    if (!scripts.some(script => script.trim() === "pnpm test:ci:deep")) {
+      violations.push("ci-deep.yml: linux-deep must run pnpm test:ci:deep");
+    }
+  }
+
+  const node24 = getJobNode(deepDoc, "node-24-smoke");
+  if (node24) {
+    if (!jobRunsOn(node24, "ubuntu-latest")) {
+      violations.push("ci-deep.yml: node-24-smoke must run on ubuntu-latest");
+    }
+    if (jobSetupNodeVersion(deepDoc, "node-24-smoke") !== "24") {
+      violations.push("ci-deep.yml: node-24-smoke must use Node 24");
+    }
+    const scripts = collectRunScripts(deepDoc, "node-24-smoke");
+    const required = [
+      "pnpm typecheck",
+      "pnpm test:unit",
+      "pnpm build",
+      "node dist/cli.js --version",
+      "node dist/cli.js --json --version",
+    ];
+    for (const command of required) {
+      if (!scripts.some(script => script.trim() === command)) {
+        violations.push(`ci-deep.yml: node-24-smoke must run ${command}`);
+      }
+    }
+  }
+
+  return violations;
+}
+
+function findWindowsProcessControlWorkflow(workflowDocs, cancellationCoverageViolations) {
+  for (const { rel, doc } of workflowDocs) {
+    for (const jobPair of getWorkflowJobs(doc)) {
+      const jobName = String(jobPair.key.value ?? jobPair.key);
+      const job = jobPair.value;
+      if (!jobRunsOn(job, "windows-latest")) continue;
+
+      const scripts = collectRunScripts(doc, jobName);
+      const hasCoverage =
+        scripts.some(script => script.trim() === "pnpm check:toolchain-binaries") &&
+        scripts.some(script => script.trim() === "pnpm build") &&
+        scripts.some(script => /\btests\/unit\/commands\/verify-process\.test\.ts\b/.test(script)) &&
+        scripts.some(
+          script =>
+            script.trim() ===
+            "pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts",
+        ) &&
+        !scripts.some(script => /(?:^|\s)-t\s+|--testNamePattern\b/.test(script)) &&
+        cancellationCoverageViolations.length === 0;
+      if (hasCoverage) {
+        return { rel, jobName };
+      }
+    }
+  }
+  return null;
+}
+
+export function checkCiPackageScripts(packageContent) {
+  const violations = [];
+  let pkg;
+  try {
+    pkg = JSON.parse(packageContent);
+  } catch (error) {
+    return [
+      `package.json parse error: ${error instanceof Error ? error.message : String(error)}`,
+    ];
+  }
+
+  const scripts = pkg.scripts ?? {};
+  const testCi = String(scripts["test:ci"] ?? "");
+  const testCiDeep = String(scripts["test:ci:deep"] ?? "");
+
+  const requiredFast = [
+    "pnpm check:supply-chain",
+    "pnpm typecheck",
+    "pnpm test:unit",
+    "pnpm build",
+    "pnpm test:integration:smoke",
+    "node dist/cli.js --version",
+    "node dist/cli.js --json --version",
+  ];
+  for (const command of requiredFast) {
+    if (!testCi.includes(command)) {
+      violations.push(`package.json: scripts.test:ci must include ${command}`);
+    }
+  }
+
+  const forbiddenFast = [
+    ["pnpm check:docs", /pnpm\s+check:docs\b/],
+    ["pnpm check:fs-containment", /pnpm\s+check:fs-containment\b/],
+    ["pnpm check:fs-authority", /pnpm\s+check:fs-authority\b/],
+    ["pnpm check:security-hardening", /pnpm\s+check:security-hardening\b/],
+    ["vitest.integration.config.ts", /vitest\.integration\.config\.ts/],
+    ["pnpm test:integration", /pnpm\s+test:integration(?:\s|$)/],
+    ["pnpm test:integration:full", /pnpm\s+test:integration:full\b/],
+    ["plan lint --include-quality --strict --json", /plan\s+lint\s+--include-quality\s+--strict\s+--json/],
+    ["plan analyze --strict --json", /plan\s+analyze\s+--strict\s+--json/],
+  ];
+  for (const [label, pattern] of forbiddenFast) {
+    if (pattern.test(testCi)) {
+      violations.push(`package.json: scripts.test:ci must not include ${label}`);
+    }
+  }
+
+  const requiredDeep = [
+    "pnpm check:docs",
+    "pnpm check:fs-containment",
+    "pnpm check:fs-authority",
+    "pnpm check:security-hardening",
+    "pnpm check:supply-chain",
+    "pnpm typecheck",
+    "pnpm test:unit",
+    "pnpm build",
+    "vitest run --config vitest.integration.config.ts",
+    "node dist/cli.js plan lint --include-quality --strict --json",
+    "node dist/cli.js plan analyze --strict --json",
+    "pnpm test:cli:init-smoke",
+  ];
+  for (const command of requiredDeep) {
+    if (!testCiDeep.includes(command)) {
+      violations.push(`package.json: scripts.test:ci:deep must include ${command}`);
+    }
+  }
+
+  return violations;
+}
+
 export function checkCancellationCoverage(testContent) {
   const violations = [];
   if (!/if \(process\.platform !== "win32"\)/.test(testContent)) {
@@ -1056,7 +1351,18 @@ export function checkSupplyChainInvariants(root) {
     }
   }
 
-  // 3. Check ci.yml for token secrets and checkout persist-credentials
+  // 3. Check CI workflow policy: fast required PR gate in ci.yml, deeper
+  // confidence gates outside required PR CI.
+  const workflowDocs = [];
+  for (const file of ymlFiles) {
+    const rel = file.replace(`${root}/`, "");
+    const content = _read(rel);
+    const doc = parseDocument(content);
+    if (doc.errors.length === 0) {
+      workflowDocs.push({ rel, content, doc });
+    }
+  }
+
   let ciContent;
   try {
     ciContent = _read(".github/workflows/ci.yml");
@@ -1070,78 +1376,28 @@ export function checkSupplyChainInvariants(root) {
     // Check ci.yml checkout persist-credentials via YAML
     const ciDoc = parseDocument(ciContent);
     if (ciDoc.errors.length === 0) {
-      const ciJobs = ciDoc.get("jobs");
-      let ciCheckoutOk = true;
-      if (ciJobs && ciJobs.items) {
-        for (const jobPair of ciJobs.items) {
-          const job = jobPair.value;
-          if (!job) continue;
-          const steps = job.get("steps");
-          if (!steps || !steps.items) continue;
-          for (const step of steps.items) {
-            const uses = step.get("uses");
-            if (
-              typeof uses === "string" &&
-              uses.startsWith("actions/checkout")
-            ) {
-              const withBlock = step.get("with");
-              if (
-                !withBlock ||
-                withBlock.get("persist-credentials") !== false
-              ) {
-                ciCheckoutOk = false;
-                fail(
-                  `ci.yml: checkout in job "${jobPair.key.value ?? jobPair.key}" missing persist-credentials: false`,
-                );
-              }
-            }
-          }
-        }
-      }
-      if (ciCheckoutOk) {
+      const ciCheckoutViolations = workflowCheckoutCredentialsViolations(
+        ciDoc,
+        "ci.yml",
+      );
+      if (ciCheckoutViolations.length === 0) {
         pass("ci.yml: all checkout steps have persist-credentials: false");
+      } else {
+        for (const violation of ciCheckoutViolations) fail(violation);
       }
 
-      let windowsJob = null;
-      if (ciJobs && ciJobs.items) {
-        for (const jobPair of ciJobs.items) {
-          if (String(jobPair.key.value ?? jobPair.key) === "windows-process-control") {
-            windowsJob = jobPair.value;
-            break;
-          }
-        }
-      }
-      if (windowsJob?.get("runs-on") === "windows-latest") {
-        const scripts = collectRunScripts(ciDoc, "windows-process-control");
-        const cancellationCoverageViolations = checkCancellationCoverage(
-          _read("tests/integration/verify-timeout-abort.test.ts"),
-        );
-        if (
-          scripts.some(script => script.trim() === "pnpm check:toolchain-binaries") &&
-          scripts.some(script => script.trim() === "pnpm build") &&
-          scripts.some(script => /\btests\/unit\/commands\/verify-process\.test\.ts\b/.test(script)) &&
-          scripts.some(
-            script =>
-              script.trim() ===
-              "pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts",
-          ) &&
-          !scripts.some(script => /(?:^|\s)-t\s+|--testNamePattern\b/.test(script)) &&
-          cancellationCoverageViolations.length === 0
-        ) {
-          pass("ci.yml: Windows job verifies toolchain, build, and concrete process control without no-op test filters");
-        } else {
-          fail("ci.yml: Windows job must verify toolchain, build, and concrete process-control tests without name filters");
-          for (const violation of cancellationCoverageViolations) fail(violation);
-        }
+      const fastCiViolations = checkFastCiWorkflow(ciDoc, ciContent);
+      if (fastCiViolations.length === 0) {
+        pass("ci.yml: required PR CI is a single Ubuntu Node 22 fast gate with stable ci-status");
       } else {
-        fail("ci.yml: windows-process-control must run on windows-latest");
+        for (const violation of fastCiViolations) fail(violation);
       }
 
-      const linuxScripts = collectRunScripts(ciDoc, "build");
-      if (linuxScripts.some(script => /pnpm check:toolchain-binaries|pnpm check:supply-chain/.test(script))) {
-        pass("ci.yml: Linux build verifies the esbuild binary");
+      const fastScripts = collectRunScripts(ciDoc, "fast");
+      if (fastScripts.some(script => script.trim() === "pnpm test:ci")) {
+        pass("ci.yml: fast gate delegates to pnpm test:ci");
       } else {
-        fail("ci.yml: Linux build must verify the esbuild binary");
+        fail("ci.yml: fast gate must delegate to pnpm test:ci");
       }
     }
 
@@ -1152,6 +1408,55 @@ export function checkSupplyChainInvariants(root) {
     }
   } catch {
     // ci.yml might not exist in some test contexts
+  }
+
+  try {
+    const deepContent = _read(".github/workflows/ci-deep.yml");
+    const deepDoc = parseDocument(deepContent);
+    if (deepDoc.errors.length > 0) {
+      fail("ci-deep.yml: YAML parse error", deepDoc.errors[0].message);
+    } else {
+      const deepViolations = checkDeepCiWorkflow(deepDoc);
+      if (deepViolations.length === 0) {
+        pass("ci-deep.yml: manual Deep CI has Linux deep, Node 24 smoke, and Windows process-control jobs");
+      } else {
+        for (const violation of deepViolations) fail(violation);
+      }
+    }
+  } catch {
+    fail("ci-deep.yml: file not found");
+  }
+
+  for (const { rel, content, doc } of workflowDocs) {
+    const tokenViolations = checkNoTokenSecrets(content);
+    for (const violation of tokenViolations) fail(`${rel}: ${violation}`);
+
+    const checkoutViolations = workflowCheckoutCredentialsViolations(doc, rel);
+    for (const violation of checkoutViolations) fail(violation);
+  }
+
+  const cancellationCoverageViolations = (() => {
+    try {
+      return checkCancellationCoverage(
+        _read("tests/integration/verify-timeout-abort.test.ts"),
+      );
+    } catch {
+      return ["verify-timeout-abort.test.ts: file not found"];
+    }
+  })();
+  const windowsCoverage = findWindowsProcessControlWorkflow(
+    workflowDocs,
+    cancellationCoverageViolations,
+  );
+  if (windowsCoverage) {
+    pass(
+      `${windowsCoverage.rel}: ${windowsCoverage.jobName} verifies toolchain, build, and concrete process-control tests without name filters`,
+    );
+  } else {
+    fail(
+      "workflows: a windows-latest job must verify toolchain, build, and concrete process-control tests without name filters",
+    );
+    for (const violation of cancellationCoverageViolations) fail(violation);
   }
 
   // 4. Pin the reviewed development toolchain and lifecycle-script policy.
@@ -1169,6 +1474,20 @@ export function checkSupplyChainInvariants(root) {
   } catch (error) {
     fail(
       "toolchain pin files must exist",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  try {
+    const violations = checkCiPackageScripts(_read("package.json"));
+    if (violations.length === 0) {
+      pass("package.json: fast and deep CI package scripts match the tiered policy");
+    } else {
+      for (const violation of violations) fail(violation);
+    }
+  } catch (error) {
+    fail(
+      "package.json CI scripts must be readable",
       error instanceof Error ? error.message : String(error),
     );
   }
