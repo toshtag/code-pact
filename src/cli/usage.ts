@@ -16,6 +16,15 @@ const CLUSTER_SUBCOMMANDS: Record<string, string> = {
   adapter: "list | install | upgrade | doctor | conformance",
 };
 
+const PHASE_NEXT_SPEC = {
+  ...PHASE_SPECS.runbook,
+  command: "next",
+  summary: `${PHASE_SPECS.runbook.summary}\n\nAlias for \`phase runbook\`.`,
+  examples: PHASE_SPECS.runbook.examples.map((example) =>
+    example.replace("phase runbook", "phase next"),
+  ),
+};
+
 /** True for the tokens that request help: `help`, `--help`, `-h`. */
 export function isHelpToken(token: string | undefined): boolean {
   return token === "help" || token === "--help" || token === "-h";
@@ -98,6 +107,8 @@ const LEAF_USAGE: Record<string, () => string> = {
   "phase archive": () => renderLeafHelp(PHASE_SPECS.archive),
 
   "phase runbook": () => renderLeafHelp(PHASE_SPECS.runbook),
+
+  "phase next": () => renderLeafHelp(PHASE_NEXT_SPEC),
 
   "task add": () => renderLeafHelp(TASK_SPECS.add!),
 

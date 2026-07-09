@@ -86,6 +86,7 @@ describe("cluster --help → usage, exit 0", () => {
     [["phase", "reconcile", "--help"], /Usage: code-pact phase reconcile/, /--write/],
     [["phase", "archive", "--help"], /Usage: code-pact phase archive/, /--write/],
     [["phase", "runbook", "--help"], /Usage: code-pact phase runbook/, /--across-phases/],
+    [["phase", "next", "--help"], /Usage: code-pact phase next/, /--across-phases/],
     [["adapter", "install", "--help"], /Usage: code-pact adapter install/, /--force/],
     [["adapter", "upgrade", "--help"], /Usage: code-pact adapter upgrade/, /--accept-modified/],
     // `plan import` is an alias for `phase import`; its --help routes to the
