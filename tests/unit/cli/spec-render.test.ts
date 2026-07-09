@@ -10,6 +10,7 @@
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { ADAPTER_SPECS } from "../../../src/cli/spec/adapter.ts";
+import { DECISION_SPECS } from "../../../src/cli/spec/decision.ts";
 import { ROOT_SPECS } from "../../../src/cli/spec/root.ts";
 import { PLAN_SPECS } from "../../../src/cli/spec/plan.ts";
 import { PHASE_SPECS } from "../../../src/cli/spec/phase.ts";
@@ -25,6 +26,7 @@ const ALL_SPECS = [
   ...Object.entries(PLAN_SPECS).map(([name, spec]) => [name, spec, `plan ${name}`] as const),
   ...Object.entries(PHASE_SPECS).map(([name, spec]) => [name, spec, `phase ${name}`] as const),
   ...Object.entries(ADAPTER_SPECS).map(([name, spec]) => [name, spec, `adapter ${name}`] as const),
+  ...Object.entries(DECISION_SPECS).map(([name, spec]) => [name, spec, `decision ${name}`] as const),
   ...Object.entries(TASK_SPECS).map(([name, spec]) => [name, spec, `task ${name}`] as const),
 ];
 
@@ -197,13 +199,34 @@ describe("CommandSpec derivation (P46)", () => {
     });
   });
 
+  describe("decision parse surfaces", () => {
+    it("decision prune covers exactly the parser-backed flags", () => {
+      expect(Object.keys(toParseOptions(DECISION_SPECS.prune)).sort()).toEqual(
+        ["json", "policy", "write"].sort(),
+      );
+    });
+
+    it("decision retire covers exactly the parser-backed flags", () => {
+      expect(Object.keys(toParseOptions(DECISION_SPECS.retire)).sort()).toEqual(
+        ["json", "write"].sort(),
+      );
+    });
+
+    it("decision reference renders representative flags and examples", () => {
+      expect(renderLeafHelp(DECISION_SPECS.prune)).toContain("--policy");
+      expect(renderReference(DECISION_SPECS.prune)).toContain("code-pact decision prune design/decisions/foo-rfc.md --write --json");
+      expect(renderReference(DECISION_SPECS.retire)).toContain("code-pact decision retire design/decisions/foo-rfc.md --json");
+    });
+  });
+
   it("generated reference uses H2 groups and H3 command entries", () => {
     const doc = readFileSync(new URL("../../../docs/cli-reference.generated.md", import.meta.url), "utf8");
     expect(doc).toContain("## Task commands\n\n### `task add`");
     expect(doc).toContain("## Plan commands\n\n### `plan brief`");
     expect(doc).toContain("## Phase commands\n\n### `phase add`");
     expect(doc).toContain("## Adapter commands\n\n### `adapter list`");
-    expect(doc).not.toMatch(/## (Task|Plan|Phase|Adapter) commands\n\n## `/);
+    expect(doc).toContain("## Decision commands\n\n### `decision prune`");
+    expect(doc).not.toMatch(/## (Task|Plan|Phase|Adapter|Decision) commands\n\n## `/);
   });
 
   it("required is presentation-only: it does not appear in parseArgs config", () => {
