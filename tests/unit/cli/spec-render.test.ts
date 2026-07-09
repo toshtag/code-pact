@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from "vitest";
 import { ROOT_SPECS } from "../../../src/cli/spec/root.ts";
+import { PLAN_SPECS } from "../../../src/cli/spec/plan.ts";
 import { TASK_SPECS } from "../../../src/cli/spec/task.ts";
 import {
   toParseOptions,
@@ -18,6 +19,7 @@ import {
 
 const ALL_SPECS = [
   ...Object.entries(ROOT_SPECS).map(([name, spec]) => [name, spec, name] as const),
+  ...Object.entries(PLAN_SPECS).map(([name, spec]) => [name, spec, `plan ${name}`] as const),
   ...Object.entries(TASK_SPECS).map(([name, spec]) => [name, spec, `task ${name}`] as const),
 ];
 
@@ -81,6 +83,43 @@ describe("CommandSpec derivation (P46)", () => {
           "read", "risk", "type", "verification-strength", "write", "write-surface",
         ].sort(),
       );
+    });
+  });
+
+  describe("plan parse surfaces", () => {
+    it("plan brief covers exactly the parser-backed flags", () => {
+      expect(Object.keys(toParseOptions(PLAN_SPECS.brief)).sort()).toEqual(
+        [
+          "differentiator",
+          "force",
+          "from-file",
+          "json",
+          "stdin",
+          "what",
+          "who",
+        ].sort(),
+      );
+    });
+
+    it("plan constitution marks --principle repeatable", () => {
+      const opts = toParseOptions(PLAN_SPECS.constitution);
+      expect(opts.principle).toEqual({ type: "string", multiple: true });
+      expect(Object.keys(opts).sort()).toEqual(
+        ["description", "force", "from-file", "json", "principle", "stdin"].sort(),
+      );
+    });
+
+    it("plan sync-paths marks --rename repeatable", () => {
+      const opts = toParseOptions(PLAN_SPECS["sync-paths"]);
+      expect(opts.rename).toEqual({ type: "string", multiple: true });
+      expect(Object.keys(opts).sort()).toEqual(["json", "rename", "write"].sort());
+    });
+
+    it("plan lint and analyze rich help are not generic stubs", () => {
+      expect(renderLeafHelp(PLAN_SPECS.lint)).toContain("--include-quality");
+      expect(renderLeafHelp(PLAN_SPECS.analyze)).toContain("--include-historical");
+      expect(renderReference(PLAN_SPECS.lint)).toContain("code-pact plan lint --json");
+      expect(renderReference(PLAN_SPECS.analyze)).toContain("code-pact plan analyze --json");
     });
   });
 

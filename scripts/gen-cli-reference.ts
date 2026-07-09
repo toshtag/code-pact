@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { TASK_SPECS } from "../src/cli/spec/task.ts";
+import { PLAN_SPECS, PLAN_SPEC_ORDER } from "../src/cli/spec/plan.ts";
 import { ROOT_SPECS } from "../src/cli/spec/root.ts";
 import { renderReference } from "../src/cli/spec/render.ts";
 
@@ -32,9 +33,9 @@ function render(): string {
     "# CLI reference (generated)",
     "",
     "Per-command flags, usage, and examples for the generated CLI surfaces,",
-    "derived from the `CommandSpec` single source (`src/cli/spec/`). Most",
-    "non-task clusters (plan / phase / adapter) are not generated yet — their",
-    "flags live in each command's `--help`, and their semantics in",
+    "derived from the `CommandSpec` single source (`src/cli/spec/`). Some",
+    "clusters are not generated yet — their flags live in each command's `--help`,",
+    "and their semantics in",
     "[`cli-contract.md`](cli-contract.md). The stable CLI contract — JSON",
     "envelope, exit codes, error codes, stability taxonomy — also lives in",
     "[`cli-contract.md`](cli-contract.md).",
@@ -66,6 +67,17 @@ function render(): string {
   for (const key of keys) {
     sections.push(renderReference(TASK_SPECS[key]!), "");
   }
+
+  sections.push("## Plan commands", "");
+  for (const key of PLAN_SPEC_ORDER) {
+    sections.push(renderReference(PLAN_SPECS[key]!), "");
+  }
+  sections.push(
+    "### `plan import`",
+    "",
+    "`code-pact plan import <file> [options]` is an alias for `code-pact phase import <file> [options]`. Its flag surface is intentionally not duplicated here; run `code-pact phase import --help` for the source command until the phase cluster is CommandSpec-backed.",
+    "",
+  );
 
   return `${sections.join("\n").trimEnd()}\n`;
 }

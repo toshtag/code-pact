@@ -645,7 +645,11 @@ Running `plan lint --include-quality --strict` against an imported phase will li
 
 `code-pact plan <subcommand>` provides AI-assisted project planning tools that feed into the design directory.
 
-### `plan brief [--force] [--from-file <yaml> | --stdin | --what <s> --who <s> [--differentiator <s>]] [--json]`
+For `plan` command usage, flags, and basic examples, see the generated [CLI reference § Plan commands](cli-reference.generated.md#plan-commands). The source of truth for that command reference and `plan <subcommand> --help` is [`src/cli/spec/plan.ts`](../src/cli/spec/plan.ts). This section owns the stable semantics: envelopes, exit behavior, mode constraints, diagnostics, and write/lock guarantees.
+
+`plan import` is intentionally documented as an alias, not a separate flag surface: it routes to `phase import`.
+
+### `plan brief`
 
 Interactive wizard that collects project description, target users, and differentiator, then writes `design/brief.md`. Stability: **Stable (v0.2+)**. `--from-file`, `--stdin`, and `--what` / `--who` / `--differentiator` are **Stable (v1.6+)** under P17-T1 / T2 / T3.
 
@@ -723,7 +727,7 @@ On success, `--json` emits `{ ok: true, data: { path: "..." } }` (same envelope 
 | `plan brief --stdin`, `plan constitution --stdin` | `stdin_read_failed`, `invalid_yaml`, `schema_invalid` |
 <!-- @generated:plan-capture-details:end -->
 
-### `plan prompt [--clipboard] [--schema-only]`
+### `plan prompt`
 
 Reads `design/brief.md` and `design/constitution.md` (both optional), assembles a structured AI planning prompt, and writes it to stdout. Add `--clipboard` to also copy to the clipboard (via `pbcopy` on macOS or `xclip` on Linux). Does not require a TTY.
 
@@ -742,7 +746,7 @@ The YAML example also shows the optional task **readiness fields** (`depends_on`
 
 When `has_brief` or `has_constitution` is false, a leading step recommends `plan brief` / `plan constitution` first. The field is additive: existing JSON consumers (which read only `prompt` / `has_brief` / `has_constitution` / `clipboard_copied`) see no shape change.
 
-### `plan adopt <path> [--write] [--scaffold-decisions] [--json]` (v1.x+)
+### `plan adopt` (v1.x+)
 
 Deterministically converts an existing plan file into the `phase import` input shape. **Dry-run by default** — it prints the generated YAML and writes nothing. `--write` applies it by reusing the `phase import` validation and write pass (under the same advisory write lock). `--scaffold-decisions` (only meaningful with `--write`) forwards to that same pass, so it scaffolds `proposed` ADR stubs exactly as `phase import --scaffold-decisions` does; the results appear under `data.import_result.scaffolded_decisions` / `scaffold_skipped`. code-pact never calls an LLM here.
 
@@ -767,7 +771,7 @@ If none match → `CONFIG_ERROR` (exit 2) with `data.detail: "no_plan_items_dete
 
 On `--write`, errors from the import pass (`DUPLICATE_PHASE_ID`, `AMBIGUOUS_TASK_ID`, reserved-id `CONFIG_ERROR`) propagate unchanged.
 
-### `plan constitution [--force] [--from-file <yaml> | --stdin | --description <s> --principle <s>...] [--json]`
+### `plan constitution`
 
 Interactive wizard that collects a project description and core principles, then writes `design/constitution.md`. Stability: **Stable (v0.2+)**. `--from-file`, `--stdin`, and `--description` / `--principle` are **Stable (v1.6+)** under P17-T4 (parallel to `plan brief` P17-T1 / T2 / T3).
 
@@ -806,7 +810,7 @@ On success, `--json` emits `{ ok: true, data: { path: "..." } }` (same envelope 
 
 All non-interactive modes are partial-write-safe: any failure yields no write to `design/constitution.md`.
 
-### `plan lint [--strict] [--include-quality] [--json]` (v0.7)
+### `plan lint` (v0.7)
 
 Read-only static integrity check over `design/roadmap.yaml` and every referenced phase file. Intended as a checkpoint command at phase or PR boundaries, not as a per-task gate.
 
@@ -913,7 +917,7 @@ These are off by default so the base lint stays lean. `WEAK_DOD` and `PLACEHOLDE
 
 **Lenient loader behavior:** when `roadmap.yaml` itself is unparseable, plan lint still scans `design/phases/` directly so duplicate-id and naming checks can run on parseable phase files. Roadmap-dependent checks (`MISSING_PHASE_FILE`, `ORPHAN_PHASE_FILE`) are listed in `data.skipped_checks` so the agent can see exactly which checks were short-circuited.
 
-### `plan normalize [--check | --write] [--json]` (v0.7)
+### `plan normalize` (v0.7)
 
 Conservative, line-based normalization for files under `design/` and the progress log. No YAML parse/re-stringify; the command operates on raw bytes per line so comments, key ordering, and document structure survive untouched.
 
@@ -993,7 +997,7 @@ Markdown trailing whitespace is preserved because two trailing spaces are a mean
 
 **JSON shape (under `--write`):** identical to the dirty `--check` payload but with `mode: "write"`, `ok: true`, no `error` field, and `written` listing every file that was rewritten.
 
-### `plan sync-paths --rename <old>=<new> [--rename ...] [--write] [--json]` (v1.33)
+### `plan sync-paths` (v1.33)
 
 Applies explicit `old=new` path mappings to **exact** entries in `tasks[].reads` / `tasks[].writes` under `design/phases/*.yaml`. The remediation for `TASK_READS_NO_MATCH` after a referenced source file is **renamed or merged**: it keeps the plan-lint reads-match invariant satisfied without hand-editing phase YAML. (A file that is **gone for good** is not a rename — remove the stale entry by hand; sync-paths only maps `old`→`new`.) The map is explicit because a moved file may be a rename, a merge, or a split — none recoverable from git heuristics.
 
@@ -1039,7 +1043,7 @@ Applies explicit `old=new` path mappings to **exact** entries in `tasks[].reads`
 
 Under `--write`, `mode` is `"write"` and `written` lists every rewritten file. `skipped` carries `{ file, reason }` for any phase that failed to parse.
 
-### `plan analyze [--strict] [--include-historical] [--json]` (v0.7)
+### `plan analyze` (v0.7)
 
 Cross-artifact integrity check. Compares design intent (task and phase `status`) against derived progress state (`deriveTaskState` over the progress ledger). Read-only.
 
@@ -1062,10 +1066,7 @@ Cross-artifact integrity check. Compares design intent (task and phase `status`)
 
 **Severity model (no `info` tier):** `done-historical` carries `hidden_by_default: true` and `affects_exit: false` directly on the issue. This keeps the existing `error | warning` severity contract intact while letting analyze hide pre-v0.6 history from default output and from `--strict` exit codes.
 
-**Flags:**
-
-- `--strict` — promote `affects_exit: true` warnings to exit 1. Mirrors `validate --strict` and `plan lint --strict`. Does NOT flip `hidden_by_default`; historical issues stay hidden.
-- `--include-historical` — render issues marked `hidden_by_default: true`. JSON consumers see them in `data.issues`. Exit code is unchanged because `affects_exit: false` is independent of visibility.
+**Strictness and visibility semantics.** Strict mode promotes `affects_exit: true` warnings to exit 1, mirroring `validate --strict` and `plan lint --strict`; it does not flip `hidden_by_default`, so historical issues stay hidden. Historical-visibility mode renders issues marked `hidden_by_default: true`; JSON consumers see them in `data.issues`, but the exit code is unchanged because `affects_exit: false` is independent of visibility.
 
 **Exit code:**
 
@@ -1130,6 +1131,12 @@ Cross-artifact integrity check. Compares design intent (task and phase `status`)
   }
 }
 ```
+
+### `plan migrate` (collaboration-safe-state RFC, B4)
+
+Converts a legacy monolithic `.code-pact/state/progress.yaml` into the per-event ledger under `.code-pact/state/events/`. The migration is idempotent and dry-run by default; the legacy file is left in place because readers merge the legacy and per-event sources.
+
+The command reports any task whose derived state changes under the merged `(at, id)` ordering so maintainers can review ordering-sensitive history before committing. A corrupt existing per-event file is wrapped as `PLAN_MIGRATE_FAILED`, matching the public-code contract above: ledger-read integrity diagnostics such as `EVENT_FILE_ID_MISMATCH` never leak as top-level `error.code` values from this command.
 
 ## `adapter` (v0.9)
 

@@ -1,12 +1,11 @@
 // P52 — leaf help coverage for the non-task clusters.
 //
-// task is CommandSpec-backed and pinned by task-lifecycle-help-terms.test.ts.
-// plan / phase / adapter still hand-write (or stub) their help. This test makes
-// the current state visible and stops it regressing: a command that an agent
-// drives — mutating, or JSON-emitting — must answer `--help` with rich help
-// (a real synopsis), not the 2-line stub. Commands still on the stub are listed
-// in STUB_ALLOWLIST so the gap is explicit, not silent; as each is filled
-// (P52 step 2) it is removed from the allowlist and the test tightens.
+// task and plan are CommandSpec-backed; phase / adapter still hand-write (or
+// stub) their help. This test makes the current state visible and stops it
+// regressing: a command that an agent drives — mutating, or JSON-emitting —
+// must answer `--help` with rich help (a real synopsis), not the 2-line stub.
+// Commands still on the stub are listed in STUB_ALLOWLIST so the gap is
+// explicit, not silent.
 //
 // Pure: drives subcommandUsage() — no CLI spawn, no build.
 
@@ -65,8 +64,6 @@ const STUB_ALLOWLIST = new Set<string>([
   // Read-only commands still on the stub (P52 step 2 filled the mutating ones).
   // These remain a known, listed gap — fill them in a later pass and remove the
   // entry. The list only shrinks.
-  "plan lint",
-  "plan analyze",
   "phase ls",
   "phase show",
   "phase runbook",
