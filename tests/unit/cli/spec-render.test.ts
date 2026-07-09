@@ -7,9 +7,11 @@
 // allowed). They do NOT pin runtime semantics — required enforcement and
 // example runnability are covered by command/contract tests, by design.
 
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { ROOT_SPECS } from "../../../src/cli/spec/root.ts";
 import { PLAN_SPECS } from "../../../src/cli/spec/plan.ts";
+import { PHASE_SPECS } from "../../../src/cli/spec/phase.ts";
 import { TASK_SPECS } from "../../../src/cli/spec/task.ts";
 import {
   toParseOptions,
@@ -20,6 +22,7 @@ import {
 const ALL_SPECS = [
   ...Object.entries(ROOT_SPECS).map(([name, spec]) => [name, spec, name] as const),
   ...Object.entries(PLAN_SPECS).map(([name, spec]) => [name, spec, `plan ${name}`] as const),
+  ...Object.entries(PHASE_SPECS).map(([name, spec]) => [name, spec, `phase ${name}`] as const),
   ...Object.entries(TASK_SPECS).map(([name, spec]) => [name, spec, `task ${name}`] as const),
 ];
 
@@ -48,7 +51,7 @@ describe("CommandSpec derivation (P46)", () => {
 
   it.each(ALL_SPECS)("`%s` reference carries the heading, every flag, and examples", (_name, spec, label) => {
     const ref = renderReference(spec);
-    expect(ref).toContain(`## \`${label}\``);
+    expect(ref).toContain(`### \`${label}\``);
     for (const f of spec.flags) expect(ref).toContain(`\`--${f.name}\``);
     for (const ex of spec.examples) expect(ref).toContain(ex);
   });
@@ -121,6 +124,52 @@ describe("CommandSpec derivation (P46)", () => {
       expect(renderReference(PLAN_SPECS.lint)).toContain("code-pact plan lint --json");
       expect(renderReference(PLAN_SPECS.analyze)).toContain("code-pact plan analyze --json");
     });
+  });
+
+  describe("phase parse surfaces", () => {
+    it("phase add covers exactly the parser-backed flags", () => {
+      const opts = toParseOptions(PHASE_SPECS.add);
+      expect(opts["verify-command"]).toEqual({ type: "string", multiple: true });
+      expect(opts["done-criterion"]).toEqual({ type: "string", multiple: true });
+      expect(Object.keys(opts).sort()).toEqual(
+        [
+          "confidence",
+          "done-criterion",
+          "id",
+          "json",
+          "name",
+          "non-interactive",
+          "objective",
+          "risk",
+          "verify-command",
+          "weight",
+        ].sort(),
+      );
+    });
+
+    it("phase archive and import keep repeatable/alias-sensitive flags in the canonical specs", () => {
+      expect(toParseOptions(PHASE_SPECS.archive).attest).toEqual({
+        type: "string",
+        multiple: true,
+      });
+      expect(Object.keys(toParseOptions(PHASE_SPECS.import)).sort()).toEqual(
+        ["force", "json", "scaffold-decisions", "strict"].sort(),
+      );
+    });
+
+    it("phase reference renders flags and examples for representative specs", () => {
+      expect(renderReference(PHASE_SPECS.import)).toContain("code-pact phase import design/roadmap-draft.yaml --json");
+      expect(renderReference(PHASE_SPECS.runbook)).toContain("`--across-phases`");
+      expect(renderLeafHelp(PHASE_SPECS.ls)).toContain("--status");
+    });
+  });
+
+  it("generated reference uses H2 groups and H3 command entries", () => {
+    const doc = readFileSync(new URL("../../../docs/cli-reference.generated.md", import.meta.url), "utf8");
+    expect(doc).toContain("## Task commands\n\n### `task add`");
+    expect(doc).toContain("## Plan commands\n\n### `plan brief`");
+    expect(doc).toContain("## Phase commands\n\n### `phase add`");
+    expect(doc).not.toMatch(/## (Task|Plan|Phase) commands\n\n## `/);
   });
 
   it("required is presentation-only: it does not appear in parseArgs config", () => {
