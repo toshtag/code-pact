@@ -18,6 +18,8 @@ import {
   isHelpToken,
   subcommandUsage,
 } from "../usage.ts";
+import { ADAPTER_SPECS, ADAPTER_SPEC_ORDER } from "../spec/adapter.ts";
+import { toParseOptions } from "../spec/render.ts";
 import { emitOk, emitError } from "../util.ts";
 import { isSupportedAgent } from "../../core/agents.ts";
 import {
@@ -52,13 +54,7 @@ export async function cmdAdapter(
     return emitUsage(clusterUsage("adapter"));
   }
 
-  const KNOWN_SUBCOMMANDS = new Set([
-    "list",
-    "install",
-    "upgrade",
-    "doctor",
-    "conformance",
-  ]);
+  const KNOWN_SUBCOMMANDS: Set<string> = new Set(ADAPTER_SPEC_ORDER);
   // `adapter <sub> --help` → per-subcommand usage (exit 0).
   if (sub !== undefined && KNOWN_SUBCOMMANDS.has(sub) && hasHelpFlag(rest)) {
     return emitUsage(subcommandUsage("adapter", sub));
@@ -93,7 +89,7 @@ async function cmdAdapterList(
 ): Promise<number> {
   const { values } = parseArgs({
     args: argv,
-    options: { json: { type: "boolean" } },
+    options: toParseOptions(ADAPTER_SPECS.list),
     strict: false,
     allowPositionals: false,
   });
@@ -129,12 +125,7 @@ async function cmdAdapterInstall(
   const m = messages[locale];
   const { values, positionals } = parseArgs({
     args: argv,
-    options: {
-      force: { type: "boolean" },
-      json: { type: "boolean" },
-      model: { type: "string" },
-      "regen-skills": { type: "boolean" },
-    },
+    options: toParseOptions(ADAPTER_SPECS.install),
     strict: false,
     allowPositionals: true,
   });
@@ -170,10 +161,7 @@ async function cmdAdapterDoctor(
 ): Promise<number> {
   const { values } = parseArgs({
     args: argv,
-    options: {
-      agent: { type: "string" },
-      json: { type: "boolean" },
-    },
+    options: toParseOptions(ADAPTER_SPECS.doctor),
     strict: false,
     allowPositionals: false,
   });
@@ -220,9 +208,7 @@ async function cmdAdapterConformance(
 ): Promise<number> {
   const { values, positionals } = parseArgs({
     args: argv,
-    options: {
-      json: { type: "boolean" },
-    },
+    options: toParseOptions(ADAPTER_SPECS.conformance),
     strict: false,
     allowPositionals: true,
   });
@@ -321,15 +307,7 @@ async function cmdAdapterUpgrade(
   const m = messages[locale];
   const { values, positionals } = parseArgs({
     args: argv,
-    options: {
-      check: { type: "boolean" },
-      write: { type: "boolean" },
-      force: { type: "boolean" },
-      "accept-modified": { type: "boolean" },
-      "regen-skills": { type: "boolean" },
-      model: { type: "string" },
-      json: { type: "boolean" },
-    },
+    options: toParseOptions(ADAPTER_SPECS.upgrade),
     strict: false,
     allowPositionals: true,
   });
