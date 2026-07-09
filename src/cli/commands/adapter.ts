@@ -5,9 +5,7 @@
 //
 // `cmdAdapter` is the cluster-entry dispatch and is the only export.
 // The per-subcommand handlers (cmdAdapterList, cmdAdapterInstall,
-// etc.) plus the `runAdapterInstallAndEmit` helper (shared between
-// `cmdAdapterInstall` and `cmdAdapterBareForm`) are private to this
-// module.
+// etc.) plus the `runAdapterInstallAndEmit` helper are private to this module.
 
 import { parseArgs } from "node:util";
 import { messages, type Locale } from "../../i18n/index.ts";
@@ -30,6 +28,11 @@ import {
   detectAgentModelMapDrift,
 } from "../../commands/adapter.ts";
 import { runAdapterConformance } from "../../commands/adapter-conformance.ts";
+
+const ADAPTER_SUBCOMMAND_LIST = ADAPTER_SPEC_ORDER.join(" | ");
+const ADAPTER_NON_INSTALL_SUBCOMMAND_LIST = ADAPTER_SPEC_ORDER
+  .filter((subcommand) => subcommand !== "install")
+  .join(" | ");
 
 // ---------------------------------------------------------------------------
 // Command: adapter
@@ -68,7 +71,7 @@ export async function cmdAdapter(
 
   // Reject unknown sub-words (anything that doesn't start with `-`).
   if (sub !== undefined && !sub.startsWith("-")) {
-    const msg = `adapter: unknown subcommand "${sub}". Use: list | install | upgrade | doctor | conformance`;
+    const msg = `adapter: unknown subcommand "${sub}". Use: ${ADAPTER_SUBCOMMAND_LIST}`;
     emitError(effectiveJson, "CONFIG_ERROR", msg);
     return 2;
   }
@@ -78,7 +81,7 @@ export async function cmdAdapter(
   // mutates the project is exactly the "warning + side effect" hazard this
   // hardening pass is closing. Require the explicit subcommand. No side effects.
   const msg =
-    'adapter requires a subcommand — the bare form is removed. Use: code-pact adapter install <agent> (or list | upgrade | doctor | conformance). Run "code-pact adapter --help".';
+    `adapter requires a subcommand — the bare form is removed. Use: code-pact adapter install <agent> (or ${ADAPTER_NON_INSTALL_SUBCOMMAND_LIST}). Run "code-pact adapter --help".`;
   emitError(effectiveJson, "CONFIG_ERROR", msg);
   return 2;
 }

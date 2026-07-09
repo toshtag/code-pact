@@ -19,7 +19,13 @@ import {
   readManifest,
   writeManifest,
 } from "../../src/core/adapters/manifest.ts";
+import { ADAPTER_SPEC_ORDER } from "../../src/cli/spec/adapter.ts";
 import { cliPath, ensureCliBuilt } from "../helpers/cli.ts";
+
+const ADAPTER_SUBCOMMAND_LIST = ADAPTER_SPEC_ORDER.join(" | ");
+const ADAPTER_NON_INSTALL_SUBCOMMAND_LIST = ADAPTER_SPEC_ORDER
+  .filter((subcommand) => subcommand !== "install")
+  .join(" | ");
 
 beforeAll(() => {
   ensureCliBuilt();
@@ -132,6 +138,9 @@ describe("adapter bare-form removed — CLI", () => {
     expect(parsed.ok).toBe(false);
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(parsed.error.message).toMatch(/adapter install/);
+    expect(parsed.error.message).toContain(
+      `(or ${ADAPTER_NON_INSTALL_SUBCOMMAND_LIST})`,
+    );
     // No implicit install: no manifest was created.
     const manifestPath = join(
       dir,
@@ -171,7 +180,7 @@ describe("adapter --help — CLI", () => {
     const res = runCli(["adapter", "--help"]);
     expect(res.status).toBe(0);
     expect(res.stdout).toMatch(/Subcommands:/);
-    expect(res.stdout).toMatch(/install/);
+    expect(res.stdout).toContain(`Subcommands: ${ADAPTER_SUBCOMMAND_LIST}`);
   });
 
   it("`adapter -h` and `adapter help` also print usage, exit 0", () => {
@@ -519,6 +528,7 @@ describe("adapter unknown subcommand — CLI", () => {
     };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(parsed.error.message).toContain("foobar");
+    expect(parsed.error.message).toContain(`Use: ${ADAPTER_SUBCOMMAND_LIST}`);
   });
 
   // The cluster-dispatch errors compute `effectiveJson = globalJson ||

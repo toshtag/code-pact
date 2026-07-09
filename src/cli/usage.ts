@@ -4,7 +4,7 @@
 // These helpers let each cluster emit usage (exit 0) instead.
 
 import { renderLeafHelp } from "./spec/render.ts";
-import { ADAPTER_SPECS } from "./spec/adapter.ts";
+import { ADAPTER_SPECS, ADAPTER_SPEC_ORDER } from "./spec/adapter.ts";
 import { PHASE_SPECS } from "./spec/phase.ts";
 import { PLAN_SPECS } from "./spec/plan.ts";
 import { TASK_SPECS } from "./spec/task.ts";
@@ -14,7 +14,7 @@ const CLUSTER_SUBCOMMANDS: Record<string, string> = {
   plan: "brief | prompt | adopt | constitution | lint | normalize | analyze | sync-paths | migrate | import (alias for \"phase import\")",
   task: "add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook (aliases: reconcile = finalize, next = runbook)",
   phase: "add | new | ls | show | import | reconcile | archive | runbook (alias: next = runbook)",
-  adapter: "list | install | upgrade | doctor | conformance",
+  adapter: ADAPTER_SPEC_ORDER.join(" | "),
 };
 
 const PHASE_NEXT_SPEC = {
