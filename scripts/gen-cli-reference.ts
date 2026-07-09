@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { TASK_SPECS } from "../src/cli/spec/task.ts";
 import { PLAN_SPECS, PLAN_SPEC_ORDER } from "../src/cli/spec/plan.ts";
+import { PHASE_SPECS, PHASE_SPEC_ORDER } from "../src/cli/spec/phase.ts";
 import { ROOT_SPECS } from "../src/cli/spec/root.ts";
 import { renderReference } from "../src/cli/spec/render.ts";
 
@@ -75,9 +76,14 @@ function render(): string {
   sections.push(
     "### `plan import`",
     "",
-    "`code-pact plan import <file> [options]` is an alias for `code-pact phase import <file> [options]`. Its flag surface is intentionally not duplicated here; run `code-pact phase import --help` for the source command until the phase cluster is CommandSpec-backed.",
+    "`code-pact plan import <file> [options]` is an alias for `code-pact phase import <file> [options]`. Its flag surface is intentionally not duplicated here; see the generated `phase import` entry below for the canonical source.",
     "",
   );
+
+  sections.push("## Phase commands", "");
+  for (const key of PHASE_SPEC_ORDER) {
+    sections.push(renderReference(PHASE_SPECS[key]!), "");
+  }
 
   return `${sections.join("\n").trimEnd()}\n`;
 }

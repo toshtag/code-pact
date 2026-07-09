@@ -13,7 +13,7 @@ envelope, exit codes, error codes, stability taxonomy — also lives in
 
 ## Top-level commands
 
-## `verify`
+### `verify`
 
 `code-pact verify [options]`
 
@@ -36,7 +36,7 @@ code-pact verify --phase P1 --task P1-T1 --timeout 300000 --json
 
 ## Task commands
 
-## `task add`
+### `task add`
 
 `code-pact task add <phase-id> [options]`
 
@@ -67,7 +67,7 @@ code-pact task add P1                         # interactive wizard (TTY)
 code-pact task add P1 --description "Add X" --type feature --json
 ```
 
-## `task context`
+### `task context`
 
 `code-pact task context <task-id> [options]`
 
@@ -87,7 +87,7 @@ code-pact task context P1-T1 --agent claude-code --json
 code-pact task context P1-T1 --explain
 ```
 
-## `task prepare`
+### `task prepare`
 
 `code-pact task prepare <task-id> [options]`
 
@@ -109,7 +109,7 @@ writes the context pack unless --dry-run is passed.
 code-pact task prepare P1-T1 --agent claude-code --json
 ```
 
-## `task start`
+### `task start`
 
 `code-pact task start <task-id> [options]`
 
@@ -126,7 +126,7 @@ implementation pass; then `task complete` when verification passes.
 code-pact task start P1-T1 --agent claude-code --json
 ```
 
-## `task status`
+### `task status`
 
 `code-pact task status <task-id> [options]`
 
@@ -141,7 +141,7 @@ done / failed) and its progress-event history. Agent-neutral (takes no --agent).
 code-pact task status P1-T1 --json
 ```
 
-## `task block`
+### `task block`
 
 `code-pact task block <task-id> [options]`
 
@@ -158,7 +158,7 @@ Record a `blocked` event in the progress ledger. A blocked task must be resumed
 code-pact task block P1-T1 --reason "waiting on upstream API" --json
 ```
 
-## `task resume`
+### `task resume`
 
 `code-pact task resume <task-id> [options]`
 
@@ -174,7 +174,7 @@ Record a `resumed` event in the progress ledger, clearing a prior block. A
 code-pact task resume P1-T1 --agent claude-code --json
 ```
 
-## `task runbook`
+### `task runbook`
 
 `code-pact task runbook <task-id> [options]`
 
@@ -189,7 +189,7 @@ derived state. Alias: `task next`. Read-only — never records a progress event.
 code-pact task runbook P1-T1 --json
 ```
 
-## `task complete`
+### `task complete`
 
 `code-pact task complete <task-id> [options]`
 
@@ -210,7 +210,7 @@ yourself — use `task record-done` instead.
 code-pact task complete P1-T1 --agent claude-code --json
 ```
 
-## `task record-done`
+### `task record-done`
 
 `code-pact task record-done <task-id> [options]`
 
@@ -240,7 +240,7 @@ code-pact task record-done P1-T1 --evidence "PR #123" --notes "Already merged"
 code-pact task record-done P1-T2 --evidence "pnpm test passed; docs-only record_only task"
 ```
 
-## `task finalize`
+### `task finalize`
 
 `code-pact task finalize <task-id> [options]`
 
@@ -264,7 +264,7 @@ code-pact task finalize P1-T1 --audit-strict --base-ref origin/main --write --js
 
 ## Plan commands
 
-## `plan brief`
+### `plan brief`
 
 `code-pact plan brief [options]`
 
@@ -288,7 +288,7 @@ code-pact plan brief --from-file brief.yaml --json
 code-pact plan brief --what "..." --who "..." --differentiator "..." --json
 ```
 
-## `plan prompt`
+### `plan prompt`
 
 `code-pact plan prompt [options]`
 
@@ -308,7 +308,7 @@ code-pact plan prompt --schema-only
 code-pact plan prompt --clipboard
 ```
 
-## `plan adopt`
+### `plan adopt`
 
 `code-pact plan adopt <file> [options]`
 
@@ -326,7 +326,7 @@ code-pact plan adopt design/roadmap-draft.yaml --json
 code-pact plan adopt design/roadmap-draft.yaml --write --json
 ```
 
-## `plan constitution`
+### `plan constitution`
 
 `code-pact plan constitution [options]`
 
@@ -349,7 +349,7 @@ code-pact plan constitution --from-file constitution.yaml --json
 code-pact plan constitution --description "..." --principle "..." --principle "..." --json
 ```
 
-## `plan lint`
+### `plan lint`
 
 `code-pact plan lint [options]`
 
@@ -368,7 +368,7 @@ code-pact plan lint --json
 code-pact plan lint --include-quality --strict --json
 ```
 
-## `plan normalize`
+### `plan normalize`
 
 `code-pact plan normalize [options]`
 
@@ -389,7 +389,7 @@ code-pact plan normalize --json          # check mode (default)
 code-pact plan normalize --write --json  # apply
 ```
 
-## `plan analyze`
+### `plan analyze`
 
 `code-pact plan analyze [options]`
 
@@ -409,7 +409,7 @@ code-pact plan analyze --json
 code-pact plan analyze --include-historical --strict --json
 ```
 
-## `plan sync-paths`
+### `plan sync-paths`
 
 `code-pact plan sync-paths [options]`
 
@@ -429,7 +429,7 @@ code-pact plan sync-paths --rename src/a.ts=src/b.ts --json          # preview
 code-pact plan sync-paths --rename src/a.ts=src/b.ts --write --json  # apply
 ```
 
-## `plan migrate`
+### `plan migrate`
 
 `code-pact plan migrate [options]`
 
@@ -449,4 +449,161 @@ code-pact plan migrate --write --json  # migrate
 
 ### `plan import`
 
-`code-pact plan import <file> [options]` is an alias for `code-pact phase import <file> [options]`. Its flag surface is intentionally not duplicated here; run `code-pact phase import --help` for the source command until the phase cluster is CommandSpec-backed.
+`code-pact plan import <file> [options]` is an alias for `code-pact phase import <file> [options]`. Its flag surface is intentionally not duplicated here; see the generated `phase import` entry below for the canonical source.
+
+## Phase commands
+
+### `phase add`
+
+`code-pact phase add [options]`
+
+Append a phase to design/roadmap.yaml and create its phase YAML. Mutating.
+Two paths: with no flags on a TTY it runs an interactive wizard; with the
+required flags (or --non-interactive) it is flag-driven. For bulk creation
+from a draft, use `phase import` instead.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--id` (required) | `<phase-id>` | Phase id (e.g. P5). Required in non-interactive mode. |
+| `--name` (required) | `<text>` | Phase name. Required in non-interactive mode. |
+| `--weight` (required) | `<n>` | Phase weight. Required in non-interactive mode. |
+| `--objective` (required) | `<text>` | Phase objective. Required in non-interactive mode. |
+| `--confidence` | `<level>` | Optional readiness field. |
+| `--risk` | `<level>` | Optional readiness field. |
+| `--verify-command` | `<cmd>` | Phase verify command. (repeatable) |
+| `--done-criterion` | `<text>` | Phase done criterion. (repeatable) |
+| `--json` | — | Emit JSON. |
+| `--non-interactive` | — | Force the flag-driven path (no wizard). |
+
+```sh
+code-pact phase add                              # interactive wizard (TTY)
+code-pact phase add --id P5 --name "..." --weight 3 --objective "..." --json
+```
+
+### `phase new`
+
+`code-pact phase new [<name>]`
+
+Interactive wizard to create a phase. TTY-only — in a non-TTY context it
+errors and directs you to `phase add` with flags. Mutating (creates the
+phase YAML and registers it in the roadmap). Takes no flags; the wizard
+prompts for every field. For non-interactive / scripted creation use
+`phase add`.
+
+```sh
+code-pact phase new
+code-pact phase new "Authentication"
+```
+
+### `phase ls`
+
+`code-pact phase ls [options]`
+
+List phases from the roadmap, optionally filtered by phase status. Read-only — never records a progress event.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--status` | `<status>` | Filter by phase status. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact phase ls --json
+code-pact phase ls --status in_progress
+```
+
+### `phase show`
+
+`code-pact phase show <phase-id> [options]`
+
+Show one phase resolved from the roadmap. Read-only — never records a progress event.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact phase show P1 --json
+```
+
+### `phase import`
+
+`code-pact phase import <file> [options]`
+
+Import phases and tasks from a YAML draft into the roadmap. Lenient by
+default (applies schema defaults to AI-generated YAML); --strict rejects
+any input that needs defaulting. Reserved ids (e.g. TUTORIAL) and id
+collisions are rejected with the whole input left unwritten.
+
+Alias: `code-pact plan import` routes here.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--force` | — | Skip phases whose ids already exist in the roadmap (the rest still import). Task-id collisions are never bypassed. |
+| `--scaffold-decisions` | — | Scaffold a `proposed` ADR stub for every requires_decision task that lacks one. |
+| `--strict` | — | Reject input that relies on schema defaults. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact phase import design/roadmap-draft.yaml --json
+code-pact phase import design/roadmap-draft.yaml --scaffold-decisions --json
+```
+
+### `phase reconcile`
+
+`code-pact phase reconcile <phase-id> [options]`
+
+Bulk-flip every task in the phase whose derived state is `done` but whose
+design status is still open. Dry-run is the default — pass --write to apply.
+Mutating only with --write. Never mutates the progress ledger; advisory-only
+on the phase's own status. Alias: `phase next` routes to `phase runbook`, not
+this command.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--write` | — | Apply the status flips (default is a dry-run preview). |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact phase reconcile P9 --json
+code-pact phase reconcile P9 --write --json
+```
+
+### `phase archive`
+
+`code-pact phase archive <phase-id> [options]`
+
+Archive a terminal phase (status done/cancelled, all tasks terminal): write
+its phase-snapshot record, then delete `design/phases/<id>.yaml`. The
+archived phase still resolves from the snapshot (the roadmap ref is kept).
+Dry-run is the default — pass --write to apply. Mutating only with --write.
+Never edits the roadmap, rewrites a link, or appends a ledger.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--write` | — | Write the snapshot then delete the YAML (default is a dry-run preview). |
+| `--attest` | `<task-id>=<reason>` | Attest a legacy done-task that has no done event. (repeatable) |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact phase archive P9 --json
+code-pact phase archive P9 --write --json
+code-pact phase archive P9 --write --attest P9-T2="verified by hand" --json
+```
+
+### `phase runbook`
+
+`code-pact phase runbook <phase-id> [options]`
+
+Print the ordered next-steps for a phase from its derived task state.
+With --across-phases, aggregate runbooks for in-progress phases
+and their dependency-linked phases. Alias: `phase next`. Read-only — never records a progress event.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--across-phases` | — | Aggregate runbooks across in-progress phases; no phase id is required in this mode. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact phase runbook P9 --json
+code-pact phase runbook --across-phases --json
+```
