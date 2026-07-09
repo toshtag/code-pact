@@ -41,7 +41,7 @@
 - [ ] **No Stable (v1.0) contract change** — no rename / removal / shape change to any flag, exit code, JSON envelope, error code, or human-stdout/stderr surface classified `Stable (v1.0)` or `Stable (human-output)` in [`docs/cli-contract.md`](../docs/cli-contract.md). If unchecked, explain below why the change is safe (additive, behind a new flag, etc.).
 - [ ] **Docs updated** if the change is user-visible:
   - Task command / flag → edit `src/cli/spec/*` (the `CommandSpec`) and run `pnpm gen:cli-reference`; parse, help, and the generated reference all derive from it — do **not** hand-write the task flag table into `docs/cli-contract.md`.
-  - Plan / phase / adapter command or flag → edit `src/cli/spec/<cluster>.ts` and run `pnpm gen:cli-reference`; keep `docs/cli-contract.md` to semantics, not basic flag tables/examples.
+  - Plan / phase / adapter / decision command or flag → edit `src/cli/spec/<cluster>.ts` and run `pnpm gen:cli-reference`; keep `docs/cli-contract.md` to semantics, not basic flag tables/examples.
   - Non-migrated non-task command / flag → update the command's rich leaf help in `src/cli/usage.ts` (a mutating/JSON-emitting command must not ship as a stub — see `tests/unit/cli/leaf-help-coverage.test.ts`) + its semantics in `docs/cli-contract.md`.
   - JSON envelope / error code / exit semantics → `docs/cli-contract.md`. User-recoverable error → `docs/troubleshooting.md`.
   - New onboarding surface → `docs/getting-started.md`. Upgrade relevance → `docs/upgrading.md`.

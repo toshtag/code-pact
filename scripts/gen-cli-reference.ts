@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { ADAPTER_SPECS, ADAPTER_SPEC_ORDER } from "../src/cli/spec/adapter.ts";
+import { DECISION_SPECS, DECISION_SPEC_ORDER } from "../src/cli/spec/decision.ts";
 import { TASK_SPECS } from "../src/cli/spec/task.ts";
 import { PLAN_SPECS, PLAN_SPEC_ORDER } from "../src/cli/spec/plan.ts";
 import { PHASE_SPECS, PHASE_SPEC_ORDER } from "../src/cli/spec/phase.ts";
@@ -89,6 +90,11 @@ function render(): string {
   sections.push("## Adapter commands", "");
   for (const key of ADAPTER_SPEC_ORDER) {
     sections.push(renderReference(ADAPTER_SPECS[key]!), "");
+  }
+
+  sections.push("## Decision commands", "");
+  for (const key of DECISION_SPEC_ORDER) {
+    sections.push(renderReference(DECISION_SPECS[key]!), "");
   }
 
   return `${sections.join("\n").trimEnd()}\n`;
