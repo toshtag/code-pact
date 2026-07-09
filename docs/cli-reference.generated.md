@@ -607,3 +607,97 @@ and their dependency-linked phases. Alias: `phase next`. Read-only — never rec
 code-pact phase runbook P9 --json
 code-pact phase runbook --across-phases --json
 ```
+
+## Adapter commands
+
+### `adapter list`
+
+`code-pact adapter list [options]`
+
+List registered adapters with enabled/experimental state and manifest
+presence. Useful before install or upgrade work. Read-only — never records a progress event.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact adapter list
+code-pact adapter list --json
+```
+
+### `adapter install`
+
+`code-pact adapter install <agent> [options]`
+
+Install an agent adapter: writes its instruction files, skills, agent
+profile updates, and manifest. Mutating.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--force` | — | Adopt or replace unmanaged files only; never overwrites managed local modifications. |
+| `--model` | `<version>` | Pin the agent's model_version at install time. |
+| `--regen-skills` | — | Refresh built-in skill files; dynamic command-skill collisions are refused. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact adapter install claude-code --json
+code-pact adapter install claude-code --model claude-opus-4-8 --json
+```
+
+### `adapter upgrade`
+
+`code-pact adapter upgrade <agent> [options]`
+
+Re-sync an installed adapter's managed files to the current generator
+output. Exactly one of --check or --write is required; --check is read-only,
+and --write applies changes.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--check` | — | Report drift and exit non-zero if any; writes nothing. |
+| `--write` | — | Apply the upgrade. |
+| `--force` | — | Adopt or replace unmanaged files only; never overwrites modified managed files. |
+| `--accept-modified` | — | Allow overwriting managed local modifications when used with --write. |
+| `--regen-skills` | — | Refresh built-in skill files; dynamic command-skill collisions are refused. |
+| `--model` | `<version>` | Update the agent's model_version; requires --write. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact adapter upgrade claude-code --check --json
+code-pact adapter upgrade claude-code --write --json
+code-pact adapter upgrade claude-code --write --accept-modified --json
+```
+
+### `adapter doctor`
+
+`code-pact adapter doctor [options]`
+
+Run adapter-scoped manifest and generated-file diagnostics. With --agent,
+inspect exactly one adapter; otherwise inspect enabled agents. Read-only — never records a progress event.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--agent` | `<name>` | Inspect one adapter by agent name. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact adapter doctor
+code-pact adapter doctor --agent claude-code --json
+```
+
+### `adapter conformance`
+
+`code-pact adapter conformance <agent> [options]`
+
+Check that an installed adapter satisfies the agent contract and per-file
+integrity requirements. Read-only — never records a progress event.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact adapter conformance claude-code
+code-pact adapter conformance claude-code --json
+```

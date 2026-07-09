@@ -1149,11 +1149,7 @@ In v0.9 `adapter` becomes a subcommand group. Each subcommand produces a stable
 effects, directing the user to `code-pact adapter install <agent>`. `code-pact adapter --help`
 (`-h`, `help`) prints usage and exits 0.
 
-- `adapter list [--json]` — enumerate registered adapters with manifest state
-- `adapter install <agent> [--force] [--model <v>] [--regen-skills] [--json]` — first-time install + writes manifest
-- `adapter upgrade <agent> --check [--json]` — read-only drift report
-- `adapter upgrade <agent> --write [--force] [--accept-modified] [--model <v>] [--regen-skills] [--json]` — apply changes
-- `adapter doctor [--agent <name>] [--json]` — adapter-scoped diagnostics
+For generated adapter flags, usage, and examples, see the generated [CLI reference § Adapter commands](cli-reference.generated.md#adapter-commands). This section owns the stable adapter semantics: manifest model, write/read behavior, JSON envelopes, exit codes, diagnostics, and safety constraints.
 
 ### Per-agent manifest
 
@@ -1192,7 +1188,7 @@ Destructive overwrite of a managed-modified file requires `adapter upgrade --wri
 The `--regen-skills` flag is a role-scoped force: it makes `--force` apply only to files with
 `role: skill`. It still cannot override `managed-modified`.
 
-### `adapter list [--json]`
+### `adapter list`
 
 Returns one entry per registered adapter:
 
@@ -1225,9 +1221,9 @@ in that case. When the manifest YAML exists but fails parse or schema validation
 sets `manifestInvalid: true` and omits the detail fields — use `adapter doctor`
 for the parse error.
 
-### `adapter install <agent> [--force] [--model <v>] [--regen-skills] [--json]`
+### `adapter install`
 
-Generates the adapter for `<agent>` (positional, required) and writes the manifest.
+Generates the adapter for the named agent and writes the manifest.
 
 `--model <version>` produces a **model-aware** instruction file for the claude-code adapter
 with an effort-level and thinking guidance block for a supported Claude version
@@ -1296,7 +1292,7 @@ Skill names are derived by stripping the package-manager prefix (`pnpm`, `npm ru
 skills are generated (the three fixed skills — `/context`, `/verify`, `/progress` — are always
 written). Duplicate commands across phases produce a single skill file.
 
-### `adapter upgrade <agent> --check | --write [flags] [--json]`
+### `adapter upgrade`
 
 Inspects or applies adapter drift against the installed manifest. Requires an
 existing manifest at `.code-pact/adapters/<agent>.manifest.yaml`; run
@@ -1304,12 +1300,7 @@ existing manifest at `.code-pact/adapters/<agent>.manifest.yaml`; run
 **mutually exclusive and required** — passing neither (or both) is a
 `CONFIG_ERROR` exit 2 so the intent is unambiguous in CI logs.
 
-Common flags:
-
-- `--force` — adopt unmanaged files only. **Never** overrides `managed-modified`.
-- `--accept-modified` — required to overwrite `managed-modified × stale` files. Available only on `--write`.
-- `--regen-skills` — role-scoped force: applies `--force`-equivalent to `role: skill` files only. Still cannot override `managed-modified`.
-- `--model <version>` — same semantics as `adapter install --model`; affects Claude `CLAUDE.md` generation.
+The generated adapter reference owns the exact flag list. The semantic constraints below are stable: `--check` is read-only, `--write` applies changes, `--accept-modified` is required to overwrite `managed-modified × stale` files, and `--model` has the same model-aware generation semantics as `adapter install --model`.
 
 #### Action enum (8 values)
 
@@ -1326,7 +1317,7 @@ Each plan entry carries a `local`, `desired`, and `action` field. `action` is on
 | `refuse`            | Would destroy local modifications without `--accept-modified` (managed-modified × stale).                                  |
 | `warn`              | Surfaceable in `--check` for unmanaged rows regardless of `--force`. `--write` never produces this.                        |
 
-#### `adapter upgrade <agent> --check`
+#### Check mode
 
 Fully read-only. Returns the action `--write` WOULD take for each desired file
 with two intentional differences:
@@ -1365,7 +1356,7 @@ non-skip action), `2` on `CONFIG_ERROR` (missing positional, mutex flags) /
 `AGENT_NOT_FOUND` / `MANIFEST_NOT_FOUND` / adapter transaction recovery or cleanup faults
 (`PARTIAL_MUTATION`, `TRANSACTION_CLEANUP_PENDING`, `ADAPTER_TRANSACTION_RECOVERY_FAILED`).
 
-#### `adapter upgrade <agent> --write`
+#### Write mode
 
 Executes the action matrix. The new manifest reflects the post-write state:
 files written / adopted have their hash refreshed, skipped managed files
@@ -1451,7 +1442,7 @@ in `.code-pact/doctor.yaml` gets no hint — and is withheld when any file was
 `--json` envelope is unchanged; `doctor --json` remains the machine-readable
 source for the advisory.
 
-### `adapter doctor [--agent <name>] [--json]`
+### `adapter doctor`
 
 Read-only manifest-aware health check. Reports issues per agent without
 modifying the manifest or any generated files. With `--agent`, inspects
@@ -1569,7 +1560,7 @@ is **removed**. A `code-pact adapter` invocation with no subcommand now returns 
 "warning + side effect" hazard the v1.20 hardening pass closed. Use `code-pact adapter install
 <agent>` explicitly. `code-pact adapter --help` / `-h` / `help` prints usage and exits 0.
 
-### `adapter conformance <agent> [--json]` (v1.11+, P21)
+### `adapter conformance` (v1.11+, P21)
 
 Focused read-only check that the installed adapter satisfies the agent contract. Each check carries a `severity` (`required` | `advisory`); `compliant` is `true` unless a **required** check fails. The CLI exits 0 when compliant, 1 when not. No state is mutated.
 
