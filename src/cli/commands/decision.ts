@@ -8,7 +8,7 @@ import { strictParse, ConfigError } from "../../lib/argv.ts";
 import { type Locale } from "../../i18n/index.ts";
 import { emitOk, emitError, withWriteLock } from "../util.ts";
 import { clusterUsage, emitUsage, subcommandUsage } from "../usage.ts";
-import { DECISION_SPECS } from "../spec/decision.ts";
+import { DECISION_SPECS, DECISION_SPEC_ORDER } from "../spec/decision.ts";
 import { toParseOptions } from "../spec/render.ts";
 import { DECISION_RETENTION_VALUES, type DecisionRetention } from "../../core/schemas/project.ts";
 import {
@@ -211,6 +211,6 @@ export async function cmdDecision(
     return runImpl();
   }
 
-  emitError(effectiveJson, "CONFIG_ERROR", `unknown decision subcommand: ${subcommand}`);
+  emitError(effectiveJson, "CONFIG_ERROR", `unknown decision subcommand: ${subcommand}. Use: ${DECISION_SPEC_ORDER.join(" | ")}`);
   return 2;
 }
