@@ -743,3 +743,82 @@ code-pact decision retire design/decisions/foo-rfc.md
 code-pact decision retire design/decisions/foo-rfc.md --json
 code-pact decision retire design/decisions/foo-rfc.md --write --json
 ```
+
+## State commands
+
+### `state compact`
+
+`code-pact state compact <phase-id> [options]`
+
+Fold one archived phase's loose progress event files into an event pack.
+Dry-run by default; --write writes the pack and removes covered loose files
+under the advisory write lock.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--write` | — | Write the event pack and clean up covered loose event files. Default is dry-run. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact state compact P1 --json
+code-pact state compact P1 --write --json
+```
+
+### `state compact-archive`
+
+`code-pact state compact-archive [<kind>] [options]`
+
+Fold loose archive records into content-addressed bundles. The optional
+kind restricts the run to one archive kind; omitting it processes all kinds.
+Dry-run by default; --write applies under the advisory write lock.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--write` | — | Fold archive records into bundles and delete bundled loose copies. Default is dry-run. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact state compact-archive --json
+code-pact state compact-archive --write --json
+code-pact state compact-archive decision_record --write
+```
+
+### `state archive-retention`
+
+`code-pact state archive-retention [options]`
+
+Apply keep-latest retention to unreferenced archive records. Dry-run by
+default; --write deletes eligible old archive truth under the advisory write
+lock.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--keep-latest` | `<N>` | Keep the latest N unreferenced records per kind. Default is the project retention default. |
+| `--write` | — | Apply the retention plan. Default is dry-run. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact state archive-retention --json
+code-pact state archive-retention --keep-latest 5 --json
+code-pact state archive-retention --write --json
+```
+
+### `state archive-maintain`
+
+`code-pact state archive-maintain [options]`
+
+Run the high-level archive maintenance sequence: recover pending delete
+intent, compact, retain, compact again when needed, then run checks. Dry-run
+by default; --write applies the sequence under one advisory write lock.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--keep-latest` | `<N>` | Keep the latest N unreferenced records per kind during retention. Default is the project retention default. |
+| `--write` | — | Apply archive maintenance. Default is dry-run. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact state archive-maintain --json
+code-pact state archive-maintain --write --json
+code-pact state archive-maintain --write --keep-latest 5
+```
