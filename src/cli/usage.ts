@@ -5,6 +5,7 @@
 
 import { renderLeafHelp } from "./spec/render.ts";
 import { ADAPTER_SPECS, ADAPTER_SPEC_ORDER } from "./spec/adapter.ts";
+import { DECISION_SPECS, DECISION_SPEC_ORDER } from "./spec/decision.ts";
 import { PHASE_SPECS } from "./spec/phase.ts";
 import { PLAN_SPECS } from "./spec/plan.ts";
 import { TASK_SPECS } from "./spec/task.ts";
@@ -15,6 +16,7 @@ const CLUSTER_SUBCOMMANDS: Record<string, string> = {
   task: "add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook (aliases: reconcile = finalize, next = runbook)",
   phase: "add | new | ls | show | import | reconcile | archive | runbook (alias: next = runbook)",
   adapter: ADAPTER_SPEC_ORDER.join(" | "),
+  decision: DECISION_SPEC_ORDER.join(" | "),
 };
 
 const PHASE_NEXT_SPEC = {
@@ -134,6 +136,10 @@ const LEAF_USAGE: Record<string, () => string> = {
   "adapter doctor": () => renderLeafHelp(ADAPTER_SPECS.doctor),
 
   "adapter conformance": () => renderLeafHelp(ADAPTER_SPECS.conformance),
+
+  "decision prune": () => renderLeafHelp(DECISION_SPECS.prune),
+
+  "decision retire": () => renderLeafHelp(DECISION_SPECS.retire),
 };
 
 /**
