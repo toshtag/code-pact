@@ -87,8 +87,11 @@ describe("cluster --help → usage, exit 0", () => {
     [["phase", "archive", "--help"], /Usage: code-pact phase archive/, /--write/],
     [["phase", "runbook", "--help"], /Usage: code-pact phase runbook/, /--across-phases/],
     [["phase", "next", "--help"], /Usage: code-pact phase next/, /--across-phases/],
+    [["adapter", "list", "--help"], /Usage: code-pact adapter list/, /--json/],
     [["adapter", "install", "--help"], /Usage: code-pact adapter install/, /--force/],
     [["adapter", "upgrade", "--help"], /Usage: code-pact adapter upgrade/, /--accept-modified/],
+    [["adapter", "doctor", "--help"], /Usage: code-pact adapter doctor/, /--agent/],
+    [["adapter", "conformance", "--help"], /Usage: code-pact adapter conformance/, /--json/],
     // `plan import` is an alias for `phase import`; its --help routes to the
     // same rich entry (cmdPlan dispatch), so it must not be a stub.
     [["plan", "import", "--help"], /Usage: code-pact phase import/, /--scaffold-decisions/],

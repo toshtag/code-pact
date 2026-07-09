@@ -4,6 +4,7 @@
 // These helpers let each cluster emit usage (exit 0) instead.
 
 import { renderLeafHelp } from "./spec/render.ts";
+import { ADAPTER_SPECS, ADAPTER_SPEC_ORDER } from "./spec/adapter.ts";
 import { PHASE_SPECS } from "./spec/phase.ts";
 import { PLAN_SPECS } from "./spec/plan.ts";
 import { TASK_SPECS } from "./spec/task.ts";
@@ -13,7 +14,7 @@ const CLUSTER_SUBCOMMANDS: Record<string, string> = {
   plan: "brief | prompt | adopt | constitution | lint | normalize | analyze | sync-paths | migrate | import (alias for \"phase import\")",
   task: "add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook (aliases: reconcile = finalize, next = runbook)",
   phase: "add | new | ls | show | import | reconcile | archive | runbook (alias: next = runbook)",
-  adapter: "list | install | upgrade | doctor | conformance",
+  adapter: ADAPTER_SPEC_ORDER.join(" | "),
 };
 
 const PHASE_NEXT_SPEC = {
@@ -124,56 +125,15 @@ const LEAF_USAGE: Record<string, () => string> = {
 
   "task runbook": () => renderLeafHelp(TASK_SPECS.runbook!),
 
-  "adapter install": () =>
-    [
-      "Usage: code-pact adapter install <agent> [options]",
-      "",
-      "Install an agent adapter — writes its instruction files and skills, and",
-      "enables the agent in project config. Mutating.",
-      "",
-      "Options:",
-      "  --model <version>   Pin the agent's model_version at install time.",
-      "  --regen-skills      Refresh built-in skill files. A divergent DYNAMIC",
-      "                      command-skill that collides with a user file is",
-      "                      refused, not overwritten (security).",
-      "  --force             Adopt or replace UNMANAGED files only. Does NOT",
-      "                      overwrite a managed file with local modifications",
-      "                      (use `adapter upgrade --write --accept-modified`).",
-      "  --json              Emit JSON.",
-      "",
-      "Examples:",
-      "  code-pact adapter install claude-code --json",
-      "  code-pact adapter install claude-code --model claude-opus-4-8 --json",
-    ].join("\n"),
+  "adapter list": () => renderLeafHelp(ADAPTER_SPECS.list),
 
-  "adapter upgrade": () =>
-    [
-      "Usage: code-pact adapter upgrade <agent> (--check | --write) [options]",
-      "",
-      "Re-sync an installed adapter's managed files to the current manifest.",
-      "Exactly one of --check or --write is required (they are mutually exclusive):",
-      "--check reports drift and exits non-zero if any, writing nothing; --write",
-      "applies the upgrade. Mutating only with --write.",
-      "",
-      "Options:",
-      "  --check             Report drift and exit non-zero if any (no writes).",
-      "  --write             Apply the upgrade.",
-      "  --accept-modified   ALLOW overwriting a managed file that has local",
-      "                      modifications with current generator output (this is",
-      "                      the destructive flag — without it such files are kept).",
-      "  --regen-skills      Refresh built-in skill files. A divergent DYNAMIC",
-      "                      command-skill that collides with a user file is",
-      "                      refused, not overwritten (security).",
-      "  --model <version>   Update the agent's model_version (requires --write).",
-      "  --force             Adopt or replace UNMANAGED files only. Does NOT",
-      "                      overwrite a modified managed file (use --accept-modified).",
-      "  --json              Emit JSON.",
-      "",
-      "Examples:",
-      "  code-pact adapter upgrade claude-code --check --json",
-      "  code-pact adapter upgrade claude-code --write --json",
-      "  code-pact adapter upgrade claude-code --accept-modified --write --json",
-    ].join("\n"),
+  "adapter install": () => renderLeafHelp(ADAPTER_SPECS.install),
+
+  "adapter upgrade": () => renderLeafHelp(ADAPTER_SPECS.upgrade),
+
+  "adapter doctor": () => renderLeafHelp(ADAPTER_SPECS.doctor),
+
+  "adapter conformance": () => renderLeafHelp(ADAPTER_SPECS.conformance),
 };
 
 /**

@@ -5,9 +5,7 @@
 //
 // `cmdAdapter` is the cluster-entry dispatch and is the only export.
 // The per-subcommand handlers (cmdAdapterList, cmdAdapterInstall,
-// etc.) plus the `runAdapterInstallAndEmit` helper (shared between
-// `cmdAdapterInstall` and `cmdAdapterBareForm`) are private to this
-// module.
+// etc.) plus the `runAdapterInstallAndEmit` helper are private to this module.
 
 import { parseArgs } from "node:util";
 import { messages, type Locale } from "../../i18n/index.ts";
@@ -18,6 +16,8 @@ import {
   isHelpToken,
   subcommandUsage,
 } from "../usage.ts";
+import { ADAPTER_SPECS, ADAPTER_SPEC_ORDER } from "../spec/adapter.ts";
+import { toParseOptions } from "../spec/render.ts";
 import { emitOk, emitError } from "../util.ts";
 import { isSupportedAgent } from "../../core/agents.ts";
 import {
@@ -28,6 +28,11 @@ import {
   detectAgentModelMapDrift,
 } from "../../commands/adapter.ts";
 import { runAdapterConformance } from "../../commands/adapter-conformance.ts";
+
+const ADAPTER_SUBCOMMAND_LIST = ADAPTER_SPEC_ORDER.join(" | ");
+const ADAPTER_NON_INSTALL_SUBCOMMAND_LIST = ADAPTER_SPEC_ORDER
+  .filter((subcommand) => subcommand !== "install")
+  .join(" | ");
 
 // ---------------------------------------------------------------------------
 // Command: adapter
@@ -52,13 +57,7 @@ export async function cmdAdapter(
     return emitUsage(clusterUsage("adapter"));
   }
 
-  const KNOWN_SUBCOMMANDS = new Set([
-    "list",
-    "install",
-    "upgrade",
-    "doctor",
-    "conformance",
-  ]);
+  const KNOWN_SUBCOMMANDS: Set<string> = new Set(ADAPTER_SPEC_ORDER);
   // `adapter <sub> --help` → per-subcommand usage (exit 0).
   if (sub !== undefined && KNOWN_SUBCOMMANDS.has(sub) && hasHelpFlag(rest)) {
     return emitUsage(subcommandUsage("adapter", sub));
@@ -72,7 +71,7 @@ export async function cmdAdapter(
 
   // Reject unknown sub-words (anything that doesn't start with `-`).
   if (sub !== undefined && !sub.startsWith("-")) {
-    const msg = `adapter: unknown subcommand "${sub}". Use: list | install | upgrade | doctor | conformance`;
+    const msg = `adapter: unknown subcommand "${sub}". Use: ${ADAPTER_SUBCOMMAND_LIST}`;
     emitError(effectiveJson, "CONFIG_ERROR", msg);
     return 2;
   }
@@ -82,7 +81,7 @@ export async function cmdAdapter(
   // mutates the project is exactly the "warning + side effect" hazard this
   // hardening pass is closing. Require the explicit subcommand. No side effects.
   const msg =
-    'adapter requires a subcommand — the bare form is removed. Use: code-pact adapter install <agent> (or list | upgrade | doctor | conformance). Run "code-pact adapter --help".';
+    `adapter requires a subcommand — the bare form is removed. Use: code-pact adapter install <agent> (or ${ADAPTER_NON_INSTALL_SUBCOMMAND_LIST}). Run "code-pact adapter --help".`;
   emitError(effectiveJson, "CONFIG_ERROR", msg);
   return 2;
 }
@@ -93,7 +92,7 @@ async function cmdAdapterList(
 ): Promise<number> {
   const { values } = parseArgs({
     args: argv,
-    options: { json: { type: "boolean" } },
+    options: toParseOptions(ADAPTER_SPECS.list),
     strict: false,
     allowPositionals: false,
   });
@@ -129,12 +128,7 @@ async function cmdAdapterInstall(
   const m = messages[locale];
   const { values, positionals } = parseArgs({
     args: argv,
-    options: {
-      force: { type: "boolean" },
-      json: { type: "boolean" },
-      model: { type: "string" },
-      "regen-skills": { type: "boolean" },
-    },
+    options: toParseOptions(ADAPTER_SPECS.install),
     strict: false,
     allowPositionals: true,
   });
@@ -170,10 +164,7 @@ async function cmdAdapterDoctor(
 ): Promise<number> {
   const { values } = parseArgs({
     args: argv,
-    options: {
-      agent: { type: "string" },
-      json: { type: "boolean" },
-    },
+    options: toParseOptions(ADAPTER_SPECS.doctor),
     strict: false,
     allowPositionals: false,
   });
@@ -220,9 +211,7 @@ async function cmdAdapterConformance(
 ): Promise<number> {
   const { values, positionals } = parseArgs({
     args: argv,
-    options: {
-      json: { type: "boolean" },
-    },
+    options: toParseOptions(ADAPTER_SPECS.conformance),
     strict: false,
     allowPositionals: true,
   });
@@ -321,15 +310,7 @@ async function cmdAdapterUpgrade(
   const m = messages[locale];
   const { values, positionals } = parseArgs({
     args: argv,
-    options: {
-      check: { type: "boolean" },
-      write: { type: "boolean" },
-      force: { type: "boolean" },
-      "accept-modified": { type: "boolean" },
-      "regen-skills": { type: "boolean" },
-      model: { type: "string" },
-      json: { type: "boolean" },
-    },
+    options: toParseOptions(ADAPTER_SPECS.upgrade),
     strict: false,
     allowPositionals: true,
   });
