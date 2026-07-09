@@ -4,6 +4,7 @@
 // These helpers let each cluster emit usage (exit 0) instead.
 
 import { renderLeafHelp } from "./spec/render.ts";
+import { PHASE_SPECS } from "./spec/phase.ts";
 import { PLAN_SPECS } from "./spec/plan.ts";
 import { TASK_SPECS } from "./spec/task.ts";
 
@@ -13,6 +14,15 @@ const CLUSTER_SUBCOMMANDS: Record<string, string> = {
   task: "add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook (aliases: reconcile = finalize, next = runbook)",
   phase: "add | new | ls | show | import | reconcile | archive | runbook (alias: next = runbook)",
   adapter: "list | install | upgrade | doctor | conformance",
+};
+
+const PHASE_NEXT_SPEC = {
+  ...PHASE_SPECS.runbook,
+  command: "next",
+  summary: `${PHASE_SPECS.runbook.summary}\n\nAlias for \`phase runbook\`.`,
+  examples: PHASE_SPECS.runbook.examples.map((example) =>
+    example.replace("phase runbook", "phase next"),
+  ),
 };
 
 /** True for the tokens that request help: `help`, `--help`, `-h`. */
@@ -82,113 +92,23 @@ const LEAF_USAGE: Record<string, () => string> = {
 
   "plan migrate": () => renderLeafHelp(PLAN_SPECS.migrate),
 
-  "phase import": () =>
-    [
-      "Usage: code-pact phase import <file> [options]",
-      "",
-      "Import phases and tasks from a YAML draft into the roadmap. Lenient by",
-      "default (applies schema defaults to AI-generated YAML); --strict rejects",
-      "any input that needs defaulting. Reserved ids (e.g. TUTORIAL) and id",
-      "collisions are rejected with the whole input left unwritten.",
-      "",
-      "Alias: `code-pact plan import` routes here.",
-      "",
-      "Options:",
-      "  --force                Skip phases whose ids already exist in the roadmap",
-      "                         (the rest still import). Task-id collisions are",
-      "                         never bypassed.",
-      "  --scaffold-decisions   Scaffold a `proposed` ADR stub for every",
-      "                         requires_decision task that lacks one (RFC §3-D).",
-      "  --strict               Reject input that relies on schema defaults.",
-      "  --json                 Emit JSON.",
-      "",
-      "Examples:",
-      "  code-pact phase import design/roadmap-draft.yaml --json",
-      "  code-pact phase import design/roadmap-draft.yaml --scaffold-decisions --json",
-    ].join("\n"),
+  "phase add": () => renderLeafHelp(PHASE_SPECS.add),
 
-  "phase add": () =>
-    [
-      "Usage: code-pact phase add [options]",
-      "",
-      "Append a phase to design/roadmap.yaml and create its phase YAML. Mutating.",
-      "Two paths: with no flags on a TTY it runs an interactive wizard; with the",
-      "required flags (or --non-interactive) it is flag-driven. For bulk creation",
-      "from a draft, use `phase import` instead.",
-      "",
-      "Options:",
-      "  --id <phase-id>          Phase id (e.g. P5). Required in non-interactive mode.",
-      "  --name <text>            Phase name. Required in non-interactive mode.",
-      "  --weight <n>             Phase weight. Required in non-interactive mode.",
-      "  --objective <text>       Phase objective. Required in non-interactive mode.",
-      "  --confidence <level>     Optional readiness field.",
-      "  --risk <level>           Optional readiness field.",
-      "  --verify-command <cmd>   Phase verify command. Repeatable.",
-      "  --done-criterion <text>  Phase done criterion. Repeatable.",
-      "  --non-interactive        Force the flag-driven path (no wizard).",
-      "  --json                   Emit JSON.",
-      "",
-      "Examples:",
-      "  code-pact phase add                              # interactive wizard (TTY)",
-      "  code-pact phase add --id P5 --name \"...\" --weight 3 --objective \"...\" --json",
-    ].join("\n"),
+  "phase new": () => renderLeafHelp(PHASE_SPECS.new),
 
-  "phase new": () =>
-    [
-      "Usage: code-pact phase new [<name>]",
-      "",
-      "Interactive wizard to create a phase. TTY-only — in a non-TTY context it",
-      "errors and directs you to `phase add` with flags. Mutating (creates the",
-      "phase YAML and registers it in the roadmap). Takes no flags (not even",
-      "--json); the wizard prompts for every field. For non-interactive / scripted",
-      "creation use `phase add`.",
-      "",
-      "Arguments:",
-      "  <name>    Optional. Pre-fills the phase name; the wizard prompts for the rest.",
-      "",
-      "Examples:",
-      "  code-pact phase new",
-      "  code-pact phase new \"Authentication\"",
-    ].join("\n"),
+  "phase ls": () => renderLeafHelp(PHASE_SPECS.ls),
 
-  "phase reconcile": () =>
-    [
-      "Usage: code-pact phase reconcile <phase-id> [options]",
-      "",
-      "Bulk-flip every task in the phase whose derived state is `done` but whose",
-      "design status is still open. Dry-run is the default — pass --write to apply.",
-      "Mutating only with --write. Never mutates the progress ledger; advisory-only on the",
-      "phase's own status. Alias: `phase next` → `phase runbook` (not this command).",
-      "",
-      "Options:",
-      "  --write    Apply the status flips (default is a dry-run preview).",
-      "  --json     Emit JSON.",
-      "",
-      "Examples:",
-      "  code-pact phase reconcile P9 --json",
-      "  code-pact phase reconcile P9 --write --json",
-    ].join("\n"),
+  "phase show": () => renderLeafHelp(PHASE_SPECS.show),
 
-  "phase archive": () =>
-    [
-      "Usage: code-pact phase archive <phase-id> [options]",
-      "",
-      "Archive a TERMINAL phase (status done/cancelled, all tasks terminal): write its",
-      "phase-snapshot record, then delete `design/phases/<id>.yaml`. The archived phase",
-      "still resolves from the snapshot (the roadmap ref is kept). Dry-run is the default",
-      "— pass --write to apply. Mutating only with --write. Never edits the roadmap,",
-      "rewrites a link, or appends a ledger.",
-      "",
-      "Options:",
-      "  --write                     Write the snapshot then delete the YAML (default is a dry-run preview).",
-      "  --attest <task-id>=<reason> Attest a legacy done-task that has no done event (repeatable).",
-      "  --json                      Emit JSON.",
-      "",
-      "Examples:",
-      "  code-pact phase archive P9 --json",
-      "  code-pact phase archive P9 --write --json",
-      "  code-pact phase archive P9 --write --attest P9-T2=\"verified by hand\" --json",
-    ].join("\n"),
+  "phase import": () => renderLeafHelp(PHASE_SPECS.import),
+
+  "phase reconcile": () => renderLeafHelp(PHASE_SPECS.reconcile),
+
+  "phase archive": () => renderLeafHelp(PHASE_SPECS.archive),
+
+  "phase runbook": () => renderLeafHelp(PHASE_SPECS.runbook),
+
+  "phase next": () => renderLeafHelp(PHASE_NEXT_SPEC),
 
   "task add": () => renderLeafHelp(TASK_SPECS.add!),
 

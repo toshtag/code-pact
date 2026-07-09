@@ -9,6 +9,8 @@
 import { parseArgs } from "node:util";
 import { strictParse, strictParseAlias, ConfigError } from "../../lib/argv.ts";
 import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
+import { toParseOptions } from "../spec/render.ts";
+import { PHASE_SPECS } from "../spec/phase.ts";
 import { isInteractive } from "../../lib/tty.ts";
 import { messages, type Locale } from "../../i18n/index.ts";
 import { withWriteLock, emitOk, emitError } from "../util.ts";
@@ -49,18 +51,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
   if (subcommand === "add") {
     let values: Record<string, unknown>;
     try {
-      ({ values } = strictParse("phase add", rest, {
-        id: { type: "string" },
-        name: { type: "string" },
-        weight: { type: "string" },
-        objective: { type: "string" },
-        confidence: { type: "string" },
-        risk: { type: "string" },
-        "verify-command": { type: "string", multiple: true },
-        "done-criterion": { type: "string", multiple: true },
-        json: { type: "boolean" },
-        "non-interactive": { type: "boolean" },
-      }));
+      ({ values } = strictParse("phase add", rest, toParseOptions(PHASE_SPECS.add)));
     } catch (err) {
       if (!(err instanceof ConfigError)) throw err;
       const msg = `${err.message}. Quote multi-word values, e.g. --verify-command "node --version".`;
@@ -238,10 +229,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
   if (subcommand === "ls") {
     let values: Record<string, unknown>;
     try {
-      ({ values } = strictParse("phase ls", rest, {
-        status: { type: "string" },
-        json: { type: "boolean" },
-      }));
+      ({ values } = strictParse("phase ls", rest, toParseOptions(PHASE_SPECS.ls)));
     } catch (err) {
       if (!(err instanceof ConfigError)) throw err;
       const json = globalJson || rest.includes("--json");
@@ -276,7 +264,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
   if (subcommand === "show") {
     const { values, positionals: pos } = parseArgs({
       args: rest,
-      options: { json: { type: "boolean" } },
+      options: toParseOptions(PHASE_SPECS.show),
       strict: false,
       allowPositionals: true,
     });
@@ -351,10 +339,7 @@ async function cmdPhaseReconcile(
     ({ values, positionals } = strictParse(
       "phase reconcile",
       argv,
-      {
-        json: { type: "boolean" },
-        write: { type: "boolean" },
-      },
+      toParseOptions(PHASE_SPECS.reconcile),
       { allowPositionals: true },
     ));
   } catch (err) {
@@ -509,11 +494,7 @@ async function cmdPhaseArchive(
     ({ values, positionals } = strictParse(
       "phase archive",
       argv,
-      {
-        json: { type: "boolean" },
-        write: { type: "boolean" },
-        attest: { type: "string", multiple: true },
-      },
+      toParseOptions(PHASE_SPECS.archive),
       { allowPositionals: true },
     ));
   } catch (err) {
@@ -640,12 +621,7 @@ export async function cmdPhaseImport(
       invokedAs,
       "phase import",
       argv,
-      {
-        force: { type: "boolean" },
-        strict: { type: "boolean" },
-        "scaffold-decisions": { type: "boolean" },
-        json: { type: "boolean" },
-      },
+      toParseOptions(PHASE_SPECS.import),
       { allowPositionals: true },
     ));
   } catch (err) {
@@ -721,10 +697,7 @@ async function cmdPhaseRunbook(
       invokedAs,
       "phase runbook",
       argv,
-      {
-        json: { type: "boolean" },
-        "across-phases": { type: "boolean" },
-      },
+      toParseOptions(PHASE_SPECS.runbook),
       { allowPositionals: true },
     ));
   } catch (err) {

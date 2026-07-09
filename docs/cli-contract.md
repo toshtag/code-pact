@@ -420,7 +420,9 @@ the list becomes `default_agent` in the generated `project.yaml`.
 
 ## `phase import`
 
-`code-pact phase import <path> [--force] [--strict] [--scaffold-decisions] [--json]` bulk-imports a draft roadmap. Input shape:
+For usage, flags, and basic examples, see the generated [CLI reference § `phase import`](cli-reference.generated.md#phase-import). `plan import` is an alias that routes to the same implementation and shares this flag surface.
+
+`phase import` bulk-imports a draft roadmap. Input shape:
 
 ```yaml
 phases:
@@ -2367,7 +2369,9 @@ See the generated [CLI reference § `task finalize`](cli-reference.generated.md)
 
 ## `phase reconcile` — bulk-flip task design statuses for a phase (v1.2+, P11)
 
-`code-pact phase reconcile <phase-id> [--write] [--json]` walks every task inside `design/phases/<phase>.yaml`, classifies each one against its derived state from the progress ledger, and (with `--write`) flips the `status` field for every task whose derived state is `done` while its design status is still `planned` / `in_progress`. Stability: **Stable (v1.2+)**.
+For usage, flags, and basic examples, see the generated [CLI reference § `phase reconcile`](cli-reference.generated.md#phase-reconcile).
+
+`phase reconcile` walks every task inside `design/phases/<phase>.yaml`, classifies each one against its derived state from the progress ledger, and (with `--write`) flips the `status` field for every task whose derived state is `done` while its design status is still `planned` / `in_progress`. Stability: **Stable (v1.2+)**.
 
 Default mode is dry-run. Pass `--write` to apply the mutations. No `--agent` flag — like `task finalize`, this is a design/progress reconciliation command that never calls an adapter.
 
@@ -2446,17 +2450,7 @@ Field presence by kind:
 
 ### Usage example
 
-```sh
-# Preview — what would reconcile do across the whole phase?
-code-pact phase reconcile P11 --json
-
-# Apply — flip every eligible task at once.
-code-pact phase reconcile P11 --write --json
-
-# Recommended adoption pattern (v1.2.0+):
-# Replace hand-edits of design/phases/*.yaml in release prep
-# with a single `phase reconcile <phase-id> --write` invocation.
-```
+See the generated [CLI reference § `phase reconcile`](cli-reference.generated.md#phase-reconcile) for the preview and apply examples. Recommended adoption: replace hand-edits of `design/phases/*.yaml` in release prep with a single `phase reconcile` write invocation.
 
 ## `decision prune`
 
@@ -2557,7 +2551,9 @@ Pruning a record that is **already gone** (a second `--write`) exits 2 with `DEC
 
 ## `phase archive`
 
-(v2.0, design-docs-ephemeral) — `phase archive <phase-id> [--write] [--json]` archives a **terminal** phase (status `done` / `cancelled`, every task terminal): it writes a phase-snapshot record under `.code-pact/state/archive/phases/<id>.json`, then deletes the matching `design/phases/*.yaml` file. The archived phase still resolves from the snapshot — **the roadmap ref is kept**, and an active task that depends on one of its tasks keeps resolving. **Dry-run by default** — it writes nothing and deletes nothing; pass `--write` to apply. It never edits the roadmap, rewrites a link, or appends a ledger. See the [`PHASE_ARCHIVE_*` error codes](#public-codes-top-level-error-envelopes) for the fail-closed verdicts and `phase archive --help` for the full flag reference.
+For usage, flags, and basic examples, see the generated [CLI reference § `phase archive`](cli-reference.generated.md#phase-archive).
+
+(v2.0, design-docs-ephemeral) — `phase archive` archives a **terminal** phase (status `done` / `cancelled`, every task terminal): it writes a phase-snapshot record under `.code-pact/state/archive/phases/<id>.json`, then deletes the matching `design/phases/*.yaml` file. The archived phase still resolves from the snapshot — **the roadmap ref is kept**, and an active task that depends on one of its tasks keeps resolving. **Dry-run by default** — it writes nothing and deletes nothing; pass `--write` to apply. It never edits the roadmap, rewrites a link, or appends a ledger. See the [`PHASE_ARCHIVE_*` error codes](#public-codes-top-level-error-envelopes) for the fail-closed verdicts.
 
 **Eligibility (a phase is archivable only when its terminal state survives the file).** Every task must have a terminal state established **independently of the YAML** — a `done` derived from `.code-pact/state/events/`, or a `cancelled` recorded as such. A YAML `status: done` **alone is not sufficient**: it disappears with the file, so a task that is `done` in the YAML but has **no `done` event** blocks the archive with `task_done_without_done_event` (older projects whose tasks pre-date the per-event ledger hit this). The narrow escape is `--attest <task-id>=<reason>` (repeatable), which attests a legacy done-task that has no done event — it does **not** let you archive a non-terminal phase or skip the snapshot.
 
@@ -2593,12 +2589,7 @@ Dry-run success envelope (`--json`):
 
 `--write` writes the snapshot under the [advisory write lock](#public-codes-top-level-error-envelopes) (`LOCK_HELD` on contention), readback-verifies it (the written snapshot must be reader-tolerated and its `source_sha256` must match the live YAML), re-checks the YAML's identity (content + inode/dev; an ancestor symlink escape or an in-place edit between baseline and delete is refused), then deletes the YAML **last** (least-harmful order). Any drift aborts with [`PHASE_ARCHIVE_STALE`](#public-codes-top-level-error-envelopes) (`data.reason`) and **the YAML is untouched**. The `--write` envelope has the **same shape** as the dry-run one, but `kind` becomes `"archived"` and `snapshot_action` reports the **actual** write outcome — `"write"` or `"noop"` (it never reports the dry-run-only preview value `"refresh"`; a planned `refresh` applies as `"write"`). Re-running on an already-archived phase (YAML absent, valid snapshot present) is **not** an error in the readers — but `phase archive` itself exits 2 with `PHASE_ARCHIVE_NOT_ARCHIVED` only when the YAML is absent **and no valid snapshot resolves it** (a broken state, not "already archived").
 
-Examples:
-
-```sh
-code-pact phase archive P1 --json            # dry-run: read the eligibility verdict
-code-pact phase archive P1 --write --json    # write the snapshot, delete the YAML
-```
+Examples live in the generated [CLI reference § `phase archive`](cli-reference.generated.md#phase-archive).
 
 ## `state compact`
 
@@ -2863,7 +2854,9 @@ See the generated [CLI reference § `task runbook`](cli-reference.generated.md).
 
 ## `phase runbook` — read-only guidance for an entire phase (v1.3+, P12)
 
-`code-pact phase runbook <phase-id> [--json]` returns a deterministic list of next recommended steps for an entire phase. Stability: **Stable (v1.3+)**.
+For usage, flags, and basic examples, see the generated [CLI reference § `phase runbook`](cli-reference.generated.md#phase-runbook).
+
+`phase runbook` returns a deterministic list of next recommended steps for an entire phase. Stability: **Stable (v1.3+)**.
 
 Mirrors `task runbook` at phase level. The command is **read-only**: every recommended step is a CLI invocation the user runs separately, or a `manual_action` describing a human checkpoint. There is no `--write`, no `--execute`, no `--agent` flag, and no multi-phase `--all`.
 
@@ -2936,18 +2929,11 @@ phase id is duplicated during aggregation:
 
 ### Usage example
 
-```sh
-# Inspect phase state at a glance.
-code-pact phase runbook P9 --json
-
-# Recommended sanity check before release-prep `phase reconcile --write`.
-code-pact phase runbook P9 --json
-code-pact phase reconcile P9 --write
-```
+See the generated [CLI reference § `phase runbook`](cli-reference.generated.md#phase-runbook). Recommended release-prep pattern: inspect the runbook before applying `phase reconcile --write`.
 
 ### `--across-phases` (v1.9+, P19)
 
-`code-pact phase runbook --across-phases [--json]` aggregates per-phase runbook steps across every phase in scope. **No `<phase-id>` positional argument is used in this mode.**
+`phase runbook --across-phases` aggregates per-phase runbook steps across every phase in scope. **No `<phase-id>` positional argument is used in this mode.**
 
 Inclusion rules:
 
