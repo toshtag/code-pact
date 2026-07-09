@@ -1,7 +1,7 @@
 // P52 — leaf help coverage for the non-task clusters.
 //
-// task, plan, phase, and adapter are CommandSpec-backed. This test makes the
-// current state visible and stops it
+// task, plan, phase, adapter, and decision are CommandSpec-backed. This test
+// makes the current state visible and stops it
 // regressing: a command that an agent drives — mutating, or JSON-emitting —
 // must answer `--help` with rich help (a real synopsis), not the 2-line stub.
 // Commands still on the stub are listed in STUB_ALLOWLIST so the gap is
@@ -16,7 +16,7 @@ import { subcommandUsage } from "../../../src/cli/usage.ts";
 const STUB_MARKER = "for the full subcommand list.";
 
 type Cmd = {
-  cluster: "plan" | "phase" | "adapter";
+  cluster: "plan" | "phase" | "adapter" | "decision";
   sub: string;
   /** Mutates files/state (writes a doc, flips YAML, installs an adapter, …). */
   mutating: boolean;
@@ -54,6 +54,9 @@ const COMMANDS: Cmd[] = [
   { cluster: "adapter", sub: "upgrade", mutating: true, json: true },
   { cluster: "adapter", sub: "doctor", mutating: false, json: true },
   { cluster: "adapter", sub: "conformance", mutating: false, json: true },
+  // decision
+  { cluster: "decision", sub: "prune", mutating: true, json: true },
+  { cluster: "decision", sub: "retire", mutating: true, json: true },
 ];
 
 // Commands still on the 2-line stub. Each line here is a known gap, not a

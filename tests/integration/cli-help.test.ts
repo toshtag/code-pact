@@ -1,5 +1,5 @@
 // PR4: subcommand clusters answer --help with usage (exit 0) instead of
-// CONFIG_ERROR. plan / task / phase also treat a bare cluster invocation as a
+// CONFIG_ERROR. plan / task / phase / decision also treat a bare cluster invocation as a
 // help request; adapter is intentionally excluded (bare adapter is an error —
 // see adapter-cli.test.ts).
 
@@ -22,7 +22,7 @@ function runCli(args: string[]) {
 }
 
 describe("cluster --help → usage, exit 0", () => {
-  for (const cluster of ["plan", "task", "phase"]) {
+  for (const cluster of ["plan", "task", "phase", "decision"]) {
     it(`\`${cluster} --help\` prints usage on stdout, exit 0`, () => {
       const res = runCli([cluster, "--help"]);
       expect(res.status).toBe(0);
@@ -92,6 +92,8 @@ describe("cluster --help → usage, exit 0", () => {
     [["adapter", "upgrade", "--help"], /Usage: code-pact adapter upgrade/, /--accept-modified/],
     [["adapter", "doctor", "--help"], /Usage: code-pact adapter doctor/, /--agent/],
     [["adapter", "conformance", "--help"], /Usage: code-pact adapter conformance/, /--json/],
+    [["decision", "prune", "--help"], /Usage: code-pact decision prune/, /--policy/],
+    [["decision", "retire", "--help"], /Usage: code-pact decision retire/, /--write/],
     // `plan import` is an alias for `phase import`; its --help routes to the
     // same rich entry (cmdPlan dispatch), so it must not be a stub.
     [["plan", "import", "--help"], /Usage: code-pact phase import/, /--scaffold-decisions/],
