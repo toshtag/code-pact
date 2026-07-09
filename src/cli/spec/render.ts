@@ -31,7 +31,7 @@ function usageLine(spec: CommandSpec): string {
       ? ["Usage: code-pact", spec.command]
       : ["Usage: code-pact", spec.cluster, spec.command];
   if (spec.positional) parts.push(spec.positional);
-  parts.push("[options]");
+  if (spec.flags.length > 0) parts.push("[options]");
   return parts.join(" ");
 }
 
@@ -76,17 +76,18 @@ export function renderLeafHelp(spec: CommandSpec): string {
 
 /**
  * Render one section of docs/cli-reference.generated.md for a command:
- * an H2 heading, the summary, a flag table, and a fenced examples block.
+ * an H3 heading, the summary, a flag table, and a fenced examples block.
  */
 export function renderReference(spec: CommandSpec): string {
   const out: string[] = [];
   const commandLabel =
     spec.cluster === "root" ? spec.command : `${spec.cluster} ${spec.command}`;
-  out.push(`## \`${commandLabel}\``, "");
+  out.push(`### \`${commandLabel}\``, "");
 
-  const synopsis = spec.positional
-    ? `\`code-pact ${commandLabel} ${spec.positional} [options]\``
-    : `\`code-pact ${commandLabel} [options]\``;
+  const synopsisParts = ["code-pact", commandLabel];
+  if (spec.positional) synopsisParts.push(spec.positional);
+  if (spec.flags.length > 0) synopsisParts.push("[options]");
+  const synopsis = `\`${synopsisParts.join(" ")}\``;
   out.push(synopsis, "");
 
   const summary = spec.readOnly
