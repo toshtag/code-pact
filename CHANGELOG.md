@@ -13,6 +13,8 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [2.0.1] — 2026-07-10
+
 ### Security
 - **Bounded verification commands and cancellation.** `verify` and `task complete` now apply a validated per-command timeout (default 300000 ms), preserve command-level exit/output/timing results, terminate descendant process trees on timeout or abort, and connect CLI `SIGINT` / `SIGTERM` to clean cancellation. `task complete` checks cancellation before its atomic event-write commit point, so a cancelled pre-commit run records no `done` event. POSIX CI exercises CLI signal translation; Windows CI exercises the same bounded-command timeout/AbortSignal path plus `taskkill` process-tree cleanup without depending on synthetic Windows signal delivery.
 - **Reviewed development toolchain is pinned and continuously checked.** pnpm is fixed at 10.34.2, Vite resolves to 6.4.3, and esbuild resolves to 0.28.1. pnpm explicitly denies esbuild lifecycle scripts with `allowBuilds.esbuild: false`; the supply-chain gate verifies package/workspace/lockfile pins, and Linux/Windows CI verify the installed pnpm, Vite, and esbuild versions, execute an esbuild transform smoke, and build the project.
