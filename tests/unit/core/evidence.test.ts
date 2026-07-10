@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { excerptText } from "../../../src/core/evidence/excerpt.ts";
@@ -84,6 +84,31 @@ describe("evidence refs and store", () => {
     await expect(loadEvidenceArtifact(dir, `evidence:sha256:${digest}`)).rejects.toMatchObject({
       code: "EVIDENCE_INVALID",
     });
+  });
+
+  it("rejects evidence cache symlinks before writing outside the project", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-evidence-outside-"));
+    await mkdir(join(dir, ".code-pact"), { recursive: true });
+    await symlink(outside, join(dir, ".code-pact", "cache"));
+    try {
+      await expect(
+        storeEvidenceArtifact(dir, {
+          schema_version: 1,
+          command: "pnpm test",
+          exit_code: 1,
+          timed_out: false,
+          aborted: false,
+          elapsed_ms: 1,
+          stdout: "out",
+          stderr: "err",
+          stdout_capture_truncated: false,
+          stderr_capture_truncated: false,
+        }),
+      ).rejects.toMatchObject({ code: "PATH_NOT_OWNED" });
+      await expect(readdir(outside)).resolves.toEqual([]);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });
 
@@ -255,10 +280,13 @@ describe("failure projection", () => {
     expect(projected.failure.kind).toBe("command_failed");
     expect(projected.failure.evidence_available).toBe(false);
     expect(projected.failure.evidence_error).toMatchObject({
-      code: "ENOSPC",
+      code: "EVIDENCE_UNAVAILABLE",
+      cause_code: "EVIDENCE_WRITE_FAILED",
+      system_code: "ENOSPC",
       message: "disk full while writing evidence",
     });
     expect(projected.failure.evidence_ref).toBeUndefined();
+    await expect(readdir(join(dir, ".code-pact", "cache", "evidence"))).resolves.toEqual([]);
   });
 
   it("keeps successful agent summaries bounded after JSON serialization", () => {
@@ -291,6 +319,83 @@ describe("failure projection", () => {
     expect(summary.projection_truncated).toBe(true);
     expect(summary.successful_commands.length).toBeLessThanOrEqual(8);
     expect(summary.checks.length).toBeLessThanOrEqual(8);
+  });
+
+  it("preserves the real stderr tail when projection shrinking is required", async () => {
+    const sentinel = "FINAL_ASSERTION_SENTINEL";
+    const noisy = "\0".repeat(1024 * 32);
+    const stderr = `${"prefix\n".repeat(1024)}${noisy}\n${sentinel}`;
+    const result: VerifyResult = {
+      ok: false,
+      checks: [
+        {
+          name: "commands",
+          ok: false,
+          reason: "command failed",
+          command: "pnpm test",
+          stdout: "",
+          stderr,
+          exitCode: 1,
+          timedOut: false,
+          aborted: false,
+          elapsedMs: 50,
+        },
+      ],
+    };
+
+    const projected = await projectVerifyForAgent(dir, result);
+    expect(Buffer.byteLength(JSON.stringify(projected), "utf8")).toBeLessThan(24 * 1024);
+    expect(projected.failure.stderr_excerpt?.tail).toContain(sentinel);
+  });
+
+  it("projects timeout, abort, and decision-only failures without evidence files", async () => {
+    const timeout = await projectVerifyForAgent(dir, {
+      ok: false,
+      checks: [
+        {
+          name: "commands",
+          ok: false,
+          command: "sleep 10",
+          stdout: "",
+          stderr: "",
+          timedOut: true,
+          aborted: false,
+          exitCode: null,
+          elapsedMs: 100,
+        },
+      ],
+    });
+    expect(timeout.failure.kind).toBe("timed_out");
+    expect(timeout.failure.evidence_ref).toMatch(/^evidence:sha256:[0-9a-f]{64}$/);
+
+    const abort = await projectVerifyForAgent(dir, {
+      ok: false,
+      checks: [
+        {
+          name: "commands",
+          ok: false,
+          command: "sleep 10",
+          stdout: "",
+          stderr: "",
+          timedOut: false,
+          aborted: true,
+          exitCode: null,
+          elapsedMs: 100,
+        },
+      ],
+    });
+    expect(abort.failure.kind).toBe("aborted");
+    expect(abort.failure.evidence_ref).toMatch(/^evidence:sha256:[0-9a-f]{64}$/);
+
+    const decision = await projectVerifyForAgent(dir, {
+      ok: false,
+      checks: [
+        { name: "commands", ok: true },
+        { name: "decision", ok: false, reason: "accepted ADR required" },
+      ],
+    });
+    expect(decision.failure.kind).toBe("decision_required");
+    expect(decision.failure.evidence_ref).toBeUndefined();
   });
 });
 
@@ -350,5 +455,25 @@ describe("failure fingerprint", () => {
 
     expect(timestampA).toBe(timestampB);
     expect(windowsA).toBe(windowsB);
+  });
+
+  it("does not change when only the omitted middle output length changes", () => {
+    const head = "HEAD".repeat(1024);
+    const tail = "TAIL".repeat(4096);
+    const a = fingerprintFailure(
+      { ...base, stderr: `${head}${"progress".repeat(1024)}${tail}` },
+      dir,
+    );
+    const b = fingerprintFailure(
+      { ...base, stderr: `${head}${"progress".repeat(8192)}${tail}` },
+      dir,
+    );
+    const c = fingerprintFailure(
+      { ...base, stderr: `${head}${"progress".repeat(8192)}${"TAIL".repeat(4095)}DIFFERENT` },
+      dir,
+    );
+
+    expect(a).toBe(b);
+    expect(a).not.toBe(c);
   });
 });
