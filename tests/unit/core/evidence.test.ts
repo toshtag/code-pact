@@ -322,6 +322,61 @@ describe("failure projection", () => {
     expect(summary.checks.length).toBeLessThanOrEqual(8);
   });
 
+  it("marks failed verify summaries truncated when checks, reasons, or successful commands are capped", async () => {
+    const longReason = "r".repeat(1024);
+    const result: VerifyResult = {
+      ok: false,
+      checks: [
+        {
+          name: "commands",
+          ok: false,
+          reason: longReason,
+          command: "pnpm test",
+          stdout: "out",
+          stderr: "err",
+          exitCode: 1,
+          timedOut: false,
+          aborted: false,
+          elapsedMs: 50,
+          commands: [
+            ...Array.from({ length: 9 }, (_, index) => ({
+              command: `pnpm ok-${index}`,
+              ok: true,
+              exitCode: 0,
+              timedOut: false,
+              aborted: false,
+              elapsedMs: index,
+              stdout: "",
+              stderr: "",
+            })),
+            {
+              command: "pnpm test",
+              ok: false,
+              exitCode: 1,
+              timedOut: false,
+              aborted: false,
+              elapsedMs: 50,
+              stdout: "out",
+              stderr: "err",
+            },
+          ],
+        },
+        ...Array.from({ length: 8 }, (_, index) => ({
+          name: `extra-${index}`,
+          ok: true,
+          reason: `ok-${index}`,
+        })),
+      ],
+    };
+
+    const projected = await projectVerifyForAgent(dir, result);
+
+    expect(projected.verify.successful_commands).toHaveLength(8);
+    expect(projected.verify.checks).toHaveLength(8);
+    expect(projected.verify.checks[0]?.reason).toBe("r".repeat(512));
+    expect(projected.verify.projection_truncated).toBe(true);
+  });
+
   it("preserves the real stderr tail when projection shrinking is required", async () => {
     const sentinel = "FINAL_ASSERTION_SENTINEL";
     const noisy = "\0".repeat(1024 * 32);
@@ -430,6 +485,73 @@ describe("failure projection", () => {
     ]));
     expect(envelope.data.suggested_next_command).toBeUndefined();
     expect(line).not.toContain("x".repeat(1024));
+  });
+
+  it("omits oversized outer fields before shrinking failure diagnostics", () => {
+    const line = stringifyBoundedAgentEnvelope({
+      ok: false,
+      error: {
+        code: "VERIFICATION_FAILED",
+        cause_code: "COMMANDS_FAILED",
+        message: "Verification failed",
+      },
+      data: {
+        task_id: `P1-${"T".repeat(30_000)}`,
+        suggested_next_command: `code-pact task complete P1-T1 ${"x".repeat(30_000)}`,
+        failure: {
+          schema_version: 1,
+          kind: "command_failed",
+          check: "commands",
+          command: "pnpm test",
+          reason: "test failed",
+          fingerprint: "abc123",
+          stdout_excerpt: {
+            head: "OUT",
+            tail: "",
+            captured_bytes: 3,
+            omitted_bytes: 0,
+            truncated: false,
+          },
+          stderr_excerpt: {
+            head: "ERR",
+            tail: "",
+            captured_bytes: 3,
+            omitted_bytes: 0,
+            truncated: false,
+          },
+          evidence_ref: `evidence:sha256:${"a".repeat(64)}`,
+          retrieve_command: `code-pact evidence show evidence:sha256:${"a".repeat(64)} --json`,
+        },
+        verify: {
+          ok: false,
+          checks: [{ name: "commands", ok: false, reason: "test failed" }],
+          successful_commands: [],
+        },
+      },
+    });
+    const envelope = JSON.parse(line) as {
+      data: {
+        omitted_fields?: string[];
+        failure: {
+          command?: string;
+          reason?: string;
+          stdout_excerpt?: { head: string };
+          stderr_excerpt?: { head: string };
+          retrieve_command?: string;
+        };
+      };
+    };
+
+    expect(Buffer.byteLength(line, "utf8")).toBeLessThan(24 * 1024);
+    expect(envelope.data.omitted_fields).toEqual(expect.arrayContaining([
+      "suggested_next_command",
+      "task_id",
+    ]));
+    expect(envelope.data.failure.command).toBe("pnpm test");
+    expect(envelope.data.failure.reason).toBe("test failed");
+    expect(envelope.data.failure.stdout_excerpt?.head).toBe("OUT");
+    expect(envelope.data.failure.stderr_excerpt?.head).toBe("ERR");
+    expect(envelope.data.failure.retrieve_command).toMatch(/^code-pact evidence show /);
   });
 });
 

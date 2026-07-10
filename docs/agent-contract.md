@@ -347,12 +347,15 @@ The verbs in detail:
   On failure it exits 1 with `error.code: VERIFICATION_FAILED`; read
   `error.cause_code` **first** to know what to fix:
   `COMMANDS_FAILED` → fix the failing verification command;
-  `DECISION_REQUIRED` → write or accept the required ADR. `error.message`
-  is actionable (and embeds the failing-check reason). Do **not** blindly
-  re-run `verify` — fix the reported cause first.
-  With `--json --detail agent`, the same compact failure capsule is under
-  `data.failure`; the full bounded output can be retrieved with
-  `code-pact evidence show <evidence-ref>` when needed.
+  `DECISION_REQUIRED` → write or accept the required ADR; `ABORTED` →
+  retry only after the interruption is resolved. With
+  `--json --detail agent`, `error.message` is intentionally short. Read
+  the compact failure capsule in this order: `data.failure.kind`,
+  `data.failure.fingerprint`, `data.failure.stderr_excerpt`,
+  `data.failure.stdout_excerpt`, `data.failure.evidence_available`,
+  `data.failure.evidence_error`, then `data.failure.retrieve_command`.
+  Do not fetch full evidence by default; use `retrieve_command` only when
+  the excerpts are insufficient to decide the fix.
 
 - **`task record-done <task-id> --evidence "<text>"`** —
   records a `done` event with `source: external` **without** running
@@ -392,6 +395,9 @@ harness run. The metric set is fixed here; the **values** live only in
 [`docs/maintainers/measurements/summary.json`](maintainers/measurements/summary.json)
 (plus the per-task CSVs beside it) so the numbers can never drift between
 this prose and the source of truth — reproduce (read-only) with `pnpm harness --corpus .`, or persist with `--write`.
+The compact agent-detail evidence envelope has its own fixed byte fixture at
+[`docs/maintainers/measurements/agent-detail-evidence.json`](maintainers/measurements/agent-detail-evidence.json),
+reproduced with `pnpm exec tsx scripts/measure-agent-detail.ts --write`.
 
 | Metric | Definition |
 |---|---|
