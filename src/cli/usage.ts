@@ -8,6 +8,7 @@ import { ADAPTER_SPECS, ADAPTER_SPEC_ORDER } from "./spec/adapter.ts";
 import { DECISION_SPECS, DECISION_SPEC_ORDER } from "./spec/decision.ts";
 import { PHASE_SPECS } from "./spec/phase.ts";
 import { PLAN_SPECS } from "./spec/plan.ts";
+import { STATE_SPECS, STATE_SPEC_ORDER } from "./spec/state.ts";
 import { TASK_SPECS } from "./spec/task.ts";
 
 /** The subcommand list shown for each cluster, mirroring the unknown-subcommand hints. */
@@ -17,6 +18,7 @@ const CLUSTER_SUBCOMMANDS: Record<string, string> = {
   phase: "add | new | ls | show | import | reconcile | archive | runbook (alias: next = runbook)",
   adapter: ADAPTER_SPEC_ORDER.join(" | "),
   decision: DECISION_SPEC_ORDER.join(" | "),
+  state: STATE_SPEC_ORDER.join(" | "),
 };
 
 const PHASE_NEXT_SPEC = {
@@ -140,6 +142,14 @@ const LEAF_USAGE: Record<string, () => string> = {
   "decision prune": () => renderLeafHelp(DECISION_SPECS.prune),
 
   "decision retire": () => renderLeafHelp(DECISION_SPECS.retire),
+
+  "state compact": () => renderLeafHelp(STATE_SPECS.compact),
+
+  "state compact-archive": () => renderLeafHelp(STATE_SPECS["compact-archive"]),
+
+  "state archive-retention": () => renderLeafHelp(STATE_SPECS["archive-retention"]),
+
+  "state archive-maintain": () => renderLeafHelp(STATE_SPECS["archive-maintain"]),
 };
 
 /**

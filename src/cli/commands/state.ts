@@ -1,7 +1,9 @@
 import { strictParse, ConfigError } from "../../lib/argv.ts";
 import { type Locale } from "../../i18n/index.ts";
 import { withWriteLock, emitOk, emitError } from "../util.ts";
-import { isHelpToken } from "../usage.ts";
+import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
+import { STATE_SPECS, STATE_SPEC_ORDER } from "../spec/state.ts";
+import { toParseOptions } from "../spec/render.ts";
 import { runStateCompact, type StateCompactResult } from "../../commands/state-compact.ts";
 import { type EventPackBlock } from "../../core/archive/event-pack.ts";
 import type { CleanupOutcome } from "../../core/archive/event-pack-cleanup.ts";
@@ -55,24 +57,30 @@ export async function cmdState(
   // No subcommand, a help token, or only flags (e.g. `state --json`) → usage.
   if (subcommand === undefined || isHelpToken(subcommand) || subcommand.startsWith("-")) {
     const json = globalJson || argv.includes("--json");
-    if (json) emitOk({ available: ["compact", "compact-archive", "archive-retention", "archive-maintain"] });
-    else
-      process.stdout.write(
-        "Usage: code-pact state compact <phase-id> [--write] [--json]\n" +
-          "       code-pact state compact-archive [<kind>] [--write] [--json]\n" +
-          "       code-pact state archive-retention [--keep-latest N] [--write] [--json]\n" +
-          "       code-pact state archive-maintain [--keep-latest N] [--write] [--json]\n",
-      );
+    if (json) emitOk({ available: [...STATE_SPEC_ORDER] });
+    else return emitUsage(clusterUsage("state"));
     return 0;
   }
-  if (subcommand === "compact") return cmdStateCompact(rest, locale, globalJson);
-  if (subcommand === "compact-archive") return cmdStateCompactArchive(rest, globalJson);
-  if (subcommand === "archive-retention") return cmdStateArchiveRetention(rest, globalJson);
-  if (subcommand === "archive-maintain") return cmdStateArchiveMaintain(rest, globalJson);
+  if (subcommand === "compact") {
+    if (isHelpToken(rest[0]) || hasHelpFlag(rest)) return emitUsage(subcommandUsage("state", "compact"));
+    return cmdStateCompact(rest, locale, globalJson);
+  }
+  if (subcommand === "compact-archive") {
+    if (isHelpToken(rest[0]) || hasHelpFlag(rest)) return emitUsage(subcommandUsage("state", "compact-archive"));
+    return cmdStateCompactArchive(rest, globalJson);
+  }
+  if (subcommand === "archive-retention") {
+    if (isHelpToken(rest[0]) || hasHelpFlag(rest)) return emitUsage(subcommandUsage("state", "archive-retention"));
+    return cmdStateArchiveRetention(rest, globalJson);
+  }
+  if (subcommand === "archive-maintain") {
+    if (isHelpToken(rest[0]) || hasHelpFlag(rest)) return emitUsage(subcommandUsage("state", "archive-maintain"));
+    return cmdStateArchiveMaintain(rest, globalJson);
+  }
   emitError(
     globalJson || argv.includes("--json"),
     "CONFIG_ERROR",
-    `state: unknown subcommand "${subcommand}". Available: compact, compact-archive, archive-retention, archive-maintain`,
+    `state: unknown subcommand "${subcommand}". Use: ${STATE_SPEC_ORDER.join(" | ")}`,
   );
   return 2;
 }
@@ -93,7 +101,7 @@ async function cmdStateArchiveRetention(argv: string[], globalJson: boolean): Pr
     ({ values, positionals } = strictParse(
       "state archive-retention",
       argv,
-      { json: { type: "boolean" }, write: { type: "boolean" }, "keep-latest": { type: "string" } },
+      toParseOptions(STATE_SPECS["archive-retention"]),
       { allowPositionals: true },
     ));
   } catch (err) {
@@ -339,7 +347,7 @@ async function cmdStateCompact(
     ({ values, positionals } = strictParse(
       "state compact",
       argv,
-      { json: { type: "boolean" }, write: { type: "boolean" } },
+      toParseOptions(STATE_SPECS.compact),
       { allowPositionals: true },
     ));
   } catch (err) {
@@ -398,7 +406,7 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
     ({ values, positionals } = strictParse(
       "state compact-archive",
       argv,
-      { json: { type: "boolean" }, write: { type: "boolean" } },
+      toParseOptions(STATE_SPECS["compact-archive"]),
       { allowPositionals: true },
     ));
   } catch (err) {
@@ -804,7 +812,7 @@ async function cmdStateArchiveMaintain(argv: string[], globalJson: boolean): Pro
     ({ values, positionals } = strictParse(
       "state archive-maintain",
       argv,
-      { json: { type: "boolean" }, write: { type: "boolean" }, "keep-latest": { type: "string" } },
+      toParseOptions(STATE_SPECS["archive-maintain"]),
       { allowPositionals: true },
     ));
   } catch (err) {

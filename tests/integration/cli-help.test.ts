@@ -1,5 +1,5 @@
 // PR4: subcommand clusters answer --help with usage (exit 0) instead of
-// CONFIG_ERROR. plan / task / phase / decision also treat a bare cluster invocation as a
+// CONFIG_ERROR. plan / task / phase / decision / state also treat a bare cluster invocation as a
 // help request; adapter is intentionally excluded (bare adapter is an error —
 // see adapter-cli.test.ts).
 
@@ -22,7 +22,7 @@ function runCli(args: string[]) {
 }
 
 describe("cluster --help → usage, exit 0", () => {
-  for (const cluster of ["plan", "task", "phase", "decision"]) {
+  for (const cluster of ["plan", "task", "phase", "decision", "state"]) {
     it(`\`${cluster} --help\` prints usage on stdout, exit 0`, () => {
       const res = runCli([cluster, "--help"]);
       expect(res.status).toBe(0);
@@ -94,6 +94,10 @@ describe("cluster --help → usage, exit 0", () => {
     [["adapter", "conformance", "--help"], /Usage: code-pact adapter conformance/, /--json/],
     [["decision", "prune", "--help"], /Usage: code-pact decision prune/, /--policy/],
     [["decision", "retire", "--help"], /Usage: code-pact decision retire/, /--write/],
+    [["state", "compact", "--help"], /Usage: code-pact state compact/, /--write/],
+    [["state", "compact-archive", "--help"], /Usage: code-pact state compact-archive/, /decision_record/],
+    [["state", "archive-retention", "--help"], /Usage: code-pact state archive-retention/, /--keep-latest/],
+    [["state", "archive-maintain", "--help"], /Usage: code-pact state archive-maintain/, /--keep-latest/],
     // `plan import` is an alias for `phase import`; its --help routes to the
     // same rich entry (cmdPlan dispatch), so it must not be a stub.
     [["plan", "import", "--help"], /Usage: code-pact phase import/, /--scaffold-decisions/],

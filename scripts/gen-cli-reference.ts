@@ -19,6 +19,7 @@ import { TASK_SPECS } from "../src/cli/spec/task.ts";
 import { PLAN_SPECS, PLAN_SPEC_ORDER } from "../src/cli/spec/plan.ts";
 import { PHASE_SPECS, PHASE_SPEC_ORDER } from "../src/cli/spec/phase.ts";
 import { ROOT_SPECS } from "../src/cli/spec/root.ts";
+import { STATE_SPECS, STATE_SPEC_ORDER } from "../src/cli/spec/state.ts";
 import { renderReference } from "../src/cli/spec/render.ts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -95,6 +96,11 @@ function render(): string {
   sections.push("## Decision commands", "");
   for (const key of DECISION_SPEC_ORDER) {
     sections.push(renderReference(DECISION_SPECS[key]!), "");
+  }
+
+  sections.push("## State commands", "");
+  for (const key of STATE_SPEC_ORDER) {
+    sections.push(renderReference(STATE_SPECS[key]!), "");
   }
 
   return `${sections.join("\n").trimEnd()}\n`;

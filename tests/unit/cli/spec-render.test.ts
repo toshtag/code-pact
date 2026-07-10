@@ -14,6 +14,7 @@ import { DECISION_SPECS } from "../../../src/cli/spec/decision.ts";
 import { ROOT_SPECS } from "../../../src/cli/spec/root.ts";
 import { PLAN_SPECS } from "../../../src/cli/spec/plan.ts";
 import { PHASE_SPECS } from "../../../src/cli/spec/phase.ts";
+import { STATE_SPECS } from "../../../src/cli/spec/state.ts";
 import { TASK_SPECS } from "../../../src/cli/spec/task.ts";
 import {
   toParseOptions,
@@ -27,6 +28,7 @@ const ALL_SPECS = [
   ...Object.entries(PHASE_SPECS).map(([name, spec]) => [name, spec, `phase ${name}`] as const),
   ...Object.entries(ADAPTER_SPECS).map(([name, spec]) => [name, spec, `adapter ${name}`] as const),
   ...Object.entries(DECISION_SPECS).map(([name, spec]) => [name, spec, `decision ${name}`] as const),
+  ...Object.entries(STATE_SPECS).map(([name, spec]) => [name, spec, `state ${name}`] as const),
   ...Object.entries(TASK_SPECS).map(([name, spec]) => [name, spec, `task ${name}`] as const),
 ];
 
@@ -219,6 +221,35 @@ describe("CommandSpec derivation (P46)", () => {
     });
   });
 
+  describe("state parse surfaces", () => {
+    it("state compact covers exactly the parser-backed flags", () => {
+      expect(Object.keys(toParseOptions(STATE_SPECS.compact)).sort()).toEqual(
+        ["json", "write"].sort(),
+      );
+    });
+
+    it("state compact-archive covers exactly the parser-backed flags", () => {
+      expect(Object.keys(toParseOptions(STATE_SPECS["compact-archive"])).sort()).toEqual(
+        ["json", "write"].sort(),
+      );
+    });
+
+    it("state archive retention commands cover exactly the parser-backed flags", () => {
+      for (const spec of [STATE_SPECS["archive-retention"], STATE_SPECS["archive-maintain"]]) {
+        expect(Object.keys(toParseOptions(spec)).sort()).toEqual(
+          ["json", "keep-latest", "write"].sort(),
+        );
+      }
+    });
+
+    it("state reference renders representative flags and examples", () => {
+      expect(renderLeafHelp(STATE_SPECS["archive-retention"])).toContain("--keep-latest <N>");
+      expect(renderReference(STATE_SPECS.compact)).toContain("code-pact state compact P1 --write --json");
+      expect(renderReference(STATE_SPECS["compact-archive"])).toContain("code-pact state compact-archive decision_record --write");
+      expect(renderReference(STATE_SPECS["archive-maintain"])).toContain("code-pact state archive-maintain --write --keep-latest 5");
+    });
+  });
+
   it("generated reference uses H2 groups and H3 command entries", () => {
     const doc = readFileSync(new URL("../../../docs/cli-reference.generated.md", import.meta.url), "utf8");
     expect(doc).toContain("## Task commands\n\n### `task add`");
@@ -226,7 +257,8 @@ describe("CommandSpec derivation (P46)", () => {
     expect(doc).toContain("## Phase commands\n\n### `phase add`");
     expect(doc).toContain("## Adapter commands\n\n### `adapter list`");
     expect(doc).toContain("## Decision commands\n\n### `decision prune`");
-    expect(doc).not.toMatch(/## (Task|Plan|Phase|Adapter|Decision) commands\n\n## `/);
+    expect(doc).toContain("## State commands\n\n### `state compact`");
+    expect(doc).not.toMatch(/## (Task|Plan|Phase|Adapter|Decision|State) commands\n\n## `/);
   });
 
   it("required is presentation-only: it does not appear in parseArgs config", () => {

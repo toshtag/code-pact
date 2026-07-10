@@ -21,6 +21,7 @@ import {
   expectJsonOk,
   expectJsonErr,
 } from "../helpers/cli.ts";
+import { DECISION_SPEC_ORDER } from "../../src/cli/spec/decision.ts";
 
 beforeAll(() => ensureCliBuilt(), 60_000);
 
@@ -505,14 +506,15 @@ describe("decision prune — CLI (dry-run)", () => {
 
   it("cluster-level errors honor --json (unknown subcommand)", async () => {
     const p = await project(ACCEPTED, "done");
-    for (const args of [
-      ["decision", "nope", "--json"],
-      ["decision", "--json"],
-    ]) {
-      const res = p.run(args);
-      expect(res.code).toBe(2);
-      expect(expectJsonErr(res).error.code).toBe("CONFIG_ERROR");
-    }
+    const unknown = p.run(["decision", "nope", "--json"]);
+    expect(unknown.code).toBe(2);
+    const err = expectJsonErr(unknown).error;
+    expect(err.code).toBe("CONFIG_ERROR");
+    expect(err.message).toContain(`Use: ${DECISION_SPEC_ORDER.join(" | ")}`);
+
+    const misplacedJson = p.run(["decision", "--json"]);
+    expect(misplacedJson.code).toBe(2);
+    expect(expectJsonErr(misplacedJson).error.code).toBe("CONFIG_ERROR");
   });
 
   it("top-level `--help` lists the decision command (discoverability)", async () => {
