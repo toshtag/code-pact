@@ -6,17 +6,17 @@
 import { renderLeafHelp } from "./spec/render.ts";
 import { ADAPTER_SPECS, ADAPTER_SPEC_ORDER } from "./spec/adapter.ts";
 import { DECISION_SPECS, DECISION_SPEC_ORDER } from "./spec/decision.ts";
-import { PHASE_SPECS } from "./spec/phase.ts";
-import { PLAN_SPECS } from "./spec/plan.ts";
+import { PHASE_SPECS, PHASE_SPEC_ORDER } from "./spec/phase.ts";
+import { PLAN_SPECS, PLAN_SPEC_ORDER } from "./spec/plan.ts";
 import { SPEC_SPECS, SPEC_SPEC_ORDER } from "./spec/spec.ts";
 import { STATE_SPECS, STATE_SPEC_ORDER } from "./spec/state.ts";
 import { TASK_SPECS } from "./spec/task.ts";
 
 /** The subcommand list shown for each cluster, mirroring the unknown-subcommand hints. */
 const CLUSTER_SUBCOMMANDS: Record<string, string> = {
-  plan: "brief | prompt | adopt | constitution | lint | normalize | analyze | sync-paths | migrate | import (alias for \"phase import\")",
+  plan: `${PLAN_SPEC_ORDER.join(" | ")} | import (alias for "phase import")`,
   task: "add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook (aliases: reconcile = finalize, next = runbook)",
-  phase: "add | new | ls | show | import | reconcile | archive | runbook (alias: next = runbook)",
+  phase: `${PHASE_SPEC_ORDER.join(" | ")} (alias: next = runbook)`,
   adapter: ADAPTER_SPEC_ORDER.join(" | "),
   decision: DECISION_SPEC_ORDER.join(" | "),
   state: STATE_SPEC_ORDER.join(" | "),

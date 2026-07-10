@@ -22,7 +22,8 @@
 
 | Surface | Changed? (what / N/A) |
 | --- | --- |
-| Public contract (flag / exit code / JSON envelope / error code) | |
+| Generated CLI reference (usage / flags / examples) | |
+| Public contract (exit code / JSON envelope / error code / semantics) | |
 | Command surface (new or changed command/flag) | |
 | Docs / CLI help surface | |
 | Schema / validation boundary | |

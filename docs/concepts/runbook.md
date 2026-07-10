@@ -1,6 +1,6 @@
 # Lightweight Runbook
 
-This document is the agent- and reviewer-facing walkthrough of `task runbook` and `phase runbook` — the two commands that answer "what should I run next?" deterministically. For the full per-command reference (flags, envelope), see [`docs/cli-contract.md` § `task runbook`](../cli-contract.md#task-runbook--read-only-guidance-for-a-single-task-v13-p12) and [§ `phase runbook`](../cli-contract.md#phase-runbook--read-only-guidance-for-an-entire-phase-v13-p12); for the design rationale, see the **lightweight-runbook RFC** (retired — in git history and the `.code-pact/state` archive record).
+This document is the agent- and reviewer-facing walkthrough of `task runbook` and `phase runbook` — the two commands that answer "what should I run next?" deterministically. For generated usage and flags, see [`docs/cli-reference.generated.md` § `task runbook`](../cli-reference.generated.md#task-runbook) and [§ `phase runbook`](../cli-reference.generated.md#phase-runbook). For envelope and error-code semantics, see [`docs/cli-contract.md` § `task runbook`](../cli-contract.md#task-runbook--read-only-guidance-for-a-single-task-v13-p12) and [§ `phase runbook`](../cli-contract.md#phase-runbook--read-only-guidance-for-an-entire-phase-v13-p12). For the design rationale, see the **lightweight-runbook RFC** (retired — in git history and the `.code-pact/state` archive record).
 
 ## Why the runbook exists
 
@@ -141,6 +141,7 @@ Both commands add **no new error codes**. They reuse `TASK_NOT_FOUND` / `AMBIGUO
 ## See also
 
 - The **lightweight-runbook RFC** (retired; in git history / the `.code-pact/state` archive record) — the accepted RFC with full alternatives and open questions.
-- [`docs/cli-contract.md` § `task runbook`](../cli-contract.md#task-runbook--read-only-guidance-for-a-single-task-v13-p12) / [§ `phase runbook`](../cli-contract.md#phase-runbook--read-only-guidance-for-an-entire-phase-v13-p12) — the full per-command reference.
+- [`docs/cli-reference.generated.md` § `task runbook`](../cli-reference.generated.md#task-runbook) / [§ `phase runbook`](../cli-reference.generated.md#phase-runbook) — generated usage, flags, and examples.
+- [`docs/cli-contract.md` § `task runbook`](../cli-contract.md#task-runbook--read-only-guidance-for-a-single-task-v13-p12) / [§ `phase runbook`](../cli-contract.md#phase-runbook--read-only-guidance-for-an-entire-phase-v13-p12) — envelope and error-code semantics.
 - [`docs/concepts/finalization-reconciliation.md`](finalization-reconciliation.md) — `task finalize` / `phase reconcile`, the commands runbook proposes.
 - [`docs/concepts/task-readiness-fields.md`](task-readiness-fields.md) — the readiness fields runbook reads (`depends_on`, `acceptance_refs`, `writes`, `decision_refs`).

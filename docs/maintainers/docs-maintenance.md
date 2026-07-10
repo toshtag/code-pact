@@ -57,6 +57,7 @@ docs/ja/README.md               Japanese entry point only — links into the Eng
 Rules:
 
 - A doc should live at the **lowest tier that needs it**. Pure internal history, per-release observations, and model-specific judgement logs do not belong in public docs.
+- Workflow and tutorial docs may show task-oriented command examples, but they should link to the generated CLI reference instead of carrying exhaustive migrated-cluster flag tables.
 - **Public docs and `design/phases/*.yaml` must never link to private (`.local/`) paths** — that would break the public link checker, external contributors, and CI.
 - The reverse is fine: private notes may link to public docs.
 

@@ -158,7 +158,7 @@ These commands' public codes (`TASK_FINALIZE_NOT_ELIGIBLE`, `TASK_FINALIZE_WRITE
 ## See also
 
 - The **finalization-reconciliation RFC** (retired; in git history / the `.code-pact/state` archive record) — the full RFC (alternatives considered, open questions).
-- [`docs/cli-contract.md` § `task finalize`](../cli-contract.md#task-finalize--flip-task-design-status-to-done-v12-p11) — full flag, envelope, and write-audit reference.
-- [`docs/cli-contract.md` § `phase reconcile`](../cli-contract.md#phase-reconcile--bulk-flip-task-design-statuses-for-a-phase-v12-p11) — full reconcile reference.
+- [`docs/cli-reference.generated.md` § `task finalize`](../cli-reference.generated.md#task-finalize) / [§ `phase reconcile`](../cli-reference.generated.md#phase-reconcile) — generated usage, flags, and examples.
+- [`docs/cli-contract.md` § `task finalize`](../cli-contract.md#task-finalize--flip-task-design-status-to-done-v12-p11) / [§ `phase reconcile`](../cli-contract.md#phase-reconcile--bulk-flip-task-design-statuses-for-a-phase-v12-p11) — envelope, write-audit, and reconcile semantics.
 - [`docs/concepts/task-readiness-fields.md`](task-readiness-fields.md) — the `writes` and `acceptance_refs` fields that finalize surfaces (and audits) but does not enforce mid-task.
 - [`docs/concepts/governance.md`](governance.md) — the governance layer: the write lock that guards these commands, and the phase-status manual-flip convention.

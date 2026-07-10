@@ -93,7 +93,7 @@ code-pact validate --json                               # CI-friendly, exit 1 on
 code-pact doctor --json                                 # human-friendly health check
 ```
 
-For the full flag detail, the strict-clean release-prep posture, and `phase runbook --across-phases` release tracking, see [maintainers/operations.md § Planning integrity](maintainers/operations.md#planning-integrity-v07--checkpoint-commands).
+For release-prep command options, the strict-clean posture, and `phase runbook --across-phases` release tracking, see [maintainers/operations.md § Planning integrity](maintainers/operations.md#planning-integrity-v07--checkpoint-commands).
 
 ## Resetting to a clean state in a temp dir
 

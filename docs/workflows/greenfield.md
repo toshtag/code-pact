@@ -67,4 +67,5 @@ After that single round trip, the rest of the roadmap is mechanical.
 
 - [`docs/getting-started.md`](../getting-started.md) — command sequences for every onboarding approach.
 - [`docs/concepts/sample-phase.md`](../concepts/sample-phase.md) — keep / rename / delete decision for the `init --sample-phase` artifact.
-- [`docs/cli-contract.md`](../cli-contract.md) — full flag and JSON envelope reference.
+- [`docs/cli-reference.generated.md`](../cli-reference.generated.md) — generated command usage, flags, and examples.
+- [`docs/cli-contract.md`](../cli-contract.md) — JSON envelopes, exit codes, error codes, and semantic guarantees.

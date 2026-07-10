@@ -11,7 +11,8 @@ code-pact の一次ドキュメントは英語版です。CLI と adapter の日
 | [Getting started](../getting-started.md) | 空のプロジェクトから最初の `task complete` 成功まで。導入アプローチとタスク単位のループ。 |
 | [Per-task loop](../per-task-loop.md) | タスクのライフサイクルの正典 — 状態遷移、各コマンド、実例。 |
 | [Glossary](../glossary.md) | code-pact 用語の定義。 |
-| [CLI contract](../cli-contract.md) | フラグ / 終了コード / JSON エンベロープ / エラーコードと安定性区分。 |
+| [CLI reference](../cli-reference.generated.md) | 生成されたコマンド usage・フラグ・例。 |
+| [CLI contract](../cli-contract.md) | 終了コード・JSON エンベロープ・エラーコード・意味論上の保証・安定性区分。 |
 | [Agent contract](../agent-contract.md) | エージェント契約と `adapter conformance` の要求内容。 |
 | [Troubleshooting](../troubleshooting.md) | 診断コードごとの復旧アクション。 |
 | [Greenfield](../workflows/greenfield.md) / [Brownfield](../workflows/brownfield-feature.md) / [CI](../workflows/ci.md) | ゼロから / 既存リポジトリへ導入 / CI で動かす。 |

@@ -1,15 +1,17 @@
 # Spec Kit bridge
 
-`code-pact spec import` is a **read-only, one-way bridge** that ingests external spec-driven planning artifacts (initially the `tasks.md` file format used by Spec Kit and similar tools) into code-pact's phase YAML.
+`code-pact spec import` is a **dry-run-first, one-way bridge** that ingests external spec-driven planning artifacts (initially the `tasks.md` file format used by Spec Kit and similar tools) into code-pact's phase YAML. It never mutates the source artifact; `--write` can persist an unregistered draft phase inside the code-pact project.
 
 > **code-pact does not re-implement Spec Kit.** It accepts artifacts produced by other tools so teams already invested in Spec Kit can adopt code-pact without throwing their planning work away. If you do not already have a `tasks.md`, you do not need this command — start with `code-pact init` and `code-pact plan brief`.
 
 This bridge lives under the top-level `spec` namespace. Two complementary modes share the same command:
 
+For generated flags, usage, and examples, see the generated [CLI reference § `spec import`](cli-reference.generated.md#spec-import). This page focuses on workflow, semantics, and the supported input subset.
+
 | Mode | What it does | Writes a file? |
 | --- | --- | --- |
-| `spec import --from <tasks.md> --phase-id <id> [--write]` | Parses tasks.md → draft phase YAML | Only with `--write` (to `design/phases/<id>-imported.yaml`) |
-| `spec import --suggest-from <spec.md\|plan.md>` | Extracts brief / constitution candidates | Never |
+| Import mode (`--from` + `--phase-id`) | Parses tasks.md → draft phase YAML | Only with `--write` (to `design/phases/<id>-imported.yaml`) |
+| Suggestion mode (`--suggest-from`) | Extracts brief / constitution candidates | Never |
 
 ## Mode 1 — importing `tasks.md` into a phase YAML draft
 
@@ -151,7 +153,7 @@ Each candidate field is independently optional. Only fields the extractor recogn
 
 First match wins. Heading normalisation strips Markdown punctuation, so `## **Problem Statement**` and `## problem statement` go to the same bucket.
 
-### Why read-only
+### Why suggestion mode is read-only
 
 Two opt-ins beats one coupled action. Once you have the suggestion envelope, you decide whether to feed it into the non-interactive paths:
 
