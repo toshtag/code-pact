@@ -382,6 +382,7 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolvePhaseDirectoryReadPath", "owned_read"],
       ["resolveRoadmapReadPath", "owned_read"],
       ["resolveProjectConfigReadPath", "owned_read"],
+      ["resolveEvidenceReadPath", "owned_read"],
       ["resolveModelProfileReadPath", "owned_read"],
       ["resolveModelProfileDirectoryReadPath", "owned_read"],
       ["resolveProgressReadPath", "owned_read"],
@@ -403,6 +404,7 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveModelProfileWritePath", "owned_write"],
       ["resolveAgentProfileWritePath", "owned_write"],
       ["resolveProjectConfigWritePath", "owned_write"],
+      ["resolveEvidenceWritePath", "owned_write"],
       ["resolveGitignoreWritePath", "owned_write"],
       // Delete resolvers
       ["resolveDecisionDeletePath", "owned_delete"],
@@ -422,6 +424,7 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolvePhaseDirectoryReadPath", "owned_read"],
       ["resolveRoadmapReadPath", "owned_read"],
       ["resolveProjectConfigReadPath", "owned_read"],
+      ["resolveEvidenceReadPath", "owned_read"],
       ["resolveModelProfileReadPath", "owned_read"],
       ["resolveModelProfileDirectoryReadPath", "owned_read"],
       ["resolveProgressReadPath", "owned_read"],
@@ -443,6 +446,7 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveModelProfileWritePath", "owned_write"],
       ["resolveAgentProfileWritePath", "owned_write"],
       ["resolveProjectConfigWritePath", "owned_write"],
+      ["resolveEvidenceWritePath", "owned_write"],
       ["resolveGitignoreWritePath", "owned_write"],
       // Delete resolvers
       ["resolveDecisionDeletePath", "owned_delete"],
