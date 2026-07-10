@@ -316,6 +316,9 @@ The verbs in detail:
   it is **not** auto-applied and never re-sizes the context pack on its own.
   To act on it, pass `--context-budget <profile>` to `task context` /
   `task prepare` explicitly; the `commands` dictionary does **not** echo it.
+  `commands.verify` and `commands.complete` include `--json --detail agent`;
+  use those strings verbatim so verification failures arrive as compact
+  capsules instead of duplicated raw stdout/stderr.
 
 - **`task start <task-id>`** — record a `started` event. The agent
   invokes this exactly once per implementation pass for a task; the
@@ -333,6 +336,10 @@ The verbs in detail:
   `VERIFICATION_FAILED` (exit 1) when any check fails — a verification
   command or the decision gate — with the per-check results (including
   the failing check) in `data.checks` (standalone `verify` uses this path; `task complete` failure places its checks under `data.verify.checks`).
+  Prefer the `--json --detail agent` form emitted by `task prepare`:
+  read `data.failure.kind`, `data.failure.fingerprint`, stderr/stdout
+  excerpts, then `data.failure.retrieve_command` only if the excerpts are
+  insufficient. Do not fetch full evidence by default.
 
 - **`task complete <task-id>`** — runs verification and, on pass,
   appends a `done` event (`source: loop`). Idempotent — a second call
@@ -343,6 +350,9 @@ The verbs in detail:
   `DECISION_REQUIRED` → write or accept the required ADR. `error.message`
   is actionable (and embeds the failing-check reason). Do **not** blindly
   re-run `verify` — fix the reported cause first.
+  With `--json --detail agent`, the same compact failure capsule is under
+  `data.failure`; the full bounded output can be retrieved with
+  `code-pact evidence show <evidence-ref>` when needed.
 
 - **`task record-done <task-id> --evidence "<text>"`** —
   records a `done` event with `source: external` **without** running

@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { ADAPTER_SPECS, ADAPTER_SPEC_ORDER } from "../src/cli/spec/adapter.ts";
 import { DECISION_SPECS, DECISION_SPEC_ORDER } from "../src/cli/spec/decision.ts";
+import { EVIDENCE_SPECS, EVIDENCE_SPEC_ORDER } from "../src/cli/spec/evidence.ts";
 import { TASK_SPECS } from "../src/cli/spec/task.ts";
 import { PLAN_SPECS, PLAN_SPEC_ORDER } from "../src/cli/spec/plan.ts";
 import { PHASE_SPECS, PHASE_SPEC_ORDER } from "../src/cli/spec/phase.ts";
@@ -47,6 +48,12 @@ function render(): string {
 
   sections.push("## Top-level commands", "");
   sections.push(renderReference(ROOT_SPECS.verify), "");
+
+  sections.push("## Evidence commands", "");
+  for (const key of EVIDENCE_SPEC_ORDER) {
+    sections.push(renderReference(EVIDENCE_SPECS[key]), "");
+  }
+
   sections.push("## Task commands", "");
 
   // Deterministic order: lifecycle reading order, then any others by key.

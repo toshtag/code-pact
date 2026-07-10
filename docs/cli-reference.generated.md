@@ -25,11 +25,34 @@ execution contract before it records a done event. Read-only — never records a
 | `--task` (required) | `<task-id>` | Task id to verify. |
 | `--dry-run` | — | Preview verification commands without executing them. |
 | `--timeout` | `<ms>` | Per-command timeout in decimal milliseconds (default: 300000). |
+| `--detail` | `<mode>` | JSON detail mode: full (default) or agent. Requires --json. |
 | `--json` | — | Emit JSON. |
 
 ```sh
 code-pact verify --phase P1 --task P1-T1 --json
+code-pact verify --phase P1 --task P1-T1 --json --detail agent
 code-pact verify --phase P1 --task P1-T1 --timeout 300000 --json
+```
+
+## Evidence commands
+
+### `evidence show`
+
+`code-pact evidence show <evidence-ref> [options]`
+
+Print a cached verification evidence artifact by opaque evidence reference.
+The artifact contains the bounded stdout/stderr captured by Code Pact, not
+an unbounded process log. Read-only — never records a progress event.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--stream` | `<name>` | Which stream to print: all (default), stdout, or stderr. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact evidence show evidence:sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+code-pact evidence show evidence:sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef --json
+code-pact evidence show evidence:sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef --stream stderr
 ```
 
 ## Task commands
@@ -202,10 +225,12 @@ yourself — use `task record-done` instead.
 | `--agent` | `<name>` | Agent name. Defaults to project default_agent. |
 | `--dry-run` | — | Show the event without recording it. |
 | `--timeout` | `<ms>` | Per-command timeout in decimal milliseconds (default: 300000). |
+| `--detail` | `<mode>` | JSON detail mode: full (default) or agent. Requires --json. |
 | `--json` | — | Emit JSON. |
 
 ```sh
 code-pact task complete P1-T1 --agent claude-code --json
+code-pact task complete P1-T1 --agent claude-code --json --detail agent
 ```
 
 ### `task record-done`
