@@ -153,7 +153,7 @@ Each candidate field is independently optional. Only fields the extractor recogn
 
 First match wins. Heading normalisation strips Markdown punctuation, so `## **Problem Statement**` and `## problem statement` go to the same bucket.
 
-### Why read-only
+### Why suggestion mode is read-only
 
 Two opt-ins beats one coupled action. Once you have the suggestion envelope, you decide whether to feed it into the non-interactive paths:
 

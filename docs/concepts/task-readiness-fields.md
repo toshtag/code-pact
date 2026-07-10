@@ -55,7 +55,7 @@ tasks:
       - design/decisions/stability-taxonomy.md # the stability contract this work operates under
     reads:
       - README.md                              # the file being slimmed
-      - docs/cli-contract.md                   # source of truth for CLI surface
+      - docs/cli-contract.md                   # source of truth for CLI semantic contract
       - src/commands/init-wizard.ts            # to ground the "sample phase" walkthrough
     writes:
       - README.md
