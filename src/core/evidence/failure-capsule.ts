@@ -75,6 +75,7 @@ const MAX_AGENT_REASON_BYTES = 512;
 const MAX_AGENT_EVIDENCE_ERROR_MESSAGE_BYTES = 256;
 const MAX_AGENT_SYSTEM_CODE_BYTES = 64;
 const MINIMAL_COMMAND_BYTES = 64;
+const MINIMAL_STDERR_TAIL_BYTES = 512;
 
 function jsonBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
@@ -329,13 +330,37 @@ function shrinkCapsuleText(projection: AgentFailureProjection): boolean {
 }
 
 function minimalProjection(projection: AgentFailureProjection): AgentFailureProjection {
+  const stderrTail = projection.failure.stderr_excerpt
+    ? truncateUtf8Suffix(
+        projection.failure.stderr_excerpt.tail || projection.failure.stderr_excerpt.head,
+        MINIMAL_STDERR_TAIL_BYTES,
+      ).text
+    : undefined;
   return {
     failure: {
       schema_version: 1,
       kind: projection.failure.kind,
       check: projection.failure.check,
       ...(projection.failure.fingerprint ? { fingerprint: projection.failure.fingerprint } : {}),
+      ...(stderrTail
+        ? {
+            stderr_excerpt: {
+              head: "",
+              tail: stderrTail,
+              captured_bytes: projection.failure.stderr_excerpt!.captured_bytes,
+              omitted_bytes: Math.max(
+                projection.failure.stderr_excerpt!.omitted_bytes,
+                projection.failure.stderr_excerpt!.captured_bytes -
+                  Buffer.byteLength(stderrTail, "utf8"),
+              ),
+              truncated: true,
+            },
+          }
+        : {}),
       ...(projection.failure.evidence_ref ? { evidence_ref: projection.failure.evidence_ref } : {}),
+      ...(projection.failure.retrieve_command
+        ? { retrieve_command: projection.failure.retrieve_command }
+        : {}),
       ...(projection.failure.evidence_available === false
         ? {
             evidence_available: false,
@@ -465,19 +490,6 @@ export function stringifyBoundedAgentEnvelope(envelope: AgentJsonEnvelope): stri
     return `${JSON.stringify(envelope)}\n`;
   }
 
-  if ("failure" in data && "verify" in data) {
-    const minimized = minimizeAgentFailureProjection({
-      failure: data.failure as FailureCapsule,
-      verify: data.verify as AgentVerifyProjection,
-    });
-    data.failure = minimized.failure;
-    data.verify = minimized.verify;
-    data.projection_truncated = true;
-  } else if ("verify" in data) {
-    data.verify = minimizeAgentVerifyProjection(data.verify as AgentVerifyProjection);
-    data.projection_truncated = true;
-  }
-
   const omissionOrder = [
     "suggested_next_command",
     "would_append",
@@ -493,14 +505,30 @@ export function stringifyBoundedAgentEnvelope(envelope: AgentJsonEnvelope): stri
     omitAgentDataField(data, field);
   }
 
+  if ("failure" in data && "verify" in data) {
+    const minimized = enforceAgentProjectionLimit({
+      failure: data.failure as FailureCapsule,
+      verify: data.verify as AgentVerifyProjection,
+    });
+    data.failure = minimized.failure;
+    data.verify = minimized.verify;
+    data.projection_truncated = true;
+  } else if ("verify" in data) {
+    data.verify = enforceVerifyProjectionLimit(data.verify as AgentVerifyProjection);
+    data.projection_truncated = true;
+  }
+
   if (agentJsonLineBytes(envelope) > MAX_AGENT_JSON_BYTES && "failure" in data) {
-    const failure = data.failure as FailureCapsule;
-    data.failure = {
-      schema_version: 1,
-      kind: failure.kind,
-      check: failure.check,
-      projection_truncated: true,
-    } satisfies FailureCapsule;
+    const minimized = minimalProjection({
+      failure: data.failure as FailureCapsule,
+      verify: (data.verify ?? {
+        ok: false,
+        checks: [],
+        successful_commands: [],
+      }) as AgentVerifyProjection,
+    });
+    data.failure = minimized.failure;
+    if ("verify" in data) data.verify = minimized.verify;
     data.projection_truncated = true;
   }
 
@@ -580,10 +608,6 @@ export async function projectVerifyForAgent(
 
   return enforceAgentProjectionLimit({
     failure: capsule,
-    verify: {
-      ok: result.ok,
-      checks: summarizeAgentChecks(result),
-      successful_commands: summarizeSuccessfulAgentCommands(result),
-    },
+    verify: projectVerifySummaryForAgent(result),
   });
 }
