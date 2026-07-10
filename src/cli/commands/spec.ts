@@ -14,25 +14,29 @@ import {
 } from "../../commands/spec-import.ts";
 import { type SpecImportDetail } from "../../contracts/spec-import-details.ts";
 import { emitOk, emitError } from "../util.ts";
+import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
+import { SPEC_SPECS, SPEC_SPEC_ORDER } from "../spec/spec.ts";
+import { toParseOptions } from "../spec/render.ts";
 
 export async function cmdSpec(argv: string[], _locale: Locale, globalJson: boolean): Promise<number> {
   const subcommand = argv[0];
   const rest = argv.slice(1);
 
+  if (subcommand === undefined || isHelpToken(subcommand)) {
+    return emitUsage(clusterUsage("spec"));
+  }
+
   if (subcommand === "import") {
+    if (isHelpToken(rest[0]) || hasHelpFlag(rest)) {
+      return emitUsage(subcommandUsage("spec", "import"));
+    }
+
     let values: Record<string, unknown>;
     try {
       ({ values } = strictParse(
         "spec import",
         rest,
-        {
-          from: { type: "string" },
-          "suggest-from": { type: "string" },
-          "phase-id": { type: "string" },
-          write: { type: "boolean" },
-          force: { type: "boolean" },
-          json: { type: "boolean" },
-        },
+        toParseOptions(SPEC_SPECS.import),
         { allowPositionals: false },
       ));
     } catch (err) {
@@ -137,7 +141,7 @@ export async function cmdSpec(argv: string[], _locale: Locale, globalJson: boole
     }
   }
 
-  const msg = `spec: unknown subcommand "${subcommand ?? ""}". Use: import`;
+  const msg = `spec: unknown subcommand "${subcommand ?? ""}". Use: ${SPEC_SPEC_ORDER.join(" | ")}`;
   emitError(globalJson, "CONFIG_ERROR", msg);
   return 2;
 }

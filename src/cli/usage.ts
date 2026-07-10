@@ -8,6 +8,7 @@ import { ADAPTER_SPECS, ADAPTER_SPEC_ORDER } from "./spec/adapter.ts";
 import { DECISION_SPECS, DECISION_SPEC_ORDER } from "./spec/decision.ts";
 import { PHASE_SPECS } from "./spec/phase.ts";
 import { PLAN_SPECS } from "./spec/plan.ts";
+import { SPEC_SPECS, SPEC_SPEC_ORDER } from "./spec/spec.ts";
 import { STATE_SPECS, STATE_SPEC_ORDER } from "./spec/state.ts";
 import { TASK_SPECS } from "./spec/task.ts";
 
@@ -19,6 +20,7 @@ const CLUSTER_SUBCOMMANDS: Record<string, string> = {
   adapter: ADAPTER_SPEC_ORDER.join(" | "),
   decision: DECISION_SPEC_ORDER.join(" | "),
   state: STATE_SPEC_ORDER.join(" | "),
+  spec: SPEC_SPEC_ORDER.join(" | "),
 };
 
 const PHASE_NEXT_SPEC = {
@@ -150,6 +152,8 @@ const LEAF_USAGE: Record<string, () => string> = {
   "state archive-retention": () => renderLeafHelp(STATE_SPECS["archive-retention"]),
 
   "state archive-maintain": () => renderLeafHelp(STATE_SPECS["archive-maintain"]),
+
+  "spec import": () => renderLeafHelp(SPEC_SPECS.import),
 };
 
 /**
