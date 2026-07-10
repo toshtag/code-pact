@@ -74,8 +74,6 @@ const MAX_AGENT_COMMAND_BYTES = 512;
 const MAX_AGENT_REASON_BYTES = 512;
 const MAX_AGENT_EVIDENCE_ERROR_MESSAGE_BYTES = 256;
 const MAX_AGENT_SYSTEM_CODE_BYTES = 64;
-const MAX_AGENT_TASK_ID_BYTES = 256;
-const MAX_AGENT_SUGGESTED_COMMAND_BYTES = 512;
 const MINIMAL_COMMAND_BYTES = 64;
 
 function jsonBytes(value: unknown): number {
@@ -437,37 +435,36 @@ export type AgentJsonEnvelope =
       data: Record<string, unknown>;
     };
 
-function capAgentEnvelopeFields(envelope: AgentJsonEnvelope): void {
-  if (!("data" in envelope) || typeof envelope.data !== "object") return;
-  const data = envelope.data as Record<string, unknown>;
-  if (typeof data.task_id === "string") {
-    data.task_id = truncateUtf8(data.task_id, MAX_AGENT_TASK_ID_BYTES).text;
-  }
-  if (typeof data.suggested_next_command === "string") {
-    data.suggested_next_command = truncateUtf8(
-      data.suggested_next_command,
-      MAX_AGENT_SUGGESTED_COMMAND_BYTES,
-    ).text;
-  }
-  if (typeof data.phase_id === "string") {
-    data.phase_id = truncateUtf8(data.phase_id, MAX_AGENT_TASK_ID_BYTES).text;
-  }
-  if (typeof data.agent === "string") {
-    data.agent = truncateUtf8(data.agent, MAX_AGENT_TASK_ID_BYTES).text;
-  }
-}
-
 function agentJsonLineBytes(envelope: AgentJsonEnvelope): number {
   return Buffer.byteLength(`${JSON.stringify(envelope)}\n`, "utf8");
 }
 
+function omitAgentDataField(data: Record<string, unknown>, field: string): boolean {
+  if (!(field in data)) return false;
+  delete data[field];
+  data.projection_truncated = true;
+  const omitted = Array.isArray(data.omitted_fields)
+    ? data.omitted_fields.filter((value): value is string => typeof value === "string")
+    : [];
+  if (!omitted.includes(field)) omitted.push(field);
+  data.omitted_fields = omitted;
+  return true;
+}
+
+function stringifyAgentEnvelopeOrThrow(envelope: AgentJsonEnvelope): string {
+  const line = `${JSON.stringify(envelope)}\n`;
+  if (Buffer.byteLength(line, "utf8") > MAX_AGENT_JSON_BYTES) {
+    throw new Error("agent JSON envelope could not be bounded below 24 KiB");
+  }
+  return line;
+}
+
 export function stringifyBoundedAgentEnvelope(envelope: AgentJsonEnvelope): string {
-  capAgentEnvelopeFields(envelope);
+  const data = envelope.data as Record<string, unknown>;
   if (agentJsonLineBytes(envelope) <= MAX_AGENT_JSON_BYTES) {
     return `${JSON.stringify(envelope)}\n`;
   }
 
-  const data = envelope.data as Record<string, unknown>;
   if ("failure" in data && "verify" in data) {
     const minimized = minimizeAgentFailureProjection({
       failure: data.failure as FailureCapsule,
@@ -475,18 +472,25 @@ export function stringifyBoundedAgentEnvelope(envelope: AgentJsonEnvelope): stri
     });
     data.failure = minimized.failure;
     data.verify = minimized.verify;
+    data.projection_truncated = true;
   } else if ("verify" in data) {
     data.verify = minimizeAgentVerifyProjection(data.verify as AgentVerifyProjection);
+    data.projection_truncated = true;
   }
 
-  if (agentJsonLineBytes(envelope) > MAX_AGENT_JSON_BYTES) {
-    delete data.suggested_next_command;
-  }
-  if (agentJsonLineBytes(envelope) > MAX_AGENT_JSON_BYTES) {
-    delete data.event;
-  }
-  if (agentJsonLineBytes(envelope) > MAX_AGENT_JSON_BYTES) {
-    delete data.task_id;
+  const omissionOrder = [
+    "suggested_next_command",
+    "would_append",
+    "event",
+    "task_id",
+    "phase_id",
+    "agent",
+  ];
+  for (const field of omissionOrder) {
+    if (agentJsonLineBytes(envelope) <= MAX_AGENT_JSON_BYTES) {
+      return `${JSON.stringify(envelope)}\n`;
+    }
+    omitAgentDataField(data, field);
   }
 
   if (agentJsonLineBytes(envelope) > MAX_AGENT_JSON_BYTES && "failure" in data) {
@@ -497,12 +501,10 @@ export function stringifyBoundedAgentEnvelope(envelope: AgentJsonEnvelope): stri
       check: failure.check,
       projection_truncated: true,
     } satisfies FailureCapsule;
+    data.projection_truncated = true;
   }
 
-  if (agentJsonLineBytes(envelope) > MAX_AGENT_JSON_BYTES) {
-    throw new Error("agent JSON envelope could not be bounded below 24 KiB");
-  }
-  return `${JSON.stringify(envelope)}\n`;
+  return stringifyAgentEnvelopeOrThrow(envelope);
 }
 
 export async function projectVerifyForAgent(

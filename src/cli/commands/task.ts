@@ -890,12 +890,17 @@ async function cmdTaskComplete(
 
     if (result.kind === "already_done") {
       if (json) {
-        emitOk({
+        const data = {
           already_done: true,
           task_id: result.task_id,
           phase_id: result.phase_id,
           agent: result.agent,
-        });
+        };
+        if (detail === "agent") {
+          process.stdout.write(stringifyBoundedAgentEnvelope({ ok: true, data }));
+        } else {
+          emitOk(data);
+        }
       } else {
         process.stdout.write(`${m.task.complete.alreadyDone(taskId)}\n`);
       }
@@ -904,13 +909,18 @@ async function cmdTaskComplete(
 
     if (result.kind === "dry_run") {
       if (json) {
-        emitOk({
+        const data = {
           dry_run: true,
           task_id: result.task_id,
           phase_id: result.phase_id,
           agent: result.agent,
           would_append: result.would_append,
-        });
+        };
+        if (detail === "agent") {
+          process.stdout.write(stringifyBoundedAgentEnvelope({ ok: true, data }));
+        } else {
+          emitOk(data);
+        }
       } else {
         process.stdout.write(`${m.task.complete.dryRun(taskId)}\n`);
       }
@@ -948,13 +958,25 @@ async function cmdTaskComplete(
         message: m.task.complete.aborted(taskId),
       };
       if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
+        if (detail === "agent") {
+          process.stdout.write(
+            stringifyBoundedAgentEnvelope({
+              ok: false,
+              error: {
+                code: "VERIFICATION_FAILED",
+                cause_code: "ABORTED",
+                message: "Verification aborted",
+              },
+              data: { task_id: taskId, aborted: true },
+            }),
+          );
+        } else {
+          process.stdout.write(`${JSON.stringify({
             ok: false,
             error: errorObj,
             data: { task_id: taskId, aborted: true },
-          })}\n`,
-        );
+          })}\n`);
+        }
       } else {
         process.stderr.write(`${errorObj.message}\n`);
       }
