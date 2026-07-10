@@ -14,6 +14,7 @@ import { DECISION_SPECS } from "../../../src/cli/spec/decision.ts";
 import { ROOT_SPECS } from "../../../src/cli/spec/root.ts";
 import { PLAN_SPECS } from "../../../src/cli/spec/plan.ts";
 import { PHASE_SPECS } from "../../../src/cli/spec/phase.ts";
+import { SPEC_SPECS } from "../../../src/cli/spec/spec.ts";
 import { STATE_SPECS } from "../../../src/cli/spec/state.ts";
 import { TASK_SPECS } from "../../../src/cli/spec/task.ts";
 import {
@@ -29,6 +30,7 @@ const ALL_SPECS = [
   ...Object.entries(ADAPTER_SPECS).map(([name, spec]) => [name, spec, `adapter ${name}`] as const),
   ...Object.entries(DECISION_SPECS).map(([name, spec]) => [name, spec, `decision ${name}`] as const),
   ...Object.entries(STATE_SPECS).map(([name, spec]) => [name, spec, `state ${name}`] as const),
+  ...Object.entries(SPEC_SPECS).map(([name, spec]) => [name, spec, `spec ${name}`] as const),
   ...Object.entries(TASK_SPECS).map(([name, spec]) => [name, spec, `task ${name}`] as const),
 ];
 
@@ -250,6 +252,22 @@ describe("CommandSpec derivation (P46)", () => {
     });
   });
 
+  describe("spec parse surfaces", () => {
+    it("spec import covers exactly the parser-backed flags", () => {
+      expect(Object.keys(toParseOptions(SPEC_SPECS.import)).sort()).toEqual(
+        ["force", "from", "json", "phase-id", "suggest-from", "write"].sort(),
+      );
+    });
+
+    it("spec reference renders representative flags and examples", () => {
+      expect(renderLeafHelp(SPEC_SPECS.import)).toContain("--suggest-from <path>");
+      expect(renderReference(SPEC_SPECS.import)).toContain(
+        "code-pact spec import --from tasks.md --phase-id P-feature --json",
+      );
+      expect(renderReference(SPEC_SPECS.import)).toContain("code-pact spec import --suggest-from spec.md --json");
+    });
+  });
+
   it("generated reference uses H2 groups and H3 command entries", () => {
     const doc = readFileSync(new URL("../../../docs/cli-reference.generated.md", import.meta.url), "utf8");
     expect(doc).toContain("## Task commands\n\n### `task add`");
@@ -258,7 +276,8 @@ describe("CommandSpec derivation (P46)", () => {
     expect(doc).toContain("## Adapter commands\n\n### `adapter list`");
     expect(doc).toContain("## Decision commands\n\n### `decision prune`");
     expect(doc).toContain("## State commands\n\n### `state compact`");
-    expect(doc).not.toMatch(/## (Task|Plan|Phase|Adapter|Decision|State) commands\n\n## `/);
+    expect(doc).toContain("## Spec commands\n\n### `spec import`");
+    expect(doc).not.toMatch(/## (Task|Plan|Phase|Adapter|Decision|State|Spec) commands\n\n## `/);
   });
 
   it("required is presentation-only: it does not appear in parseArgs config", () => {

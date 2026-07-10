@@ -3,12 +3,10 @@
 
 # CLI reference (generated)
 
-Per-command flags, usage, and examples for the generated CLI surfaces,
-derived from the `CommandSpec` single source (`src/cli/spec/`). Some
-clusters are not generated yet — their flags live in each command's `--help`,
-and their semantics in
-[`cli-contract.md`](cli-contract.md). The stable CLI contract — JSON
-envelope, exit codes, error codes, stability taxonomy — also lives in
+Per-command flags, usage, and examples for CommandSpec-backed CLI
+surfaces, derived from the `CommandSpec` single source (`src/cli/spec/`).
+The stable CLI contract — JSON envelope, exit codes, error codes,
+stability taxonomy, and command semantics — lives in
 [`cli-contract.md`](cli-contract.md).
 
 ## Top-level commands
@@ -821,4 +819,30 @@ by default; --write applies the sequence under one advisory write lock.
 code-pact state archive-maintain --json
 code-pact state archive-maintain --write --json
 code-pact state archive-maintain --write --keep-latest 5
+```
+
+## Spec commands
+
+### `spec import`
+
+`code-pact spec import [options]`
+
+Bridge external spec-driven planning artifacts into code-pact.
+Use --from with --phase-id to parse a tasks.md-style file into draft phase
+YAML; use --suggest-from to extract brief and constitution candidates.
+Dry-run by default; --write persists the imported phase draft.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--from` | `<path>` | Read a tasks.md-style source file and generate draft phase YAML. |
+| `--suggest-from` | `<path>` | Read a spec.md or plan.md-style source file and emit planning candidates. Never writes files. |
+| `--phase-id` | `<id>` | Phase id for --from mode. Required with --from; ignored by --suggest-from. |
+| `--write` | — | Persist the imported phase draft to design/phases/<id>-imported.yaml. Default is dry-run. |
+| `--force` | — | Overwrite an existing imported phase draft when used with --write. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact spec import --from tasks.md --phase-id P-feature --json
+code-pact spec import --from tasks.md --phase-id P-feature --write
+code-pact spec import --suggest-from spec.md --json
 ```

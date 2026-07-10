@@ -19,6 +19,7 @@ import { TASK_SPECS } from "../src/cli/spec/task.ts";
 import { PLAN_SPECS, PLAN_SPEC_ORDER } from "../src/cli/spec/plan.ts";
 import { PHASE_SPECS, PHASE_SPEC_ORDER } from "../src/cli/spec/phase.ts";
 import { ROOT_SPECS } from "../src/cli/spec/root.ts";
+import { SPEC_SPECS, SPEC_SPEC_ORDER } from "../src/cli/spec/spec.ts";
 import { STATE_SPECS, STATE_SPEC_ORDER } from "../src/cli/spec/state.ts";
 import { renderReference } from "../src/cli/spec/render.ts";
 
@@ -36,12 +37,10 @@ function render(): string {
     "",
     "# CLI reference (generated)",
     "",
-    "Per-command flags, usage, and examples for the generated CLI surfaces,",
-    "derived from the `CommandSpec` single source (`src/cli/spec/`). Some",
-    "clusters are not generated yet — their flags live in each command's `--help`,",
-    "and their semantics in",
-    "[`cli-contract.md`](cli-contract.md). The stable CLI contract — JSON",
-    "envelope, exit codes, error codes, stability taxonomy — also lives in",
+    "Per-command flags, usage, and examples for CommandSpec-backed CLI",
+    "surfaces, derived from the `CommandSpec` single source (`src/cli/spec/`).",
+    "The stable CLI contract — JSON envelope, exit codes, error codes,",
+    "stability taxonomy, and command semantics — lives in",
     "[`cli-contract.md`](cli-contract.md).",
     "",
   ];
@@ -101,6 +100,11 @@ function render(): string {
   sections.push("## State commands", "");
   for (const key of STATE_SPEC_ORDER) {
     sections.push(renderReference(STATE_SPECS[key]!), "");
+  }
+
+  sections.push("## Spec commands", "");
+  for (const key of SPEC_SPEC_ORDER) {
+    sections.push(renderReference(SPEC_SPECS[key]!), "");
   }
 
   return `${sections.join("\n").trimEnd()}\n`;
