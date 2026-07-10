@@ -70,6 +70,10 @@ import {
   type FailureSummary,
 } from "../../core/failure/failure-summary.ts";
 import { renderFailureSummaryLines } from "../render/failure-summary.ts";
+import {
+  projectVerifyForAgent,
+  projectVerifySummaryForAgent,
+} from "../../core/evidence/failure-capsule.ts";
 
 export async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
   const subcommand = argv[0];
@@ -845,7 +849,20 @@ async function cmdTaskComplete(
 
   const json = globalJson || values.json === true;
   const dryRun = values["dry-run"] === true;
+  const detail = values.detail as string | undefined;
   const taskId = positionals[0];
+  if (detail !== undefined && !json) {
+    emitError(false, "CONFIG_ERROR", "task complete: --detail requires --json");
+    return 2;
+  }
+  if (detail !== undefined && detail !== "full" && detail !== "agent") {
+    emitError(
+      json,
+      "CONFIG_ERROR",
+      `task complete: invalid --detail "${detail}" (expected full or agent)`,
+    );
+    return 2;
+  }
   if (!taskId) {
     emitError(
       json,
@@ -904,7 +921,10 @@ async function cmdTaskComplete(
         phase_id: result.phase_id,
         agent: result.agent,
         event: result.event,
-        verify: { ok: true, checks: result.verify.checks },
+        verify:
+          detail === "agent"
+            ? projectVerifySummaryForAgent(result.verify)
+            : { ok: true, checks: result.verify.checks },
       });
     } else {
       process.stdout.write(`${m.task.complete.success(taskId, result.agent)}\n`);
@@ -979,15 +999,20 @@ async function cmdTaskComplete(
       }
 
       if (json) {
+        const verifyResult = { ok: false as const, checks };
         process.stdout.write(
           `${JSON.stringify({
             ok: false,
             error: errorObj,
             data: {
               task_id: taskId,
-              verify: { ok: false, checks },
-              failed_checks: summary.failed_checks,
-              first_failure: summary.first_failure,
+              ...(detail === "agent"
+                ? await projectVerifyForAgent(process.cwd(), verifyResult)
+                : {
+                    verify: { ok: false, checks },
+                    failed_checks: summary.failed_checks,
+                    first_failure: summary.first_failure,
+                  }),
               suggested_next_command: summary.suggested_next_command,
               ...(wasAborted ? { aborted: true } : {}),
             },

@@ -23,6 +23,10 @@ import {
 import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
 import { runVerify, formatVerify } from "./commands/verify.ts";
+import {
+  projectVerifyForAgent,
+  projectVerifySummaryForAgent,
+} from "./core/evidence/failure-capsule.ts";
 import { runRecommend, formatRecommend } from "./commands/recommend.ts";
 import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runValidate } from "./commands/validate.ts";
@@ -39,6 +43,7 @@ import { cmdPhase } from "./cli/commands/phase.ts";
 import { cmdState } from "./cli/commands/state.ts";
 import { cmdSpec } from "./cli/commands/spec.ts";
 import { cmdDecision } from "./cli/commands/decision.ts";
+import { cmdEvidence } from "./cli/commands/evidence.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
 import { LocaleConfig } from "./core/schemas/locale.ts";
 import { readProjectYamlStrictOrNull } from "./core/project-config-path.ts";
@@ -667,6 +672,7 @@ async function cmdVerify(
       task: { type: "string" },
       "dry-run": { type: "boolean" },
       timeout: { type: "string" },
+      detail: { type: "string" },
       json: { type: "boolean" },
     },
     strict: false,
@@ -677,8 +683,18 @@ async function cmdVerify(
   const phaseId = values.phase as string | undefined;
   const taskId = values.task as string | undefined;
   const dryRun = values["dry-run"] === true;
+  const detail = values.detail as string | undefined;
   const parsedTimeout = parseTimeoutArg(values.timeout as string | undefined, json);
   if (!parsedTimeout.ok) return parsedTimeout.exitCode;
+
+  if (detail !== undefined && !json) {
+    emitError(false, "CONFIG_ERROR", "verify: --detail requires --json");
+    return 2;
+  }
+  if (detail !== undefined && detail !== "full" && detail !== "agent") {
+    emitError(json, "CONFIG_ERROR", `verify: invalid --detail "${detail}" (expected full or agent)`);
+    return 2;
+  }
 
   if (!phaseId || !taskId) {
     emitError(json, "CONFIG_ERROR", "verify requires --phase and --task");
@@ -698,7 +714,11 @@ async function cmdVerify(
     const aborted = result.checks.some(check => check.aborted === true);
     if (json) {
       if (result.ok) {
-        emitOk({ checks: result.checks });
+        emitOk(
+          detail === "agent"
+            ? { verify: projectVerifySummaryForAgent(result) }
+            : { checks: result.checks },
+        );
       } else {
         emitError(
           json,
@@ -706,7 +726,10 @@ async function cmdVerify(
           aborted ? m.verify.aborted : "Verification failed",
           {
             ...(aborted ? { causeCode: "ABORTED" } : {}),
-            data: { checks: result.checks },
+            data:
+              detail === "agent"
+                ? await projectVerifyForAgent(process.cwd(), result)
+                : { checks: result.checks },
           },
         );
       }
@@ -965,6 +988,9 @@ async function main(): Promise<number> {
 
     case "decision":
       return cmdDecision(rest, locale, json);
+
+    case "evidence":
+      return cmdEvidence(rest, locale, json);
 
     default: {
       emitError(json, "UNKNOWN_COMMAND", m.unknownCommand(command ?? ""));

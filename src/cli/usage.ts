@@ -6,6 +6,7 @@
 import { renderLeafHelp } from "./spec/render.ts";
 import { ADAPTER_SPECS, ADAPTER_SPEC_ORDER } from "./spec/adapter.ts";
 import { DECISION_SPECS, DECISION_SPEC_ORDER } from "./spec/decision.ts";
+import { EVIDENCE_SPECS, EVIDENCE_SPEC_ORDER } from "./spec/evidence.ts";
 import { PHASE_SPECS, PHASE_SPEC_ORDER } from "./spec/phase.ts";
 import { PLAN_SPECS, PLAN_SPEC_ORDER } from "./spec/plan.ts";
 import { SPEC_SPECS, SPEC_SPEC_ORDER } from "./spec/spec.ts";
@@ -19,6 +20,7 @@ const CLUSTER_SUBCOMMANDS: Record<string, string> = {
   phase: `${PHASE_SPEC_ORDER.join(" | ")} (alias: next = runbook)`,
   adapter: ADAPTER_SPEC_ORDER.join(" | "),
   decision: DECISION_SPEC_ORDER.join(" | "),
+  evidence: EVIDENCE_SPEC_ORDER.join(" | "),
   state: STATE_SPEC_ORDER.join(" | "),
   spec: SPEC_SPEC_ORDER.join(" | "),
 };
@@ -130,6 +132,8 @@ const LEAF_USAGE: Record<string, () => string> = {
   "task resume": () => renderLeafHelp(TASK_SPECS.resume!),
 
   "task runbook": () => renderLeafHelp(TASK_SPECS.runbook!),
+
+  "evidence show": () => renderLeafHelp(EVIDENCE_SPECS.show),
 
   "adapter list": () => renderLeafHelp(ADAPTER_SPECS.list),
 
