@@ -10,7 +10,7 @@ import { parseArgs } from "node:util";
 import { strictParse, strictParseAlias, ConfigError } from "../../lib/argv.ts";
 import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
 import { toParseOptions } from "../spec/render.ts";
-import { PHASE_SPECS } from "../spec/phase.ts";
+import { PHASE_SPECS, PHASE_SPEC_ORDER } from "../spec/phase.ts";
 import { isInteractive } from "../../lib/tty.ts";
 import { messages, type Locale } from "../../i18n/index.ts";
 import { withWriteLock, emitOk, emitError } from "../util.ts";
@@ -321,7 +321,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
     return cmdPhaseImport(rest, locale, globalJson);
   }
 
-  const msg = `phase: unknown subcommand "${subcommand ?? ""}". Use: add | new | ls | show | import | reconcile | archive | runbook (alias: next = runbook)`;
+  const msg = `phase: unknown subcommand "${subcommand ?? ""}". Use: ${PHASE_SPEC_ORDER.join(" | ")} (alias: next = runbook)`;
   emitError(globalJson, "CONFIG_ERROR", msg);
   return 2;
 }

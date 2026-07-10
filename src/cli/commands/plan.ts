@@ -11,7 +11,7 @@ import { parseArgs } from "node:util";
 import { strictParse, ConfigError } from "../../lib/argv.ts";
 import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
 import { toParseOptions } from "../spec/render.ts";
-import { PLAN_SPECS } from "../spec/plan.ts";
+import { PLAN_SPECS, PLAN_SPEC_ORDER } from "../spec/plan.ts";
 import { cmdPhaseImport } from "./phase.ts";
 import { withWriteLock, emitOk, emitError } from "../util.ts";
 import { isInteractive } from "../../lib/tty.ts";
@@ -116,7 +116,7 @@ export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolea
     return cmdPhaseImport(rest, locale, globalJson, "plan import");
   }
 
-  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | adopt | constitution | lint | normalize | analyze | sync-paths | migrate | import (alias for "phase import")`;
+  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: ${PLAN_SPEC_ORDER.join(" | ")} | import (alias for "phase import")`;
   emitError(globalJson, "CONFIG_ERROR", msg);
   return 2;
 }

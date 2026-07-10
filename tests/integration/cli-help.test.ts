@@ -7,6 +7,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { cliPath, ensureCliBuilt } from "../helpers/cli.ts";
+import { PHASE_SPEC_ORDER } from "../../src/cli/spec/phase.ts";
+import { PLAN_SPEC_ORDER } from "../../src/cli/spec/plan.ts";
 import { STATE_SPEC_ORDER } from "../../src/cli/spec/state.ts";
 
 beforeAll(() => {
@@ -157,6 +159,27 @@ describe("cluster --help → usage, exit 0", () => {
     expect(parsed.error.message).toContain("nope");
     for (const subcommand of STATE_SPEC_ORDER) {
       expect(parsed.error.message).toContain(subcommand);
+    }
+  });
+
+  it("plan and phase unknown subcommand guidance lists valid subcommands from the spec order", () => {
+    const cases: Array<["plan" | "phase", readonly string[]]> = [
+      ["plan", PLAN_SPEC_ORDER],
+      ["phase", PHASE_SPEC_ORDER],
+    ];
+
+    for (const [cluster, subcommands] of cases) {
+      const res = runCli(["--json", cluster, "nope"]);
+      expect(res.status).toBe(2);
+      const parsed = JSON.parse(res.stdout) as {
+        ok: false;
+        error: { code: string; message: string };
+      };
+      expect(parsed.error.code).toBe("CONFIG_ERROR");
+      expect(parsed.error.message).toContain("nope");
+      for (const subcommand of subcommands) {
+        expect(parsed.error.message).toContain(subcommand);
+      }
     }
   });
 });
