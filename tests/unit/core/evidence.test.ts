@@ -12,6 +12,7 @@ import { fingerprintFailure } from "../../../src/core/evidence/failure-fingerpri
 import {
   projectVerifyForAgent,
   projectVerifySummaryForAgent,
+  stringifyBoundedAgentEnvelope,
 } from "../../../src/core/evidence/failure-capsule.ts";
 import type { VerifyResult } from "../../../src/commands/verify.ts";
 import { __setAtomicWriteFailAfterOpenForTests } from "../../../src/io/atomic-text.ts";
@@ -396,6 +397,39 @@ describe("failure projection", () => {
     });
     expect(decision.failure.kind).toBe("decision_required");
     expect(decision.failure.evidence_ref).toBeUndefined();
+  });
+
+  it("marks outer envelope omissions without returning partial suggested commands", () => {
+    const suggested = `code-pact task complete P1-T1 ${"x".repeat(40_000)}`;
+    const line = stringifyBoundedAgentEnvelope({
+      ok: false,
+      error: {
+        code: "VERIFICATION_FAILED",
+        cause_code: "ABORTED",
+        message: "Verification aborted",
+      },
+      data: {
+        task_id: `P1-${"T".repeat(40_000)}`,
+        aborted: true,
+        suggested_next_command: suggested,
+      },
+    });
+    const envelope = JSON.parse(line) as {
+      data: {
+        projection_truncated?: boolean;
+        omitted_fields?: string[];
+        suggested_next_command?: string;
+      };
+    };
+
+    expect(Buffer.byteLength(line, "utf8")).toBeLessThan(24 * 1024);
+    expect(envelope.data.projection_truncated).toBe(true);
+    expect(envelope.data.omitted_fields).toEqual(expect.arrayContaining([
+      "suggested_next_command",
+      "task_id",
+    ]));
+    expect(envelope.data.suggested_next_command).toBeUndefined();
+    expect(line).not.toContain("x".repeat(1024));
   });
 });
 

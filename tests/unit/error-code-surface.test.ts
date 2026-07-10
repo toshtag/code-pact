@@ -88,6 +88,8 @@ const KNOWN_CODES: Record<
   EVIDENCE_DIGEST_MISMATCH: "public",
   EVIDENCE_INVALID: "public",
   EVIDENCE_NOT_FOUND: "public",
+  EVIDENCE_PATH_UNSAFE: "public",
+  EVIDENCE_READ_FAILED: "public",
   EVIDENCE_UNAVAILABLE: "public",
   FS_AUTHORITY_FAILURE: "public",
   INVALID_EVIDENCE_REF: "public",

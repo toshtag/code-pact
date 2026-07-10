@@ -1,6 +1,7 @@
 import { beforeAll, afterEach, describe, expect, it } from "vitest";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   createTempProject,
@@ -34,7 +35,9 @@ async function setupTask(opts: {
   command: string;
   status?: "planned" | "done";
   progressDone?: boolean;
+  taskId?: string;
 }): Promise<Project> {
+  const taskId = opts.taskId ?? "P1-T1";
   project = await createTempProject({ prefix: "code-pact-evidence-cli-" });
   expectJsonOk(
     project.run([
@@ -61,7 +64,7 @@ async function setupTask(opts: {
   };
   doc.tasks = [
     {
-      id: "P1-T1",
+      id: taskId,
       type: "feature",
       ambiguity: "low",
       risk: "low",
@@ -77,7 +80,7 @@ async function setupTask(opts: {
   if (opts.progressDone) {
     await writeFile(
       join(project.dir, ".code-pact", "state", "progress.yaml"),
-      `events:\n  - task_id: P1-T1\n    status: done\n    at: "2026-07-10T00:00:00.000Z"\n    actor: agent\n`,
+      `events:\n  - task_id: ${JSON.stringify(taskId)}\n    status: done\n    at: "2026-07-10T00:00:00.000Z"\n    actor: agent\n`,
       "utf8",
     );
   }
@@ -186,6 +189,36 @@ describe("agent detail evidence envelope", () => {
     expect(env.error.message).toContain("exactly one evidence ref");
   });
 
+  it("evidence show maps cache symlink authority errors to a stable public code", async () => {
+    const p = await setupFailingTask();
+    const failed = p.run([
+      "verify",
+      "--phase",
+      "P1",
+      "--task",
+      "P1-T1",
+      "--json",
+      "--detail",
+      "agent",
+    ]);
+    const env = expectJsonErr(failed, "VERIFICATION_FAILED") as {
+      data: { failure: { evidence_ref: string } };
+    };
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-evidence-read-"));
+    await rm(join(p.dir, ".code-pact", "cache"), { recursive: true, force: true });
+    await symlink(outside, join(p.dir, ".code-pact", "cache"));
+    try {
+      const shown = p.run(["evidence", "show", env.data.failure.evidence_ref, "--json"]);
+      expect(shown.code).toBe(1);
+      const shownEnv = expectJsonErr(shown, "EVIDENCE_PATH_UNSAFE") as {
+        data?: { system_code?: string };
+      };
+      expect(shownEnv.data?.system_code).toBe("PATH_NOT_OWNED");
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it("verify --detail agent keeps the final CLI JSON below 24 KiB for worst-case output", async () => {
     const p = await setupTask({ command: worstCaseCommand() });
     const failed = p.run([
@@ -237,6 +270,61 @@ describe("agent detail evidence envelope", () => {
     expect(failed.stdout).not.toContain("stdoutTruncated");
     expect(failed.stdout).not.toContain("stderrTruncated");
     expect(failed.stdout).not.toContain("x".repeat(1024));
+  });
+
+  it("task complete --detail agent bounds already_done and dry_run envelopes", async () => {
+    const longTaskId = `P1-${"T".repeat(30_000)}`;
+    const alreadyDone = await setupTask({
+      command: "node --version",
+      status: "done",
+      progressDone: true,
+      taskId: longTaskId,
+    });
+    const alreadyDoneResult = alreadyDone.run([
+      "task",
+      "complete",
+      longTaskId,
+      "--json",
+      "--detail",
+      "agent",
+    ]);
+    const alreadyDoneEnv = expectJsonOk<{
+      already_done: true;
+      projection_truncated?: boolean;
+      omitted_fields?: string[];
+    }>(alreadyDoneResult);
+    expect(Buffer.byteLength(alreadyDoneResult.stdout, "utf8")).toBeLessThan(24 * 1024);
+    expect(alreadyDoneEnv.data.projection_truncated).toBe(true);
+    expect(alreadyDoneEnv.data.omitted_fields).toContain("task_id");
+    await alreadyDone.cleanup();
+    project = null;
+
+    const dryRun = await setupTask({
+      command: "node --version",
+      status: "planned",
+      taskId: longTaskId,
+    });
+    const dryRunResult = dryRun.run([
+      "task",
+      "complete",
+      longTaskId,
+      "--dry-run",
+      "--json",
+      "--detail",
+      "agent",
+    ]);
+    const dryRunEnv = expectJsonOk<{
+      dry_run: true;
+      projection_truncated?: boolean;
+      omitted_fields?: string[];
+      suggested_next_command?: string;
+    }>(dryRunResult);
+    expect(Buffer.byteLength(dryRunResult.stdout, "utf8")).toBeLessThan(24 * 1024);
+    expect(dryRunEnv.data.projection_truncated).toBe(true);
+    expect(dryRunEnv.data.omitted_fields).toEqual(expect.arrayContaining(["would_append", "task_id"]));
+    expect(dryRunEnv.data.suggested_next_command).toBeUndefined();
+    await dryRun.cleanup();
+    project = null;
   });
 
   it("default and full JSON keep legacy verify failure shape", async () => {
