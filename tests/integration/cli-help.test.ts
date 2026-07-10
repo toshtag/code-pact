@@ -1,5 +1,5 @@
 // PR4: subcommand clusters answer --help with usage (exit 0) instead of
-// CONFIG_ERROR. plan / task / phase / decision / state also treat a bare cluster invocation as a
+// CONFIG_ERROR. plan / task / phase / decision / state / spec also treat a bare cluster invocation as a
 // help request; adapter is intentionally excluded (bare adapter is an error —
 // see adapter-cli.test.ts).
 
@@ -7,6 +7,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { cliPath, ensureCliBuilt } from "../helpers/cli.ts";
+import { STATE_SPEC_ORDER } from "../../src/cli/spec/state.ts";
 
 beforeAll(() => {
   ensureCliBuilt();
@@ -22,7 +23,7 @@ function runCli(args: string[]) {
 }
 
 describe("cluster --help → usage, exit 0", () => {
-  for (const cluster of ["plan", "task", "phase", "decision", "state"]) {
+  for (const cluster of ["plan", "task", "phase", "decision", "state", "spec"]) {
     it(`\`${cluster} --help\` prints usage on stdout, exit 0`, () => {
       const res = runCli([cluster, "--help"]);
       expect(res.status).toBe(0);
@@ -98,6 +99,7 @@ describe("cluster --help → usage, exit 0", () => {
     [["state", "compact-archive", "--help"], /Usage: code-pact state compact-archive/, /decision_record/],
     [["state", "archive-retention", "--help"], /Usage: code-pact state archive-retention/, /--keep-latest/],
     [["state", "archive-maintain", "--help"], /Usage: code-pact state archive-maintain/, /--keep-latest/],
+    [["spec", "import", "--help"], /Usage: code-pact spec import/, /--suggest-from/],
     // `plan import` is an alias for `phase import`; its --help routes to the
     // same rich entry (cmdPlan dispatch), so it must not be a stub.
     [["plan", "import", "--help"], /Usage: code-pact phase import/, /--scaffold-decisions/],
@@ -142,5 +144,19 @@ describe("cluster --help → usage, exit 0", () => {
     expect(res.status).toBe(2);
     const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+
+  it("state unknown subcommand guidance lists valid subcommands from the spec order", () => {
+    const res = runCli(["--json", "state", "nope"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string; message: string };
+    };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(parsed.error.message).toContain("nope");
+    for (const subcommand of STATE_SPEC_ORDER) {
+      expect(parsed.error.message).toContain(subcommand);
+    }
   });
 });
