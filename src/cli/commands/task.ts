@@ -33,6 +33,7 @@ import {
 import { isStandardContextBudgetProfile } from "../../core/context-fit/budget-profiles.ts";
 import type { ContextBudgetProfiles } from "../../core/schemas/agent-profile.ts";
 import { runTaskComplete } from "../../commands/task-complete.ts";
+import { projectVerifyForPublicJson } from "../../commands/verify.ts";
 import {
   runTaskRecordDone,
   type DecisionRequiredData,
@@ -73,6 +74,7 @@ import { renderFailureSummaryLines } from "../render/failure-summary.ts";
 import {
   projectVerifyForAgent,
   projectVerifySummaryForAgent,
+  stringifyBoundedAgentEnvelope,
 } from "../../core/evidence/failure-capsule.ts";
 
 export async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
@@ -916,7 +918,7 @@ async function cmdTaskComplete(
     }
 
     if (json) {
-      emitOk({
+      const data = {
         task_id: result.task_id,
         phase_id: result.phase_id,
         agent: result.agent,
@@ -924,8 +926,13 @@ async function cmdTaskComplete(
         verify:
           detail === "agent"
             ? projectVerifySummaryForAgent(result.verify)
-            : { ok: true, checks: result.verify.checks },
-      });
+            : projectVerifyForPublicJson(result.verify),
+      };
+      if (detail === "agent") {
+        process.stdout.write(stringifyBoundedAgentEnvelope({ ok: true, data }));
+      } else {
+        emitOk(data);
+      }
     } else {
       process.stdout.write(`${m.task.complete.success(taskId, result.agent)}\n`);
     }
@@ -1000,24 +1007,39 @@ async function cmdTaskComplete(
 
       if (json) {
         const verifyResult = { ok: false as const, checks };
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: false,
-            error: errorObj,
-            data: {
-              task_id: taskId,
-              ...(detail === "agent"
-                ? await projectVerifyForAgent(process.cwd(), verifyResult)
-                : {
-                    verify: { ok: false, checks },
-                    failed_checks: summary.failed_checks,
-                    first_failure: summary.first_failure,
-                  }),
-              suggested_next_command: summary.suggested_next_command,
-              ...(wasAborted ? { aborted: true } : {}),
-            },
-          })}\n`,
-        );
+        if (detail === "agent") {
+          process.stdout.write(
+            stringifyBoundedAgentEnvelope({
+              ok: false,
+              error: {
+                code: "VERIFICATION_FAILED",
+                ...(errorObj.cause_code ? { cause_code: errorObj.cause_code } : {}),
+                message: wasAborted ? "Verification aborted" : "Verification failed",
+              },
+              data: {
+                task_id: taskId,
+                ...(await projectVerifyForAgent(process.cwd(), verifyResult)),
+                suggested_next_command: summary.suggested_next_command,
+                ...(wasAborted ? { aborted: true } : {}),
+              },
+            }),
+          );
+        } else {
+          process.stdout.write(
+            `${JSON.stringify({
+              ok: false,
+              error: errorObj,
+              data: {
+                task_id: taskId,
+                verify: projectVerifyForPublicJson(verifyResult),
+                failed_checks: summary.failed_checks,
+                first_failure: summary.first_failure,
+                suggested_next_command: summary.suggested_next_command,
+                ...(wasAborted ? { aborted: true } : {}),
+              },
+            })}\n`,
+          );
+        }
       } else {
         process.stderr.write(`${errorObj.message}\n`);
         const lines = renderFailureSummaryLines(m.task.failure, summary);

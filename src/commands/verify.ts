@@ -58,6 +58,50 @@ export type VerifyResult = {
 
 export { DEFAULT_COMMAND_TIMEOUT_MS, MAX_TIMEOUT_MS, validateTimeoutMs };
 
+export type PublicCommandExecutionResult = Omit<
+  CommandExecutionResult,
+  "stdoutTruncated" | "stderrTruncated"
+>;
+
+export type PublicCheckResult = Omit<
+  CheckResult,
+  "stdoutTruncated" | "stderrTruncated" | "commands"
+> & {
+  commands?: PublicCommandExecutionResult[];
+};
+
+export type PublicVerifyResult = {
+  ok: boolean;
+  checks: PublicCheckResult[];
+};
+
+export function projectCommandForPublicJson(
+  command: CommandExecutionResult,
+): PublicCommandExecutionResult {
+  const { stdoutTruncated: _stdoutTruncated, stderrTruncated: _stderrTruncated, ...rest } = command;
+  return rest;
+}
+
+export function projectCheckForPublicJson(check: CheckResult): PublicCheckResult {
+  const {
+    stdoutTruncated: _stdoutTruncated,
+    stderrTruncated: _stderrTruncated,
+    commands,
+    ...rest
+  } = check;
+  return {
+    ...rest,
+    ...(commands ? { commands: commands.map(projectCommandForPublicJson) } : {}),
+  };
+}
+
+export function projectVerifyForPublicJson(result: VerifyResult): PublicVerifyResult {
+  return {
+    ok: result.ok,
+    checks: result.checks.map(projectCheckForPublicJson),
+  };
+}
+
 export function createAbortError(): Error {
   const error = new Error("Operation aborted");
   (error as NodeJS.ErrnoException).code = "ABORTED";

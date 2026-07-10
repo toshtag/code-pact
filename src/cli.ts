@@ -24,10 +24,15 @@ import { ROOT_SPECS } from "./cli/spec/root.ts";
 import { toParseOptions } from "./cli/spec/render.ts";
 import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
-import { runVerify, formatVerify } from "./commands/verify.ts";
+import {
+  runVerify,
+  formatVerify,
+  projectVerifyForPublicJson,
+} from "./commands/verify.ts";
 import {
   projectVerifyForAgent,
   projectVerifySummaryForAgent,
+  stringifyBoundedAgentEnvelope,
 } from "./core/evidence/failure-capsule.ts";
 import { runRecommend, formatRecommend } from "./commands/recommend.ts";
 import { runDoctor, formatDoctor } from "./commands/doctor.ts";
@@ -711,24 +716,40 @@ async function cmdVerify(
     const aborted = result.checks.some(check => check.aborted === true);
     if (json) {
       if (result.ok) {
-        emitOk(
-          detail === "agent"
-            ? { verify: projectVerifySummaryForAgent(result) }
-            : { checks: result.checks },
-        );
+        if (detail === "agent") {
+          process.stdout.write(
+            stringifyBoundedAgentEnvelope({
+              ok: true,
+              data: { verify: projectVerifySummaryForAgent(result) },
+            }),
+          );
+        } else {
+          emitOk({ checks: projectVerifyForPublicJson(result).checks });
+        }
       } else {
-        emitError(
-          json,
-          "VERIFICATION_FAILED",
-          aborted ? m.verify.aborted : "Verification failed",
-          {
-            ...(aborted ? { causeCode: "ABORTED" } : {}),
-            data:
-              detail === "agent"
-                ? await projectVerifyForAgent(process.cwd(), result)
-                : { checks: result.checks },
-          },
-        );
+        if (detail === "agent") {
+          process.stdout.write(
+            stringifyBoundedAgentEnvelope({
+              ok: false,
+              error: {
+                code: "VERIFICATION_FAILED",
+                ...(aborted ? { cause_code: "ABORTED" } : {}),
+                message: aborted ? "Verification aborted" : "Verification failed",
+              },
+              data: await projectVerifyForAgent(process.cwd(), result),
+            }),
+          );
+        } else {
+          emitError(
+            json,
+            "VERIFICATION_FAILED",
+            aborted ? m.verify.aborted : "Verification failed",
+            {
+              ...(aborted ? { causeCode: "ABORTED" } : {}),
+              data: { checks: projectVerifyForPublicJson(result).checks },
+            },
+          );
+        }
       }
     } else {
       for (const check of result.checks) {

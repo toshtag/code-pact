@@ -33,6 +33,8 @@ export type FailureCapsule = {
   evidence_available?: boolean;
   evidence_error?: {
     code: string;
+    cause_code?: string;
+    system_code?: string;
     message?: string;
   };
   evidence_ref?: string;
@@ -65,10 +67,15 @@ export type AgentFailureProjection = {
 };
 
 const MAX_AGENT_PROJECTION_BYTES = 20 * 1024;
+export const MAX_AGENT_JSON_BYTES = 24 * 1024;
 const MAX_AGENT_CHECKS = 8;
 const MAX_AGENT_SUCCESSFUL_COMMANDS = 8;
 const MAX_AGENT_COMMAND_BYTES = 512;
 const MAX_AGENT_REASON_BYTES = 512;
+const MAX_AGENT_EVIDENCE_ERROR_MESSAGE_BYTES = 256;
+const MAX_AGENT_SYSTEM_CODE_BYTES = 64;
+const MAX_AGENT_TASK_ID_BYTES = 256;
+const MAX_AGENT_SUGGESTED_COMMAND_BYTES = 512;
 const MINIMAL_COMMAND_BYTES = 64;
 
 function jsonBytes(value: unknown): number {
@@ -83,6 +90,18 @@ function truncateUtf8(text: string, maxBytes: number): { text: string; truncated
     text: excerptText(text, { headBytes: Math.max(0, maxBytes), tailBytes: 0 }).head,
     truncated: true,
   };
+}
+
+function truncateUtf8Suffix(text: string, maxBytes: number): { text: string; truncated: boolean } {
+  if (Buffer.byteLength(text, "utf8") <= maxBytes) {
+    return { text, truncated: false };
+  }
+  const buffer = Buffer.from(text, "utf8");
+  let start = Math.max(0, buffer.length - maxBytes);
+  while (start < buffer.length && (buffer[start]! & 0b1100_0000) === 0b1000_0000) {
+    start += 1;
+  }
+  return { text: buffer.subarray(start).toString("utf8"), truncated: true };
 }
 
 function capText(text: string | undefined, maxBytes: number): { value: string | undefined; truncated: boolean } {
@@ -146,6 +165,21 @@ export function summarizeSuccessfulAgentCommands(result: VerifyResult): AgentCom
       exit_code: command.exitCode,
       elapsed_ms: command.elapsedMs,
     }));
+}
+
+function countCappedChecks(result: VerifyResult): boolean {
+  if (result.checks.length > MAX_AGENT_CHECKS) return true;
+  return result.checks.some(check => {
+    const rawReason = check.reason ?? (check.ok ? undefined : "check failed");
+    return rawReason !== undefined &&
+      Buffer.byteLength(rawReason, "utf8") > MAX_AGENT_REASON_BYTES;
+  });
+}
+
+function countCappedSuccessfulCommands(result: VerifyResult): boolean {
+  const commands = result.checks.flatMap(check => check.commands ?? []).filter(command => command.ok);
+  return commands.length > MAX_AGENT_SUCCESSFUL_COMMANDS ||
+    commands.some(command => Buffer.byteLength(command.command, "utf8") > MAX_AGENT_COMMAND_BYTES);
 }
 
 function trimVerifySuccessfulCommands(projection: AgentVerifyProjection): boolean {
@@ -224,27 +258,7 @@ export function projectVerifySummaryForAgent(result: VerifyResult): AgentVerifyP
     checks: summarizeAgentChecks(result),
     successful_commands: summarizeSuccessfulAgentCommands(result),
   };
-  const truncated =
-    result.checks.length > MAX_AGENT_CHECKS ||
-    result.checks.flatMap(check => check.commands ?? []).filter(command => command.ok)
-      .length > MAX_AGENT_SUCCESSFUL_COMMANDS ||
-    JSON.stringify(projection) !==
-      JSON.stringify({
-        ok: result.ok,
-        checks: result.checks.map(check => ({
-          name: check.name,
-          ok: check.ok,
-          ...(check.ok ? {} : { reason: check.reason ?? "check failed" }),
-        })),
-        successful_commands: result.checks
-          .flatMap(check => check.commands ?? [])
-          .filter(command => command.ok)
-          .map(command => ({
-            command: command.command,
-            exit_code: command.exitCode,
-            elapsed_ms: command.elapsedMs,
-          })),
-      });
+  const truncated = countCappedChecks(result) || countCappedSuccessfulCommands(result);
   if (truncated) projection.projection_truncated = true;
   return enforceVerifyProjectionLimit(projection);
 }
@@ -256,13 +270,22 @@ function shrinkString(value: string, floorBytes = 0): { value: string; changed: 
   return { value: truncateUtf8(value, nextBytes).text, changed: true };
 }
 
+function shrinkStringSuffix(value: string, floorBytes = 0): { value: string; changed: boolean } {
+  const currentBytes = Buffer.byteLength(value, "utf8");
+  if (currentBytes <= floorBytes) return { value, changed: false };
+  const nextBytes = Math.max(floorBytes, Math.floor(currentBytes / 2));
+  return { value: truncateUtf8Suffix(value, nextBytes).text, changed: true };
+}
+
 function shrinkExcerptField(
   excerpt: OutputExcerpt | undefined,
   field: "head" | "tail",
 ): boolean {
   if (!excerpt || excerpt[field].length === 0) return false;
   const beforeBytes = Buffer.byteLength(excerpt[field], "utf8");
-  const next = shrinkString(excerpt[field]);
+  const next = field === "tail"
+    ? shrinkStringSuffix(excerpt[field])
+    : shrinkString(excerpt[field]);
   if (!next.changed) return false;
   excerpt[field] = next.value;
   const afterBytes = Buffer.byteLength(excerpt[field], "utf8");
@@ -337,6 +360,18 @@ function minimalProjection(projection: AgentFailureProjection): AgentFailureProj
   };
 }
 
+export function minimizeAgentFailureProjection(
+  projection: AgentFailureProjection,
+): AgentFailureProjection {
+  return minimalProjection(projection);
+}
+
+export function minimizeAgentVerifyProjection(
+  projection: AgentVerifyProjection,
+): AgentVerifyProjection {
+  return minimalVerifyProjection(projection);
+}
+
 function enforceAgentProjectionLimit(
   projection: AgentFailureProjection,
 ): AgentFailureProjection {
@@ -366,12 +401,108 @@ function enforceAgentProjectionLimit(
   return projection;
 }
 
-function evidenceError(error: unknown): { code: string; message?: string } {
-  const code = (error as NodeJS.ErrnoException).code ?? "EVIDENCE_WRITE_FAILED";
+function evidenceError(error: unknown): {
+  code: "EVIDENCE_UNAVAILABLE";
+  cause_code: "EVIDENCE_CONFLICT" | "EVIDENCE_PATH_UNSAFE" | "EVIDENCE_WRITE_FAILED";
+  system_code?: string;
+  message?: string;
+} {
+  const systemCode = (error as NodeJS.ErrnoException).code;
+  const causeCode =
+    systemCode === "EVIDENCE_CONFLICT"
+      ? "EVIDENCE_CONFLICT"
+      : systemCode === "PATH_NOT_OWNED" ||
+          systemCode === "PATH_OUTSIDE_PROJECT" ||
+          systemCode === "FS_AUTHORITY_FAILURE"
+        ? "EVIDENCE_PATH_UNSAFE"
+        : "EVIDENCE_WRITE_FAILED";
+  const message = error instanceof Error
+    ? capText(error.message, MAX_AGENT_EVIDENCE_ERROR_MESSAGE_BYTES).value
+    : undefined;
   return {
-    code,
-    ...(error instanceof Error ? { message: error.message } : {}),
+    code: "EVIDENCE_UNAVAILABLE",
+    cause_code: causeCode,
+    ...(systemCode !== undefined
+      ? { system_code: truncateUtf8(systemCode, MAX_AGENT_SYSTEM_CODE_BYTES).text }
+      : {}),
+    ...(message !== undefined ? { message } : {}),
   };
+}
+
+export type AgentJsonEnvelope =
+  | { ok: true; data: Record<string, unknown> }
+  | {
+      ok: false;
+      error: { code: string; cause_code?: string; message: string };
+      data: Record<string, unknown>;
+    };
+
+function capAgentEnvelopeFields(envelope: AgentJsonEnvelope): void {
+  if (!("data" in envelope) || typeof envelope.data !== "object") return;
+  const data = envelope.data as Record<string, unknown>;
+  if (typeof data.task_id === "string") {
+    data.task_id = truncateUtf8(data.task_id, MAX_AGENT_TASK_ID_BYTES).text;
+  }
+  if (typeof data.suggested_next_command === "string") {
+    data.suggested_next_command = truncateUtf8(
+      data.suggested_next_command,
+      MAX_AGENT_SUGGESTED_COMMAND_BYTES,
+    ).text;
+  }
+  if (typeof data.phase_id === "string") {
+    data.phase_id = truncateUtf8(data.phase_id, MAX_AGENT_TASK_ID_BYTES).text;
+  }
+  if (typeof data.agent === "string") {
+    data.agent = truncateUtf8(data.agent, MAX_AGENT_TASK_ID_BYTES).text;
+  }
+}
+
+function agentJsonLineBytes(envelope: AgentJsonEnvelope): number {
+  return Buffer.byteLength(`${JSON.stringify(envelope)}\n`, "utf8");
+}
+
+export function stringifyBoundedAgentEnvelope(envelope: AgentJsonEnvelope): string {
+  capAgentEnvelopeFields(envelope);
+  if (agentJsonLineBytes(envelope) <= MAX_AGENT_JSON_BYTES) {
+    return `${JSON.stringify(envelope)}\n`;
+  }
+
+  const data = envelope.data as Record<string, unknown>;
+  if ("failure" in data && "verify" in data) {
+    const minimized = minimizeAgentFailureProjection({
+      failure: data.failure as FailureCapsule,
+      verify: data.verify as AgentVerifyProjection,
+    });
+    data.failure = minimized.failure;
+    data.verify = minimized.verify;
+  } else if ("verify" in data) {
+    data.verify = minimizeAgentVerifyProjection(data.verify as AgentVerifyProjection);
+  }
+
+  if (agentJsonLineBytes(envelope) > MAX_AGENT_JSON_BYTES) {
+    delete data.suggested_next_command;
+  }
+  if (agentJsonLineBytes(envelope) > MAX_AGENT_JSON_BYTES) {
+    delete data.event;
+  }
+  if (agentJsonLineBytes(envelope) > MAX_AGENT_JSON_BYTES) {
+    delete data.task_id;
+  }
+
+  if (agentJsonLineBytes(envelope) > MAX_AGENT_JSON_BYTES && "failure" in data) {
+    const failure = data.failure as FailureCapsule;
+    data.failure = {
+      schema_version: 1,
+      kind: failure.kind,
+      check: failure.check,
+      projection_truncated: true,
+    } satisfies FailureCapsule;
+  }
+
+  if (agentJsonLineBytes(envelope) > MAX_AGENT_JSON_BYTES) {
+    throw new Error("agent JSON envelope could not be bounded below 24 KiB");
+  }
+  return `${JSON.stringify(envelope)}\n`;
 }
 
 export async function projectVerifyForAgent(

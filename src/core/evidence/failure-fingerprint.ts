@@ -50,7 +50,9 @@ export function normalizeFailureText(text: string, cwd: string): string {
 }
 
 function excerptFingerprintText(excerpt: OutputExcerpt): string {
-  return `${excerpt.head}\n[...${excerpt.omitted_bytes} omitted bytes...]\n${excerpt.tail}`;
+  return excerpt.truncated
+    ? `${excerpt.head}\n<truncated>\n${excerpt.tail}`
+    : excerpt.head;
 }
 
 export function fingerprintFailure(
