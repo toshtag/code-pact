@@ -4,9 +4,10 @@ A finished project accumulates completed phases and settled decisions. code-pact
 lets you **remove** those historical design docs — a completed
 `design/phases/*.yaml` or a retired `design/decisions/**/*.md` — without breaking
 anything that still points at them. This page is the user-facing walkthrough of
-**how to do it safely**. The exact command contracts (JSON envelopes, error codes)
-live in [`cli-contract.md`](../cli-contract.md#phase-archive); each verb's full
-flag reference is in its `--help`.
+**how to do it safely**. Generated command usage and flags live in
+[`cli-reference.generated.md`](../cli-reference.generated.md); the exact command
+contracts (JSON envelopes, error codes) live in
+[`cli-contract.md`](../cli-contract.md#phase-archive).
 
 ## The short answer
 

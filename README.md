@@ -83,7 +83,8 @@ New to the terms used here (context pack, envelope, derived state, …)? The [`d
 | [`docs/positioning.md`](docs/positioning.md) | What `code-pact` is, what it deliberately is not, the core CLI surfaces, and the success metrics the project measures itself against. |
 | [`docs/agent-contract.md`](docs/agent-contract.md) | The agent contract: what `code-pact` guarantees, what `adapter conformance` requires of each agent integration, and the recommended per-task lifecycle. |
 | [`docs/getting-started.md`](docs/getting-started.md) | First-thirty-minutes guide (onboarding approaches + the per-task loop). |
-| [`docs/cli-contract.md`](docs/cli-contract.md) | Full flag / exit code / JSON envelope / error code reference and the Stability taxonomy. |
+| [`docs/cli-reference.generated.md`](docs/cli-reference.generated.md) | Generated command usage, flags, and examples. |
+| [`docs/cli-contract.md`](docs/cli-contract.md) | Exit codes, JSON envelopes, error codes, semantic guarantees, and the Stability taxonomy. |
 | [`docs/upgrading.md`](docs/upgrading.md) | How to upgrade — additive within a major, with a migration note per major bump; pointers for coming from an earlier alpha. |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | Diagnostic code → recovery action for the most common error codes. |
 | [`docs/community.md`](docs/community.md) | Where to file issues / discussions / PRs, the GitHub Discussions intent, and the scope-discipline rule for the Non-goals list. |

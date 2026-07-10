@@ -117,5 +117,7 @@ code-pact task finalize P1-T1 --write --json
   (one task) or `phase reconcile` (a whole phase) is what reconciles them. If
   they drift, `plan analyze` reports a `STATUS_DRIFT` warning.
 
-For the full flag, exit-code, and envelope reference of every verb, see
+For generated command usage, flags, and examples, see
+[cli-reference.generated.md](cli-reference.generated.md). For exit codes,
+JSON envelopes, error codes, and semantic guarantees, see
 [cli-contract.md](cli-contract.md).

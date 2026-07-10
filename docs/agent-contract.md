@@ -8,10 +8,11 @@
 This document defines the contract between `code-pact` and any AI
 coding agent that drives work in a code-pact project. It pairs with
 [`docs/positioning.md`](positioning.md) (what the project is and is
-not) and [`docs/cli-contract.md`](cli-contract.md) (the full CLI
-reference). Read this when integrating a new agent, when reviewing
-adapter changes, or when judging whether a proposed feature is in
-scope.
+not) and [`docs/cli-contract.md`](cli-contract.md) (the CLI semantic
+contract). Generated command usage, flags, and examples live in
+[`docs/cli-reference.generated.md`](cli-reference.generated.md). Read this when
+integrating a new agent, when reviewing adapter changes, or when judging
+whether a proposed feature is in scope.
 
 The contract has three sides:
 
@@ -402,8 +403,10 @@ is not itself a contract violation.
 - [`docs/positioning.md`](positioning.md) — what code-pact is, what
   it deliberately is not, the core CLI surfaces, the success
   metrics.
-- [`docs/cli-contract.md`](cli-contract.md) — full flag / exit code
-  / JSON envelope / error code reference.
+- [`docs/cli-reference.generated.md`](cli-reference.generated.md) —
+  generated command usage, flags, and examples.
+- [`docs/cli-contract.md`](cli-contract.md) — exit codes, JSON
+  envelopes, error codes, and semantic guarantees.
 - [`src/core/adapters/conformance-spec.ts`](../src/core/adapters/conformance-spec.ts)
   — single source of truth for the required surfaces and headings;
   imported by `adapter doctor`, `adapter conformance`, and the
