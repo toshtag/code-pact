@@ -535,9 +535,11 @@ The validation pass detects logic errors before any write; ordinary disk failure
 
 `code-pact spec import` is a read-only one-way bridge that ingests external spec-driven planning artifacts into code-pact's phase YAML. **It does NOT re-implement Spec Kit or any spec-generation tool** — code-pact remains a control plane that accepts artifacts produced by other tools.
 
+For usage, flags, and basic examples, see the generated [CLI reference § `spec import`](cli-reference.generated.md#spec-import).
+
 Two mutually exclusive modes:
 
-### `spec import --from <tasks.md> --phase-id <id> [--write] [--force] [--json]`
+### Import from tasks.md
 
 Parses a Spec Kit-style `tasks.md` (or any Markdown that follows the supported subset) into a draft phase YAML.
 
@@ -547,13 +549,7 @@ Parses a Spec Kit-style `tasks.md` (or any Markdown that follows the supported s
 - `- [ ]` unchecked checkbox item → one task candidate
 - Everything else (other heading levels, plain bullets, numbered lists, checked items, prose, code fences, tables, frontmatter, HTML comments) is silently dropped and counted in `skipped_lines`.
 
-**Flags:**
-
-- `--from <path>` — required. Must pass `assertSafeRelativePath` (relative to cwd, no `..`, no absolute, no leading `~`).
-- `--phase-id <id>` — required. Must match `/^[A-Za-z][A-Za-z0-9_-]*$/`.
-- `--write` — persist to `design/phases/<id>-imported.yaml`. Default is dry-run (prints YAML to stdout).
-- `--force` — overwrite an existing `design/phases/<id>-imported.yaml`.
-- `--json` — emit the JSON envelope on stdout.
+In import mode, the source path must pass `assertSafeRelativePath` (relative to cwd, no `..`, no absolute, no leading `~`). The phase id must match `/^[A-Za-z][A-Za-z0-9_-]*$/`. Dry-run is the default and prints YAML to stdout; write mode persists to `design/phases/<id>-imported.yaml`, refusing to overwrite an existing draft unless force is requested.
 
 **Generated phase shape:** tasks carry minimal P10 defaults — `type=feature`, all judgement axes (`ambiguity`, `risk`, `context_size`, `write_surface`, `verification_strength`, `expected_duration`) = `medium`, `status=planned`. Descriptions are the verbatim `- [ ]` text prefixed with the section title (`[Section Name] task text`). The user adds `reads` / `writes` / `acceptance_refs` after import.
 
@@ -580,7 +576,7 @@ Parses a Spec Kit-style `tasks.md` (or any Markdown that follows the supported s
 
 `output_path` is `null` on dry-run. `warnings` summarises dropped constructs by code+count.
 
-### `spec import --suggest-from <path> --json`
+### Suggest from spec.md / plan.md
 
 Reads a Spec Kit `spec.md` or `plan.md` and surfaces brief / constitution candidates. **Never writes any file** — the user pipes the suggestions into `plan brief --from-file` / `plan constitution --from-file` (v1.6 P17 non-interactive paths) if they accept them.
 
