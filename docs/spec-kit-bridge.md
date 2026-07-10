@@ -6,10 +6,12 @@
 
 This bridge lives under the top-level `spec` namespace. Two complementary modes share the same command:
 
+For generated flags, usage, and examples, see the generated [CLI reference § `spec import`](cli-reference.generated.md#spec-import). This page focuses on workflow, semantics, and the supported input subset.
+
 | Mode | What it does | Writes a file? |
 | --- | --- | --- |
-| `spec import --from <tasks.md> --phase-id <id> [--write]` | Parses tasks.md → draft phase YAML | Only with `--write` (to `design/phases/<id>-imported.yaml`) |
-| `spec import --suggest-from <spec.md\|plan.md>` | Extracts brief / constitution candidates | Never |
+| Import mode (`--from` + `--phase-id`) | Parses tasks.md → draft phase YAML | Only with `--write` (to `design/phases/<id>-imported.yaml`) |
+| Suggestion mode (`--suggest-from`) | Extracts brief / constitution candidates | Never |
 
 ## Mode 1 — importing `tasks.md` into a phase YAML draft
 

@@ -165,6 +165,8 @@ See [`docs/concepts/sample-phase.md`](../concepts/sample-phase.md) for the keep 
 
 If you already have a `tasks.md` from Spec Kit (or any compatible tool that emits the Heading 3 + `- [ ]` checkbox subset), `spec import` bootstraps a draft phase YAML without re-typing the tasks:
 
+For exhaustive generated flags, usage, and examples, see the generated [CLI reference § `spec import`](../cli-reference.generated.md#spec-import). The examples below show the maintainer workflow around the import.
+
 ```sh
 # 1. Dry-run first — prints the generated YAML to stdout
 code-pact spec import --from path/to/tasks.md --phase-id P-imported --json
