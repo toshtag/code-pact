@@ -533,7 +533,7 @@ The validation pass detects logic errors before any write; ordinary disk failure
 
 ## `spec import` (v1.8+)
 
-`code-pact spec import` is a read-only one-way bridge that ingests external spec-driven planning artifacts into code-pact's phase YAML. **It does NOT re-implement Spec Kit or any spec-generation tool** — code-pact remains a control plane that accepts artifacts produced by other tools.
+`code-pact spec import` is a dry-run-first, one-way bridge that ingests external spec-driven planning artifacts into code-pact's phase YAML. It never mutates the source artifact; `--write` can persist an unregistered draft phase inside the code-pact project. **It does NOT re-implement Spec Kit or any spec-generation tool** — code-pact remains a control plane that accepts artifacts produced by other tools.
 
 For usage, flags, and basic examples, see the generated [CLI reference § `spec import`](cli-reference.generated.md#spec-import).
 
@@ -3452,17 +3452,16 @@ Auto-flip implementation (e.g. a `--phase-status` flag on `phase reconcile`, or 
 > locked by the JSON envelope / exit code / error code
 > contract documented above, not by file paths.
 
-The CLI wrapper layer (argv parsing, flag validation, error envelope
-shaping) lives in two places. The pure-function command implementations
-that the wrappers call into live separately under [`src/commands/`](../src/commands/)
-and are untouched by this split.
+The CLI wrapper layer owns argv parsing, flag validation, cluster dispatch, and
+error-envelope shaping. The pure-function command implementations that the
+wrappers call into live separately under [`src/commands/`](../src/commands/).
 
-| File                                                            | Cluster                                                                                                    | Contents                                                                                                                                                                                                                                                                                                                                      |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`src/cli.ts`](../src/cli.ts)                                   | top-level dispatch + init / doctor / validate / recommend / verify / pack / progress                       | The main entry point. `main()` parses argv, resolves locale, and routes to per-cluster dispatchers. Roughly 2400 lines after P27.                                                                                                                                                                                                             |
-| [`src/cli/commands/task.ts`](../src/cli/commands/task.ts)       | task                                                                                                       | `cmdTask` (exported) + `cmdTaskAdd` / `cmdTaskContext` / `cmdTaskPrepare` / `cmdTaskComplete` / `cmdTaskFinalize` / `cmdTaskRunbook` / `cmdTaskStart` / `cmdTaskBlock` / `cmdTaskResume` / `cmdTaskStatus` (private to module) + the cluster-private helpers `TASK_ADD_NON_INTERACTIVE_ONLY_FLAGS`, `emitConfigError`, `emitTaskCommonError`. |
-| [`src/cli/commands/adapter.ts`](../src/cli/commands/adapter.ts) | adapter                                                                                                    | `cmdAdapter` (exported) + `cmdAdapterList` / `cmdAdapterInstall` / `cmdAdapterDoctor` / `cmdAdapterConformance` / `cmdAdapterUpgrade` (private to module) + the cluster-private `runAdapterInstallAndEmit` helper.                                                                                                                            |
-| [`src/cli/util.ts`](../src/cli/util.ts)                         | shared                                                                                                     | `withWriteLock` — the P14 advisory-write-lock wrapper. Imported by `src/cli.ts` and split cluster wrappers for mutating commands.                                                                                                                                                                                                             |
+| Path | Owns |
+| --- | --- |
+| [`src/cli.ts`](../src/cli.ts) | Top-level dispatch and root commands such as `init`, `doctor`, `validate`, `recommend`, `verify`, `pack`, and `progress`. |
+| [`src/cli/commands/<cluster>.ts`](../src/cli/commands/) | Cluster dispatch and command-wrapper behavior for `task`, `plan`, `phase`, `adapter`, `decision`, `state`, and `spec`. |
+| [`src/cli/spec/<cluster>.ts`](../src/cli/spec/) | Generated usage/help/reference source for migrated clusters. Parser options, rich help, and [`docs/cli-reference.generated.md`](cli-reference.generated.md) derive from these specs where the cluster has been migrated. |
+| [`src/cli/util.ts`](../src/cli/util.ts) | Shared CLI wrapper utilities such as the advisory write lock and JSON envelope helpers. |
 
 ### Where new commands go
 
@@ -3472,9 +3471,9 @@ When adding a new CLI command:
 
 2. **If it is a new top-level command** still hosted in `src/cli.ts` (init, doctor, validate, verify, pack, progress, recommend), the new `cmd*` function goes in `src/cli.ts` next to its peers, and the top-level `main()` dispatch gains a new branch.
 
-3. **If a cluster currently hosted in `src/cli.ts` grows enough to warrant its own file**, file an RFC amendment to P27 (or a follow-up RFC) and extract the cluster in its own task. The pure-refactor invariant (existing tests pass without modification) is the safety guarantee.
+3. **If a future top-level command grows into a subcommand cluster**, file a focused follow-up and extract that cluster into `src/cli/commands/<cluster>.ts`. The pure-refactor invariant (existing tests pass without modification) is the safety guarantee.
 
-The pure-function implementation layer that the CLI wrappers call into lives separately under [`src/commands/`](../src/commands/) (e.g. `task-context.ts`, `adapter-conformance.ts`). That layer is unaffected by P27 — only the CLI wrapper layer is split.
+The pure-function implementation layer that the CLI wrappers call into lives separately under [`src/commands/`](../src/commands/) (e.g. `task-context.ts`, `adapter-conformance.ts`). That layer is intentionally separate from the wrapper/spec ownership above.
 
 ## Maintainer-only tooling (NOT part of the CLI surface)
 

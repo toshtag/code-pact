@@ -1,6 +1,6 @@
 # Spec Kit bridge
 
-`code-pact spec import` is a **read-only, one-way bridge** that ingests external spec-driven planning artifacts (initially the `tasks.md` file format used by Spec Kit and similar tools) into code-pact's phase YAML.
+`code-pact spec import` is a **dry-run-first, one-way bridge** that ingests external spec-driven planning artifacts (initially the `tasks.md` file format used by Spec Kit and similar tools) into code-pact's phase YAML. It never mutates the source artifact; `--write` can persist an unregistered draft phase inside the code-pact project.
 
 > **code-pact does not re-implement Spec Kit.** It accepts artifacts produced by other tools so teams already invested in Spec Kit can adopt code-pact without throwing their planning work away. If you do not already have a `tasks.md`, you do not need this command — start with `code-pact init` and `code-pact plan brief`.
 

@@ -358,7 +358,7 @@ The essentials above get you through your first task. These are the next things 
 
 - **Optional task readiness fields** (`depends_on` / `reads` / `writes` / `decision_refs` / `acceptance_refs`) — declare a task's dependencies and read/write surface to shape its context pack. Fully optional. → [concepts/task-readiness-fields.md](concepts/task-readiness-fields.md)
 - **Concurrent runs & the write lock** — what `LOCK_HELD` means and how to recover. → [troubleshooting.md § `LOCK_HELD`](troubleshooting.md#lock_held-from-a-lock-covered-mutation) · [concepts/governance.md](concepts/governance.md)
-- **Importing a Spec Kit plan** (`tasks.md` / `spec.md`) — the read-only one-way bridge. → [spec-kit-bridge.md](spec-kit-bridge.md)
+- **Importing a Spec Kit plan** (`tasks.md` / `spec.md`) — the dry-run-first bridge that never mutates the source artifact. → [spec-kit-bridge.md](spec-kit-bridge.md)
 - **Managing adapters over time** (`adapter upgrade`, drift) — after the one-time install. → [upgrading.md](upgrading.md)
 
 ## Next reading
@@ -367,4 +367,4 @@ The essentials above get you through your first task. These are the next things 
 - [`docs/troubleshooting.md`](troubleshooting.md) — diagnostic code → recovery action for the most common error codes.
 - [`docs/upgrading.md`](upgrading.md) — how to upgrade an existing project.
 - [`docs/concepts/governance.md`](concepts/governance.md) — the governance layer (advisory write lock, reserved ids, roadmap mutation policy).
-- [`docs/spec-kit-bridge.md`](spec-kit-bridge.md) — the read-only one-way importer for Spec Kit `tasks.md` / `spec.md` / `plan.md`.
+- [`docs/spec-kit-bridge.md`](spec-kit-bridge.md) — the dry-run-first importer for Spec Kit `tasks.md` / `spec.md` / `plan.md`; it never mutates the source artifact.
