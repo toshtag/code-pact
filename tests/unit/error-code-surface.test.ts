@@ -86,6 +86,7 @@ const KNOWN_CODES: Record<
   DUPLICATE_PHASE_ID: "public",
   EVIDENCE_CONFLICT: "public",
   EVIDENCE_DIGEST_MISMATCH: "public",
+  EVIDENCE_INVALID: "public",
   EVIDENCE_NOT_FOUND: "public",
   FS_AUTHORITY_FAILURE: "public",
   INVALID_EVIDENCE_REF: "public",

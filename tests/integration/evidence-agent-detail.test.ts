@@ -117,4 +117,35 @@ describe("agent detail evidence envelope", () => {
     const shownEnv = expectJsonOk<{ artifact: { stderr: string } }>(shown);
     expect(shownEnv.data.artifact.stderr).toContain("ERRERRERR");
   });
+
+  it("verify rejects unexpected positionals through the root command spec parser", async () => {
+    const p = await setupFailingTask();
+    const failed = p.run([
+      "verify",
+      "--phase",
+      "P1",
+      "--task",
+      "P1-T1",
+      "--json",
+      "extra",
+    ]);
+
+    expect(failed.code).toBe(2);
+    expectJsonErr(failed, "CONFIG_ERROR");
+  });
+
+  it("evidence show rejects extra positionals", async () => {
+    const p = await setupFailingTask();
+    const failed = p.run([
+      "evidence",
+      "show",
+      `evidence:sha256:${"a".repeat(64)}`,
+      `evidence:sha256:${"b".repeat(64)}`,
+      "--json",
+    ]);
+
+    expect(failed.code).toBe(2);
+    const env = expectJsonErr(failed, "CONFIG_ERROR");
+    expect(env.error.message).toContain("exactly one evidence ref");
+  });
 });

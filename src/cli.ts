@@ -20,6 +20,8 @@ import {
   createCliAbortSignal,
   parseTimeoutArg,
 } from "./cli/util.ts";
+import { ROOT_SPECS } from "./cli/spec/root.ts";
+import { toParseOptions } from "./cli/spec/render.ts";
 import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
 import { runVerify, formatVerify } from "./commands/verify.ts";
@@ -665,19 +667,14 @@ async function cmdVerify(
   globalJson: boolean,
 ): Promise<number> {
   const m = messages[locale];
-  const { values } = parseArgs({
-    args: argv,
-    options: {
-      phase: { type: "string" },
-      task: { type: "string" },
-      "dry-run": { type: "boolean" },
-      timeout: { type: "string" },
-      detail: { type: "string" },
-      json: { type: "boolean" },
-    },
-    strict: false,
-    allowPositionals: false,
-  });
+  let values: Record<string, unknown>;
+  try {
+    ({ values } = strictParse("verify", argv, toParseOptions(ROOT_SPECS.verify)));
+  } catch (error) {
+    if (!(error instanceof ConfigError)) throw error;
+    emitError(globalJson || argv.includes("--json"), "CONFIG_ERROR", error.message);
+    return 2;
+  }
 
   const json = globalJson || values.json === true;
   const phaseId = values.phase as string | undefined;

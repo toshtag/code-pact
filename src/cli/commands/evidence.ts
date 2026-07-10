@@ -54,15 +54,17 @@ async function cmdEvidenceShow(
   }
 
   const json = globalJson || values.json === true;
-  const ref = positionals[0];
-  if (!ref) {
+  if (positionals.length !== 1) {
     emitError(
       json,
       "CONFIG_ERROR",
-      "evidence show requires an evidence ref (e.g. evidence:sha256:<digest>).",
+      positionals.length === 0
+        ? "evidence show requires an evidence ref (e.g. evidence:sha256:<digest>)."
+        : "evidence show accepts exactly one evidence ref.",
     );
     return 2;
   }
+  const ref = positionals[0]!;
 
   const streamRaw = (values.stream as string | undefined) ?? "all";
   if (streamRaw !== "all" && streamRaw !== "stdout" && streamRaw !== "stderr") {
@@ -91,7 +93,7 @@ async function cmdEvidenceShow(
     }
     return 0;
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code ?? "EVIDENCE_ERROR";
+    const code = (error as NodeJS.ErrnoException).code ?? "EVIDENCE_INVALID";
     const message = error instanceof Error ? error.message : String(error);
     const exit = code === "INVALID_EVIDENCE_REF" || code === "CONFIG_ERROR" ? 2 : 1;
     emitError(json, code, message);
