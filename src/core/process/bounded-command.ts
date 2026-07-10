@@ -19,6 +19,8 @@ export type CommandExecutionResult = {
   elapsedMs: number;
   stdout: string;
   stderr: string;
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
   termination?: ProcessTerminationResult;
 };
 
@@ -45,6 +47,7 @@ export type ProcessTerminationDependencies = {
 function createOutputCapture(): {
   append: (chunk: Buffer) => void;
   value: () => string;
+  truncated: () => boolean;
 } {
   let text = "";
   let bytes = 0;
@@ -65,6 +68,7 @@ function createOutputCapture(): {
       truncated = true;
     },
     value: () => text,
+    truncated: () => truncated,
   };
 }
 
@@ -247,6 +251,8 @@ export async function runBoundedCommand(
       exitCode: 1,
       stdout: "",
       stderr: "empty verification command",
+      stdoutTruncated: false,
+      stderrTruncated: false,
       timedOut: false,
       aborted: false,
       elapsedMs: 0,
@@ -257,6 +263,8 @@ export async function runBoundedCommand(
       exitCode: null,
       stdout: "",
       stderr: "aborted before start",
+      stdoutTruncated: false,
+      stderrTruncated: false,
       timedOut: false,
       aborted: true,
       elapsedMs: 0,
@@ -325,6 +333,8 @@ export async function runBoundedCommand(
       exitCode: outcome.result.exitCode,
       stdout: stdout.value(),
       stderr: stderr.value(),
+      stdoutTruncated: stdout.truncated(),
+      stderrTruncated: stderr.truncated(),
       timedOut: false,
       aborted: false,
       elapsedMs: elapsedSince(started),
@@ -365,6 +375,8 @@ export async function runBoundedCommand(
     exitCode,
     stdout: stdout.value(),
     stderr: stderr.value(),
+    stdoutTruncated: stdout.truncated(),
+    stderrTruncated: stderr.truncated(),
     timedOut: cause === "timeout",
     aborted: cause === "abort",
     elapsedMs: elapsedSince(started),

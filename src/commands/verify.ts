@@ -42,6 +42,8 @@ export type CheckResult = {
   command?: string;
   stdout?: string;
   stderr?: string;
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
   timedOut?: boolean;
   aborted?: boolean;
   exitCode?: number | null;
@@ -90,6 +92,8 @@ async function checkCommands(
         elapsedMs: 0,
         stdout: "",
         stderr: "",
+        stdoutTruncated: false,
+        stderrTruncated: false,
       });
     }
     return {
@@ -103,6 +107,8 @@ async function checkCommands(
       elapsedMs: 0,
       stdout: "",
       stderr: "",
+      stdoutTruncated: false,
+      stderrTruncated: false,
       commands: commandResults,
     };
   }
@@ -133,6 +139,8 @@ async function checkCommands(
         command,
         stdout: result.stdout,
         stderr: result.stderr,
+        stdoutTruncated: result.stdoutTruncated,
+        stderrTruncated: result.stderrTruncated,
         timedOut: result.timedOut,
         aborted: result.aborted,
         exitCode: result.exitCode,
@@ -148,6 +156,8 @@ async function checkCommands(
     command: commands.join("; "),
     stdout: "",
     stderr: "",
+    stdoutTruncated: false,
+    stderrTruncated: false,
     timedOut: false,
     aborted: false,
     exitCode: 0,

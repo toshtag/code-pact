@@ -24,6 +24,15 @@ export function artifactDigest(artifact: EvidenceArtifact): string {
     .digest("hex");
 }
 
+function evidenceInvalid(message: string, cause?: unknown): Error {
+  const error = new Error(message);
+  (error as NodeJS.ErrnoException).code = "EVIDENCE_INVALID";
+  if (cause !== undefined) {
+    (error as Error & { cause?: unknown }).cause = cause;
+  }
+  return error;
+}
+
 export async function storeEvidenceArtifact(
   cwd: string,
   artifact: EvidenceArtifact,
@@ -65,7 +74,19 @@ export async function loadEvidenceArtifact(
     }
     throw error;
   }
-  const parsed = EvidenceArtifactSchema.parse(JSON.parse(raw));
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(raw);
+  } catch (error) {
+    throw evidenceInvalid("evidence artifact is not valid JSON", error);
+  }
+
+  const parsedResult = EvidenceArtifactSchema.safeParse(decoded);
+  if (!parsedResult.success) {
+    throw evidenceInvalid("evidence artifact does not match the evidence schema", parsedResult.error);
+  }
+
+  const parsed = parsedResult.data;
   const actual = artifactDigest(parsed);
   if (actual !== digest) {
     const mismatch = new Error("evidence file content does not match reference digest");
