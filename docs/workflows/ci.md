@@ -4,10 +4,12 @@ This page is the single home for wiring code-pact into CI. It **sequences and
 links** the pieces — it does not restate them. The detectors it relies on already
 exist (`CONTROL_PLANE_*`, branch-drift; see [`cli-contract.md`](../cli-contract.md#error-codes)).
 
-If you only want the per-command reference (flags, JSON envelopes, the
-branch-drift `--base-ref` mechanics), read [`cli-contract.md`](../cli-contract.md);
-for the install/pinning rationale, read [`getting-started.md`](../getting-started.md).
-This page is about **which checks to run, when, and what must be true first.**
+If you only want generated command usage and flags, read
+[`cli-reference.generated.md`](../cli-reference.generated.md). For JSON envelopes
+and the branch-drift `--base-ref` mechanics, read
+[`cli-contract.md`](../cli-contract.md); for the install/pinning rationale, read
+[`getting-started.md`](../getting-started.md). This page is about **which checks
+to run, when, and what must be true first.**
 
 ## Two loops, not one
 
@@ -117,6 +119,7 @@ the workflow above will do anything useful:
 
 ## See also
 
-- [`cli-contract.md`](../cli-contract.md) — the command/flag/envelope reference and the branch-drift gate mechanics.
+- [`cli-reference.generated.md`](../cli-reference.generated.md) — generated command usage, flags, and examples.
+- [`cli-contract.md`](../cli-contract.md) — JSON envelopes, exit codes, error codes, semantic guarantees, and branch-drift gate mechanics.
 - [`getting-started.md`](../getting-started.md) — install + exact-version pinning.
 - [`maintainers/operations.md`](../maintainers/operations.md) — the maintainer planning-integrity and release-prep posture.
