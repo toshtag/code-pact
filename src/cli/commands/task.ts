@@ -33,6 +33,7 @@ import {
 import { isStandardContextBudgetProfile } from "../../core/context-fit/budget-profiles.ts";
 import type { ContextBudgetProfiles } from "../../core/schemas/agent-profile.ts";
 import { runTaskComplete } from "../../commands/task-complete.ts";
+import { projectVerifyForPublicJson } from "../../commands/verify.ts";
 import {
   runTaskRecordDone,
   type DecisionRequiredData,
@@ -70,6 +71,62 @@ import {
   type FailureSummary,
 } from "../../core/failure/failure-summary.ts";
 import { renderFailureSummaryLines } from "../render/failure-summary.ts";
+import {
+  projectPreflightFailureForAgent,
+  projectVerifyForAgent,
+  projectVerifySummaryForAgent,
+  stringifyBoundedAgentEnvelope,
+} from "../../core/evidence/failure-capsule.ts";
+
+function wantsAgentDetail(argv: string[], globalJson: boolean): boolean {
+  const detailIndex = argv.indexOf("--detail");
+  return (
+    (globalJson || argv.includes("--json")) &&
+    (argv.includes("--detail=agent") ||
+      (detailIndex >= 0 && argv[detailIndex + 1] === "agent"))
+  );
+}
+
+function emitAgentTaskCompleteError(
+  error: { code: string; cause_code?: string; message: string },
+  reason?: string,
+  data: Record<string, unknown> = {},
+): void {
+  process.stdout.write(
+    stringifyBoundedAgentEnvelope({
+      ok: false,
+      error,
+      data: {
+        ...data,
+        ...projectPreflightFailureForAgent(
+          error.cause_code === "ABORTED" ? "aborted" : "invalid_state",
+          reason,
+        ),
+      },
+    }),
+  );
+}
+
+function messageForAgentError(code: string): string {
+  switch (code) {
+    case "TASK_NOT_FOUND":
+      return "Task not found";
+    case "AMBIGUOUS_TASK_ID":
+      return "Ambiguous task id";
+    case "AGENT_NOT_FOUND":
+      return "Agent not found";
+    case "AGENT_NOT_ENABLED":
+      return "Agent not enabled";
+    case "INVALID_TASK_TRANSITION":
+      return "Invalid task transition";
+    case "PHASE_SNAPSHOT_INVALID":
+      return "Phase snapshot invalid";
+    case "CONFIG_ERROR":
+      return "Invalid configuration";
+    default:
+      return "Task complete failed";
+  }
+}
 
 export async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
   const subcommand = argv[0];
@@ -840,13 +897,40 @@ async function cmdTaskComplete(
       { allowPositionals: true },
     ));
   } catch (error) {
+    if (error instanceof ConfigError && wantsAgentDetail(argv, globalJson)) {
+      emitAgentTaskCompleteError(
+        { code: "CONFIG_ERROR", message: "Invalid configuration" },
+        error.message,
+      );
+      return 2;
+    }
     return emitParseConfigError(error, argv, globalJson);
   }
 
   const json = globalJson || values.json === true;
   const dryRun = values["dry-run"] === true;
+  const detail = values.detail as string | undefined;
   const taskId = positionals[0];
+  if (detail !== undefined && !json) {
+    emitError(false, "CONFIG_ERROR", "task complete: --detail requires --json");
+    return 2;
+  }
+  if (detail !== undefined && detail !== "full" && detail !== "agent") {
+    emitError(
+      json,
+      "CONFIG_ERROR",
+      `task complete: invalid --detail "${detail}" (expected full or agent)`,
+    );
+    return 2;
+  }
   if (!taskId) {
+    if (detail === "agent") {
+      emitAgentTaskCompleteError(
+        { code: "CONFIG_ERROR", message: "Invalid configuration" },
+        "task complete requires a task id (e.g. `task complete P1-T1`).",
+      );
+      return 2;
+    }
     emitError(
       json,
       "CONFIG_ERROR",
@@ -854,8 +938,19 @@ async function cmdTaskComplete(
     );
     return 2;
   }
-  const parsedTimeout = parseTimeoutArg(values.timeout as string | undefined, json);
-  if (!parsedTimeout.ok) return parsedTimeout.exitCode;
+  const parsedTimeout = parseTimeoutArg(values.timeout as string | undefined, json, {
+    emit: detail !== "agent",
+  });
+  if (!parsedTimeout.ok) {
+    if (detail === "agent") {
+      emitAgentTaskCompleteError(
+        { code: "CONFIG_ERROR", message: "Invalid configuration" },
+        "Invalid timeout.",
+        { task_id: taskId },
+      );
+    }
+    return parsedTimeout.exitCode;
+  }
 
   const agent = values.agent as string | undefined;
   const { signal, cleanup } = createCliAbortSignal();
@@ -871,12 +966,17 @@ async function cmdTaskComplete(
 
     if (result.kind === "already_done") {
       if (json) {
-        emitOk({
+        const data = {
           already_done: true,
           task_id: result.task_id,
           phase_id: result.phase_id,
           agent: result.agent,
-        });
+        };
+        if (detail === "agent") {
+          process.stdout.write(stringifyBoundedAgentEnvelope({ ok: true, data }));
+        } else {
+          emitOk(data);
+        }
       } else {
         process.stdout.write(`${m.task.complete.alreadyDone(taskId)}\n`);
       }
@@ -885,13 +985,18 @@ async function cmdTaskComplete(
 
     if (result.kind === "dry_run") {
       if (json) {
-        emitOk({
+        const data = {
           dry_run: true,
           task_id: result.task_id,
           phase_id: result.phase_id,
           agent: result.agent,
           would_append: result.would_append,
-        });
+        };
+        if (detail === "agent") {
+          process.stdout.write(stringifyBoundedAgentEnvelope({ ok: true, data }));
+        } else {
+          emitOk(data);
+        }
       } else {
         process.stdout.write(`${m.task.complete.dryRun(taskId)}\n`);
       }
@@ -899,13 +1004,21 @@ async function cmdTaskComplete(
     }
 
     if (json) {
-      emitOk({
+      const data = {
         task_id: result.task_id,
         phase_id: result.phase_id,
         agent: result.agent,
         event: result.event,
-        verify: { ok: true, checks: result.verify.checks },
-      });
+        verify:
+          detail === "agent"
+            ? projectVerifySummaryForAgent(result.verify)
+            : projectVerifyForPublicJson(result.verify),
+      };
+      if (detail === "agent") {
+        process.stdout.write(stringifyBoundedAgentEnvelope({ ok: true, data }));
+      } else {
+        emitOk(data);
+      }
     } else {
       process.stdout.write(`${m.task.complete.success(taskId, result.agent)}\n`);
     }
@@ -921,13 +1034,29 @@ async function cmdTaskComplete(
         message: m.task.complete.aborted(taskId),
       };
       if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
+        if (detail === "agent") {
+          process.stdout.write(
+            stringifyBoundedAgentEnvelope({
+              ok: false,
+              error: {
+                code: "VERIFICATION_FAILED",
+                cause_code: "ABORTED",
+                message: "Verification aborted",
+              },
+              data: {
+                task_id: taskId,
+                aborted: true,
+                ...projectPreflightFailureForAgent("aborted", m.task.complete.aborted(taskId)),
+              },
+            }),
+          );
+        } else {
+          process.stdout.write(`${JSON.stringify({
             ok: false,
             error: errorObj,
             data: { task_id: taskId, aborted: true },
-          })}\n`,
-        );
+          })}\n`);
+        }
       } else {
         process.stderr.write(`${errorObj.message}\n`);
       }
@@ -979,20 +1108,40 @@ async function cmdTaskComplete(
       }
 
       if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: false,
-            error: errorObj,
-            data: {
-              task_id: taskId,
-              verify: { ok: false, checks },
-              failed_checks: summary.failed_checks,
-              first_failure: summary.first_failure,
-              suggested_next_command: summary.suggested_next_command,
-              ...(wasAborted ? { aborted: true } : {}),
-            },
-          })}\n`,
-        );
+        const verifyResult = { ok: false as const, checks };
+        if (detail === "agent") {
+          process.stdout.write(
+            stringifyBoundedAgentEnvelope({
+              ok: false,
+              error: {
+                code: "VERIFICATION_FAILED",
+                ...(errorObj.cause_code ? { cause_code: errorObj.cause_code } : {}),
+                message: wasAborted ? "Verification aborted" : "Verification failed",
+              },
+              data: {
+                task_id: taskId,
+                ...(await projectVerifyForAgent(process.cwd(), verifyResult)),
+                suggested_next_command: summary.suggested_next_command,
+                ...(wasAborted ? { aborted: true } : {}),
+              },
+            }),
+          );
+        } else {
+          process.stdout.write(
+            `${JSON.stringify({
+              ok: false,
+              error: errorObj,
+              data: {
+                task_id: taskId,
+                verify: projectVerifyForPublicJson(verifyResult),
+                failed_checks: summary.failed_checks,
+                first_failure: summary.first_failure,
+                suggested_next_command: summary.suggested_next_command,
+                ...(wasAborted ? { aborted: true } : {}),
+              },
+            })}\n`,
+          );
+        }
       } else {
         process.stderr.write(`${errorObj.message}\n`);
         const lines = renderFailureSummaryLines(m.task.failure, summary);
@@ -1041,7 +1190,15 @@ async function cmdTaskComplete(
       default:
         throw error;
     }
-    emitError(json, outCode, message);
+    if (detail === "agent") {
+      emitAgentTaskCompleteError(
+        { code: outCode, message: messageForAgentError(outCode) },
+        message,
+        { task_id: taskId, agent },
+      );
+    } else {
+      emitError(json, outCode, message);
+    }
     return 2;
   } finally {
     cleanup();

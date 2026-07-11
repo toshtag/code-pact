@@ -16,6 +16,7 @@ import {
   isDecisionRefPath,
   normalizeDecisionRefPath,
 } from "../schemas/decision-ref.ts";
+import { parseEvidenceRef, SHA256_PATTERN } from "../evidence/evidence-ref.ts";
 import { isPhasePath } from "../schemas/phase-path.ts";
 import { assertSafeRelativePath } from "../path-safety.ts";
 import {
@@ -249,6 +250,41 @@ export async function resolveProjectConfigReadPath(
   cwd: string,
 ): Promise<OwnedReadPath> {
   return resolveAndBrandRead(cwd, ".code-pact/project.yaml", () => true);
+}
+
+/**
+ * Resolve a cached verification evidence artifact for reading. Public callers
+ * pass the opaque evidence ref; only the lowercase sha256 digest becomes a
+ * filename under the owned cache namespace.
+ */
+export async function resolveEvidenceReadPath(
+  cwd: string,
+  ref: string,
+): Promise<OwnedReadPath> {
+  const digest = parseEvidenceRef(ref);
+  return resolveAndBrandRead(
+    cwd,
+    `.code-pact/cache/evidence/${digest}.json`,
+    relPath => relPath === `.code-pact/cache/evidence/${digest}.json`,
+  );
+}
+
+/**
+ * Resolve a cached verification evidence artifact for writing. The digest is
+ * structurally validated before it is used as a filename.
+ */
+export async function resolveEvidenceWritePath(
+  cwd: string,
+  digest: string,
+): Promise<OwnedWritePath> {
+  if (!SHA256_PATTERN.test(digest)) {
+    throw codedPathNotOwned(digest);
+  }
+  return resolveAndBrandWrite(
+    cwd,
+    `.code-pact/cache/evidence/${digest}.json`,
+    relPath => relPath === `.code-pact/cache/evidence/${digest}.json`,
+  );
 }
 
 /**

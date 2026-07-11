@@ -42,6 +42,8 @@ export type CheckResult = {
   command?: string;
   stdout?: string;
   stderr?: string;
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
   timedOut?: boolean;
   aborted?: boolean;
   exitCode?: number | null;
@@ -55,6 +57,50 @@ export type VerifyResult = {
 };
 
 export { DEFAULT_COMMAND_TIMEOUT_MS, MAX_TIMEOUT_MS, validateTimeoutMs };
+
+export type PublicCommandExecutionResult = Omit<
+  CommandExecutionResult,
+  "stdoutTruncated" | "stderrTruncated"
+>;
+
+export type PublicCheckResult = Omit<
+  CheckResult,
+  "stdoutTruncated" | "stderrTruncated" | "commands"
+> & {
+  commands?: PublicCommandExecutionResult[];
+};
+
+export type PublicVerifyResult = {
+  ok: boolean;
+  checks: PublicCheckResult[];
+};
+
+export function projectCommandForPublicJson(
+  command: CommandExecutionResult,
+): PublicCommandExecutionResult {
+  const { stdoutTruncated: _stdoutTruncated, stderrTruncated: _stderrTruncated, ...rest } = command;
+  return rest;
+}
+
+export function projectCheckForPublicJson(check: CheckResult): PublicCheckResult {
+  const {
+    stdoutTruncated: _stdoutTruncated,
+    stderrTruncated: _stderrTruncated,
+    commands,
+    ...rest
+  } = check;
+  return {
+    ...rest,
+    ...(commands ? { commands: commands.map(projectCommandForPublicJson) } : {}),
+  };
+}
+
+export function projectVerifyForPublicJson(result: VerifyResult): PublicVerifyResult {
+  return {
+    ok: result.ok,
+    checks: result.checks.map(projectCheckForPublicJson),
+  };
+}
 
 export function createAbortError(): Error {
   const error = new Error("Operation aborted");
@@ -90,6 +136,8 @@ async function checkCommands(
         elapsedMs: 0,
         stdout: "",
         stderr: "",
+        stdoutTruncated: false,
+        stderrTruncated: false,
       });
     }
     return {
@@ -103,6 +151,8 @@ async function checkCommands(
       elapsedMs: 0,
       stdout: "",
       stderr: "",
+      stdoutTruncated: false,
+      stderrTruncated: false,
       commands: commandResults,
     };
   }
@@ -133,6 +183,8 @@ async function checkCommands(
         command,
         stdout: result.stdout,
         stderr: result.stderr,
+        stdoutTruncated: result.stdoutTruncated,
+        stderrTruncated: result.stderrTruncated,
         timedOut: result.timedOut,
         aborted: result.aborted,
         exitCode: result.exitCode,
@@ -148,6 +200,8 @@ async function checkCommands(
     command: commands.join("; "),
     stdout: "",
     stderr: "",
+    stdoutTruncated: false,
+    stderrTruncated: false,
     timedOut: false,
     aborted: false,
     exitCode: 0,

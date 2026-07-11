@@ -316,6 +316,9 @@ The verbs in detail:
   it is **not** auto-applied and never re-sizes the context pack on its own.
   To act on it, pass `--context-budget <profile>` to `task context` /
   `task prepare` explicitly; the `commands` dictionary does **not** echo it.
+  `commands.verify` and `commands.complete` include `--json --detail agent`;
+  use those strings verbatim so verification failures arrive as compact
+  capsules instead of duplicated raw stdout/stderr.
 
 - **`task start <task-id>`** — record a `started` event. The agent
   invokes this exactly once per implementation pass for a task; the
@@ -333,6 +336,16 @@ The verbs in detail:
   `VERIFICATION_FAILED` (exit 1) when any check fails — a verification
   command or the decision gate — with the per-check results (including
   the failing check) in `data.checks` (standalone `verify` uses this path; `task complete` failure places its checks under `data.verify.checks`).
+  Prefer the `--json --detail agent` form emitted by `task prepare`:
+  read `data.failure.kind`, `data.failure.check`, `data.failure.reason`,
+  `data.failure.fingerprint` (when present), stderr/stdout excerpts (when
+  present), then `data.failure.retrieve_command` only for command-output
+  failures when the excerpts are insufficient. Standalone `verify` can report
+  `invalid_state` for state-consistency checks such as `progress_event` or
+  `task_status`; in that case `check` and `reason` are the actionable fields.
+  Fingerprints, excerpts, evidence refs, and retrieve commands are optional and
+  normally exist only for command-output failures. Do not fetch full evidence by
+  default.
 
 - **`task complete <task-id>`** — runs verification and, on pass,
   appends a `done` event (`source: loop`). Idempotent — a second call
@@ -340,9 +353,18 @@ The verbs in detail:
   On failure it exits 1 with `error.code: VERIFICATION_FAILED`; read
   `error.cause_code` **first** to know what to fix:
   `COMMANDS_FAILED` → fix the failing verification command;
-  `DECISION_REQUIRED` → write or accept the required ADR. `error.message`
-  is actionable (and embeds the failing-check reason). Do **not** blindly
-  re-run `verify` — fix the reported cause first.
+  `DECISION_REQUIRED` → write or accept the required ADR; `ABORTED` →
+  retry only after the interruption is resolved. With
+  `--json --detail agent`, `error.message` is intentionally short. Read
+  the compact failure capsule in this order: `data.failure.kind`,
+  `data.failure.check`, `data.failure.reason`, `data.failure.fingerprint`
+  (when present), `data.failure.stderr_excerpt` (when present),
+  `data.failure.stdout_excerpt` (when present),
+  `data.failure.evidence_available`, `data.failure.evidence_error`, then
+  `data.failure.retrieve_command`. Fingerprints, excerpts, evidence refs, and
+  retrieve commands are optional and normally exist only for command-output
+  failures. Do not fetch full evidence by default; use `retrieve_command` only
+  when command-output excerpts are insufficient to decide the fix.
 
 - **`task record-done <task-id> --evidence "<text>"`** —
   records a `done` event with `source: external` **without** running
@@ -382,6 +404,9 @@ harness run. The metric set is fixed here; the **values** live only in
 [`docs/maintainers/measurements/summary.json`](maintainers/measurements/summary.json)
 (plus the per-task CSVs beside it) so the numbers can never drift between
 this prose and the source of truth — reproduce (read-only) with `pnpm harness --corpus .`, or persist with `--write`.
+The compact agent-detail evidence envelope has its own fixed byte fixture at
+[`docs/maintainers/measurements/agent-detail-evidence.json`](maintainers/measurements/agent-detail-evidence.json),
+reproduced with `pnpm exec tsx scripts/measure-agent-detail.ts --write`.
 
 | Metric | Definition |
 |---|---|

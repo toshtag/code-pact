@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "generated_by": "scripts/measure-agent-detail.ts",
+  "measurements": [
+    {
+      "name": "vitest_failure",
+      "raw_result_bytes": 77284,
+      "full_json_bytes": 77317,
+      "agent_json_bytes": 17922,
+      "reduction_ratio": 0.2318,
+      "evidence_bytes": 38630
+    },
+    {
+      "name": "typescript_error",
+      "raw_result_bytes": 43923,
+      "full_json_bytes": 43956,
+      "agent_json_bytes": 11348,
+      "reduction_ratio": 0.2582,
+      "evidence_bytes": 21963
+    },
+    {
+      "name": "eslint_error",
+      "raw_result_bytes": 41860,
+      "full_json_bytes": 41893,
+      "agent_json_bytes": 11468,
+      "reduction_ratio": 0.2737,
+      "evidence_bytes": 20934
+    },
+    {
+      "name": "build_failure",
+      "raw_result_bytes": 42375,
+      "full_json_bytes": 42408,
+      "agent_json_bytes": 11470,
+      "reduction_ratio": 0.2705,
+      "evidence_bytes": 21191
+    },
+    {
+      "name": "large_stdout",
+      "raw_result_bytes": 106960,
+      "full_json_bytes": 106993,
+      "agent_json_bytes": 7695,
+      "reduction_ratio": 0.0719,
+      "evidence_bytes": 53474
+    },
+    {
+      "name": "large_stderr",
+      "raw_result_bytes": 106944,
+      "full_json_bytes": 106977,
+      "agent_json_bytes": 12124,
+      "reduction_ratio": 0.1133,
+      "evidence_bytes": 53466
+    },
+    {
+      "name": "json_escape_worst_case",
+      "raw_result_bytes": 328122,
+      "full_json_bytes": 328155,
+      "agent_json_bytes": 20420,
+      "reduction_ratio": 0.0622,
+      "evidence_bytes": 164056
+    },
+    {
+      "name": "mixed_utf8",
+      "raw_result_bytes": 54172,
+      "full_json_bytes": 54205,
+      "agent_json_bytes": 17822,
+      "reduction_ratio": 0.3288,
+      "evidence_bytes": 27086
+    },
+    {
+      "name": "command_not_found",
+      "raw_result_bytes": 59844,
+      "full_json_bytes": 59877,
+      "agent_json_bytes": 11440,
+      "reduction_ratio": 0.1911,
+      "evidence_bytes": 29920
+    },
+    {
+      "name": "timeout",
+      "raw_result_bytes": 81312,
+      "full_json_bytes": 81345,
+      "agent_json_bytes": 17971,
+      "reduction_ratio": 0.2209,
+      "evidence_bytes": 40660
+    },
+    {
+      "name": "abort",
+      "raw_result_bytes": 89507,
+      "full_json_bytes": 89540,
+      "agent_json_bytes": 17770,
+      "reduction_ratio": 0.1985,
+      "evidence_bytes": 44757
+    }
+  ]
+}

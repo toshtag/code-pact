@@ -165,8 +165,8 @@ function buildCommands(
   return {
     context: `code-pact task context ${taskId} --agent ${agent}`,
     start: `code-pact task start ${taskId} --agent ${agent}`,
-    verify: `code-pact verify --phase ${phaseId} --task ${taskId}`,
-    complete: `code-pact task complete ${taskId} --agent ${agent}`,
+    verify: `code-pact verify --phase ${phaseId} --task ${taskId} --json --detail agent`,
+    complete: `code-pact task complete ${taskId} --agent ${agent} --json --detail agent`,
     finalize: `code-pact task finalize ${taskId} --write --json`,
     // Template, not ready-to-run: `--evidence` is the agent's completion proof.
     "record-done": `code-pact task record-done ${taskId} --agent ${agent} --evidence "<verification you ran>"`,

@@ -162,8 +162,8 @@ describe("runTaskPrepare — planned state", () => {
     expect(result.commands).toEqual({
       context: "code-pact task context P1-T1 --agent claude-code",
       start: "code-pact task start P1-T1 --agent claude-code",
-      verify: "code-pact verify --phase P1 --task P1-T1",
-      complete: "code-pact task complete P1-T1 --agent claude-code",
+      verify: "code-pact verify --phase P1 --task P1-T1 --json --detail agent",
+      complete: "code-pact task complete P1-T1 --agent claude-code --json --detail agent",
       finalize: "code-pact task finalize P1-T1 --write --json",
       // P40 — additive, always present; the one non-runnable template.
       "record-done": 'code-pact task record-done P1-T1 --agent claude-code --evidence "<verification you ran>"',

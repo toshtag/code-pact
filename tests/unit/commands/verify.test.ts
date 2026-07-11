@@ -95,6 +95,21 @@ async function setupProject(
 // ---------------------------------------------------------------------------
 
 describe("runVerify — project-a P1-T1 (dry-run)", () => {
+  it("rejects an already-aborted operation before verification starts", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      runVerify({
+        cwd: fixtureDir,
+        phaseId: "P1",
+        taskId: "P1-T1",
+        dryRun: true,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ code: "ABORTED" });
+  });
+
   it("all checks pass in dry-run mode", async () => {
     const result = await runVerify({
       cwd: fixtureDir,

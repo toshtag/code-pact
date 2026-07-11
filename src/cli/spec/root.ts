@@ -14,10 +14,12 @@ const verify: CommandSpec = {
     { name: "task", value: "<task-id>", required: true, description: "Task id to verify." },
     { name: "dry-run", description: "Preview verification commands without executing them." },
     { name: "timeout", value: "<ms>", description: "Per-command timeout in decimal milliseconds (default: 300000)." },
+    { name: "detail", value: "<mode>", description: "JSON detail mode: full (default) or agent. Requires --json." },
     { name: "json", description: "Emit JSON." },
   ],
   examples: [
     "code-pact verify --phase P1 --task P1-T1 --json",
+    "code-pact verify --phase P1 --task P1-T1 --json --detail agent",
     "code-pact verify --phase P1 --task P1-T1 --timeout 300000 --json",
   ],
 };

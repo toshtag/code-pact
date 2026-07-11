@@ -65,6 +65,7 @@ export {
   resolvePhaseDirectoryReadPath,
   resolveRoadmapReadPath,
   resolveProjectConfigReadPath,
+  resolveEvidenceReadPath,
   resolveModelProfileReadPath,
   resolveModelProfileDirectoryReadPath,
   resolveProgressReadPath,
@@ -86,6 +87,7 @@ export {
   resolveModelProfileWritePath,
   resolveAgentProfileWritePath,
   resolveProjectConfigWritePath,
+  resolveEvidenceWritePath,
   resolveGitignoreWritePath,
   // Delete resolvers
   resolveDecisionDeletePath,
