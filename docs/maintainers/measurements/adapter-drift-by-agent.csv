@@ -1,2 +1,2 @@
 agent,doctor_ok,issue_count,manifest_missing,manifest_invalid,generator_stale,schema_drift,profile_drift,file_missing,file_drift,desired_stale,contract_drift,unmanaged_file
-claude-code,true,2,0,0,1,0,0,0,0,1,0,0
+claude-code,true,0,0,0,0,0,0,0,0,0,0,0
