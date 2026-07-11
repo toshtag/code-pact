@@ -20,8 +20,9 @@ The contract has three sides:
 2. What agents must do to satisfy `adapter conformance`.
 3. The recommended per-task lifecycle the contract is shaped around.
 
-A short section on measurement follows; numbers there are populated by
-the Evidence Harness v2.
+A short section on measurement follows; it defines the project's
+evaluation criteria and points to focused feature-specific evidence
+where such evidence is maintained.
 
 ## 1. What `code-pact` guarantees
 

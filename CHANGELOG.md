@@ -13,6 +13,9 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Changed
+- **Retired the internal general-purpose Evidence Harness.** Removed its release-coupled aggregate CSV/JSON snapshots and dedicated unit/integration test path because the archived dogfood corpus no longer produced actionable live-task measurements. The focused P51 agent-detail byte fixture remains under `docs/maintainers/evidence/` as a direct regression check for the compact evidence contract.
+
 ## [2.1.0] — 2026-07-11
 
 ### Added

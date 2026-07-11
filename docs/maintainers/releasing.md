@@ -111,7 +111,7 @@ After the release-prep PR merges to `main`:
    - **github-release** creates a GitHub Release with an auto-generated
      `## Integrity` section.
 
-9. **Verify.** After the workflow succeeds:
+8. **Verify.** After the workflow succeeds:
    - Check the npm package page for the provenance badge.
    - Check the GitHub Release for the auto-generated Integrity section
      (shasum, integrity, local SHA-256, provenance note).
