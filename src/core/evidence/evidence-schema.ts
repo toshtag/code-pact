@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const EvidenceArtifactSchema = z.object({
+export const EvidenceArtifactSchema = z.strictObject({
   schema_version: z.literal(1),
   command: z.string(),
   exit_code: z.number().int().nullable(),

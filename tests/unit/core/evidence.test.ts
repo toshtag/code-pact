@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { chmod, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { canonicalJson } from "../../../src/core/evidence/canonical-json.ts";
 import { excerptText } from "../../../src/core/evidence/excerpt.ts";
 import {
   artifactDigest,
@@ -88,6 +89,50 @@ describe("evidence refs and store", () => {
     });
   });
 
+  it("rejects evidence files with unknown fields before digest validation", async () => {
+    const artifact = {
+      schema_version: 1 as const,
+      command: "pnpm test",
+      exit_code: 1,
+      timed_out: false,
+      aborted: false,
+      elapsed_ms: 123,
+      stdout: "out",
+      stderr: "err",
+      stdout_capture_truncated: false,
+      stderr_capture_truncated: false,
+    };
+    const digest = artifactDigest(artifact);
+    await mkdir(join(dir, ".code-pact", "cache", "evidence"), { recursive: true });
+    await writeFile(
+      join(dir, ".code-pact", "cache", "evidence", `${digest}.json`),
+      canonicalJson({ ...artifact, unexpected_field: "modified" }),
+      "utf8",
+    );
+
+    await expect(loadEvidenceArtifact(dir, `evidence:sha256:${digest}`)).rejects.toMatchObject({
+      code: "EVIDENCE_INVALID",
+    });
+  });
+
+  it("rejects unknown fields passed to storeEvidenceArtifact", async () => {
+    await expect(
+      storeEvidenceArtifact(dir, {
+        schema_version: 1,
+        command: "pnpm test",
+        exit_code: 1,
+        timed_out: false,
+        aborted: false,
+        elapsed_ms: 123,
+        stdout: "out",
+        stderr: "err",
+        stdout_capture_truncated: false,
+        stderr_capture_truncated: false,
+        unexpected_field: "modified",
+      } as Parameters<typeof storeEvidenceArtifact>[1]),
+    ).rejects.toThrow();
+  });
+
   it("rejects digest mismatches when evidence content does not match the ref", async () => {
     const artifact = {
       schema_version: 1 as const,
@@ -114,10 +159,35 @@ describe("evidence refs and store", () => {
     });
   });
 
-  it("rejects evidence cache symlinks before writing outside the project", async () => {
+  it("rejects .code-pact cache root symlinks before writing outside the project", async () => {
     const outside = await mkdtemp(join(tmpdir(), "code-pact-evidence-outside-"));
     await mkdir(join(dir, ".code-pact"), { recursive: true });
     await symlink(outside, join(dir, ".code-pact", "cache"));
+    try {
+      await expect(
+        storeEvidenceArtifact(dir, {
+          schema_version: 1,
+          command: "pnpm test",
+          exit_code: 1,
+          timed_out: false,
+          aborted: false,
+          elapsed_ms: 1,
+          stdout: "out",
+          stderr: "err",
+          stdout_capture_truncated: false,
+          stderr_capture_truncated: false,
+        }),
+      ).rejects.toMatchObject({ code: "PATH_NOT_OWNED" });
+      await expect(readdir(outside)).resolves.toEqual([]);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects the evidence directory symlink before writing outside the project", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-evidence-dir-outside-"));
+    await mkdir(join(dir, ".code-pact", "cache"), { recursive: true });
+    await symlink(outside, join(dir, ".code-pact", "cache", "evidence"));
     try {
       await expect(
         storeEvidenceArtifact(dir, {
@@ -150,8 +220,9 @@ describe("evidence refs and store", () => {
     );
     try {
       await expect(loadEvidenceArtifact(dir, `evidence:sha256:${digest}`)).rejects.toMatchObject({
-        code: expect.any(String),
+        code: "PATH_NOT_OWNED",
       });
+      await expect(readFile(join(outside, "artifact.json"), "utf8")).resolves.toBe("{}");
     } finally {
       await rm(outside, { recursive: true, force: true });
     }
@@ -777,6 +848,84 @@ describe("failure fingerprint", () => {
 
     expect(upper).toBe(lower);
     expect(prefix).not.toBe(upper);
+  });
+
+  it("does not normalize repository root substrings inside unrelated paths", () => {
+    const outsideA = fingerprintFailure(
+      { ...base, stderr: "/var/tmp/app/a failed" },
+      "/tmp/app",
+    );
+    const outsideB = fingerprintFailure(
+      { ...base, stderr: "/var/tmp/other/a failed" },
+      "/tmp/other",
+    );
+    const prefixed = fingerprintFailure(
+      { ...base, stderr: "prefix/tmp/app/a failed" },
+      "/tmp/app",
+    );
+    const repoPath = fingerprintFailure(
+      { ...base, stderr: "/tmp/app/a failed" },
+      "/tmp/app",
+    );
+
+    expect(outsideA).not.toBe(outsideB);
+    expect(prefixed).not.toBe(repoPath);
+  });
+
+  it("normalizes repository roots after command delimiters", () => {
+    const configA = fingerprintFailure(
+      {
+        ...base,
+        command: "--config=/tmp/app/config.json",
+        stderr: "failed",
+      },
+      "/tmp/app",
+    );
+    const configB = fingerprintFailure(
+      {
+        ...base,
+        command: "--config=/tmp/other/config.json",
+        stderr: "failed",
+      },
+      "/tmp/other",
+    );
+    const fileUriA = fingerprintFailure(
+      {
+        ...base,
+        command: "node file:///tmp/app/config.js",
+        stderr: "failed",
+      },
+      "/tmp/app",
+    );
+    const fileUriB = fingerprintFailure(
+      {
+        ...base,
+        command: "node file:///tmp/other/config.js",
+        stderr: "failed",
+      },
+      "/tmp/other",
+    );
+
+    expect(configA).toBe(configB);
+    expect(fileUriA).toBe(fileUriB);
+  });
+
+  it("does not normalize Windows roots inside unrelated path strings", () => {
+    const embedded = fingerprintFailure(
+      { ...base, command: "xC:/Repo/file.js", stderr: "failed" },
+      "C:/Repo",
+    );
+    const repoPath = fingerprintFailure(
+      { ...base, command: "C:/Repo/file.js", stderr: "failed" },
+      "C:/Repo",
+    );
+    const sibling = fingerprintFailure(
+      { ...base, command: "C:/Repo-tools/file.js", stderr: "failed" },
+      "C:/Repo",
+    );
+
+    expect(embedded).not.toBe(repoPath);
+    expect(sibling).not.toBe(repoPath);
   });
 
   it("does not change when only the omitted middle output length changes", () => {

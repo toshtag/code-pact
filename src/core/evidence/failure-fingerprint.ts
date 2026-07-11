@@ -24,13 +24,20 @@ function pathVariants(path: string): string[] {
 
 function replaceRootVariants(text: string, roots: string[], token: string): string {
   let out = text;
+  const leftBoundary = `(^|[\\s"'\\x60\\(\\[\\{=:;,]|file://)`;
   for (const root of roots) {
     for (const variant of pathVariants(root)) {
       const flags = /^[A-Za-z]:/.test(variant) ? "gi" : "g";
-      out = out.replace(new RegExp(`${escapeRegExp(variant)}([\\\\/])`, flags), `${token}/`);
       out = out.replace(
-        new RegExp(`${escapeRegExp(variant)}(?=$|[\\s"'\\x60\\)\\]\\}:;,])`, flags),
-        token,
+        new RegExp(`${leftBoundary}${escapeRegExp(variant)}([\\\\/])`, flags),
+        (_match, prefix: string) => `${prefix}${token}/`,
+      );
+      out = out.replace(
+        new RegExp(
+          `${leftBoundary}${escapeRegExp(variant)}(?=$|[\\s"'\\x60\\)\\]\\}:;,])`,
+          flags,
+        ),
+        (_match, prefix: string) => `${prefix}${token}`,
       );
     }
   }

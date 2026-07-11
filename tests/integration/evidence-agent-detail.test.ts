@@ -275,6 +275,36 @@ describe("agent detail evidence envelope", () => {
     }
   });
 
+  it("evidence show rejects artifacts with unknown fields", async () => {
+    const p = await setupFailingTask();
+    const failed = p.run([
+      "verify",
+      "--phase",
+      "P1",
+      "--task",
+      "P1-T1",
+      "--json",
+      "--detail",
+      "agent",
+    ]);
+    const env = expectJsonErr(failed, "VERIFICATION_FAILED") as {
+      data: { failure: { evidence_ref: string } };
+    };
+    const digest = env.data.failure.evidence_ref.split(":").at(-1);
+    if (!digest) throw new Error("missing evidence digest");
+    const artifactPath = join(p.dir, ".code-pact", "cache", "evidence", `${digest}.json`);
+    const artifact = JSON.parse(await readFile(artifactPath, "utf8")) as Record<string, unknown>;
+    await writeFile(
+      artifactPath,
+      JSON.stringify({ ...artifact, unexpected_field: "modified" }),
+      "utf8",
+    );
+
+    const shown = p.run(["evidence", "show", env.data.failure.evidence_ref, "--json"]);
+    expect(shown.code).toBe(1);
+    expectJsonErr(shown, "EVIDENCE_INVALID");
+  });
+
   it("bounds agent detail verify errors for long unknown phase and task ids", async () => {
     const p = await setupFailingTask();
     const longPhase = `P${"X".repeat(30_000)}`;
