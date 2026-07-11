@@ -63,7 +63,7 @@ function hashRun(run) {
 }
 
 export const PUBLISH_RUN_HASH =
-  "d74f5355bb7463a2fc41f009f127545b46280d482875d1fa08d989f516c7fa2e";
+  "8b1aecc7074039b3c7dfd47650b3ac6fc6c1f424646389e1e908a5412f540d5b";
 export const GITHUB_RELEASE_RUN_HASH =
   "fca11320656640fbea0fadfd233d548ad40ac0754bbb6be3c0e2a9193fac66cc";
 

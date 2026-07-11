@@ -215,7 +215,7 @@ jobs:
             echo "Version already exists; verification will follow."
             echo "published_now=false" >> "$GITHUB_OUTPUT"
           else
-            npm publish "$tarball" --ignore-scripts --registry="$registry"
+            npm publish "./$tarball" --ignore-scripts --registry="$registry"
             echo "published_now=true" >> "$GITHUB_OUTPUT"
           fi
 

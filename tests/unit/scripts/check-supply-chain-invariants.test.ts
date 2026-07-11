@@ -233,7 +233,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     '            echo "Version already exists; verification will follow."',
     '            echo "published_now=false" >> "$GITHUB_OUTPUT"',
     "          else",
-    '            npm publish "$tarball" --ignore-scripts --registry="$registry"',
+    '            npm publish "./$tarball" --ignore-scripts --registry="$registry"',
     '            echo "published_now=true" >> "$GITHUB_OUTPUT"',
     "          fi",
     "",
@@ -907,8 +907,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when publish job does not use --ignore-scripts", async () => {
     root = await buildTree({
       publishContent: wellFormedPublish.replace(
-        'npm publish "$tarball" --ignore-scripts',
-        'npm publish "$tarball"',
+        'npm publish "./$tarball" --ignore-scripts',
+        'npm publish "./$tarball"',
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);

@@ -561,7 +561,7 @@ describe("publish-workflow inline scripts", () => {
         expect(log).toContain("view code-pact@2.0.0 version");
         expect(log).toContain("--registry=https://registry.npmjs.org");
         expect(log).toContain(
-          "publish release-artifact/package.tgz --ignore-scripts",
+          "publish ./release-artifact/package.tgz --ignore-scripts",
         );
 
         const ghOutput = readFileSync(
