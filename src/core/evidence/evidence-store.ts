@@ -18,6 +18,14 @@ export type StoredEvidence = {
   artifact: EvidenceArtifact;
 };
 
+let readEvidenceArtifactFailureForTests: (() => Error) | null = null;
+
+export function __setReadEvidenceArtifactFailureForTests(
+  hook: (() => Error) | null,
+): void {
+  readEvidenceArtifactFailureForTests = hook;
+}
+
 export function artifactDigest(artifact: EvidenceArtifact): string {
   return createHash("sha256")
     .update(canonicalJson(artifact))
@@ -65,7 +73,9 @@ export async function loadEvidenceArtifact(
   const digest = parseEvidenceRef(ref);
   let raw: string;
   try {
-    raw = await readOwnedText(await resolveEvidenceReadPath(cwd, ref));
+    const path = await resolveEvidenceReadPath(cwd, ref);
+    if (readEvidenceArtifactFailureForTests) throw readEvidenceArtifactFailureForTests();
+    raw = await readOwnedText(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       const missing = new Error(`evidence not found: ${ref}`);

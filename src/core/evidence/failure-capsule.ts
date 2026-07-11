@@ -508,7 +508,7 @@ function omitAgentDataField(data: Record<string, unknown>, field: string): boole
 
 function stringifyAgentEnvelopeOrThrow(envelope: AgentJsonEnvelope): string {
   const line = `${JSON.stringify(envelope)}\n`;
-  if (Buffer.byteLength(line, "utf8") > MAX_AGENT_JSON_BYTES) {
+  if (Buffer.byteLength(line, "utf8") >= MAX_AGENT_JSON_BYTES) {
     throw new Error("agent JSON envelope could not be bounded below 24 KiB");
   }
   return line;
@@ -516,7 +516,7 @@ function stringifyAgentEnvelopeOrThrow(envelope: AgentJsonEnvelope): string {
 
 export function stringifyBoundedAgentEnvelope(envelope: AgentJsonEnvelope): string {
   const data = envelope.data as Record<string, unknown>;
-  if (agentJsonLineBytes(envelope) <= MAX_AGENT_JSON_BYTES) {
+  if (agentJsonLineBytes(envelope) < MAX_AGENT_JSON_BYTES) {
     return `${JSON.stringify(envelope)}\n`;
   }
 
@@ -530,7 +530,7 @@ export function stringifyBoundedAgentEnvelope(envelope: AgentJsonEnvelope): stri
     "agent",
   ];
   for (const field of omissionOrder) {
-    if (agentJsonLineBytes(envelope) <= MAX_AGENT_JSON_BYTES) {
+    if (agentJsonLineBytes(envelope) < MAX_AGENT_JSON_BYTES) {
       return `${JSON.stringify(envelope)}\n`;
     }
     omitAgentDataField(data, field);
@@ -549,7 +549,7 @@ export function stringifyBoundedAgentEnvelope(envelope: AgentJsonEnvelope): stri
     data.projection_truncated = true;
   }
 
-  if (agentJsonLineBytes(envelope) > MAX_AGENT_JSON_BYTES && "failure" in data) {
+  if (agentJsonLineBytes(envelope) >= MAX_AGENT_JSON_BYTES && "failure" in data) {
     const minimized = minimalProjection({
       failure: data.failure as FailureCapsule,
       verify: (data.verify ?? {

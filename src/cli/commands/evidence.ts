@@ -18,7 +18,7 @@ const PUBLIC_EVIDENCE_SHOW_CODES = new Set([
   "CONFIG_ERROR",
 ]);
 
-function mapEvidenceShowError(error: unknown): {
+export function mapEvidenceShowError(error: unknown): {
   code: string;
   systemCode?: string;
   message: string;

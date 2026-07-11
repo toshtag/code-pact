@@ -1,17 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { canonicalJson } from "../../../src/core/evidence/canonical-json.ts";
 import { excerptText } from "../../../src/core/evidence/excerpt.ts";
 import {
   artifactDigest,
+  __setReadEvidenceArtifactFailureForTests,
   loadEvidenceArtifact,
   storeEvidenceArtifact,
 } from "../../../src/core/evidence/evidence-store.ts";
 import { parseEvidenceRef } from "../../../src/core/evidence/evidence-ref.ts";
 import { fingerprintFailure } from "../../../src/core/evidence/failure-fingerprint.ts";
 import {
+  MAX_AGENT_JSON_BYTES,
   projectVerifyForAgent,
   projectVerifySummaryForAgent,
   stringifyBoundedAgentEnvelope,
@@ -28,6 +30,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   __setAtomicWriteFailAfterOpenForTests(null);
+  __setReadEvidenceArtifactFailureForTests(null);
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -254,7 +257,7 @@ describe("evidence refs and store", () => {
     });
   });
 
-  it.runIf(process.platform !== "win32")("surfaces read permission failures from evidence files", async () => {
+  it("surfaces read permission failures from evidence files", async () => {
     const artifact = {
       schema_version: 1 as const,
       command: "pnpm test",
@@ -268,15 +271,13 @@ describe("evidence refs and store", () => {
       stderr_capture_truncated: false,
     };
     const stored = await storeEvidenceArtifact(dir, artifact);
-    const path = join(dir, ".code-pact", "cache", "evidence", `${stored.digest}.json`);
-    await chmod(path, 0o000);
-    try {
-      await expect(loadEvidenceArtifact(dir, stored.ref)).rejects.toMatchObject({
-        code: "EACCES",
-      });
-    } finally {
-      await chmod(path, 0o600).catch(() => {});
-    }
+    const error = new Error("permission denied");
+    (error as NodeJS.ErrnoException).code = "EACCES";
+    __setReadEvidenceArtifactFailureForTests(() => error);
+
+    await expect(loadEvidenceArtifact(dir, stored.ref)).rejects.toMatchObject({
+      code: "EACCES",
+    });
   });
 });
 
@@ -302,6 +303,48 @@ describe("excerpt policy", () => {
 });
 
 describe("failure projection", () => {
+  function envelopeWithLineBytes(targetBytes: number) {
+    const envelope = {
+      ok: true as const,
+      data: {
+        already_done: true,
+        task_id: "P1-",
+        phase_id: "P1",
+        agent: "claude-code",
+      },
+    };
+    const baseBytes = Buffer.byteLength(`${JSON.stringify(envelope)}\n`, "utf8");
+    envelope.data.task_id = `P1-${"X".repeat(targetBytes - baseBytes)}`;
+    expect(Buffer.byteLength(`${JSON.stringify(envelope)}\n`, "utf8")).toBe(targetBytes);
+    return envelope;
+  }
+
+  it("keeps agent JSON envelopes strictly below 24 KiB", () => {
+    const belowLimit = envelopeWithLineBytes(MAX_AGENT_JSON_BYTES - 1);
+    const belowLine = `${JSON.stringify(belowLimit)}\n`;
+    expect(stringifyBoundedAgentEnvelope(belowLimit)).toBe(belowLine);
+
+    const atLimit = envelopeWithLineBytes(MAX_AGENT_JSON_BYTES);
+    const line = stringifyBoundedAgentEnvelope(atLimit);
+    const envelope = JSON.parse(line) as {
+      data: {
+        task_id?: string;
+        projection_truncated?: boolean;
+        omitted_fields?: string[];
+      };
+    };
+
+    expect(Buffer.byteLength(line, "utf8")).toBeLessThan(MAX_AGENT_JSON_BYTES);
+    expect(envelope.data.projection_truncated).toBe(true);
+    expect(envelope.data.omitted_fields).toContain("task_id");
+    expect(envelope.data.task_id).toBeUndefined();
+
+    const aboveLimit = stringifyBoundedAgentEnvelope(
+      envelopeWithLineBytes(MAX_AGENT_JSON_BYTES + 1),
+    );
+    expect(Buffer.byteLength(aboveLimit, "utf8")).toBeLessThan(MAX_AGENT_JSON_BYTES);
+  });
+
   it("stores raw output once and returns compact agent data", async () => {
     const stdout = "x".repeat(1024 * 64);
     const stderr = "y".repeat(1024 * 64);
@@ -908,6 +951,106 @@ describe("failure fingerprint", () => {
 
     expect(configA).toBe(configB);
     expect(fileUriA).toBe(fileUriB);
+  });
+
+  it("normalizes Windows ESM file URLs at repository roots", () => {
+    const repoA = fingerprintFailure(
+      {
+        ...base,
+        stderr: "at file:///c:/repo/src/a.ts:1:1",
+      },
+      "C:/Repo",
+    );
+    const repoB = fingerprintFailure(
+      {
+        ...base,
+        stderr: "at file:///D:/Other/src/a.ts:1:1",
+      },
+      "D:/Other",
+    );
+    const outside = fingerprintFailure(
+      {
+        ...base,
+        stderr: "at file:///C:/Other/src/a.ts:1:1",
+      },
+      "C:/Repo",
+    );
+    const sibling = fingerprintFailure(
+      {
+        ...base,
+        stderr: "at file:///C:/Repo-tools/src/a.ts:1:1",
+      },
+      "C:/Repo",
+    );
+
+    expect(repoA).toBe(repoB);
+    expect(outside).not.toBe(repoA);
+    expect(sibling).not.toBe(repoA);
+  });
+
+  it("normalizes percent-encoded file URLs at repository roots", () => {
+    const repoA = fingerprintFailure(
+      {
+        ...base,
+        stderr: "at file:///tmp/app%20one/src/a.ts:1:1",
+      },
+      "/tmp/app one",
+    );
+    const repoB = fingerprintFailure(
+      {
+        ...base,
+        stderr: "at file:///opt/app%20two/src/a.ts:1:1",
+      },
+      "/opt/app two",
+    );
+
+    expect(repoA).toBe(repoB);
+  });
+
+  it("strips ANSI control sequences before fingerprint path normalization", () => {
+    const coloredA = fingerprintFailure(
+      {
+        ...base,
+        stderr: "\u001b[31m/tmp/app/src/a.ts failed\u001b[0m",
+      },
+      "/tmp/app",
+    );
+    const coloredB = fingerprintFailure(
+      {
+        ...base,
+        stderr: "\u001b[31m/opt/other/src/a.ts failed\u001b[0m",
+      },
+      "/opt/other",
+    );
+    const differentMessage = fingerprintFailure(
+      {
+        ...base,
+        stderr: "\u001b[31m/opt/other/src/a.ts different\u001b[0m",
+      },
+      "/opt/other",
+    );
+
+    expect(coloredA).toBe(coloredB);
+    expect(differentMessage).not.toBe(coloredA);
+  });
+
+  it("strips OSC hyperlinks before fingerprint path normalization", () => {
+    const linkedA = fingerprintFailure(
+      {
+        ...base,
+        stderr: "\u001b]8;;file:///tmp/app/src/a.ts\u0007/tmp/app/src/a.ts\u001b]8;;\u0007 failed",
+      },
+      "/tmp/app",
+    );
+    const linkedB = fingerprintFailure(
+      {
+        ...base,
+        stderr: "\u001b]8;;file:///opt/other/src/a.ts\u0007/opt/other/src/a.ts\u001b]8;;\u0007 failed",
+      },
+      "/opt/other",
+    );
+
+    expect(linkedA).toBe(linkedB);
   });
 
   it("does not normalize Windows roots inside unrelated path strings", () => {

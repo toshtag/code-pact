@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import type { CommandExecutionResult } from "../../commands/verify.ts";
 import { canonicalJson } from "./canonical-json.ts";
 import {
@@ -16,8 +17,19 @@ function escapeRegExp(value: string): string {
 
 function pathVariants(path: string): string[] {
   const variants = new Set<string>();
+  const forward = path.replace(/\\/g, "/");
+  const encodedForward = encodeURI(forward);
+  if (forward.startsWith("/")) {
+    variants.add(`file://${forward}`);
+    variants.add(`file://${encodedForward}`);
+  } else if (/^[A-Za-z]:\//.test(forward)) {
+    variants.add(`file:///${forward}`);
+    variants.add(`file:///${encodedForward}`);
+    variants.add(`/${forward}`);
+    variants.add(`/${encodedForward}`);
+  }
   variants.add(path);
-  variants.add(path.replace(/\\/g, "/"));
+  variants.add(forward);
   variants.add(path.replace(/\//g, "\\"));
   return [...variants].filter(value => value.length > 0);
 }
@@ -27,7 +39,7 @@ function replaceRootVariants(text: string, roots: string[], token: string): stri
   const leftBoundary = `(^|[\\s"'\\x60\\(\\[\\{=:;,]|file://)`;
   for (const root of roots) {
     for (const variant of pathVariants(root)) {
-      const flags = /^[A-Za-z]:/.test(variant) ? "gi" : "g";
+      const flags = /^(?:file:\/\/\/|\/)?[A-Za-z]:/i.test(variant) ? "gi" : "g";
       out = out.replace(
         new RegExp(`${leftBoundary}${escapeRegExp(variant)}([\\\\/])`, flags),
         (_match, prefix: string) => `${prefix}${token}/`,
@@ -51,7 +63,7 @@ function normalizeTokenPathSeparators(text: string): string {
 }
 
 export function normalizeFailureText(text: string, cwd: string): string {
-  let out = text;
+  let out = stripVTControlCharacters(text);
   out = replaceRootVariants(out, [cwd, resolve(cwd)], "<repo>");
   out = replaceRootVariants(out, [tmpdir(), resolve(tmpdir())], "<tmp>");
   out = normalizeTokenPathSeparators(out);
