@@ -591,7 +591,8 @@ export const messages = {
         ].join("\n"),
         failBody: [
           "- **blocked dependency** (`task prepare` から) — `next_action.type` が `wait_for_dependencies` で、`blocked_by` に未完の上流タスク id が並びます。実際にブロックされている場合は依存タスクを先に解消し、`task block` の手動ブロックなら理由解消後に `code-pact task resume <task-id>` を実行してください。",
-          "- **verification failure** (`verify --json --detail agent` / `task complete --json --detail agent` から) — `error.code` は `VERIFICATION_FAILED`（exit 1）。まず `error.cause_code` を確認: `COMMANDS_FAILED` → 失敗した検証コマンドを修正; `DECISION_REQUIRED` → `requires_decision` タスクに accepted な ADR が必要（作成・accept する）; `ABORTED` → 中断要因を解消してから retry。",
+          "- **task complete の verification failure** (`task complete --json --detail agent` から) — `error.code` は `VERIFICATION_FAILED`（exit 1）。まず `error.cause_code` を確認: `COMMANDS_FAILED` → 失敗した検証コマンドを修正; `DECISION_REQUIRED` → `requires_decision` タスクに accepted な ADR が必要（作成・accept する）; `ABORTED` → 中断要因を解消してから retry。",
+          "- **standalone verify failure** (`verify --json --detail agent` から) — `error.cause_code` が保証されるのは cancellation (`ABORTED`) のみです。通常の失敗は `data.failure.kind` で分岐します: `command_failed`, `timed_out`, `decision_required`。",
           "- Agent detail の verification failure では `error.message` は意図的に短い固定文です。診断はこの順で行います: `data.failure.kind`, `data.failure.fingerprint`, `data.failure.stderr_excerpt`, `data.failure.stdout_excerpt`, `data.failure.evidence_available`, `data.failure.evidence_error`, `data.failure.retrieve_command`。",
           "- full evidence はデフォルトで取得しないでください。excerpt だけでは修正判断に不足する場合に限り、`data.failure.retrieve_command` を使います。",
           "- **missing context pack** — `code-pact task prepare <task-id> --agent <name> --json` で agent profile の `context_dir`（default `.context/<agent>/<task-id>.md`）に pack を再生成できます。書き込み前にパスだけ確認したい場合は `--dry-run` を付けます。",
