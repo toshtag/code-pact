@@ -3,9 +3,8 @@
 //
 // The 1.26.0 release prep had to reconcile the version by hand across several
 // places: package.json, the CHANGELOG section, docs `code-pact@x.y.z` install
-// examples, the recommendation-consumption gate threshold, and the committed
-// measurements snapshot. This makes that a single deterministic check so it
-// is not re-verified by eye each release.
+// examples, and the recommendation-consumption gate threshold. This makes that
+// a single deterministic check so it is not re-verified by eye each release.
 //
 // Run directly (`node scripts/check-release-version.mjs`) or via
 // `pnpm release:check`. Exits non-zero on any mismatch.
@@ -75,24 +74,7 @@ export function checkReleaseVersion(root) {
     );
   }
 
-  // 2. Measurements snapshot version (also guarded by check-doc-invariants;
-  //    bundled here so `release:check` is self-contained).
-  const summaryVersion = JSON.parse(read("docs/maintainers/measurements/summary.json")).code_pact_cli_version;
-  if (summaryVersion !== pkgVersion) {
-    problems.push(
-      `docs/maintainers/measurements/summary.json: code_pact_cli_version "${summaryVersion}" != package.json "${pkgVersion}" — run \`pnpm harness --corpus . --write\``,
-    );
-  }
-  // The manifest is written by the same harness run as summary.json; check it too
-  // so "measurements agree" covers BOTH files, not just the summary.
-  const manifestVersion = JSON.parse(read("docs/maintainers/measurements/measurements.manifest.json")).code_pact_cli_version;
-  if (manifestVersion !== pkgVersion) {
-    problems.push(
-      `docs/maintainers/measurements/measurements.manifest.json: code_pact_cli_version "${manifestVersion}" != package.json "${pkgVersion}" — run \`pnpm harness --corpus . --write\``,
-    );
-  }
-
-  // 3. docs `code-pact@X.Y.Z` install/usage examples must match the package
+  // 2. docs `code-pact@X.Y.Z` install/usage examples must match the package
   //    version (a stale example tells users to install an old release).
   const docFiles = ["README.md", ...markdownFiles(resolve(root, "docs"), "docs")];
   for (const rel of docFiles) {
@@ -111,7 +93,7 @@ export function checkReleaseVersion(root) {
     }
   }
 
-  // 4. The recommendation-consumption gate threshold must reference a released
+  // 3. The recommendation-consumption gate threshold must reference a released
   //    (or current) version, never a future one.
   const specSrc = read("src/core/adapters/conformance-spec.ts");
   const threshM = /RECOMMENDATION_CONSUMPTION_FROM_VERSION\s*=\s*"([^"]+)"/.exec(specSrc);

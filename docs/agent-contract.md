@@ -398,14 +398,15 @@ short-circuits — the command does not build a context pack, returns
 
 The success metrics defined in
 [`docs/positioning.md`](positioning.md) are how the project measures
-whether the contract is working. The metric set is locked here; the
-Evidence Harness v2 computes these and recomputes them on every
-harness run. The metric set is fixed here; the **values** live only in
-[`docs/maintainers/measurements/summary.json`](maintainers/measurements/summary.json)
-(plus the per-task CSVs beside it) so the numbers can never drift between
-this prose and the source of truth — reproduce (read-only) with `pnpm harness --corpus .`, or persist with `--write`.
-The compact agent-detail evidence envelope has its own fixed byte fixture at
-[`docs/maintainers/measurements/agent-detail-evidence.json`](maintainers/measurements/agent-detail-evidence.json),
+whether the contract is working. The metric definitions remain stable,
+but the former generic Evidence Harness is retired: this repository no
+longer keeps release-refreshed aggregate CSV/JSON snapshots for metrics
+that currently have no live task corpus to measure. Do not reintroduce a
+general measurement substrate unless a specific feature needs a narrow
+fixture.
+
+The compact agent-detail evidence envelope still has a fixed byte fixture at
+[`docs/maintainers/evidence/agent-detail-evidence.json`](maintainers/evidence/agent-detail-evidence.json),
 reproduced with `pnpm exec tsx scripts/measure-agent-detail.ts --write`.
 
 | Metric | Definition |
@@ -414,8 +415,8 @@ reproduced with `pnpm exec tsx scripts/measure-agent-detail.ts --write`.
 | Context pack p90 bytes | Per-task pack size, lower 90th percentile |
 | Context pack max bytes | Largest single task's pack size |
 | First-pass verification rate | Percentage of `task complete` invocations whose declared verification passes on the first attempt |
-| Task lifecycle adherence rate | State-machine adherence: among tasks that have any progress events, the percentage with at least one `started` event before the first `done` event AND no legacy `planned → done` shortcut. `task prepare` emits no progress event, so prepare-adherence is **not** measured. When `summary.corpus_status` is `measured`, this can sit below 100% because of historical tasks that used the legacy `planned → done` shortcut; when it is `no_live_tasks`, the rate is 0 because there are no live tasks to measure (see [`positioning.md`](positioning.md#baseline-values)) |
-| Undeclared write rate | Files changed by a task whose paths are not covered by the task's declared `writes` globs. Currently `deferred` (rationale in the evidence-harness-v2 RFC Non-goals — retired; in git history / the archive record) |
+| Task lifecycle adherence rate | State-machine adherence: among tasks that have any progress events, the percentage with at least one `started` event before the first `done` event AND no legacy `planned → done` shortcut. `task prepare` emits no progress event, so prepare-adherence is **not** measured. Historical dogfood baselines can sit below 100% because older tasks used the legacy shortcut |
+| Undeclared write rate | Files changed by a task whose paths are not covered by the task's declared `writes` globs. Currently not computed; historical rationale lives in git history / the archive record for the retired evidence-harness-v2 RFC |
 | Adapter drift detection rate | Percentage of enabled agents where `adapter doctor` returns at least one error-severity issue |
 
 These metrics evaluate the contract — they are not part of the
