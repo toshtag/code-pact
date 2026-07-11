@@ -960,21 +960,38 @@ describe("failure fingerprint", () => {
     expect(normalizeFailureText("profile:///tmp/app/src/a.ts failed", "/tmp/app")).toBe(
       "profile:///tmp/app/src/a.ts failed",
     );
+    expect(normalizeFailureText("profile:/tmp/app/src/a.ts failed", "/tmp/app")).toBe(
+      "profile:/tmp/app/src/a.ts failed",
+    );
     expect(normalizeFailureText("myfile:///tmp/app/src/a.ts failed", "/tmp/app")).toBe(
       "myfile:///tmp/app/src/a.ts failed",
+    );
+    expect(normalizeFailureText("myfile:/tmp/app/src/a.ts failed", "/tmp/app")).toBe(
+      "myfile:/tmp/app/src/a.ts failed",
     );
     expect(normalizeFailureText("notfile:///tmp/app/src/a.ts failed", "/tmp/app")).toBe(
       "notfile:///tmp/app/src/a.ts failed",
     );
+    expect(normalizeFailureText("urn:/tmp/app/src/a.ts failed", "/tmp/app")).toBe(
+      "urn:/tmp/app/src/a.ts failed",
+    );
   });
 
   it("does not collapse different custom URI schemes into repository fingerprints", () => {
-    const customA = fingerprintFailure(
+    const customTripleA = fingerprintFailure(
       { ...base, stderr: "profile:///tmp/app/src/a.ts failed" },
       "/tmp/app",
     );
-    const customB = fingerprintFailure(
+    const customTripleB = fingerprintFailure(
       { ...base, stderr: "profile:///opt/other/src/a.ts failed" },
+      "/opt/other",
+    );
+    const customSingleA = fingerprintFailure(
+      { ...base, stderr: "profile:/tmp/app/src/a.ts failed" },
+      "/tmp/app",
+    );
+    const customSingleB = fingerprintFailure(
+      { ...base, stderr: "profile:/opt/other/src/a.ts failed" },
       "/opt/other",
     );
     const standardFileUrl = fingerprintFailure(
@@ -982,8 +999,33 @@ describe("failure fingerprint", () => {
       "/tmp/app",
     );
 
-    expect(customA).not.toBe(customB);
-    expect(customA).not.toBe(standardFileUrl);
+    expect(customTripleA).not.toBe(customTripleB);
+    expect(customTripleA).not.toBe(standardFileUrl);
+    expect(customSingleA).not.toBe(customSingleB);
+    expect(customSingleA).not.toBe(standardFileUrl);
+  });
+
+  it("normalizes single-slash POSIX file URLs at repository roots", () => {
+    const singleSlashA = fingerprintFailure(
+      { ...base, stderr: "at file:/tmp/app/src/a.ts:1:1" },
+      "/tmp/app",
+    );
+    const singleSlashB = fingerprintFailure(
+      { ...base, stderr: "at file:/opt/other/src/a.ts:1:1" },
+      "/opt/other",
+    );
+    const tripleSlashA = fingerprintFailure(
+      { ...base, stderr: "at file:///tmp/app/src/a.ts:1:1" },
+      "/tmp/app",
+    );
+    const tripleSlashB = fingerprintFailure(
+      { ...base, stderr: "at file:///opt/other/src/a.ts:1:1" },
+      "/opt/other",
+    );
+
+    expect(singleSlashA).toBe(singleSlashB);
+    expect(tripleSlashA).toBe(tripleSlashB);
+    expect(singleSlashA).toBe(tripleSlashA);
   });
 
   it("normalizes Windows ESM file URLs at repository roots", () => {
@@ -1015,8 +1057,24 @@ describe("failure fingerprint", () => {
       },
       "C:/Repo",
     );
+    const singleSlashA = fingerprintFailure(
+      {
+        ...base,
+        stderr: "at file:/C:/Repo/src/a.ts:1:1",
+      },
+      "C:/Repo",
+    );
+    const singleSlashB = fingerprintFailure(
+      {
+        ...base,
+        stderr: "at file:/D:/Other/src/a.ts:1:1",
+      },
+      "D:/Other",
+    );
 
     expect(repoA).toBe(repoB);
+    expect(singleSlashA).toBe(singleSlashB);
+    expect(singleSlashA).toBe(repoA);
     expect(outside).not.toBe(repoA);
     expect(sibling).not.toBe(repoA);
   });
