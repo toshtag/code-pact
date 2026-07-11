@@ -337,9 +337,15 @@ The verbs in detail:
   command or the decision gate — with the per-check results (including
   the failing check) in `data.checks` (standalone `verify` uses this path; `task complete` failure places its checks under `data.verify.checks`).
   Prefer the `--json --detail agent` form emitted by `task prepare`:
-  read `data.failure.kind`, `data.failure.fingerprint`, stderr/stdout
-  excerpts, then `data.failure.retrieve_command` only if the excerpts are
-  insufficient. Do not fetch full evidence by default.
+  read `data.failure.kind`, `data.failure.check`, `data.failure.reason`,
+  `data.failure.fingerprint` (when present), stderr/stdout excerpts (when
+  present), then `data.failure.retrieve_command` only for command-output
+  failures when the excerpts are insufficient. Standalone `verify` can report
+  `invalid_state` for state-consistency checks such as `progress_event` or
+  `task_status`; in that case `check` and `reason` are the actionable fields.
+  Fingerprints, excerpts, evidence refs, and retrieve commands are optional and
+  normally exist only for command-output failures. Do not fetch full evidence by
+  default.
 
 - **`task complete <task-id>`** — runs verification and, on pass,
   appends a `done` event (`source: loop`). Idempotent — a second call
@@ -351,11 +357,14 @@ The verbs in detail:
   retry only after the interruption is resolved. With
   `--json --detail agent`, `error.message` is intentionally short. Read
   the compact failure capsule in this order: `data.failure.kind`,
-  `data.failure.fingerprint`, `data.failure.stderr_excerpt`,
-  `data.failure.stdout_excerpt`, `data.failure.evidence_available`,
-  `data.failure.evidence_error`, then `data.failure.retrieve_command`.
-  Do not fetch full evidence by default; use `retrieve_command` only when
-  the excerpts are insufficient to decide the fix.
+  `data.failure.check`, `data.failure.reason`, `data.failure.fingerprint`
+  (when present), `data.failure.stderr_excerpt` (when present),
+  `data.failure.stdout_excerpt` (when present),
+  `data.failure.evidence_available`, `data.failure.evidence_error`, then
+  `data.failure.retrieve_command`. Fingerprints, excerpts, evidence refs, and
+  retrieve commands are optional and normally exist only for command-output
+  failures. Do not fetch full evidence by default; use `retrieve_command` only
+  when command-output excerpts are insufficient to decide the fix.
 
 - **`task record-done <task-id> --evidence "<text>"`** —
   records a `done` event with `source: external` **without** running

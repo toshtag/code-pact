@@ -8,6 +8,8 @@ describe("agent contract failure guidance", () => {
 
       for (const anchor of [
         "data.failure.kind",
+        "data.failure.check",
+        "data.failure.reason",
         "data.failure.fingerprint",
         "stderr_excerpt",
         "stdout_excerpt",
@@ -28,12 +30,16 @@ describe("agent contract failure guidance", () => {
       for (const causeCode of ["COMMANDS_FAILED", "DECISION_REQUIRED", "ABORTED"]) {
         expect(failBody).toContain(causeCode);
       }
-      for (const kind of ["command_failed", "timed_out", "decision_required"]) {
+      for (const kind of ["command_failed", "timed_out", "decision_required", "invalid_state"]) {
         expect(failBody).toContain(kind);
+      }
+      for (const stateAnchor of ["progress_event", "task_status"]) {
+        expect(failBody).toContain(stateAnchor);
       }
 
       expect(failBody).toMatch(/task complete[\s\S]*error\.cause_code[\s\S]*COMMANDS_FAILED[\s\S]*DECISION_REQUIRED[\s\S]*ABORTED/);
-      expect(failBody).toMatch(/verify --json --detail agent[\s\S]*data\.failure\.kind[\s\S]*command_failed[\s\S]*timed_out[\s\S]*decision_required/);
+      expect(failBody).toMatch(/verify --json --detail agent[\s\S]*data\.failure\.kind[\s\S]*command_failed[\s\S]*timed_out[\s\S]*decision_required[\s\S]*invalid_state/);
+      expect(failBody).toMatch(/invalid_state[\s\S]*data\.failure\.check[\s\S]*data\.failure\.reason/);
       expect(failBody).not.toMatch(/verify --json --detail agent[\s\S]{0,160}COMMANDS_FAILED/);
       expect(failBody).not.toMatch(/verify --json --detail agent[\s\S]{0,160}DECISION_REQUIRED/);
     });

@@ -407,6 +407,89 @@ describe("agent detail evidence envelope", () => {
     expect(env.data.failure?.kind).toBe("invalid_state");
   });
 
+  it("verify --detail agent reports missing done events as invalid_state without evidence", async () => {
+    const p = await setupTask({
+      command: "node --version",
+      status: "done",
+    });
+    const failed = p.run([
+      "verify",
+      "--phase",
+      "P1",
+      "--task",
+      "P1-T1",
+      "--json",
+      "--detail",
+      "agent",
+    ]);
+
+    expect(failed.code).toBe(1);
+    const env = expectJsonErr(failed, "VERIFICATION_FAILED") as {
+      data: {
+        failure: {
+          kind: string;
+          check: string;
+          reason?: string;
+          evidence_ref?: string;
+          retrieve_command?: string;
+          stdout_excerpt?: unknown;
+          stderr_excerpt?: unknown;
+        };
+      };
+    };
+    expect(env.data.failure).toMatchObject({
+      kind: "invalid_state",
+      check: "progress_event",
+      reason: expect.any(String),
+    });
+    expect(env.data.failure.evidence_ref).toBeUndefined();
+    expect(env.data.failure.retrieve_command).toBeUndefined();
+    expect(env.data.failure.stdout_excerpt).toBeUndefined();
+    expect(env.data.failure.stderr_excerpt).toBeUndefined();
+  });
+
+  it("verify --detail agent reports design task status drift as invalid_state without evidence", async () => {
+    const p = await setupTask({
+      command: "node --version",
+      status: "planned",
+      progressDone: true,
+    });
+    const failed = p.run([
+      "verify",
+      "--phase",
+      "P1",
+      "--task",
+      "P1-T1",
+      "--json",
+      "--detail",
+      "agent",
+    ]);
+
+    expect(failed.code).toBe(1);
+    const env = expectJsonErr(failed, "VERIFICATION_FAILED") as {
+      data: {
+        failure: {
+          kind: string;
+          check: string;
+          reason?: string;
+          evidence_ref?: string;
+          retrieve_command?: string;
+          stdout_excerpt?: unknown;
+          stderr_excerpt?: unknown;
+        };
+      };
+    };
+    expect(env.data.failure).toMatchObject({
+      kind: "invalid_state",
+      check: "task_status",
+      reason: expect.any(String),
+    });
+    expect(env.data.failure.evidence_ref).toBeUndefined();
+    expect(env.data.failure.retrieve_command).toBeUndefined();
+    expect(env.data.failure.stdout_excerpt).toBeUndefined();
+    expect(env.data.failure.stderr_excerpt).toBeUndefined();
+  });
+
   it("verify --detail agent keeps the final CLI JSON below 24 KiB for worst-case output", async () => {
     const p = await setupTask({ command: worstCaseCommand() });
     const failed = p.run([
