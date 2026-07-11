@@ -30,6 +30,7 @@ import {
   projectVerifyForPublicJson,
 } from "./commands/verify.ts";
 import {
+  projectPreflightFailureForAgent,
   projectVerifyForAgent,
   projectVerifySummaryForAgent,
   stringifyBoundedAgentEnvelope,
@@ -57,6 +58,35 @@ import { readProjectYamlStrictOrNull } from "./core/project-config-path.ts";
 
 const KNOWN_LOCALES: ReadonlySet<Locale> = new Set(["en-US", "ja-JP"]);
 const KNOWN_AGENTS: ReadonlySet<SupportedAgent> = new Set(SUPPORTED_AGENTS);
+
+function wantsAgentDetail(argv: string[], globalJson: boolean): boolean {
+  const detailIndex = argv.indexOf("--detail");
+  return (
+    (globalJson || argv.includes("--json")) &&
+    (argv.includes("--detail=agent") ||
+      (detailIndex >= 0 && argv[detailIndex + 1] === "agent"))
+  );
+}
+
+function emitAgentError(
+  error: { code: string; cause_code?: string; message: string },
+  reason?: string,
+  data: Record<string, unknown> = {},
+): void {
+  process.stdout.write(
+    stringifyBoundedAgentEnvelope({
+      ok: false,
+      error,
+      data: {
+        ...data,
+        ...projectPreflightFailureForAgent(
+          error.cause_code === "ABORTED" ? "aborted" : "invalid_state",
+          reason,
+        ),
+      },
+    }),
+  );
+}
 
 /**
  * `true` when `<cwd>/.code-pact/` exists on disk. Used by `cmdInit` to
@@ -677,6 +707,10 @@ async function cmdVerify(
     ({ values } = strictParse("verify", argv, toParseOptions(ROOT_SPECS.verify)));
   } catch (error) {
     if (!(error instanceof ConfigError)) throw error;
+    if (wantsAgentDetail(argv, globalJson)) {
+      emitAgentError({ code: "CONFIG_ERROR", message: "Invalid configuration" }, error.message);
+      return 2;
+    }
     emitError(globalJson || argv.includes("--json"), "CONFIG_ERROR", error.message);
     return 2;
   }
@@ -686,9 +720,6 @@ async function cmdVerify(
   const taskId = values.task as string | undefined;
   const dryRun = values["dry-run"] === true;
   const detail = values.detail as string | undefined;
-  const parsedTimeout = parseTimeoutArg(values.timeout as string | undefined, json);
-  if (!parsedTimeout.ok) return parsedTimeout.exitCode;
-
   if (detail !== undefined && !json) {
     emitError(false, "CONFIG_ERROR", "verify: --detail requires --json");
     return 2;
@@ -699,8 +730,29 @@ async function cmdVerify(
   }
 
   if (!phaseId || !taskId) {
+    if (detail === "agent") {
+      emitAgentError(
+        { code: "CONFIG_ERROR", message: "Invalid configuration" },
+        "verify requires --phase and --task",
+      );
+      return 2;
+    }
     emitError(json, "CONFIG_ERROR", "verify requires --phase and --task");
     return 2;
+  }
+
+  const parsedTimeout = parseTimeoutArg(values.timeout as string | undefined, json, {
+    emit: detail !== "agent",
+  });
+  if (!parsedTimeout.ok) {
+    if (detail === "agent") {
+      emitAgentError(
+        { code: "CONFIG_ERROR", message: "Invalid configuration" },
+        "Invalid timeout.",
+        { phase_id: phaseId, task_id: taskId },
+      );
+    }
+    return parsedTimeout.exitCode;
   }
 
   const { signal, cleanup } = createCliAbortSignal();
@@ -762,12 +814,32 @@ async function cmdVerify(
   } catch (error: unknown) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ABORTED") {
+      if (detail === "agent") {
+        emitAgentError(
+          {
+            code: "VERIFICATION_FAILED",
+            cause_code: "ABORTED",
+            message: "Verification aborted",
+          },
+          m.verify.aborted,
+          { aborted: true, phase_id: phaseId, task_id: taskId },
+        );
+        return 1;
+      }
       emitError(json, "VERIFICATION_FAILED", m.verify.aborted, {
         causeCode: "ABORTED",
       });
       return 1;
     }
     if (code === "PHASE_NOT_FOUND") {
+      if (detail === "agent") {
+        emitAgentError(
+          { code: "PHASE_NOT_FOUND", message: "Phase not found" },
+          m.verify.phaseNotFound(phaseId),
+          { phase_id: phaseId, task_id: taskId },
+        );
+        return 2;
+      }
       emitError(json, "PHASE_NOT_FOUND", m.verify.phaseNotFound(phaseId));
       return 2;
     }
@@ -776,14 +848,38 @@ async function cmdVerify(
         (error as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
       const message =
         error instanceof Error ? error.message : `Phase "${phaseId}" is ambiguous.`;
+      if (detail === "agent") {
+        emitAgentError(
+          { code: "AMBIGUOUS_PHASE_ID", message: "Ambiguous phase id" },
+          message,
+          { phase_id: phaseId, task_id: taskId, phases },
+        );
+        return 2;
+      }
       emitError(json, "AMBIGUOUS_PHASE_ID", message, { data: { phases } });
       return 2;
     }
     if (code === "TASK_NOT_FOUND") {
+      if (detail === "agent") {
+        emitAgentError(
+          { code: "TASK_NOT_FOUND", message: "Task not found" },
+          m.verify.taskNotFound(taskId, phaseId),
+          { phase_id: phaseId, task_id: taskId },
+        );
+        return 2;
+      }
       emitError(json, "TASK_NOT_FOUND", m.verify.taskNotFound(taskId, phaseId));
       return 2;
     }
     if (code === "CONFIG_ERROR") {
+      if (detail === "agent") {
+        emitAgentError(
+          { code: "CONFIG_ERROR", message: "Invalid configuration" },
+          error instanceof Error ? error.message : "Invalid configuration.",
+          { phase_id: phaseId, task_id: taskId },
+        );
+        return 2;
+      }
       emitError(
         json,
         "CONFIG_ERROR",

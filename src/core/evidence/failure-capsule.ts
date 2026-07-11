@@ -262,6 +262,36 @@ export function projectVerifySummaryForAgent(result: VerifyResult): AgentVerifyP
   return enforceVerifyProjectionLimit(projection);
 }
 
+export function projectPreflightFailureForAgent(
+  kind: FailureKind,
+  reason?: string,
+  check = "preflight",
+): AgentFailureProjection {
+  const cappedReason = capText(reason, MAX_AGENT_REASON_BYTES);
+  const projection: AgentFailureProjection = {
+    failure: {
+      schema_version: 1,
+      kind,
+      check,
+      ...(cappedReason.value !== undefined ? { reason: cappedReason.value } : {}),
+      ...(cappedReason.truncated ? { projection_truncated: true } : {}),
+    },
+    verify: {
+      ok: false,
+      checks: [
+        {
+          name: check,
+          ok: false,
+          ...(cappedReason.value !== undefined ? { reason: cappedReason.value } : {}),
+        },
+      ],
+      successful_commands: [],
+      ...(cappedReason.truncated ? { projection_truncated: true } : {}),
+    },
+  };
+  return enforceAgentProjectionLimit(projection);
+}
+
 function shrinkString(value: string, floorBytes = 0): { value: string; changed: boolean } {
   const currentBytes = Buffer.byteLength(value, "utf8");
   if (currentBytes <= floorBytes) return { value, changed: false };
@@ -494,6 +524,7 @@ export function stringifyBoundedAgentEnvelope(envelope: AgentJsonEnvelope): stri
     "suggested_next_command",
     "would_append",
     "event",
+    "phases",
     "task_id",
     "phase_id",
     "agent",

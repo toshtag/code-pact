@@ -72,10 +72,61 @@ import {
 } from "../../core/failure/failure-summary.ts";
 import { renderFailureSummaryLines } from "../render/failure-summary.ts";
 import {
+  projectPreflightFailureForAgent,
   projectVerifyForAgent,
   projectVerifySummaryForAgent,
   stringifyBoundedAgentEnvelope,
 } from "../../core/evidence/failure-capsule.ts";
+
+function wantsAgentDetail(argv: string[], globalJson: boolean): boolean {
+  const detailIndex = argv.indexOf("--detail");
+  return (
+    (globalJson || argv.includes("--json")) &&
+    (argv.includes("--detail=agent") ||
+      (detailIndex >= 0 && argv[detailIndex + 1] === "agent"))
+  );
+}
+
+function emitAgentTaskCompleteError(
+  error: { code: string; cause_code?: string; message: string },
+  reason?: string,
+  data: Record<string, unknown> = {},
+): void {
+  process.stdout.write(
+    stringifyBoundedAgentEnvelope({
+      ok: false,
+      error,
+      data: {
+        ...data,
+        ...projectPreflightFailureForAgent(
+          error.cause_code === "ABORTED" ? "aborted" : "invalid_state",
+          reason,
+        ),
+      },
+    }),
+  );
+}
+
+function messageForAgentError(code: string): string {
+  switch (code) {
+    case "TASK_NOT_FOUND":
+      return "Task not found";
+    case "AMBIGUOUS_TASK_ID":
+      return "Ambiguous task id";
+    case "AGENT_NOT_FOUND":
+      return "Agent not found";
+    case "AGENT_NOT_ENABLED":
+      return "Agent not enabled";
+    case "INVALID_TASK_TRANSITION":
+      return "Invalid task transition";
+    case "PHASE_SNAPSHOT_INVALID":
+      return "Phase snapshot invalid";
+    case "CONFIG_ERROR":
+      return "Invalid configuration";
+    default:
+      return "Task complete failed";
+  }
+}
 
 export async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
   const subcommand = argv[0];
@@ -846,6 +897,13 @@ async function cmdTaskComplete(
       { allowPositionals: true },
     ));
   } catch (error) {
+    if (error instanceof ConfigError && wantsAgentDetail(argv, globalJson)) {
+      emitAgentTaskCompleteError(
+        { code: "CONFIG_ERROR", message: "Invalid configuration" },
+        error.message,
+      );
+      return 2;
+    }
     return emitParseConfigError(error, argv, globalJson);
   }
 
@@ -866,6 +924,13 @@ async function cmdTaskComplete(
     return 2;
   }
   if (!taskId) {
+    if (detail === "agent") {
+      emitAgentTaskCompleteError(
+        { code: "CONFIG_ERROR", message: "Invalid configuration" },
+        "task complete requires a task id (e.g. `task complete P1-T1`).",
+      );
+      return 2;
+    }
     emitError(
       json,
       "CONFIG_ERROR",
@@ -873,8 +938,19 @@ async function cmdTaskComplete(
     );
     return 2;
   }
-  const parsedTimeout = parseTimeoutArg(values.timeout as string | undefined, json);
-  if (!parsedTimeout.ok) return parsedTimeout.exitCode;
+  const parsedTimeout = parseTimeoutArg(values.timeout as string | undefined, json, {
+    emit: detail !== "agent",
+  });
+  if (!parsedTimeout.ok) {
+    if (detail === "agent") {
+      emitAgentTaskCompleteError(
+        { code: "CONFIG_ERROR", message: "Invalid configuration" },
+        "Invalid timeout.",
+        { task_id: taskId },
+      );
+    }
+    return parsedTimeout.exitCode;
+  }
 
   const agent = values.agent as string | undefined;
   const { signal, cleanup } = createCliAbortSignal();
@@ -967,7 +1043,11 @@ async function cmdTaskComplete(
                 cause_code: "ABORTED",
                 message: "Verification aborted",
               },
-              data: { task_id: taskId, aborted: true },
+              data: {
+                task_id: taskId,
+                aborted: true,
+                ...projectPreflightFailureForAgent("aborted", m.task.complete.aborted(taskId)),
+              },
             }),
           );
         } else {
@@ -1110,7 +1190,15 @@ async function cmdTaskComplete(
       default:
         throw error;
     }
-    emitError(json, outCode, message);
+    if (detail === "agent") {
+      emitAgentTaskCompleteError(
+        { code: outCode, message: messageForAgentError(outCode) },
+        message,
+        { task_id: taskId, agent },
+      );
+    } else {
+      emitError(json, outCode, message);
+    }
     return 2;
   } finally {
     cleanup();

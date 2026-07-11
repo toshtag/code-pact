@@ -107,16 +107,19 @@ export type ParsedTimeoutArg =
 export function parseTimeoutArg(
   raw: string | undefined,
   json: boolean,
+  opts: { emit?: boolean } = {},
 ): ParsedTimeoutArg {
   if (raw === undefined) return { ok: true, value: undefined };
   try {
     return { ok: true, value: parseTimeoutMs(raw) };
   } catch (error) {
-    emitError(
-      json,
-      "CONFIG_ERROR",
-      error instanceof Error ? error.message : "Invalid timeout.",
-    );
+    if (opts.emit !== false) {
+      emitError(
+        json,
+        "CONFIG_ERROR",
+        error instanceof Error ? error.message : "Invalid timeout.",
+      );
+    }
     return { ok: false, exitCode: 2 };
   }
 }
