@@ -10,6 +10,7 @@ import {
   validateTimeoutMs,
 } from "../../../src/commands/verify.ts";
 import {
+  createOutputCapture,
   runBoundedCommand,
   terminateProcessTree,
   type CommandExecutionResult,
@@ -177,6 +178,59 @@ beforeEach(async () => {
 afterEach(async () => {
   await forceCleanup(await readPids(dir));
   await rm(dir, { recursive: true, force: true });
+});
+
+describe("output capture", () => {
+  it("decodes multibyte UTF-8 split across direct append calls", () => {
+    const capture = createOutputCapture();
+
+    capture.append(Buffer.from([0xc2]));
+    capture.append(Buffer.from([0xa2]));
+    capture.append(Buffer.from([0xe3]));
+    capture.append(Buffer.from([0x81, 0x82]));
+    capture.append(Buffer.from([0xf0, 0xa0]));
+    capture.append(Buffer.from([0xae, 0xb7]));
+
+    expect(capture.value()).toBe("¢あ𠮷");
+    expect(capture.value()).not.toContain("\uFFFD");
+    expect(capture.truncated()).toBe(false);
+  });
+
+  it("keeps independent stdout and stderr capture state", () => {
+    const stdout = createOutputCapture();
+    const stderr = createOutputCapture();
+
+    stdout.append(Buffer.from([0xe3]));
+    stderr.append(Buffer.from([0xf0]));
+    stdout.append(Buffer.from([0x81, 0x82]));
+    stderr.append(Buffer.from([0xa0, 0xae, 0xb7]));
+
+    expect(stdout.value()).toBe("あ");
+    expect(stderr.value()).toBe("𠮷");
+  });
+
+  it("does not flush a replacement character when the byte cap cuts a sequence", () => {
+    const capture = createOutputCapture(4);
+
+    capture.append(Buffer.from("abc"));
+    capture.append(Buffer.from([0xe3, 0x81, 0x82]));
+
+    expect(capture.truncated()).toBe(true);
+    expect(capture.value()).toBe("abc\n[code-pact: output truncated after 4 bytes]\n");
+    expect(capture.value()).not.toContain("\uFFFD");
+  });
+
+  it("preserves a multibyte character that ends exactly at the cap", () => {
+    const capture = createOutputCapture(6);
+
+    capture.append(Buffer.from("abc"));
+    capture.append(Buffer.from([0xe3]));
+    capture.append(Buffer.from([0x81, 0x82]));
+    capture.append(Buffer.from("x"));
+
+    expect(capture.value()).toBe("abcあ\n[code-pact: output truncated after 6 bytes]\n");
+    expect(capture.value()).not.toContain("\uFFFD");
+  });
 });
 
 describe("verification command process lifecycle", () => {

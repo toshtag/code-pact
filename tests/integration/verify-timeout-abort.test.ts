@@ -424,5 +424,93 @@ if (process.platform !== "win32") {
       expect(pidExists(pids!.parent)).toBe(false);
       expect(pidExists(pids!.child)).toBe(false);
     }, 15_000);
+
+    it("reports standalone verify cancellation through the bounded agent envelope", async () => {
+      await installLongProcessFixture(dir);
+      await setupProject(dir, "node long-parent.mjs");
+      activeCli = spawn(
+        process.execPath,
+        [
+          cliPath,
+          "verify",
+          "--phase",
+          "P1",
+          "--task",
+          "P1-T1",
+          "--json",
+          "--detail",
+          "agent",
+        ],
+        { cwd: dir, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      const resultPromise = collectProcess(activeCli);
+      await waitForFile(join(dir, "long-ready"));
+      activeCli.kill("SIGTERM");
+      const result = await resultPromise;
+      activeCli = undefined;
+
+      expect(result.code).toBe(1);
+      expect(Buffer.byteLength(result.stdout, "utf8")).toBeLessThan(24 * 1024);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        ok: false,
+        error: {
+          code: "VERIFICATION_FAILED",
+          cause_code: "ABORTED",
+          message: "Verification aborted",
+        },
+        data: { failure: { kind: "aborted" } },
+      });
+      const pids = await readPids(dir);
+      expect(pids).toBeDefined();
+      await waitForPidExit(pids!.parent);
+      await waitForPidExit(pids!.child);
+      expect(pidExists(pids!.parent)).toBe(false);
+      expect(pidExists(pids!.child)).toBe(false);
+    }, 15_000);
+
+    it("reports task complete cancellation through the bounded agent envelope without recording done", async () => {
+      await installLongProcessFixture(dir);
+      await setupProject(dir, "node long-parent.mjs");
+      activeCli = spawn(
+        process.execPath,
+        [
+          cliPath,
+          "task",
+          "complete",
+          "P1-T1",
+          "--timeout",
+          "10000",
+          "--json",
+          "--detail",
+          "agent",
+        ],
+        { cwd: dir, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      const resultPromise = collectProcess(activeCli);
+      await waitForFile(join(dir, "long-ready"));
+      activeCli.kill("SIGINT");
+      const result = await resultPromise;
+      activeCli = undefined;
+
+      expect(result.code).toBe(1);
+      expect(Buffer.byteLength(result.stdout, "utf8")).toBeLessThan(24 * 1024);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        ok: false,
+        error: {
+          code: "VERIFICATION_FAILED",
+          cause_code: "ABORTED",
+          message: "Verification aborted",
+        },
+        data: { failure: { kind: "aborted" } },
+      });
+      expect((await loadMergedProgress(dir)).log.events).toHaveLength(0);
+      const pids = await readPids(dir);
+      expect(pids).toBeDefined();
+      await waitForPidExit(pids!.parent);
+      await waitForPidExit(pids!.child);
+      expect(pidExists(pids!.parent)).toBe(false);
+      expect(pidExists(pids!.child)).toBe(false);
+      expect(existsSync(join(dir, "long-child-survived"))).toBe(false);
+    }, 15_000);
   });
 }

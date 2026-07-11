@@ -27,8 +27,7 @@ export type CommandExecutionResult = {
 
 export type BoundedCommandResult = Omit<CommandExecutionResult, "command" | "ok">;
 
-const MAX_COMMAND_OUTPUT_BYTES = 1_048_576;
-const TRUNCATED_OUTPUT_MESSAGE = `\n[code-pact: output truncated after ${MAX_COMMAND_OUTPUT_BYTES} bytes]\n`;
+export const MAX_COMMAND_OUTPUT_BYTES = 1_048_576;
 const TERMINATION_WAIT_MS = 2_000;
 const TASKKILL_TIMEOUT_MS = 5_000;
 const CLOSE_DEADLINE_MS = 3_000;
@@ -45,7 +44,11 @@ export type ProcessTerminationDependencies = {
   runTaskkill?: (pid: number) => Promise<TaskkillResult>;
 };
 
-function createOutputCapture(): {
+function truncatedOutputMessage(maxBytes: number): string {
+  return `\n[code-pact: output truncated after ${maxBytes} bytes]\n`;
+}
+
+export function createOutputCapture(maxBytes = MAX_COMMAND_OUTPUT_BYTES): {
   append: (chunk: Buffer) => void;
   value: () => string;
   truncated: () => boolean;
@@ -59,7 +62,7 @@ function createOutputCapture(): {
   return {
     append(chunk: Buffer): void {
       if (truncated) return;
-      const remaining = MAX_COMMAND_OUTPUT_BYTES - bytes;
+      const remaining = maxBytes - bytes;
       if (chunk.byteLength <= remaining) {
         text += decoder.write(chunk);
         bytes += chunk.byteLength;
@@ -70,8 +73,8 @@ function createOutputCapture(): {
       // the incomplete bytes buffered. Do not flush them as U+FFFD; the raw
       // byte cap has intentionally truncated that character.
       decoder = new StringDecoder("utf8");
-      text += TRUNCATED_OUTPUT_MESSAGE;
-      bytes = MAX_COMMAND_OUTPUT_BYTES;
+      text += truncatedOutputMessage(maxBytes);
+      bytes = maxBytes;
       truncated = true;
     },
     value: () => {
