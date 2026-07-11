@@ -46,7 +46,6 @@ These explain how a feature works for users. The *why* behind each — the desig
 | [concepts/design-doc-lifecycle.md](concepts/design-doc-lifecycle.md) | Archiving / retiring completed design docs — how a phase YAML or decision file becomes safe to delete, and why a bare `rm` first fails closed. |
 | [concepts/governance.md](concepts/governance.md) | The governance layer — write lock, reserved IDs, protected paths. |
 | [concepts/sample-phase.md](concepts/sample-phase.md) | The `TUTORIAL` sample phase — keep / rename / delete decision. |
-| [concepts/evidence-harness.md](concepts/evidence-harness.md) | Maintainer tooling (not a product feature) — the deterministic metrics harness behind design decisions. |
 
 ## Project
 

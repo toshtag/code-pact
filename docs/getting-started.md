@@ -161,7 +161,7 @@ real (non-tutorial) phase.
 
 Generated, non-design state lives elsewhere: progress events in
 `.code-pact/state/`, agent instruction files at the repo root (e.g. `CLAUDE.md`),
-and maintainer evidence under `docs/maintainers/measurements/`.
+and maintainer evidence under `docs/maintainers/evidence/`.
 
 ## Path 2 — Manual
 

@@ -6,7 +6,7 @@ describe("agent detail measurement fixture", () => {
   it("keeps the committed P51 byte measurements reproducible", async () => {
     const actual = await buildAgentDetailMeasurements();
     const expected = JSON.parse(
-      await readFile("docs/maintainers/measurements/agent-detail-evidence.json", "utf8"),
+      await readFile("docs/maintainers/evidence/agent-detail-evidence.json", "utf8"),
     ) as typeof actual;
 
     expect(actual).toEqual(expected);

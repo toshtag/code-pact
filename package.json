@@ -51,7 +51,6 @@
     "prepush:fast": "pnpm test:ci",
     "prepush:deep": "pnpm test:ci:deep",
     "typecheck": "tsc --noEmit",
-    "harness": "tsx scripts/harness/run.ts",
     "check:doc-links": "tsx scripts/check-doc-links.ts",
     "check:public-md-links": "tsx scripts/check-public-md-links.ts",
     "check:doc-invariants": "node scripts/check-doc-invariants.mjs",

@@ -29,20 +29,14 @@ Semantic versioning, per major line (`MAJOR.MINOR.PATCH`):
 On a `chore/release-<version>` branch:
 
 1. **Bump** `package.json` `version`.
-2. **Refresh measurements:** `pnpm harness --corpus . --write`. This rewrites
-   `docs/maintainers/measurements/` so the snapshot reflects this release (version, git
-   SHA, date, and any metric drift). CI enforces that the snapshot's
-   `code_pact_cli_version` matches `package.json` (see `check:doc-invariants`),
-   so this step cannot be silently skipped. `docs/positioning.md` points at the
-   snapshot rather than copying numbers, so it needs no edit.
-3. **CHANGELOG:** add a `## [<version>] — <date>` section (Keep a Changelog
+2. **CHANGELOG:** add a `## [<version>] — <date>` section (Keep a Changelog
    format: Added / Changed / Fixed). Lead with the user-facing shipped change.
    On a **major bump**, roll older majors out of `CHANGELOG.md` into
    `docs/maintainers/history/CHANGELOG-<major>.md` with `pnpm changelog:archive`
    (verbatim move, not a delete; leaves a pointer). `check:changelog-archive`
    (part of `check:docs`) fails if an older major is still inline, so this is
    not silently skipped.
-4. **Docs-sync audit** — confirm everything shipped since the last tag followed
+3. **Docs-sync audit** — confirm everything shipped since the last tag followed
    the [docs ownership map](docs-maintenance.md#ownership-map--what-to-update-for-which-change).
    `check:docs` covers links, invariants, history-noise, and generated-reference
    drift, but one rule is
@@ -57,23 +51,23 @@ On a `chore/release-<version>` branch:
    # scan for: new error codes without a troubleshooting entry.
    ```
 
-5. **Verify** — one command, the release gate:
+4. **Verify** — one command, the release gate:
    ```sh
    pnpm release:check
    ```
    `release:check` (in `package.json`) runs typecheck, the full test suite,
    build, `check:docs` (links + invariants + history-noise + generated-reference drift),
-   `check:release-version` (package.json ↔ CHANGELOG ↔ measurements agree),
+   `check:release-version` (package.json ↔ CHANGELOG ↔ docs examples agree),
    then `validate --json`, `plan lint --include-quality --strict --json`, and
    `plan analyze --strict --json`. This is the single source of the release
    gate — don't re-list the steps here, or the runbook drifts from the script.
-6. Open the PR; merge once CI is green.
+5. Open the PR; merge once CI is green.
 
 ## Tag + publish (automated via GitHub Actions)
 
 After the release-prep PR merges to `main`:
 
-7. **SSH-signed annotated tag** on the merge commit. `SECURITY.md` requires
+6. **SSH-signed annotated tag** on the merge commit. `SECURITY.md` requires
    stable releases to use SSH-signed tags (so the GitHub tag page shows
    "Verified"); use `-s` (not `-a`, which is annotated but not signed).
    Lightweight tags are rejected by the publish workflow; signing setup is in
@@ -83,7 +77,7 @@ After the release-prep PR merges to `main`:
    git verify-tag v<version>   # expect a good signature before pushing
    git push origin v<version>
    ```
-8. **Approve the publish workflow.** Pushing the tag triggers
+7. **Approve the publish workflow.** Pushing the tag triggers
    `.github/workflows/publish.yml`. The workflow has four jobs with strict
    permission separation:
 
@@ -117,7 +111,7 @@ After the release-prep PR merges to `main`:
    - **github-release** creates a GitHub Release with an auto-generated
      `## Integrity` section.
 
-9. **Verify.** After the workflow succeeds:
+8. **Verify.** After the workflow succeeds:
    - Check the npm package page for the provenance badge.
    - Check the GitHub Release for the auto-generated Integrity section
      (shasum, integrity, local SHA-256, provenance note).

@@ -63,7 +63,7 @@ describe("checkReleaseVersion — against the real repo", () => {
   });
 });
 
-describe("checkReleaseVersion — measurements snapshot AND manifest both pinned", () => {
+describe("checkReleaseVersion — release surfaces", () => {
   let root: string | undefined;
   afterEach(async () => {
     if (root) await rm(root, { recursive: true, force: true });
@@ -71,28 +71,25 @@ describe("checkReleaseVersion — measurements snapshot AND manifest both pinned
   });
 
   // Minimal tree carrying every surface checkReleaseVersion reads, all at 9.9.9.
-  async function buildTree(over: { summary?: string; manifest?: string } = {}): Promise<string> {
+  async function buildTree(over: { changelog?: string; docVersion?: string } = {}): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), "crv-"));
     const v = "9.9.9";
     await writeFile(join(dir, "package.json"), JSON.stringify({ version: v }), "utf8");
-    await writeFile(join(dir, "CHANGELOG.md"), `# Changelog\n\n## [Unreleased]\n\n## [${v}] — 2026-06-18\n`, "utf8");
-    await writeFile(join(dir, "README.md"), "# Project\n", "utf8");
-    await mkdir(join(dir, "docs", "maintainers", "measurements"), { recursive: true });
-    await writeFile(join(dir, "docs/maintainers/measurements/summary.json"), JSON.stringify({ code_pact_cli_version: over.summary ?? v }), "utf8");
-    await writeFile(join(dir, "docs/maintainers/measurements/measurements.manifest.json"), JSON.stringify({ code_pact_cli_version: over.manifest ?? v }), "utf8");
+    await writeFile(join(dir, "CHANGELOG.md"), over.changelog ?? `# Changelog\n\n## [Unreleased]\n\n## [${v}] — 2026-06-18\n`, "utf8");
+    await writeFile(join(dir, "README.md"), `# Project\n\nnpm install code-pact@${over.docVersion ?? v}\n`, "utf8");
     await mkdir(join(dir, "src", "core", "adapters"), { recursive: true });
     await writeFile(join(dir, "src/core/adapters/conformance-spec.ts"), `export const RECOMMENDATION_CONSUMPTION_FROM_VERSION = "1.0.0";\n`, "utf8");
     return dir;
   }
 
-  it("passes when summary AND manifest both match package.json", async () => {
+  it("passes when changelog, docs, and threshold match package.json", async () => {
     root = await buildTree();
     expect(checkReleaseVersion(root)).toEqual([]);
   });
 
-  it("flags a manifest whose code_pact_cli_version != package.json (not just the summary)", async () => {
-    root = await buildTree({ manifest: "1.2.3" });
+  it("flags stale docs examples", async () => {
+    root = await buildTree({ docVersion: "1.2.3" });
     const problems = checkReleaseVersion(root);
-    expect(problems.some((p) => p.includes("measurements.manifest.json") && p.includes("1.2.3"))).toBe(true);
+    expect(problems.some((p) => p.includes("code-pact@1.2.3"))).toBe(true);
   });
 });

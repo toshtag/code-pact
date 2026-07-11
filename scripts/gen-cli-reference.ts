@@ -2,7 +2,7 @@
 // Generate docs/cli-reference.generated.md from the CommandSpec single source.
 //
 // Run via tsx so it imports the TypeScript spec directly — no dist build
-// needed (matches the scripts/harness/run.ts precedent).
+// needed (matches the internal maintainer-script precedent).
 //
 //   pnpm gen:cli-reference     write the file
 //   pnpm check:cli-reference   regenerate in memory and fail on drift (CI)

@@ -1,9 +1,9 @@
 // The single source of truth for the standard context budget profile
 // names and their built-in fallback byte values.
 //
-// These values bracket the committed dogfood baseline
-// (docs/maintainers/measurements/summary.json), so each is a real
-// percentile boundary rather than a round guess —
+// These values were calibrated from the historical dogfood baseline before the
+// generic evidence harness was retired, so each is a real percentile boundary
+// rather than a round guess —
 //   tight    30000  (above pack_size_p50_bytes)
 //   balanced 60000  (above pack_size_p90_bytes)
 //   wide     120000 (generous margin below the pack_size_max outlier)
