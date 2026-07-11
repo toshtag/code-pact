@@ -13,6 +13,8 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-07-11
+
 ### Added
 - **Agent-sized verification detail and local evidence retrieval.** `verify --json --detail agent` and `task complete --json --detail agent` now emit a compact Failure Capsule for agents while preserving the legacy default / `--detail full` JSON shapes. Failed command stdout/stderr are stored once in the gitignored derived Evidence cache under `.code-pact/cache/evidence/`, referenced by an opaque `evidence:sha256:<digest>` value, and retrievable with `code-pact evidence show <ref> --json`. Agent-detail JSON is bounded below 24 KiB, including cancellation, timeout, preflight, and oversized-output failures.
 
