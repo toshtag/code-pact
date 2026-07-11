@@ -51,6 +51,12 @@ test(progress): cover expanded_work for project-b fixture
   `mkdir -p .local/hooks && cp scripts/local/pre-push.example.sh .local/hooks/pre-push && chmod +x .local/hooks/pre-push && git config core.hooksPath .local/hooks`.
 - Touching docs? See [`docs/maintainers/docs-maintenance.md`](docs/maintainers/docs-maintenance.md) for which doc owns which kind of change, so updates don't drift across files.
 
+## Issues and questions
+
+- Bugs, feature requests, and usage questions currently use GitHub Issues.
+- Use the provided bug or feature templates where applicable.
+- The README Non-goals list remains the scope boundary for feature requests.
+
 ## Runtime dependency policy
 
 MVP runtime `dependencies` are limited to `yaml` and `zod`. Do not add CLI frameworks (`commander`), color libraries (`picocolors`), front-matter parsers (`gray-matter`), glob libraries (`globby`), or process libraries (`execa`) without an explicit RFC in `.local/decisions/`.

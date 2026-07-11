@@ -1,6 +1,6 @@
 # code-pact documentation
 
-> 🌐 日本語の入口は [docs/ja/](ja/README.md) にあります（一次ドキュメントは英語です）。
+> 🌐 日本語案内は [docs/ja/](ja/README.md) にあります（一次ドキュメントは英語です）。
 
 The fastest way in is [`getting-started.md`](getting-started.md) — empty project to your first `task complete` in about thirty minutes. If you already know the shape of the work, jump straight to the workflow guide that matches your situation: starting from scratch, or adopting code-pact on an existing repo.
 
@@ -55,4 +55,3 @@ These explain how a feature works for users. The *why* behind each — the desig
 | [dogfood.md](dogfood.md) | Maintainer quick guide — running code-pact on code-pact itself (setup, per-task flow, checkpoints). |
 | [maintainers/operations.md](maintainers/operations.md) | Deeper maintainer topics — planning wizards, model-aware adapters, adapter-upgrade internals, Spec Kit import, release-prep posture. |
 | [maintainers/docs-maintenance.md](maintainers/docs-maintenance.md) | How these docs are organized and **which doc to update for which change** (the ownership map). |
-| [community.md](community.md) | Where to file issues / discussions / PRs and the scope-discipline rule for the Non-goals list. |

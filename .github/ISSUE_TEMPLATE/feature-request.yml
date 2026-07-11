@@ -14,7 +14,7 @@ body:
         - No multi-agent orchestration
         - No RAG / semantic search
 
-        See the [Non-goals (MVP) section in the README](../../README.md#non-goals-mvp). Re-introducing an item from that list is not impossible, but it requires an explicit scope tradeoff in the issue body — see [`docs/community.md`](../../docs/community.md#scope-discipline).
+        See the [Non-goals (MVP) section in the README](../../README.md#non-goals-mvp). Re-introducing an item from that list is not impossible, but it requires an explicit scope tradeoff in the scope check below.
 
   - type: textarea
     id: problem
