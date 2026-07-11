@@ -18,7 +18,7 @@ type Measurement = {
   evidence_bytes: number;
 };
 
-const OUT_PATH = join("docs", "maintainers", "measurements", "agent-detail-evidence.json");
+const OUT_PATH = join("docs", "maintainers", "evidence", "agent-detail-evidence.json");
 
 function commandFailure(command: string, stdout: string, stderr: string): VerifyResult {
   return {
@@ -247,7 +247,7 @@ export async function buildAgentDetailMeasurements(): Promise<{
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const output = `${JSON.stringify(await buildAgentDetailMeasurements(), null, 2)}\n`;
   if (process.argv.includes("--write")) {
-    await mkdir(join("docs", "maintainers", "measurements"), { recursive: true });
+    await mkdir(join("docs", "maintainers", "evidence"), { recursive: true });
     await writeFile(OUT_PATH, output, "utf8");
   } else {
     process.stdout.write(output);
