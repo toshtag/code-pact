@@ -54,6 +54,47 @@ function commandFailure(command: string, stdout: string, stderr: string): Verify
   };
 }
 
+function commandResultFailure(opts: {
+  command: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  aborted: boolean;
+}): VerifyResult {
+  return {
+    ok: false,
+    checks: [
+      {
+        name: "commands",
+        ok: false,
+        reason: `"${opts.command}" failed`,
+        command: opts.command,
+        stdout: opts.stdout,
+        stderr: opts.stderr,
+        exitCode: opts.exitCode,
+        timedOut: opts.timedOut,
+        aborted: opts.aborted,
+        elapsedMs: 123,
+        commands: [
+          {
+            command: opts.command,
+            ok: false,
+            exitCode: opts.exitCode,
+            timedOut: opts.timedOut,
+            aborted: opts.aborted,
+            elapsedMs: 123,
+            stdout: opts.stdout,
+            stderr: opts.stderr,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function cases(): Array<{ name: string; result: VerifyResult }> {
   const jsonWorst = `${"\0".repeat(512)}${"\\\"".repeat(512)}${"\b\f\n\r\t".repeat(512)}`;
   return [
@@ -108,6 +149,39 @@ function cases(): Array<{ name: string; result: VerifyResult }> {
         "日本語のstdout\nemoji-like text stays UTF-8 safe\n".repeat(256),
         "型エラー: 値 '𠮷' を処理できません\n".repeat(256),
       ),
+    },
+    {
+      name: "command_not_found",
+      result: commandResultFailure({
+        command: "missing-code-pact-fixture-command",
+        stdout: "",
+        stderr: "sh: missing-code-pact-fixture-command: command not found\n".repeat(512),
+        exitCode: 127,
+        timedOut: false,
+        aborted: false,
+      }),
+    },
+    {
+      name: "timeout",
+      result: commandResultFailure({
+        command: "node slow-fixture.mjs",
+        stdout: "still running\n".repeat(512),
+        stderr: "verification command exceeded timeout while waiting for output\n".repeat(512),
+        exitCode: null,
+        timedOut: true,
+        aborted: false,
+      }),
+    },
+    {
+      name: "abort",
+      result: commandResultFailure({
+        command: "node abort-fixture.mjs",
+        stdout: "partial output before abort\n".repeat(512),
+        stderr: "verification aborted by signal while command was running\n".repeat(512),
+        exitCode: null,
+        timedOut: false,
+        aborted: true,
+      }),
     },
   ];
 }

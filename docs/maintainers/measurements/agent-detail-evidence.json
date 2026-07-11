@@ -65,6 +65,30 @@
       "agent_json_bytes": 17822,
       "reduction_ratio": 0.3288,
       "evidence_bytes": 27086
+    },
+    {
+      "name": "command_not_found",
+      "raw_result_bytes": 59844,
+      "full_json_bytes": 59877,
+      "agent_json_bytes": 11440,
+      "reduction_ratio": 0.1911,
+      "evidence_bytes": 29920
+    },
+    {
+      "name": "timeout",
+      "raw_result_bytes": 81312,
+      "full_json_bytes": 81345,
+      "agent_json_bytes": 17971,
+      "reduction_ratio": 0.2209,
+      "evidence_bytes": 40660
+    },
+    {
+      "name": "abort",
+      "raw_result_bytes": 89507,
+      "full_json_bytes": 89540,
+      "agent_json_bytes": 17770,
+      "reduction_ratio": 0.1985,
+      "evidence_bytes": 44757
     }
   ]
 }

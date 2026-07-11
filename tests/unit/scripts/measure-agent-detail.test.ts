@@ -19,6 +19,9 @@ describe("agent detail measurement fixture", () => {
       "large_stderr",
       "json_escape_worst_case",
       "mixed_utf8",
+      "command_not_found",
+      "timeout",
+      "abort",
     ]);
     for (const row of actual.measurements) {
       expect(row.raw_result_bytes).toBeGreaterThan(0);

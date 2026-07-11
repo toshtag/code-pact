@@ -107,6 +107,18 @@ function worstCaseCommand(): string {
   ].join(" ");
 }
 
+function expectAgentErrorBounded(
+  result: ReturnType<Project["run"]>,
+  code: string,
+): { data: { failure?: { kind?: string; check?: string }; omitted_fields?: string[] } } {
+  expect(Buffer.byteLength(result.stdout, "utf8")).toBeLessThan(24 * 1024);
+  const env = expectJsonErr(result, code) as {
+    data: { failure?: { kind?: string; check?: string }; omitted_fields?: string[] };
+  };
+  expect(env.data.failure?.kind).toEqual(expect.any(String));
+  return env;
+}
+
 describe("agent detail evidence envelope", () => {
   it("verify --detail agent emits a compact failure and retrievable evidence", async () => {
     const p = await setupFailingTask();
@@ -156,6 +168,50 @@ describe("agent detail evidence envelope", () => {
     ]);
     const shownEnv = expectJsonOk<{ artifact: { stderr: string } }>(shown);
     expect(shownEnv.data.artifact.stderr).toContain("ERRERRERR");
+  });
+
+  it("stores split UTF-8 process output exactly in retrievable evidence", async () => {
+    const p = await setupTask({
+      command: "node split-utf8.mjs",
+      status: "planned",
+    });
+    await writeFile(
+      join(p.dir, "split-utf8.mjs"),
+      [
+        "const stdoutChunks = [[0xc2], [0xa2], [0xe3], [0x81, 0x82], [0xf0, 0xa0], [0xae, 0xb7]];",
+        "const stderrChunks = [[0xf0], [0xa0, 0xae, 0xb7], [0xe3, 0x81], [0x82], [0xc2, 0xa2]];",
+        "for (const chunk of stdoutChunks) {",
+        "  process.stdout.write(Buffer.from(chunk));",
+        "  await new Promise(resolve => setImmediate(resolve));",
+        "}",
+        "for (const chunk of stderrChunks) {",
+        "  process.stderr.write(Buffer.from(chunk));",
+        "  await new Promise(resolve => setImmediate(resolve));",
+        "}",
+        "process.exit(1);",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const failed = p.run([
+      "verify",
+      "--phase",
+      "P1",
+      "--task",
+      "P1-T1",
+      "--json",
+      "--detail",
+      "agent",
+    ]);
+    const env = expectJsonErr(failed, "VERIFICATION_FAILED") as {
+      data: { failure: { evidence_ref: string } };
+    };
+    const shown = p.run(["evidence", "show", env.data.failure.evidence_ref, "--json"]);
+    const shownEnv = expectJsonOk<{ artifact: { stdout: string; stderr: string } }>(shown);
+
+    expect(shownEnv.data.artifact.stdout).toBe("¢あ𠮷");
+    expect(shownEnv.data.artifact.stderr).toBe("𠮷あ¢");
+    expect(JSON.stringify(shownEnv)).not.toContain("\\uFFFD");
   });
 
   it("verify rejects unexpected positionals through the root command spec parser", async () => {
@@ -217,6 +273,108 @@ describe("agent detail evidence envelope", () => {
     } finally {
       await rm(outside, { recursive: true, force: true });
     }
+  });
+
+  it("bounds agent detail verify errors for long unknown phase and task ids", async () => {
+    const p = await setupFailingTask();
+    const longPhase = `P${"X".repeat(30_000)}`;
+    const longTask = `P1-${"T".repeat(30_000)}`;
+
+    const missingPhase = p.run([
+      "verify",
+      "--phase",
+      longPhase,
+      "--task",
+      "P1-T1",
+      "--json",
+      "--detail",
+      "agent",
+    ]);
+    expect(missingPhase.code).toBe(2);
+    const missingPhaseEnv = expectAgentErrorBounded(missingPhase, "PHASE_NOT_FOUND");
+    expect(missingPhaseEnv.data.failure?.check).toBe("preflight");
+
+    const missingTask = p.run([
+      "verify",
+      "--phase",
+      "P1",
+      "--task",
+      longTask,
+      "--json",
+      "--detail",
+      "agent",
+    ]);
+    expect(missingTask.code).toBe(2);
+    const missingTaskEnv = expectAgentErrorBounded(missingTask, "TASK_NOT_FOUND");
+    expect(missingTaskEnv.data.omitted_fields).toContain("task_id");
+  });
+
+  it("bounds agent detail task complete errors for long task and agent inputs", async () => {
+    const p = await setupFailingTask();
+    const longTask = `P1-${"T".repeat(30_000)}`;
+    const longAgent = `agent-${"a".repeat(30_000)}`;
+
+    const missingTask = p.run([
+      "task",
+      "complete",
+      longTask,
+      "--json",
+      "--detail",
+      "agent",
+    ]);
+    expect(missingTask.code).toBe(2);
+    const missingTaskEnv = expectAgentErrorBounded(missingTask, "TASK_NOT_FOUND");
+    expect(missingTaskEnv.data.omitted_fields).toContain("task_id");
+
+    const missingAgent = p.run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--agent",
+      longAgent,
+      "--json",
+      "--detail",
+      "agent",
+    ]);
+    expect(missingAgent.code).toBe(2);
+    const missingAgentEnv = expectAgentErrorBounded(missingAgent, "AGENT_NOT_FOUND");
+    expect(missingAgentEnv.data.omitted_fields).toContain("agent");
+  });
+
+  it("bounds agent detail task complete invalid transition errors", async () => {
+    const p = await setupTask({
+      command: "node --version",
+      status: "planned",
+    });
+    await writeFile(
+      join(p.dir, ".code-pact", "state", "progress.yaml"),
+      [
+        "events:",
+        "  - task_id: P1-T1",
+        "    status: started",
+        "    at: \"2026-07-10T00:00:00.000Z\"",
+        "    actor: agent",
+        "  - task_id: P1-T1",
+        "    status: blocked",
+        "    at: \"2026-07-10T00:01:00.000Z\"",
+        "    actor: agent",
+        "    reason: waiting",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const invalid = p.run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--json",
+      "--detail",
+      "agent",
+    ]);
+    expect(invalid.code).toBe(2);
+    const env = expectAgentErrorBounded(invalid, "INVALID_TASK_TRANSITION");
+    expect(env.data.failure?.kind).toBe("invalid_state");
   });
 
   it("verify --detail agent keeps the final CLI JSON below 24 KiB for worst-case output", async () => {
