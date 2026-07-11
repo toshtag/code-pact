@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 
 export type ProcessTerminationResult = {
   attempted: boolean;
@@ -52,22 +53,34 @@ function createOutputCapture(): {
   let text = "";
   let bytes = 0;
   let truncated = false;
+  let finalized = false;
+  let decoder = new StringDecoder("utf8");
 
   return {
     append(chunk: Buffer): void {
       if (truncated) return;
       const remaining = MAX_COMMAND_OUTPUT_BYTES - bytes;
       if (chunk.byteLength <= remaining) {
-        text += chunk.toString();
+        text += decoder.write(chunk);
         bytes += chunk.byteLength;
         return;
       }
-      if (remaining > 0) text += chunk.subarray(0, remaining).toString();
+      if (remaining > 0) text += decoder.write(chunk.subarray(0, remaining));
+      // If the byte cap cuts through a multibyte sequence, StringDecoder keeps
+      // the incomplete bytes buffered. Do not flush them as U+FFFD; the raw
+      // byte cap has intentionally truncated that character.
+      decoder = new StringDecoder("utf8");
       text += TRUNCATED_OUTPUT_MESSAGE;
       bytes = MAX_COMMAND_OUTPUT_BYTES;
       truncated = true;
     },
-    value: () => text,
+    value: () => {
+      if (!finalized && !truncated) {
+        text += decoder.end();
+        finalized = true;
+      }
+      return text;
+    },
     truncated: () => truncated,
   };
 }

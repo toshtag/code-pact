@@ -26,8 +26,12 @@ function replaceRootVariants(text: string, roots: string[], token: string): stri
   let out = text;
   for (const root of roots) {
     for (const variant of pathVariants(root)) {
-      out = out.replace(new RegExp(`${escapeRegExp(variant)}[\\\\/]`, "g"), `${token}/`);
-      out = out.replace(new RegExp(escapeRegExp(variant), "g"), token);
+      const flags = /^[A-Za-z]:/.test(variant) ? "gi" : "g";
+      out = out.replace(new RegExp(`${escapeRegExp(variant)}([\\\\/])`, flags), `${token}/`);
+      out = out.replace(
+        new RegExp(`${escapeRegExp(variant)}(?=$|[\\s"'\\x60\\)\\]\\}:;,])`, flags),
+        token,
+      );
     }
   }
   return out;
@@ -68,7 +72,7 @@ export function fingerprintFailure(
   const stderrExcerpt =
     excerpts?.stderr ?? excerptText(result.stderr, STDERR_EXCERPT_LIMITS);
   const normalized = {
-    command: result.command,
+    command: normalizeFailureText(result.command, cwd),
     exit_code: result.exitCode,
     timed_out: result.timedOut,
     aborted: result.aborted,
