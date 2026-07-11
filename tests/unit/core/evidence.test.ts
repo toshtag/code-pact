@@ -11,7 +11,10 @@ import {
   storeEvidenceArtifact,
 } from "../../../src/core/evidence/evidence-store.ts";
 import { parseEvidenceRef } from "../../../src/core/evidence/evidence-ref.ts";
-import { fingerprintFailure } from "../../../src/core/evidence/failure-fingerprint.ts";
+import {
+  fingerprintFailure,
+  normalizeFailureText,
+} from "../../../src/core/evidence/failure-fingerprint.ts";
 import {
   MAX_AGENT_JSON_BYTES,
   projectVerifyForAgent,
@@ -951,6 +954,36 @@ describe("failure fingerprint", () => {
 
     expect(configA).toBe(configB);
     expect(fileUriA).toBe(fileUriB);
+  });
+
+  it("does not treat file:// inside custom URI schemes as repository roots", () => {
+    expect(normalizeFailureText("profile:///tmp/app/src/a.ts failed", "/tmp/app")).toBe(
+      "profile:///tmp/app/src/a.ts failed",
+    );
+    expect(normalizeFailureText("myfile:///tmp/app/src/a.ts failed", "/tmp/app")).toBe(
+      "myfile:///tmp/app/src/a.ts failed",
+    );
+    expect(normalizeFailureText("notfile:///tmp/app/src/a.ts failed", "/tmp/app")).toBe(
+      "notfile:///tmp/app/src/a.ts failed",
+    );
+  });
+
+  it("does not collapse different custom URI schemes into repository fingerprints", () => {
+    const customA = fingerprintFailure(
+      { ...base, stderr: "profile:///tmp/app/src/a.ts failed" },
+      "/tmp/app",
+    );
+    const customB = fingerprintFailure(
+      { ...base, stderr: "profile:///opt/other/src/a.ts failed" },
+      "/opt/other",
+    );
+    const standardFileUrl = fingerprintFailure(
+      { ...base, stderr: "file:///tmp/app/src/a.ts failed" },
+      "/tmp/app",
+    );
+
+    expect(customA).not.toBe(customB);
+    expect(customA).not.toBe(standardFileUrl);
   });
 
   it("normalizes Windows ESM file URLs at repository roots", () => {

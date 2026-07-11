@@ -36,7 +36,7 @@ function pathVariants(path: string): string[] {
 
 function replaceRootVariants(text: string, roots: string[], token: string): string {
   let out = text;
-  const leftBoundary = `(^|[\\s"'\\x60\\(\\[\\{=:;,]|file://)`;
+  const leftBoundary = `(^|[\\s"'\\x60\\(\\[\\{=:;,])`;
   for (const root of roots) {
     for (const variant of pathVariants(root)) {
       const flags = /^(?:file:\/\/\/|\/)?[A-Za-z]:/i.test(variant) ? "gi" : "g";
