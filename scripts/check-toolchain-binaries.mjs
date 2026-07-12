@@ -9,7 +9,7 @@ const { packageManager } = require("../package.json");
 const { version: viteVersion } = require("vite/package.json");
 
 const EXPECTED_PNPM_VERSION = "10.34.2";
-const EXPECTED_VITE_VERSION = "6.4.3";
+const EXPECTED_VITE_VERSION = "8.1.4";
 const EXPECTED_ESBUILD_VERSION = "0.28.1";
 
 if (packageManager !== `pnpm@${EXPECTED_PNPM_VERSION}`) {
