@@ -13,3 +13,11 @@ export function buildLocalCommands(
   scope: VerificationScope,
   mergeBase: string | null,
 ): [string, string[]][];
+
+export interface LocalChangedFiles {
+  files: string[];
+  mergeBase: string | null;
+  baseResolved: boolean;
+}
+
+export function collectLocalChangedFiles(): Promise<LocalChangedFiles>;

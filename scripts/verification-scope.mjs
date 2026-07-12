@@ -166,12 +166,14 @@ async function resolveMergeBase(baseRef) {
   return sha;
 }
 
-async function diffNames(baseOrRef) {
-  const args = ["diff", "--no-renames", "--name-only"];
-  if (baseOrRef) args.push(baseOrRef);
+async function gitNameList(args) {
   const result = await runGit(args);
   if (result.code !== 0) {
-    throw new Error(result.stderr || `git diff ${baseOrRef ?? ""} failed`);
+    const command = `git ${args.join(" ")}`;
+    const message = result.stderr
+      ? `${result.stderr.trim()} (${command} failed)`
+      : `${command} failed`;
+    throw new Error(message);
   }
   return result.stdout
     .split("\n")
@@ -182,13 +184,19 @@ async function diffNames(baseOrRef) {
 async function mergeBaseDiffNames(baseRef) {
   const mergeBase = await resolveMergeBase(baseRef);
   if (!mergeBase) return { files: [], mergeBase: null };
-  const files = await diffNames(`${mergeBase}...HEAD`);
+  const files = await gitNameList([
+    "diff",
+    "--no-renames",
+    "--name-only",
+    `${mergeBase}...HEAD`,
+  ]);
   return { files, mergeBase };
 }
 
-async function collectLocalChangedFiles() {
+export async function collectLocalChangedFiles() {
   const files = new Set();
   let mergeBase = null;
+  let baseResolved = false;
 
   // Try to find a sensible base for branch changes.
   for (const baseRef of ["origin/main", "main"]) {
@@ -198,6 +206,7 @@ async function collectLocalChangedFiles() {
       if (mb) {
         for (const f of baseFiles) files.add(f);
         mergeBase = mb;
+        baseResolved = true;
         break;
       }
     } catch {
@@ -206,39 +215,25 @@ async function collectLocalChangedFiles() {
   }
 
   // Always add staged, unstaged, and untracked (non-ignored) working-tree changes.
-  const unstaged = await diffNames("");
+  const unstaged = await gitNameList(["diff", "--no-renames", "--name-only"]);
   for (const f of unstaged) files.add(f);
 
-  const staged = await runGit([
+  const staged = await gitNameList([
     "diff",
     "--no-renames",
     "--cached",
     "--name-only",
   ]);
-  if (staged.code === 0) {
-    for (const f of staged.stdout
-      .split("\n")
-      .map(s => s.trim())
-      .filter(Boolean)) {
-      files.add(f);
-    }
-  }
+  for (const f of staged) files.add(f);
 
-  const untracked = await runGit([
+  const untracked = await gitNameList([
     "ls-files",
     "--others",
     "--exclude-standard",
   ]);
-  if (untracked.code === 0) {
-    for (const f of untracked.stdout
-      .split("\n")
-      .map(s => s.trim())
-      .filter(Boolean)) {
-      files.add(f);
-    }
-  }
+  for (const f of untracked) files.add(f);
 
-  return { files: [...files], mergeBase };
+  return { files: [...files], mergeBase, baseResolved };
 }
 
 async function collectBaseChangedFiles(baseRef) {
@@ -390,27 +385,34 @@ export function buildLocalCommands(scope, mergeBase) {
 async function runLocalVerification() {
   let files;
   let mergeBase;
-  let failOpen = false;
+  let baseResolved;
+  let failSafe = false;
 
   try {
     const collected = await collectLocalChangedFiles();
     files = collected.files;
     mergeBase = collected.mergeBase;
+    baseResolved = collected.baseResolved;
   } catch (err) {
     console.error(
       `verify:local: failed to determine changed files: ${err.message}`,
     );
     files = [];
     mergeBase = null;
-    failOpen = true;
+    baseResolved = false;
+    failSafe = true;
   }
 
-  if (!failOpen && files.length === 0) {
+  if (!baseResolved) {
+    failSafe = true;
+  }
+
+  if (!failSafe && files.length === 0) {
     console.log("verify:local: no tracked changes");
     process.exit(0);
   }
 
-  const scope = failOpen
+  const scope = failSafe
     ? {
         changedFiles: [],
         docs: true,
@@ -418,7 +420,7 @@ async function runLocalVerification() {
         toolchain: false,
         processControl: false,
         generic: true,
-        reason: "fail-open",
+        reason: "fail-safe",
       }
     : classifyChangedFiles(files);
 
@@ -488,12 +490,25 @@ async function main() {
 
   let files;
   let mergeBase;
-  let failOpen = false;
+  let baseResolved;
+  let failSafe = false;
 
   if (values.local) {
-    const collected = await collectLocalChangedFiles();
-    files = collected.files;
-    mergeBase = collected.mergeBase;
+    try {
+      const collected = await collectLocalChangedFiles();
+      files = collected.files;
+      mergeBase = collected.mergeBase;
+      baseResolved = collected.baseResolved;
+      if (!baseResolved) failSafe = true;
+    } catch (err) {
+      console.error(
+        `verify:local: failed to determine changed files: ${err.message}`,
+      );
+      files = [];
+      mergeBase = null;
+      baseResolved = false;
+      failSafe = true;
+    }
   } else if (values.base) {
     try {
       const collected = await collectBaseChangedFiles(values.base);
@@ -505,14 +520,14 @@ async function main() {
       );
       files = [];
       mergeBase = null;
-      failOpen = true;
+      failSafe = true;
     }
   } else {
     console.error("verify:local: pass --local or --base <ref>");
     process.exit(2);
   }
 
-  const scope = failOpen
+  const scope = failSafe
     ? {
         changedFiles: [],
         docs: true,
@@ -520,11 +535,11 @@ async function main() {
         toolchain: false,
         processControl: false,
         generic: true,
-        reason: "fail-open",
+        reason: "fail-safe",
       }
     : classifyChangedFiles(files);
 
-  if (mergeBase === null && values.base && !failOpen) {
+  if (mergeBase === null && values.base && !failSafe) {
     // If base cannot be resolved, fail-safe to run both docs and standard.
     scope.docs = true;
     scope.standard = true;

@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  mkdirSync,
+  chmodSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -7,7 +13,12 @@ import { fileURLToPath } from "node:url";
 import {
   classifyChangedFiles,
   buildLocalCommands,
+  collectLocalChangedFiles,
 } from "../../../scripts/verification-scope.mjs";
+
+const scriptPath = fileURLToPath(
+  new URL("../../../scripts/verification-scope.mjs", import.meta.url),
+);
 
 describe("classifyChangedFiles", () => {
   it("returns empty scope for no changed files", () => {
@@ -375,10 +386,6 @@ describe("buildLocalCommands", () => {
 });
 
 describe("git diff integration", () => {
-  const scriptPath = fileURLToPath(
-    new URL("../../../scripts/verification-scope.mjs", import.meta.url),
-  );
-
   function runInRepo(cwd: string, args: string[]) {
     return execFileSync(process.execPath, [scriptPath, ...args], {
       cwd,
@@ -467,5 +474,197 @@ describe("git diff integration", () => {
     expect(scope.docs).toBe(true);
     expect(scope.standard).toBe(true);
     expect(scope.reason).toBe("docs+standard");
+  });
+});
+
+describe("collectLocalChangedFiles", () => {
+  const fakeGitNodeScript = `#!/usr/bin/env node
+import fs from "node:fs";
+const config = JSON.parse(fs.readFileSync(process.env.FAKE_GIT_CONFIG, "utf8"));
+const [, , ...args] = process.argv;
+const cmd = args[0];
+if (cmd === "merge-base") {
+  process.exit(1);
+}
+if (cmd === "diff" && args.includes("--cached")) {
+  if (config.stagedFail) {
+    console.error("fake staged error");
+    process.exit(1);
+  }
+  for (const f of config.staged || []) console.log(f);
+  process.exit(0);
+}
+if (cmd === "diff") {
+  for (const f of config.unstaged || []) console.log(f);
+  process.exit(0);
+}
+if (cmd === "ls-files" && args.includes("--others")) {
+  if (config.untrackedFail) {
+    console.error("fake untracked error");
+    process.exit(1);
+  }
+  for (const f of config.untracked || []) console.log(f);
+  process.exit(0);
+}
+console.error("fake git: unsupported " + args.join(" "));
+process.exit(1);
+`;
+
+  let tempDir: string;
+  let configPath: string;
+  let originalPath: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "fake-git-"));
+    configPath = join(tempDir, "config.json");
+    const gitPath = join(tempDir, "git");
+    writeFileSync(gitPath, fakeGitNodeScript, { mode: 0o755 });
+    chmodSync(gitPath, 0o755);
+    originalPath = process.env.PATH ?? "";
+    process.env.PATH = `${tempDir}:${originalPath}`;
+    process.env.FAKE_GIT_CONFIG = configPath;
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+    process.env.PATH = originalPath;
+    delete process.env.FAKE_GIT_CONFIG;
+  });
+
+  it("throws when git diff --cached fails", async () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({ unstaged: ["README.md"], stagedFail: true }),
+    );
+    await expect(collectLocalChangedFiles()).rejects.toThrow(
+      "git diff --no-renames --cached --name-only failed",
+    );
+  });
+
+  it("throws when git ls-files --others fails", async () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({ unstaged: ["README.md"], untrackedFail: true }),
+    );
+    await expect(collectLocalChangedFiles()).rejects.toThrow(
+      "git ls-files --others --exclude-standard failed",
+    );
+  });
+
+  it("returns baseResolved false when main/origin/main is missing and working tree has README.md", async () => {
+    writeFileSync(configPath, JSON.stringify({ unstaged: ["README.md"] }));
+    const result = await collectLocalChangedFiles();
+    expect(result.files).toEqual(["README.md"]);
+    expect(result.mergeBase).toBeNull();
+    expect(result.baseResolved).toBe(false);
+  });
+
+  it("returns empty files and baseResolved false when no base and no working tree changes", async () => {
+    writeFileSync(configPath, JSON.stringify({}));
+    const result = await collectLocalChangedFiles();
+    expect(result.files).toEqual([]);
+    expect(result.mergeBase).toBeNull();
+    expect(result.baseResolved).toBe(false);
+  });
+});
+
+describe("local verification integration", () => {
+  const fakeGitNodeScript = `#!/usr/bin/env node
+import fs from "node:fs";
+const config = JSON.parse(fs.readFileSync(process.env.FAKE_GIT_CONFIG, "utf8"));
+const [, , ...args] = process.argv;
+const cmd = args[0];
+if (cmd === "merge-base") {
+  process.exit(1);
+}
+if (cmd === "diff" && args.includes("--cached")) {
+  for (const f of config.staged || []) console.log(f);
+  process.exit(0);
+}
+if (cmd === "diff") {
+  for (const f of config.unstaged || []) console.log(f);
+  process.exit(0);
+}
+if (cmd === "ls-files" && args.includes("--others")) {
+  for (const f of config.untracked || []) console.log(f);
+  process.exit(0);
+}
+console.error("fake git: unsupported " + args.join(" "));
+process.exit(1);
+`;
+
+  const fakePnpmScript = `#!/usr/bin/env node
+console.log("fake pnpm ok");
+process.exit(0);
+`;
+
+  let tempDir: string;
+  let originalPath: string;
+
+  function runScript(
+    cwd: string,
+    args: string[],
+    env: Record<string, string> = {},
+  ) {
+    return execFileSync(process.execPath, [scriptPath, ...args], {
+      cwd,
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+    }).trim();
+  }
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "verify-local-"));
+    const gitPath = join(tempDir, "git");
+    const pnpmPath = join(tempDir, "pnpm.cjs");
+    writeFileSync(gitPath, fakeGitNodeScript, { mode: 0o755 });
+    chmodSync(gitPath, 0o755);
+    writeFileSync(pnpmPath, fakePnpmScript);
+    originalPath = process.env.PATH ?? "";
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+    process.env.PATH = originalPath;
+  });
+
+  it("reports fail-safe scope when base cannot be resolved and only README.md changed", () => {
+    const configPath = join(tempDir, "config.json");
+    writeFileSync(configPath, JSON.stringify({ unstaged: ["README.md"] }));
+    const out = runScript(process.cwd(), ["--local", "--format", "json"], {
+      PATH: `${tempDir}:${originalPath}`,
+      FAKE_GIT_CONFIG: configPath,
+    });
+    const scope = JSON.parse(out);
+    expect(scope.docs).toBe(true);
+    expect(scope.standard).toBe(true);
+    expect(scope.generic).toBe(true);
+    expect(scope.reason).toBe("fail-safe");
+  });
+
+  it("does not report no tracked changes when base is unknown and tree is empty", () => {
+    const configPath = join(tempDir, "config.json");
+    writeFileSync(configPath, JSON.stringify({}));
+    const out = runScript(process.cwd(), ["--local", "--format", "json"], {
+      PATH: `${tempDir}:${originalPath}`,
+      FAKE_GIT_CONFIG: configPath,
+    });
+    const scope = JSON.parse(out);
+    expect(scope.reason).toBe("fail-safe");
+    expect(out).not.toContain("no tracked changes");
+  });
+
+  it("runs fail-safe checks when base is unknown and tree is empty", () => {
+    const configPath = join(tempDir, "config.json");
+    writeFileSync(configPath, JSON.stringify({}));
+    const pnpmPath = join(tempDir, "pnpm.cjs");
+    const out = runScript(process.cwd(), ["--local", "--run"], {
+      PATH: `${tempDir}:${originalPath}`,
+      FAKE_GIT_CONFIG: configPath,
+      npm_execpath: pnpmPath,
+    });
+    expect(out).toContain("verify:local: scope=fail-safe");
+    expect(out).toContain("verify:local: 3 checks passed");
+    expect(out).not.toContain("no tracked changes");
   });
 });
