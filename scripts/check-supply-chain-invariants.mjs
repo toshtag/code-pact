@@ -671,12 +671,29 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function scriptInvokes(script, scriptName) {
+function parseFailFastChain(script) {
+  if (
+    script.includes("||") ||
+    script.includes(";") ||
+    /(^|[^&])&([^&]|$)/.test(script) ||
+    /(^|[^|])\|([^|]|$)/.test(script)
+  ) {
+    return null;
+  }
+
+  return script
+    .split(/\s*&&\s*/)
+    .map(command => command.trim())
+    .filter(Boolean);
+}
+
+function commandInvokesPnpmScript(command, scriptName) {
   const escaped = escapeRegExp(scriptName);
-  const pattern = new RegExp(
-    `(?:^|(?:&&|\\|\\||;)\\s*)pnpm\\s+(?:run\\s+)?${escaped}(?=$|\\s|&&|\\|\\||;)`,
-  );
-  return pattern.test(script);
+  return new RegExp(`^pnpm\\s+(?:run\\s+)?${escaped}(?=$|\\s)`).test(command);
+}
+
+function chainPnpmScriptIndex(chain, scriptName) {
+  return chain.findIndex(command => commandInvokesPnpmScript(command, scriptName));
 }
 
 export function checkCiPackageScripts(packageContent) {
@@ -697,6 +714,9 @@ export function checkCiPackageScripts(packageContent) {
   const testCiDeep = String(scripts["test:ci:deep"] ?? "");
   const integrationFull = String(scripts["test:integration:full"] ?? "");
   const releaseCheck = String(scripts["release:check"] ?? "");
+  const testChain = parseFailFastChain(test);
+  const integrationChain = parseFailFastChain(integration);
+  const releaseCheckChain = parseFailFastChain(releaseCheck);
 
   const requiredFast = [
     "pnpm check:supply-chain",
@@ -756,35 +776,68 @@ export function checkCiPackageScripts(packageContent) {
     );
   }
 
-  if (!scriptInvokes(test, "test:unit")) {
+  if (!testChain) {
+    violations.push("package.json: scripts.test must use a fail-fast && chain");
+  } else if (chainPnpmScriptIndex(testChain, "test:unit") === -1) {
     violations.push("package.json: scripts.test must invoke pnpm test:unit");
   }
 
-  if (!scriptInvokes(test, "test:integration")) {
-    violations.push("package.json: scripts.test must invoke pnpm test:integration");
+  if (testChain) {
+    const testUnitIndex = chainPnpmScriptIndex(testChain, "test:unit");
+    const testIntegrationIndex = chainPnpmScriptIndex(testChain, "test:integration");
+    if (testIntegrationIndex === -1) {
+      violations.push("package.json: scripts.test must invoke pnpm test:integration");
+    } else if (testUnitIndex !== -1 && testUnitIndex > testIntegrationIndex) {
+      violations.push(
+        "package.json: scripts.test must invoke pnpm test:unit before pnpm test:integration",
+      );
+    }
   }
 
-  if (!scriptInvokes(integration, "test:integration:full")) {
+  if (!integrationChain) {
+    violations.push(
+      "package.json: scripts.test:integration must use a fail-fast && chain",
+    );
+  } else if (chainPnpmScriptIndex(integrationChain, "test:integration:full") === -1) {
     violations.push(
       "package.json: scripts.test:integration must invoke pnpm test:integration:full",
     );
   }
 
-  if (/pnpm\s+build\b/.test(releaseCheck)) {
+  if (
+    releaseCheckChain
+      ? releaseCheckChain.some(command => commandInvokesPnpmScript(command, "build"))
+      : /\bpnpm\s+(?:run\s+)?build(?:$|\s|&&|\|\||;)/.test(releaseCheck)
+  ) {
     violations.push("package.json: scripts.release:check must not run a duplicate pnpm build");
   }
 
-  if (!scriptInvokes(releaseCheck, "test")) {
+  if (!releaseCheckChain) {
+    violations.push("package.json: scripts.release:check must use a fail-fast && chain");
+  } else if (chainPnpmScriptIndex(releaseCheckChain, "test") === -1) {
     violations.push("package.json: scripts.release:check must invoke pnpm test");
   }
 
-  for (const command of [
+  const releaseDistCommands = [
     "node dist/cli.js validate --json",
     "node dist/cli.js plan lint --include-quality --strict --json",
     "node dist/cli.js plan analyze --strict --json",
-  ]) {
+  ];
+  for (const command of releaseDistCommands) {
     if (!releaseCheck.includes(command)) {
       violations.push(`package.json: scripts.release:check must include ${command}`);
+    }
+  }
+
+  if (releaseCheckChain) {
+    const testIndex = chainPnpmScriptIndex(releaseCheckChain, "test");
+    for (const command of releaseDistCommands) {
+      const distCommandIndex = releaseCheckChain.indexOf(command);
+      if (testIndex !== -1 && distCommandIndex !== -1 && testIndex > distCommandIndex) {
+        violations.push(
+          `package.json: scripts.release:check must invoke pnpm test before ${command}`,
+        );
+      }
     }
   }
 

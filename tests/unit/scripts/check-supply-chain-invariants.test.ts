@@ -587,6 +587,14 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     return JSON.stringify(pkg, null, 2);
   }
 
+  function packageWithScripts(scripts: Record<string, string>): string {
+    const pkg = JSON.parse(wellFormedPackage) as {
+      scripts: Record<string, string>;
+    };
+    Object.assign(pkg.scripts, scripts);
+    return JSON.stringify(pkg, null, 2);
+  }
+
   it("passes on a well-formed tree", async () => {
     root = await buildTree();
     const { failures } = checkSupplyChainInvariants(root);
@@ -695,6 +703,36 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     );
   });
 
+  it("fails when test conditionally invokes integration", async () => {
+    const violations = checkCiPackageScripts(
+      packageWithScript("test", "pnpm test:unit || pnpm test:integration"),
+    );
+    expect(violations).toContain(
+      "package.json: scripts.test must use a fail-fast && chain",
+    );
+  });
+
+  it("fails when test ignores unit failures before integration", async () => {
+    const violations = checkCiPackageScripts(
+      packageWithScript("test", "pnpm test:unit ; pnpm test:integration"),
+    );
+    expect(violations).toContain(
+      "package.json: scripts.test must use a fail-fast && chain",
+    );
+  });
+
+  it("allows pnpm run script invocations in fail-fast chains", async () => {
+    const violations = checkCiPackageScripts(
+      packageWithScripts({
+        test: "pnpm run test:unit && pnpm run test:integration",
+        "test:integration": "pnpm run test:integration:full",
+        "release:check":
+          "pnpm typecheck && pnpm run test && pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm check:supply-chain && pnpm check:release-version && node dist/cli.js validate --json && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json",
+      }),
+    );
+    expect(violations).toEqual([]);
+  });
+
   it("fails when test:integration omits full integration", async () => {
     const violations = checkCiPackageScripts(
       packageWithScript(
@@ -719,6 +757,30 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     );
   });
 
+  it("fails when release:check conditionally invokes test", async () => {
+    const violations = checkCiPackageScripts(
+      packageWithScript(
+        "release:check",
+        "pnpm typecheck || pnpm test && pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm check:supply-chain && pnpm check:release-version && node dist/cli.js validate --json && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json",
+      ),
+    );
+    expect(violations).toContain(
+      "package.json: scripts.release:check must use a fail-fast && chain",
+    );
+  });
+
+  it("fails when release:check validates dist before test builds it", async () => {
+    const violations = checkCiPackageScripts(
+      packageWithScript(
+        "release:check",
+        "pnpm typecheck && node dist/cli.js validate --json && pnpm test && pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm check:supply-chain && pnpm check:release-version && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json",
+      ),
+    );
+    expect(violations).toContain(
+      "package.json: scripts.release:check must invoke pnpm test before node dist/cli.js validate --json",
+    );
+  });
+
   it("fails when release:check reintroduces a duplicate build", async () => {
     root = await buildTree({
       packageContent: packageWithScript(
@@ -729,6 +791,18 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBeGreaterThan(0);
     await cleanup();
+  });
+
+  it("fails when release:check reintroduces a duplicate build via pnpm run", async () => {
+    const violations = checkCiPackageScripts(
+      packageWithScript(
+        "release:check",
+        "pnpm typecheck && pnpm test && pnpm run build && pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm check:supply-chain && pnpm check:release-version && node dist/cli.js validate --json && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json",
+      ),
+    );
+    expect(violations).toContain(
+      "package.json: scripts.release:check must not run a duplicate pnpm build",
+    );
   });
 
   it("fails when full integration stops building dist first", async () => {
