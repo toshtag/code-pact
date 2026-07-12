@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   checkActionShaPins,
   checkCancellationCoverage,
+  checkCiPackageScripts,
   checkNoTokenSecrets,
   checkSupplyChainInvariants,
 } from "../../../scripts/check-supply-chain-invariants.mjs";
@@ -475,6 +476,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     {
       packageManager: "pnpm@10.34.2",
       scripts: {
+        test: "pnpm test:unit && pnpm test:integration",
+        "test:integration": "pnpm test:integration:full",
         "test:integration:full":
           "pnpm build && vitest run --config vitest.integration.config.ts",
         "test:ci":
@@ -681,6 +684,39 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBeGreaterThan(0);
     await cleanup();
+  });
+
+  it("fails when test omits integration", async () => {
+    const violations = checkCiPackageScripts(
+      packageWithScript("test", "pnpm test:unit"),
+    );
+    expect(violations).toContain(
+      "package.json: scripts.test must invoke pnpm test:integration",
+    );
+  });
+
+  it("fails when test:integration omits full integration", async () => {
+    const violations = checkCiPackageScripts(
+      packageWithScript(
+        "test:integration",
+        "vitest run --config vitest.integration.smoke.config.ts",
+      ),
+    );
+    expect(violations).toContain(
+      "package.json: scripts.test:integration must invoke pnpm test:integration:full",
+    );
+  });
+
+  it("does not treat pnpm test:unit as pnpm test in release:check", async () => {
+    const violations = checkCiPackageScripts(
+      packageWithScript(
+        "release:check",
+        "pnpm typecheck && pnpm test:unit && pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm check:supply-chain && pnpm check:release-version && node dist/cli.js validate --json && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json",
+      ),
+    );
+    expect(violations).toContain(
+      "package.json: scripts.release:check must invoke pnpm test",
+    );
   });
 
   it("fails when release:check reintroduces a duplicate build", async () => {

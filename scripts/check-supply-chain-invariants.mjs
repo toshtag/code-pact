@@ -667,6 +667,18 @@ function findWindowsProcessControlWorkflow(workflowDocs, cancellationCoverageVio
   return null;
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function scriptInvokes(script, scriptName) {
+  const escaped = escapeRegExp(scriptName);
+  const pattern = new RegExp(
+    `(?:^|(?:&&|\\|\\||;)\\s*)pnpm\\s+(?:run\\s+)?${escaped}(?=$|\\s|&&|\\|\\||;)`,
+  );
+  return pattern.test(script);
+}
+
 export function checkCiPackageScripts(packageContent) {
   const violations = [];
   let pkg;
@@ -679,6 +691,8 @@ export function checkCiPackageScripts(packageContent) {
   }
 
   const scripts = pkg.scripts ?? {};
+  const test = String(scripts.test ?? "");
+  const integration = String(scripts["test:integration"] ?? "");
   const testCi = String(scripts["test:ci"] ?? "");
   const testCiDeep = String(scripts["test:ci:deep"] ?? "");
   const integrationFull = String(scripts["test:integration:full"] ?? "");
@@ -742,12 +756,29 @@ export function checkCiPackageScripts(packageContent) {
     );
   }
 
+  if (!scriptInvokes(test, "test:unit")) {
+    violations.push("package.json: scripts.test must invoke pnpm test:unit");
+  }
+
+  if (!scriptInvokes(test, "test:integration")) {
+    violations.push("package.json: scripts.test must invoke pnpm test:integration");
+  }
+
+  if (!scriptInvokes(integration, "test:integration:full")) {
+    violations.push(
+      "package.json: scripts.test:integration must invoke pnpm test:integration:full",
+    );
+  }
+
   if (/pnpm\s+build\b/.test(releaseCheck)) {
     violations.push("package.json: scripts.release:check must not run a duplicate pnpm build");
   }
 
+  if (!scriptInvokes(releaseCheck, "test")) {
+    violations.push("package.json: scripts.release:check must invoke pnpm test");
+  }
+
   for (const command of [
-    "pnpm test",
     "node dist/cli.js validate --json",
     "node dist/cli.js plan lint --include-quality --strict --json",
     "node dist/cli.js plan analyze --strict --json",

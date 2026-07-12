@@ -6,6 +6,7 @@ export function checkNoTokenSecrets(content: string): string[];
 export function checkCheckoutPersistCredentials(content: string): string[];
 export function checkCancellationCoverage(testContent: string): string[];
 export function checkWindowsCancellationCoverage(testContent: string): string[];
+export function checkCiPackageScripts(packageContent: string): string[];
 export function checkSupplyChainInvariants(root: string): { failures: number };
 
 export const PUBLISH_RUN_HASH: string;
