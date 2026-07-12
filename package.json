@@ -40,7 +40,7 @@
   "scripts": {
     "build": "tsup",
     "test": "pnpm test:unit && pnpm test:integration",
-    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:unit": "vitest run",
     "test:integration:smoke": "vitest run --config vitest.integration.smoke.config.ts",
     "test:integration:full": "pnpm build && vitest run --config vitest.integration.config.ts",
     "test:integration": "pnpm test:integration:full",
@@ -79,13 +79,14 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
+    "@types/node": "^22.20.1",
     "esbuild": "0.28.1",
     "github-slugger": "^2.0.0",
     "tsup": "^8.5.1",
-    "tsx": "^4.22.3",
-    "typescript": "^6.0.3",
+    "tsx": "^4.23.0",
+    "typescript": "^7.0.2",
+    "typescript-compiler-api": "npm:typescript@6.0.3",
     "vite": "^6.4.3",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.10"
   }
 }
