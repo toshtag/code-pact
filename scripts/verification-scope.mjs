@@ -126,6 +126,18 @@ export function classifyChangedFiles(files) {
   };
 }
 
+function buildFailSafeScope(files) {
+  const known = classifyChangedFiles(files);
+
+  return {
+    ...known,
+    docs: true,
+    standard: true,
+    generic: true,
+    reason: "fail-safe",
+  };
+}
+
 // --- git helpers ---
 
 function runGit(args, options = {}) {
@@ -413,15 +425,7 @@ async function runLocalVerification() {
   }
 
   const scope = failSafe
-    ? {
-        changedFiles: [],
-        docs: true,
-        standard: true,
-        toolchain: false,
-        processControl: false,
-        generic: true,
-        reason: "fail-safe",
-      }
+    ? buildFailSafeScope(files)
     : classifyChangedFiles(files);
 
   console.log(`verify:local: scope=${scope.reason}`);
@@ -514,6 +518,7 @@ async function main() {
       const collected = await collectBaseChangedFiles(values.base);
       files = collected.files;
       mergeBase = collected.mergeBase;
+      if (mergeBase === null) failSafe = true;
     } catch (err) {
       console.error(
         `verify:local: failed to determine changed files for base ${values.base}: ${err.message}`,
@@ -528,23 +533,8 @@ async function main() {
   }
 
   const scope = failSafe
-    ? {
-        changedFiles: [],
-        docs: true,
-        standard: true,
-        toolchain: false,
-        processControl: false,
-        generic: true,
-        reason: "fail-safe",
-      }
+    ? buildFailSafeScope(files)
     : classifyChangedFiles(files);
-
-  if (mergeBase === null && values.base && !failSafe) {
-    // If base cannot be resolved, fail-safe to run both docs and standard.
-    scope.docs = true;
-    scope.standard = true;
-    scope.reason = "docs+standard";
-  }
 
   if (values.format === "github") {
     outputGitHub(scope);

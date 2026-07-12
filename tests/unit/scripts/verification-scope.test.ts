@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
   mkdirSync,
@@ -459,7 +460,7 @@ describe("git diff integration", () => {
     expect(scope.reason).toBe("docs+standard");
   });
 
-  it("falls back to docs+standard when base ref cannot be resolved", () => {
+  it("falls back to consistent fail-safe scope when base ref cannot be resolved", () => {
     initRepo(tempDir);
     writeFileSync(join(tempDir, "README.md"), "# test");
     commitAll(tempDir, "base");
@@ -471,9 +472,13 @@ describe("git diff integration", () => {
       "json",
     ]);
     const scope = JSON.parse(out);
+    expect(scope.changedFiles).toEqual([]);
     expect(scope.docs).toBe(true);
     expect(scope.standard).toBe(true);
-    expect(scope.reason).toBe("docs+standard");
+    expect(scope.generic).toBe(true);
+    expect(scope.toolchain).toBe(false);
+    expect(scope.processControl).toBe(false);
+    expect(scope.reason).toBe("fail-safe");
   });
 });
 
@@ -594,7 +599,13 @@ process.exit(1);
 `;
 
   const fakePnpmScript = `#!/usr/bin/env node
-console.log("fake pnpm ok");
+const fs = require("node:fs");
+if (process.env.FAKE_PNPM_LOG) {
+  fs.appendFileSync(
+    process.env.FAKE_PNPM_LOG,
+    process.argv.slice(2).join(" ") + "\\n",
+  );
+}
 process.exit(0);
 `;
 
@@ -642,6 +653,43 @@ process.exit(0);
     expect(scope.reason).toBe("fail-safe");
   });
 
+  it("preserves toolchain scope when base cannot be resolved", () => {
+    const configPath = join(tempDir, "config.json");
+    writeFileSync(configPath, JSON.stringify({ unstaged: ["package.json"] }));
+    const out = runScript(process.cwd(), ["--local", "--format", "json"], {
+      PATH: `${tempDir}:${originalPath}`,
+      FAKE_GIT_CONFIG: configPath,
+    });
+    const scope = JSON.parse(out);
+    expect(scope.changedFiles).toEqual(["package.json"]);
+    expect(scope.docs).toBe(true);
+    expect(scope.standard).toBe(true);
+    expect(scope.toolchain).toBe(true);
+    expect(scope.processControl).toBe(false);
+    expect(scope.generic).toBe(true);
+    expect(scope.reason).toBe("fail-safe");
+  });
+
+  it("preserves process-control scope when base cannot be resolved", () => {
+    const configPath = join(tempDir, "config.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({ unstaged: ["src/lib/timeout.ts"] }),
+    );
+    const out = runScript(process.cwd(), ["--local", "--format", "json"], {
+      PATH: `${tempDir}:${originalPath}`,
+      FAKE_GIT_CONFIG: configPath,
+    });
+    const scope = JSON.parse(out);
+    expect(scope.changedFiles).toEqual(["src/lib/timeout.ts"]);
+    expect(scope.docs).toBe(true);
+    expect(scope.standard).toBe(true);
+    expect(scope.toolchain).toBe(false);
+    expect(scope.processControl).toBe(true);
+    expect(scope.generic).toBe(true);
+    expect(scope.reason).toBe("fail-safe");
+  });
+
   it("does not report no tracked changes when base is unknown and tree is empty", () => {
     const configPath = join(tempDir, "config.json");
     writeFileSync(configPath, JSON.stringify({}));
@@ -666,5 +714,48 @@ process.exit(0);
     expect(out).toContain("verify:local: scope=fail-safe");
     expect(out).toContain("verify:local: 3 checks passed");
     expect(out).not.toContain("no tracked changes");
+  });
+
+  it("runs toolchain checks when base is unknown and package.json changed", () => {
+    const configPath = join(tempDir, "config.json");
+    const pnpmPath = join(tempDir, "pnpm.cjs");
+    const pnpmLogPath = join(tempDir, "pnpm.log");
+    writeFileSync(configPath, JSON.stringify({ unstaged: ["package.json"] }));
+    const out = runScript(process.cwd(), ["--local", "--run"], {
+      PATH: `${tempDir}:${originalPath}`,
+      FAKE_GIT_CONFIG: configPath,
+      FAKE_PNPM_LOG: pnpmLogPath,
+      npm_execpath: pnpmPath,
+    });
+    const pnpmLog = readFileSync(pnpmLogPath, "utf8");
+    expect(out).toContain("verify:local: scope=fail-safe");
+    expect(pnpmLog).toContain("check:supply-chain");
+    expect(pnpmLog).toContain(
+      "tests/unit/scripts/check-supply-chain-invariants.test.ts",
+    );
+  });
+
+  it("runs process-control checks when base is unknown and timeout changed", () => {
+    const configPath = join(tempDir, "config.json");
+    const pnpmPath = join(tempDir, "pnpm.cjs");
+    const pnpmLogPath = join(tempDir, "pnpm.log");
+    writeFileSync(
+      configPath,
+      JSON.stringify({ unstaged: ["src/lib/timeout.ts"] }),
+    );
+    const out = runScript(process.cwd(), ["--local", "--run"], {
+      PATH: `${tempDir}:${originalPath}`,
+      FAKE_GIT_CONFIG: configPath,
+      FAKE_PNPM_LOG: pnpmLogPath,
+      npm_execpath: pnpmPath,
+    });
+    const pnpmLog = readFileSync(pnpmLogPath, "utf8");
+    expect(out).toContain("verify:local: scope=fail-safe");
+    expect(pnpmLog).toContain("build");
+    expect(pnpmLog).toContain(
+      "tests/unit/core/project-fs-authority-resolvers.test.ts",
+    );
+    expect(pnpmLog).toContain("tests/unit/commands/verify-process.test.ts");
+    expect(pnpmLog).toContain("tests/integration/verify-timeout-abort.test.ts");
   });
 });
