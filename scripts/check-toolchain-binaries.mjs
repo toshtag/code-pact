@@ -19,8 +19,8 @@ if (packageManager !== `pnpm@${EXPECTED_PNPM_VERSION}`) {
   process.exit(1);
 }
 
-const pnpmCommand = "pnpm";
-const pnpm = spawnSync(pnpmCommand, ["--version"], {
+const pnpmCommand = "corepack pnpm";
+const pnpm = spawnSync("corepack", ["pnpm", "--version"], {
   encoding: "utf8",
   windowsHide: true,
   // Windows cannot execute .cmd shims through execFile/spawn directly. A

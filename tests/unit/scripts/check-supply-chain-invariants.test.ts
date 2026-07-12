@@ -634,6 +634,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   );
 
   const wellFormedWorkspace = [
+    "packages:",
+    '  - "."',
     "overrides:",
     "  esbuild: 0.28.1",
     "allowBuilds:",
