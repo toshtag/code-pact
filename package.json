@@ -87,6 +87,6 @@
     "typescript": "^7.0.2",
     "typescript-compiler-api": "npm:typescript@6.0.3",
     "vite": "^6.4.3",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.10"
   }
 }
