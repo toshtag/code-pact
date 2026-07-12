@@ -489,7 +489,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
       },
       devDependencies: {
         esbuild: "0.28.1",
-        vite: "^6.4.3",
+        vite: "^8.1.4",
       },
     },
     null,
@@ -512,14 +512,14 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "        specifier: 0.28.1",
     "        version: 0.28.1",
     "      vite:",
-    "        specifier: ^6.4.3",
-    "        version: 6.4.3",
+    "        specifier: ^8.1.4",
+    "        version: 8.1.4",
     "packages:",
     "  esbuild@0.28.1: {}",
-    "  vite@6.4.3: {}",
+    "  vite@8.1.4: {}",
     "snapshots:",
     "  esbuild@0.28.1: {}",
-    "  vite@6.4.3: {}",
+    "  vite@8.1.4: {}",
   ].join("\n");
 
   async function buildTree(
@@ -949,7 +949,43 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
 
   it("fails when Vite is below the reviewed version", async () => {
     root = await buildTree({
-      packageContent: wellFormedPackage.replace("^6.4.3", "^6.4.2"),
+      packageContent: wellFormedPackage.replace("^8.1.4", "^8.1.3"),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when the lockfile Vite specifier differs from the reviewed range", async () => {
+    root = await buildTree({
+      lockContent: wellFormedLock.replace(
+        "        specifier: ^8.1.4",
+        "        specifier: ^8.1.3",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when the lockfile Vite resolution differs from the reviewed version", async () => {
+    root = await buildTree({
+      lockContent: wellFormedLock.replace(
+        "        version: 8.1.4",
+        "        version: 8.1.3",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when the lockfile contains multiple Vite package versions", async () => {
+    root = await buildTree({
+      lockContent: wellFormedLock.replace(
+        "  vite@8.1.4: {}\nsnapshots:",
+        "  vite@8.1.4: {}\n  vite@8.1.3: {}\nsnapshots:",
+      ),
     });
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBeGreaterThan(0);

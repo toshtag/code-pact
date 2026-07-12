@@ -118,8 +118,9 @@ These are deliberate, permanent boundaries — not a backlog. `code-pact` will n
 
 ## Requirements
 
-- Node.js >= 22 (LTS or current)
-- pnpm (for contributors building from source)
+- Node.js >= 22 for using the published CLI (LTS or current)
+- Node.js >= 22.12 for building and testing from source
+- pnpm for contributors building from source
 
 ## Development
 

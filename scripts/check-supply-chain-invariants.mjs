@@ -934,8 +934,8 @@ export function checkToolchainPins(packageContent, workspaceContent, lockContent
   if (pkg.packageManager !== "pnpm@10.34.2") {
     violations.push('package.json: packageManager must be exactly "pnpm@10.34.2"');
   }
-  if (pkg.devDependencies?.vite !== "^6.4.3") {
-    violations.push('package.json: devDependencies.vite must be "^6.4.3"');
+  if (pkg.devDependencies?.vite !== "^8.1.4") {
+    violations.push('package.json: devDependencies.vite must be "^8.1.4"');
   }
   if (pkg.devDependencies?.esbuild !== "0.28.1") {
     violations.push('package.json: devDependencies.esbuild must be exactly "0.28.1"');
@@ -962,10 +962,10 @@ export function checkToolchainPins(packageContent, workspaceContent, lockContent
   const importer = lockObject?.importers?.["."]?.devDependencies ?? {};
   const baseVersion = value => String(value ?? "").split("(", 1)[0];
   if (
-    importer.vite?.specifier !== "^6.4.3" ||
-    baseVersion(importer.vite?.version) !== "6.4.3"
+    importer.vite?.specifier !== "^8.1.4" ||
+    baseVersion(importer.vite?.version) !== "8.1.4"
   ) {
-    violations.push("pnpm-lock.yaml: root importer must resolve vite 6.4.3 from ^6.4.3");
+    violations.push("pnpm-lock.yaml: root importer must resolve vite 8.1.4 from ^8.1.4");
   }
   if (
     importer.esbuild?.specifier !== "0.28.1" ||
@@ -984,9 +984,9 @@ export function checkToolchainPins(packageContent, workspaceContent, lockContent
   const esbuildVersions = lockKeys
     .map(key => /^esbuild@([^()]+)(?:\(|$)/.exec(key)?.[1])
     .filter(Boolean);
-  if (viteVersions.length === 0 || viteVersions.some(version => version !== "6.4.3")) {
+  if (viteVersions.length === 0 || viteVersions.some(version => version !== "8.1.4")) {
     violations.push(
-      `pnpm-lock.yaml: every vite package must be 6.4.3 (found: ${viteVersions.join(", ") || "none"})`,
+      `pnpm-lock.yaml: every vite package must be 8.1.4 (found: ${viteVersions.join(", ") || "none"})`,
     );
   }
   if (

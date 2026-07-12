@@ -14,6 +14,7 @@ identifiers. Starting with v1.0.0, stable releases use plain
 ## [Unreleased]
 
 ### Changed
+- **Upgraded the reviewed Vite toolchain to 8.1.4.** The development/test stack now resolves Vite to 8.1.4 with Vitest 4.1.10 while retaining the existing tsup production build and esbuild 0.28.1 smoke/pinning policy.
 - **Retired the internal general-purpose Evidence Harness.** Removed its release-coupled aggregate CSV/JSON snapshots and dedicated unit/integration test path because the archived dogfood corpus no longer produced actionable live-task measurements. The focused P51 agent-detail byte fixture remains under `docs/maintainers/evidence/` as a direct regression check for the compact evidence contract.
 - **Leaned the automated npm release path.** Removed the duplicate release-gate build, added bounded timeouts to every publish job, and reduced transient release artifact retention to seven days while preserving Trusted Publishing, provenance, and registry tarball verification.
 
