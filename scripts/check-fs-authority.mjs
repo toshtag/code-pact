@@ -8,7 +8,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve, relative } from "node:path";
 import { pathToFileURL } from "node:url";
-import ts from "typescript";
+import ts from "typescript-compiler-api";
 
 // ---------------------------------------------------------------------------
 // Authority kinds — the checker distinguishes containment from ownership.
