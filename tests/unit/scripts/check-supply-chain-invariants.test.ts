@@ -361,9 +361,27 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "        with:",
     "          fetch-depth: 0",
     "          persist-credentials: false",
+    "      - name: Determine base ref",
+    "        id: base",
+    "        run: |",
+    '          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then',
+    '            echo "ref=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"',
+    "          else",
+    '            echo "ref=${{ github.event.before }}" >> "$GITHUB_OUTPUT"',
+    "          fi",
     "      - name: Classify changed files",
     "        id: classify",
-    "        run: node scripts/verification-scope.mjs --base HEAD --format github",
+    "        env:",
+    "          BASE_REF: ${{ steps.base.outputs.ref }}",
+    "        run: |",
+    '          trusted_classifier="$RUNNER_TEMP/verification-scope.mjs"',
+    '          if git cat-file -e "$BASE_REF:scripts/verification-scope.mjs" 2>/dev/null; then',
+    '            git show "$BASE_REF:scripts/verification-scope.mjs" > "$trusted_classifier"',
+    '            node "$trusted_classifier" --base "$BASE_REF" --format github',
+    "          else",
+    '            echo "docs=true" >> "$GITHUB_OUTPUT"',
+    '            echo "standard=true" >> "$GITHUB_OUTPUT"',
+    "          fi",
     "",
     "  docs:",
     "    name: Docs checks",
@@ -406,25 +424,29 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "    if: ${{ always() }}",
     "    steps:",
     "      - name: Verify CI results",
+    "        env:",
+    "          DOCS_OUTPUT: ${{ needs.classify.outputs.docs }}",
+    "          STANDARD_OUTPUT: ${{ needs.classify.outputs.standard }}",
+    "          CLASSIFY_RESULT: ${{ needs.classify.result }}",
+    "          DOCS_RESULT: ${{ needs.docs.result }}",
+    "          STANDARD_RESULT: ${{ needs.standard.result }}",
     "        run: |",
-    '          docs_output="${{ needs.classify.outputs.docs }}"',
-    '          standard_output="${{ needs.classify.outputs.standard }}"',
-    '          if [ "$docs_output" != "true" ] && [ "$docs_output" != "false" ]; then',
-    "            echo \"classify output docs is not a boolean: '$docs_output'\"",
+    '          if [ "$DOCS_OUTPUT" != "true" ] && [ "$DOCS_OUTPUT" != "false" ]; then',
+    "            echo \"classify output docs is not a boolean: '$DOCS_OUTPUT'\"",
     "            exit 1",
     "          fi",
-    '          if [ "$standard_output" != "true" ] && [ "$standard_output" != "false" ]; then',
-    "            echo \"classify output standard is not a boolean: '$standard_output'\"",
+    '          if [ "$STANDARD_OUTPUT" != "true" ] && [ "$STANDARD_OUTPUT" != "false" ]; then',
+    "            echo \"classify output standard is not a boolean: '$STANDARD_OUTPUT'\"",
     "            exit 1",
     "          fi",
-    '          if [ "${{ needs.classify.result }}" != "success" ]; then',
+    '          if [ "$CLASSIFY_RESULT" != "success" ]; then',
     '            echo "classify job did not succeed"',
     "            exit 1",
     "          fi",
-    '          if [ "$docs_output" = "true" ] && [ "${{ needs.docs.result }}" != "success" ]; then',
+    '          if [ "$DOCS_OUTPUT" = "true" ] && [ "$DOCS_RESULT" != "success" ]; then',
     "            exit 1",
     "          fi",
-    '          if [ "$standard_output" = "true" ] && [ "${{ needs.standard.result }}" != "success" ]; then',
+    '          if [ "$STANDARD_OUTPUT" = "true" ] && [ "$STANDARD_RESULT" != "success" ]; then',
     "            exit 1",
     "          fi",
   ].join("\n");
@@ -703,6 +725,70 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     root = await buildTree();
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBe(0);
+    await cleanup();
+  });
+
+  it("fails when classify runs the checked-out verification-scope script directly", async () => {
+    root = await buildTree({
+      ciContent: wellFormedCi.replace(
+        [
+          '          trusted_classifier="$RUNNER_TEMP/verification-scope.mjs"',
+          '          if git cat-file -e "$BASE_REF:scripts/verification-scope.mjs" 2>/dev/null; then',
+          '            git show "$BASE_REF:scripts/verification-scope.mjs" > "$trusted_classifier"',
+          '            node "$trusted_classifier" --base "$BASE_REF" --format github',
+          "          else",
+          '            echo "docs=true" >> "$GITHUB_OUTPUT"',
+          '            echo "standard=true" >> "$GITHUB_OUTPUT"',
+          "          fi",
+        ].join("\n"),
+        "          node scripts/verification-scope.mjs --base HEAD --format github",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when classify omits the no-base-classifier fail-safe outputs", async () => {
+    root = await buildTree({
+      ciContent: wellFormedCi.replace(
+        [
+          "          else",
+          '            echo "docs=true" >> "$GITHUB_OUTPUT"',
+          '            echo "standard=true" >> "$GITHUB_OUTPUT"',
+          "          fi",
+        ].join("\n"),
+        ["          else", "            exit 1", "          fi"].join("\n"),
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when classify inlines the base ref expression into shell", async () => {
+    root = await buildTree({
+      ciContent: wellFormedCi
+        .replace("        env:\n          BASE_REF: ${{ steps.base.outputs.ref }}\n", "")
+        .replace(
+          '            node "$trusted_classifier" --base "$BASE_REF" --format github',
+          "            node \"$trusted_classifier\" --base ${{ steps.base.outputs.ref }} --format github",
+        ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when ci-status inlines classifier outputs into shell", async () => {
+    root = await buildTree({
+      ciContent: wellFormedCi.replace(
+        '          if [ "$DOCS_OUTPUT" != "true" ] && [ "$DOCS_OUTPUT" != "false" ]; then',
+        '          docs_output="${{ needs.classify.outputs.docs }}"\n          if [ "$docs_output" != "true" ] && [ "$docs_output" != "false" ]; then',
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
     await cleanup();
   });
 

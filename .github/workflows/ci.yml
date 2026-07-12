@@ -36,7 +36,17 @@ jobs:
 
       - name: Classify changed files
         id: classify
-        run: node scripts/verification-scope.mjs --base ${{ steps.base.outputs.ref }} --format github
+        env:
+          BASE_REF: ${{ steps.base.outputs.ref }}
+        run: |
+          trusted_classifier="$RUNNER_TEMP/verification-scope.mjs"
+          if git cat-file -e "$BASE_REF:scripts/verification-scope.mjs" 2>/dev/null; then
+            git show "$BASE_REF:scripts/verification-scope.mjs" > "$trusted_classifier"
+            node "$trusted_classifier" --base "$BASE_REF" --format github
+          else
+            echo "docs=true" >> "$GITHUB_OUTPUT"
+            echo "standard=true" >> "$GITHUB_OUTPUT"
+          fi
 
   docs:
     name: Docs checks
@@ -87,26 +97,30 @@ jobs:
     if: ${{ always() }}
     steps:
       - name: Verify CI results
+        env:
+          DOCS_OUTPUT: ${{ needs.classify.outputs.docs }}
+          STANDARD_OUTPUT: ${{ needs.classify.outputs.standard }}
+          CLASSIFY_RESULT: ${{ needs.classify.result }}
+          DOCS_RESULT: ${{ needs.docs.result }}
+          STANDARD_RESULT: ${{ needs.standard.result }}
         run: |
-          docs_output="${{ needs.classify.outputs.docs }}"
-          standard_output="${{ needs.classify.outputs.standard }}"
-          if [ "$docs_output" != "true" ] && [ "$docs_output" != "false" ]; then
-            echo "classify output 'docs' is not a boolean: '$docs_output'"
+          if [ "$DOCS_OUTPUT" != "true" ] && [ "$DOCS_OUTPUT" != "false" ]; then
+            echo "classify output 'docs' is not a boolean: '$DOCS_OUTPUT'"
             exit 1
           fi
-          if [ "$standard_output" != "true" ] && [ "$standard_output" != "false" ]; then
-            echo "classify output 'standard' is not a boolean: '$standard_output'"
+          if [ "$STANDARD_OUTPUT" != "true" ] && [ "$STANDARD_OUTPUT" != "false" ]; then
+            echo "classify output 'standard' is not a boolean: '$STANDARD_OUTPUT'"
             exit 1
           fi
-          if [ "${{ needs.classify.result }}" != "success" ]; then
-            echo "classify job did not succeed: ${{ needs.classify.result }}"
+          if [ "$CLASSIFY_RESULT" != "success" ]; then
+            echo "classify job did not succeed: $CLASSIFY_RESULT"
             exit 1
           fi
-          if [ "$docs_output" = "true" ] && [ "${{ needs.docs.result }}" != "success" ]; then
-            echo "docs job did not succeed: docs=${{ needs.docs.result }}"
+          if [ "$DOCS_OUTPUT" = "true" ] && [ "$DOCS_RESULT" != "success" ]; then
+            echo "docs job did not succeed: docs=$DOCS_RESULT"
             exit 1
           fi
-          if [ "$standard_output" = "true" ] && [ "${{ needs.standard.result }}" != "success" ]; then
-            echo "standard job did not succeed: standard=${{ needs.standard.result }}"
+          if [ "$STANDARD_OUTPUT" = "true" ] && [ "$STANDARD_RESULT" != "success" ]; then
+            echo "standard job did not succeed: standard=$STANDARD_RESULT"
             exit 1
           fi

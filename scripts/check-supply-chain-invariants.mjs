@@ -458,6 +458,14 @@ function getJobNode(doc, jobName) {
   return null;
 }
 
+function findStepById(doc, jobName, stepId) {
+  return getJobSteps(doc, jobName).find(step => step.get("id") === stepId);
+}
+
+function findStepByName(doc, jobName, stepName) {
+  return getJobSteps(doc, jobName).find(step => step.get("name") === stepName);
+}
+
 function getWorkflowJobNames(doc) {
   return getWorkflowJobs(doc).map(jobPair =>
     String(jobPair.key.value ?? jobPair.key),
@@ -591,21 +599,85 @@ function checkFastCiWorkflow(ciDoc, ciContent) {
     ) {
       violations.push("ci.yml: classify job must output docs and standard");
     }
+    if (!findStepById(ciDoc, "classify", "base")) {
+      violations.push("ci.yml: classify job must determine the base ref");
+    }
     const classifyScripts = collectRunScripts(ciDoc, "classify");
     if (classifyScripts.some(script => /pnpm\s+install/.test(script))) {
       violations.push("ci.yml: classify job must not install dependencies");
     }
     if (
-      !classifyScripts.some(script =>
-        /node\s+scripts\/verification-scope\.mjs/.test(script),
+      classifyScripts.some(script =>
+        /node\s+(?:"[^"]*\/)?(?:\.\/)?scripts\/verification-scope\.mjs/.test(
+          script,
+        ),
       )
     ) {
       violations.push(
-        "ci.yml: classify job must run node scripts/verification-scope.mjs",
+        "ci.yml: classify job must not run the checked-out scripts/verification-scope.mjs directly",
       );
     }
     if (!classifyScripts.some(script => /--format\s+github/.test(script))) {
       violations.push("ci.yml: classify job must use --format github");
+    }
+    const classifyStep = findStepById(ciDoc, "classify", "classify");
+    const classifyRun =
+      classifyStep && typeof classifyStep.get("run") === "string"
+        ? classifyStep.get("run")
+        : "";
+    const classifyEnv = classifyStep?.get("env");
+    if (!classifyStep) {
+      violations.push("ci.yml: classify job must contain id: classify step");
+    }
+    if (
+      !classifyEnv ||
+      !String(classifyEnv.get("BASE_REF") ?? "").includes(
+        "steps.base.outputs.ref",
+      )
+    ) {
+      violations.push(
+        "ci.yml: classify step must pass steps.base.outputs.ref through BASE_REF env",
+      );
+    }
+    if (/\$\{\{\s*steps\.base\.outputs\.ref\s*\}\}/.test(classifyRun)) {
+      violations.push(
+        "ci.yml: classify step must not inline steps.base.outputs.ref into shell",
+      );
+    }
+    if (
+      !/git\s+cat-file\s+-e\s+"\$BASE_REF:scripts\/verification-scope\.mjs"/.test(
+        classifyRun,
+      )
+    ) {
+      violations.push(
+        "ci.yml: classify job must check for scripts/verification-scope.mjs in the base commit",
+      );
+    }
+    if (
+      !/git\s+show\s+"\$BASE_REF:scripts\/verification-scope\.mjs"/.test(
+        classifyRun,
+      )
+    ) {
+      violations.push(
+        "ci.yml: classify job must load scripts/verification-scope.mjs from the base commit",
+      );
+    }
+    if (
+      !/node\s+"\$trusted_classifier"\s+--base\s+"\$BASE_REF"\s+--format\s+github/.test(
+        classifyRun,
+      )
+    ) {
+      violations.push(
+        "ci.yml: classify job must run the base commit classifier with --format github",
+      );
+    }
+    if (
+      !/echo\s+"docs=true"\s+>>\s+"\$GITHUB_OUTPUT"/.test(classifyRun) ||
+      !/echo\s+"standard=true"\s+>>\s+"\$GITHUB_OUTPUT"/.test(classifyRun)
+    ) {
+      violations.push(
+        "ci.yml: classify job must fall back to docs=true and standard=true when the base classifier is absent",
+      );
     }
 
     let classifyFetchDepth = false;
@@ -758,29 +830,41 @@ function checkFastCiWorkflow(ciDoc, ciContent) {
       );
     }
     const ciStatusScripts = collectRunScripts(ciDoc, "ci-status");
-    for (const check of [
-      "needs.classify.result",
-      "needs.docs.result",
-      "needs.standard.result",
-    ]) {
-      if (!ciStatusScripts.some(script => script.includes(check))) {
-        violations.push(`ci.yml: ci-status job must verify ${check}`);
+    const ciStatusStep = findStepByName(ciDoc, "ci-status", "Verify CI results");
+    const ciStatusEnv = ciStatusStep?.get("env");
+    const expectedCiStatusEnv = {
+      DOCS_OUTPUT: "needs.classify.outputs.docs",
+      STANDARD_OUTPUT: "needs.classify.outputs.standard",
+      CLASSIFY_RESULT: "needs.classify.result",
+      DOCS_RESULT: "needs.docs.result",
+      STANDARD_RESULT: "needs.standard.result",
+    };
+    if (!ciStatusStep) {
+      violations.push(
+        "ci.yml: ci-status job must contain a Verify CI results step",
+      );
+    }
+    for (const [envName, expression] of Object.entries(expectedCiStatusEnv)) {
+      if (
+        !ciStatusEnv ||
+        !String(ciStatusEnv.get(envName) ?? "").includes(expression)
+      ) {
+        violations.push(
+          `ci.yml: ci-status job must pass ${expression} through ${envName} env`,
+        );
       }
     }
-    for (const output of [
-      "needs.classify.outputs.docs",
-      "needs.classify.outputs.standard",
-    ]) {
-      if (!ciStatusScripts.some(script => script.includes(output))) {
-        violations.push(`ci.yml: ci-status job must verify ${output}`);
-      }
+    if (ciStatusScripts.some(script => /\$\{\{\s*needs\./.test(script))) {
+      violations.push(
+        "ci.yml: ci-status job must not inline needs.* expressions into shell",
+      );
     }
     const hasBooleanCheck = script =>
       /!=\s*['"]true['"]/.test(script) && /!=\s*['"]false['"]/.test(script);
     if (
       !ciStatusScripts.some(
         script =>
-          script.includes("needs.classify.outputs.docs") &&
+          script.includes("DOCS_OUTPUT") &&
           hasBooleanCheck(script),
       )
     ) {
@@ -791,7 +875,7 @@ function checkFastCiWorkflow(ciDoc, ciContent) {
     if (
       !ciStatusScripts.some(
         script =>
-          script.includes("needs.classify.outputs.standard") &&
+          script.includes("STANDARD_OUTPUT") &&
           hasBooleanCheck(script),
       )
     ) {
