@@ -536,21 +536,32 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "    if: ${{ always() }}",
     "    steps:",
     "      - name: Verify deep CI succeeded",
+    "        env:",
+    "          SCOPE: ${{ github.event.inputs.scope }}",
+    "          LINUX_RESULT: ${{ needs.linux-deep.result }}",
+    "          NODE24_RESULT: ${{ needs.node-24-smoke.result }}",
+    "          WINDOWS_RESULT: ${{ needs.windows-process-control.result }}",
     "        run: |",
-    '          scope="${{ github.event.inputs.scope }}"',
+    '          case "$SCOPE" in',
+    "            all|linux-deep|node24|windows) ;;",
+    "            *)",
+    '              echo "invalid deep CI scope: $SCOPE"',
+    "              exit 1",
+    "              ;;",
+    "          esac",
     "          ok=true",
-    '          if [ "$scope" = "all" ] || [ "$scope" = "linux-deep" ]; then',
-    '            if [ "${{ needs.linux-deep.result }}" != "success" ]; then',
+    '          if [ "$SCOPE" = "all" ] || [ "$SCOPE" = "linux-deep" ]; then',
+    '            if [ "$LINUX_RESULT" != "success" ]; then',
     "              ok=false",
     "            fi",
     "          fi",
-    '          if [ "$scope" = "all" ] || [ "$scope" = "node24" ]; then',
-    '            if [ "${{ needs.node-24-smoke.result }}" != "success" ]; then',
+    '          if [ "$SCOPE" = "all" ] || [ "$SCOPE" = "node24" ]; then',
+    '            if [ "$NODE24_RESULT" != "success" ]; then',
     "              ok=false",
     "            fi",
     "          fi",
-    '          if [ "$scope" = "all" ] || [ "$scope" = "windows" ]; then',
-    '            if [ "${{ needs.windows-process-control.result }}" != "success" ]; then',
+    '          if [ "$SCOPE" = "all" ] || [ "$SCOPE" = "windows" ]; then',
+    '            if [ "$WINDOWS_RESULT" != "success" ]; then',
     "              ok=false",
     "            fi",
     "          fi",
@@ -797,6 +808,38 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
       ciDeepContent: wellFormedCiDeep.replace(
         "      - run: pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts",
         '      - run: pnpm exec vitest run --config vitest.integration.config.ts -t "timeout"',
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when deep CI status inlines workflow inputs into shell", async () => {
+    root = await buildTree({
+      ciDeepContent: wellFormedCiDeep.replace(
+        '          case "$SCOPE" in',
+        '          scope="${{ github.event.inputs.scope }}"\n          case "$scope" in',
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when deep CI status does not reject unknown scopes", async () => {
+    root = await buildTree({
+      ciDeepContent: wellFormedCiDeep.replace(
+        [
+          '          case "$SCOPE" in',
+          "            all|linux-deep|node24|windows) ;;",
+          "            *)",
+          '              echo "invalid deep CI scope: $SCOPE"',
+          "              exit 1",
+          "              ;;",
+          "          esac",
+        ].join("\n"),
+        '          echo "checking deep CI scope: $SCOPE"',
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);

@@ -1037,9 +1037,47 @@ function checkDeepCiWorkflow(deepDoc) {
       violations.push("ci-deep.yml: deep-ci-status must use if: always()");
     }
     const scripts = collectRunScripts(deepDoc, "deep-ci-status");
-    if (!scripts.some(script => /github\.event\.inputs\.scope/.test(script))) {
+    const deepStatusStep = findStepByName(
+      deepDoc,
+      "deep-ci-status",
+      "Verify deep CI succeeded",
+    );
+    const deepStatusEnv = deepStatusStep?.get("env");
+    const expectedDeepStatusEnv = {
+      SCOPE: "github.event.inputs.scope",
+      LINUX_RESULT: "needs.linux-deep.result",
+      NODE24_RESULT: "needs.node-24-smoke.result",
+      WINDOWS_RESULT: "needs.windows-process-control.result",
+    };
+    for (const [envName, expression] of Object.entries(expectedDeepStatusEnv)) {
+      if (
+        !deepStatusEnv ||
+        !String(deepStatusEnv.get(envName) ?? "").includes(expression)
+      ) {
+        violations.push(
+          `ci-deep.yml: deep-ci-status must pass ${expression} through ${envName} env`,
+        );
+      }
+    }
+    if (
+      scripts.some(script =>
+        /\$\{\{\s*(?:github\.event\.inputs|needs\.)/.test(script),
+      )
+    ) {
+      violations.push(
+        "ci-deep.yml: deep-ci-status must not inline workflow inputs or needs.* expressions into shell",
+      );
+    }
+    if (!scripts.some(script => /\$SCOPE/.test(script))) {
       violations.push(
         "ci-deep.yml: deep-ci-status must check workflow_dispatch scope",
+      );
+    }
+    if (
+      !scripts.some(script => /all\|linux-deep\|node24\|windows/.test(script))
+    ) {
+      violations.push(
+        "ci-deep.yml: deep-ci-status must reject unknown workflow_dispatch scopes",
       );
     }
   }
