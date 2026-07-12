@@ -170,16 +170,16 @@ function runGit(args, options = {}) {
   });
 }
 
-async function resolveMergeBase(baseRef) {
-  const result = await runGit(["merge-base", baseRef, "HEAD"]);
+async function resolveMergeBase(baseRef, runGitImpl = runGit) {
+  const result = await runGitImpl(["merge-base", baseRef, "HEAD"]);
   if (result.code !== 0) return null;
   const sha = result.stdout.trim();
   if (!sha || /^0+$/.test(sha)) return null;
   return sha;
 }
 
-async function gitNameList(args) {
-  const result = await runGit(args);
+async function gitNameList(args, runGitImpl = runGit) {
+  const result = await runGitImpl(args);
   if (result.code !== 0) {
     const command = `git ${args.join(" ")}`;
     const message = result.stderr
@@ -193,20 +193,19 @@ async function gitNameList(args) {
     .filter(Boolean);
 }
 
-async function mergeBaseDiffNames(baseRef) {
-  const mergeBase = await resolveMergeBase(baseRef);
+async function mergeBaseDiffNames(baseRef, runGitImpl = runGit) {
+  const mergeBase = await resolveMergeBase(baseRef, runGitImpl);
   if (!mergeBase) return { files: [], mergeBase: null };
-  const files = await gitNameList([
-    "diff",
-    "--no-renames",
-    "--name-only",
-    `${mergeBase}...HEAD`,
-  ]);
+  const files = await gitNameList(
+    ["diff", "--no-renames", "--name-only", `${mergeBase}...HEAD`],
+    runGitImpl,
+  );
   return { files, mergeBase };
 }
 
-export async function collectLocalChangedFiles() {
+export async function collectLocalChangedFiles({ runGitImpl = runGit } = {}) {
   const files = new Set();
+  const errors = [];
   let mergeBase = null;
   let baseResolved = false;
 
@@ -214,38 +213,39 @@ export async function collectLocalChangedFiles() {
   for (const baseRef of ["origin/main", "main"]) {
     try {
       const { files: baseFiles, mergeBase: mb } =
-        await mergeBaseDiffNames(baseRef);
+        await mergeBaseDiffNames(baseRef, runGitImpl);
       if (mb) {
         for (const f of baseFiles) files.add(f);
         mergeBase = mb;
         baseResolved = true;
         break;
       }
-    } catch {
+    } catch (err) {
+      errors.push(err);
       // continue to next base candidate
     }
   }
 
   // Always add staged, unstaged, and untracked (non-ignored) working-tree changes.
-  const unstaged = await gitNameList(["diff", "--no-renames", "--name-only"]);
-  for (const f of unstaged) files.add(f);
+  for (const args of [
+    ["diff", "--no-renames", "--name-only"],
+    ["diff", "--no-renames", "--cached", "--name-only"],
+    ["ls-files", "--others", "--exclude-standard"],
+  ]) {
+    try {
+      const names = await gitNameList(args, runGitImpl);
+      for (const f of names) files.add(f);
+    } catch (err) {
+      errors.push(err);
+    }
+  }
 
-  const staged = await gitNameList([
-    "diff",
-    "--no-renames",
-    "--cached",
-    "--name-only",
-  ]);
-  for (const f of staged) files.add(f);
-
-  const untracked = await gitNameList([
-    "ls-files",
-    "--others",
-    "--exclude-standard",
-  ]);
-  for (const f of untracked) files.add(f);
-
-  return { files: [...files], mergeBase, baseResolved };
+  return {
+    files: [...files],
+    mergeBase,
+    baseResolved,
+    indeterminate: errors.length > 0,
+  };
 }
 
 async function collectBaseChangedFiles(baseRef) {
@@ -405,6 +405,7 @@ async function runLocalVerification() {
     files = collected.files;
     mergeBase = collected.mergeBase;
     baseResolved = collected.baseResolved;
+    failSafe = collected.indeterminate;
   } catch (err) {
     console.error(
       `verify:local: failed to determine changed files: ${err.message}`,
@@ -503,7 +504,7 @@ async function main() {
       files = collected.files;
       mergeBase = collected.mergeBase;
       baseResolved = collected.baseResolved;
-      if (!baseResolved) failSafe = true;
+      if (collected.indeterminate || !baseResolved) failSafe = true;
     } catch (err) {
       console.error(
         `verify:local: failed to determine changed files: ${err.message}`,

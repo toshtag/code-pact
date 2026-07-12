@@ -18,6 +18,17 @@ export interface LocalChangedFiles {
   files: string[];
   mergeBase: string | null;
   baseResolved: boolean;
+  indeterminate: boolean;
 }
 
-export function collectLocalChangedFiles(): Promise<LocalChangedFiles>;
+export interface GitResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+export type GitRunner = (args: string[]) => Promise<GitResult>;
+
+export function collectLocalChangedFiles(options?: {
+  runGitImpl?: GitRunner;
+}): Promise<LocalChangedFiles>;

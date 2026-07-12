@@ -5,10 +5,9 @@ import {
   rmSync,
   writeFileSync,
   mkdirSync,
-  chmodSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
@@ -20,30 +19,6 @@ import {
 const scriptPath = fileURLToPath(
   new URL("../../../scripts/verification-scope.mjs", import.meta.url),
 );
-
-function writeFakeExecutable(
-  directory: string,
-  commandName: string,
-  scriptName: string,
-  nodeScript: string,
-) {
-  const scriptPath = join(directory, scriptName);
-  writeFileSync(scriptPath, nodeScript);
-
-  if (process.platform === "win32") {
-    const commandPath = join(directory, `${commandName}.cmd`);
-    writeFileSync(
-      commandPath,
-      `@echo off\r\n"${process.execPath}" "%~dp0${scriptName}" %*\r\n`,
-    );
-    return commandPath;
-  }
-
-  const commandPath = join(directory, commandName);
-  writeFileSync(commandPath, nodeScript, { mode: 0o755 });
-  chmodSync(commandPath, 0o755);
-  return commandPath;
-}
 
 describe("classifyChangedFiles", () => {
   it("returns empty scope for no changed files", () => {
@@ -507,119 +482,114 @@ describe("git diff integration", () => {
 });
 
 describe("collectLocalChangedFiles", () => {
-  const fakeGitNodeScript = `#!/usr/bin/env node
-import fs from "node:fs";
-const config = JSON.parse(fs.readFileSync(process.env.FAKE_GIT_CONFIG, "utf8"));
-const [, , ...args] = process.argv;
-const cmd = args[0];
-if (cmd === "merge-base") {
-  process.exit(1);
-}
-if (cmd === "diff" && args.includes("--cached")) {
-  if (config.stagedFail) {
-    console.error("fake staged error");
-    process.exit(1);
+  function fakeGit(config: {
+    mergeBase?: string;
+    base?: string[];
+    unstaged?: string[];
+    staged?: string[];
+    untracked?: string[];
+    stagedFail?: boolean;
+    untrackedFail?: boolean;
+  }) {
+    return async (args: string[]) => {
+      const cmd = args[0];
+      if (cmd === "merge-base") {
+        return config.mergeBase
+          ? { code: 0, stdout: `${config.mergeBase}\n`, stderr: "" }
+          : { code: 1, stdout: "", stderr: "no merge base" };
+      }
+      if (cmd === "diff" && args.some(arg => arg.endsWith("...HEAD"))) {
+        return {
+          code: 0,
+          stdout: `${(config.base ?? []).join("\n")}\n`,
+          stderr: "",
+        };
+      }
+      if (cmd === "diff" && args.includes("--cached")) {
+        if (config.stagedFail) {
+          return { code: 1, stdout: "", stderr: "fake staged error" };
+        }
+        return {
+          code: 0,
+          stdout: `${(config.staged ?? []).join("\n")}\n`,
+          stderr: "",
+        };
+      }
+      if (cmd === "diff") {
+        return {
+          code: 0,
+          stdout: `${(config.unstaged ?? []).join("\n")}\n`,
+          stderr: "",
+        };
+      }
+      if (cmd === "ls-files" && args.includes("--others")) {
+        if (config.untrackedFail) {
+          return { code: 1, stdout: "", stderr: "fake untracked error" };
+        }
+        return {
+          code: 0,
+          stdout: `${(config.untracked ?? []).join("\n")}\n`,
+          stderr: "",
+        };
+      }
+      return {
+        code: 1,
+        stdout: "",
+        stderr: `fake git: unsupported ${args.join(" ")}`,
+      };
+    };
   }
-  for (const f of config.staged || []) console.log(f);
-  process.exit(0);
-}
-if (cmd === "diff") {
-  for (const f of config.unstaged || []) console.log(f);
-  process.exit(0);
-}
-if (cmd === "ls-files" && args.includes("--others")) {
-  if (config.untrackedFail) {
-    console.error("fake untracked error");
-    process.exit(1);
-  }
-  for (const f of config.untracked || []) console.log(f);
-  process.exit(0);
-}
-console.error("fake git: unsupported " + args.join(" "));
-process.exit(1);
-`;
 
-  let tempDir: string;
-  let configPath: string;
-  let originalPath: string;
-
-  beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), "fake-git-"));
-    configPath = join(tempDir, "config.json");
-    writeFakeExecutable(tempDir, "git", "fake-git.mjs", fakeGitNodeScript);
-    originalPath = process.env.PATH ?? "";
-    process.env.PATH = `${tempDir}${delimiter}${originalPath}`;
-    process.env.FAKE_GIT_CONFIG = configPath;
+  it("marks the result indeterminate when git diff --cached fails", async () => {
+    const result = await collectLocalChangedFiles({
+      runGitImpl: fakeGit({ unstaged: ["README.md"], stagedFail: true }),
+    });
+    expect(result.files).toEqual(["README.md"]);
+    expect(result.indeterminate).toBe(true);
   });
 
-  afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
-    process.env.PATH = originalPath;
-    delete process.env.FAKE_GIT_CONFIG;
+  it("marks the result indeterminate when git ls-files --others fails", async () => {
+    const result = await collectLocalChangedFiles({
+      runGitImpl: fakeGit({ unstaged: ["README.md"], untrackedFail: true }),
+    });
+    expect(result.files).toEqual(["README.md"]);
+    expect(result.indeterminate).toBe(true);
   });
 
-  it("throws when git diff --cached fails", async () => {
-    writeFileSync(
-      configPath,
-      JSON.stringify({ unstaged: ["README.md"], stagedFail: true }),
-    );
-    await expect(collectLocalChangedFiles()).rejects.toThrow(
-      "git diff --no-renames --cached --name-only failed",
-    );
-  });
-
-  it("throws when git ls-files --others fails", async () => {
-    writeFileSync(
-      configPath,
-      JSON.stringify({ unstaged: ["README.md"], untrackedFail: true }),
-    );
-    await expect(collectLocalChangedFiles()).rejects.toThrow(
-      "git ls-files --others --exclude-standard failed",
-    );
+  it("preserves base files when a later git query fails", async () => {
+    const result = await collectLocalChangedFiles({
+      runGitImpl: fakeGit({
+        mergeBase: "abc123",
+        base: ["package.json"],
+        stagedFail: true,
+      }),
+    });
+    expect(result.files).toEqual(["package.json"]);
+    expect(result.mergeBase).toBe("abc123");
+    expect(result.baseResolved).toBe(true);
+    expect(result.indeterminate).toBe(true);
   });
 
   it("returns baseResolved false when main/origin/main is missing and working tree has README.md", async () => {
-    writeFileSync(configPath, JSON.stringify({ unstaged: ["README.md"] }));
-    const result = await collectLocalChangedFiles();
+    const result = await collectLocalChangedFiles({
+      runGitImpl: fakeGit({ unstaged: ["README.md"] }),
+    });
     expect(result.files).toEqual(["README.md"]);
     expect(result.mergeBase).toBeNull();
     expect(result.baseResolved).toBe(false);
+    expect(result.indeterminate).toBe(false);
   });
 
   it("returns empty files and baseResolved false when no base and no working tree changes", async () => {
-    writeFileSync(configPath, JSON.stringify({}));
-    const result = await collectLocalChangedFiles();
+    const result = await collectLocalChangedFiles({ runGitImpl: fakeGit({}) });
     expect(result.files).toEqual([]);
     expect(result.mergeBase).toBeNull();
     expect(result.baseResolved).toBe(false);
+    expect(result.indeterminate).toBe(false);
   });
 });
 
 describe("local verification integration", () => {
-  const fakeGitNodeScript = `#!/usr/bin/env node
-import fs from "node:fs";
-const config = JSON.parse(fs.readFileSync(process.env.FAKE_GIT_CONFIG, "utf8"));
-const [, , ...args] = process.argv;
-const cmd = args[0];
-if (cmd === "merge-base") {
-  process.exit(1);
-}
-if (cmd === "diff" && args.includes("--cached")) {
-  for (const f of config.staged || []) console.log(f);
-  process.exit(0);
-}
-if (cmd === "diff") {
-  for (const f of config.unstaged || []) console.log(f);
-  process.exit(0);
-}
-if (cmd === "ls-files" && args.includes("--others")) {
-  for (const f of config.untracked || []) console.log(f);
-  process.exit(0);
-}
-console.error("fake git: unsupported " + args.join(" "));
-process.exit(1);
-`;
-
   const fakePnpmScript = `#!/usr/bin/env node
 const fs = require("node:fs");
 if (process.env.FAKE_PNPM_LOG) {
@@ -632,7 +602,8 @@ process.exit(0);
 `;
 
   let tempDir: string;
-  let originalPath: string;
+  let repoDir: string;
+  let toolsDir: string;
 
   function runScript(
     cwd: string,
@@ -646,26 +617,33 @@ process.exit(0);
     }).trim();
   }
 
+  function initRepoWithoutMain(cwd: string) {
+    execFileSync("git", ["init", "--initial-branch=feature"], { cwd });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd });
+    writeFileSync(join(cwd, ".initial"), "initial\n");
+    execFileSync("git", ["add", ".initial"], { cwd });
+    execFileSync("git", ["commit", "-m", "initial"], { cwd });
+  }
+
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "verify-local-"));
-    const pnpmPath = join(tempDir, "pnpm.cjs");
-    writeFakeExecutable(tempDir, "git", "fake-git.mjs", fakeGitNodeScript);
+    repoDir = join(tempDir, "repo");
+    toolsDir = join(tempDir, "tools");
+    mkdirSync(repoDir, { recursive: true });
+    mkdirSync(toolsDir, { recursive: true });
+    initRepoWithoutMain(repoDir);
+    const pnpmPath = join(toolsDir, "pnpm.cjs");
     writeFileSync(pnpmPath, fakePnpmScript);
-    originalPath = process.env.PATH ?? "";
   });
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
-    process.env.PATH = originalPath;
   });
 
   it("reports fail-safe scope when base cannot be resolved and only README.md changed", () => {
-    const configPath = join(tempDir, "config.json");
-    writeFileSync(configPath, JSON.stringify({ unstaged: ["README.md"] }));
-    const out = runScript(process.cwd(), ["--local", "--format", "json"], {
-      PATH: `${tempDir}${delimiter}${originalPath}`,
-      FAKE_GIT_CONFIG: configPath,
-    });
+    writeFileSync(join(repoDir, "README.md"), "# test");
+    const out = runScript(repoDir, ["--local", "--format", "json"]);
     const scope = JSON.parse(out);
     expect(scope.docs).toBe(true);
     expect(scope.standard).toBe(true);
@@ -674,12 +652,8 @@ process.exit(0);
   });
 
   it("preserves toolchain scope when base cannot be resolved", () => {
-    const configPath = join(tempDir, "config.json");
-    writeFileSync(configPath, JSON.stringify({ unstaged: ["package.json"] }));
-    const out = runScript(process.cwd(), ["--local", "--format", "json"], {
-      PATH: `${tempDir}${delimiter}${originalPath}`,
-      FAKE_GIT_CONFIG: configPath,
-    });
+    writeFileSync(join(repoDir, "package.json"), "{}");
+    const out = runScript(repoDir, ["--local", "--format", "json"]);
     const scope = JSON.parse(out);
     expect(scope.changedFiles).toEqual(["package.json"]);
     expect(scope.docs).toBe(true);
@@ -691,15 +665,9 @@ process.exit(0);
   });
 
   it("preserves process-control scope when base cannot be resolved", () => {
-    const configPath = join(tempDir, "config.json");
-    writeFileSync(
-      configPath,
-      JSON.stringify({ unstaged: ["src/lib/timeout.ts"] }),
-    );
-    const out = runScript(process.cwd(), ["--local", "--format", "json"], {
-      PATH: `${tempDir}${delimiter}${originalPath}`,
-      FAKE_GIT_CONFIG: configPath,
-    });
+    mkdirSync(join(repoDir, "src", "lib"), { recursive: true });
+    writeFileSync(join(repoDir, "src", "lib", "timeout.ts"), "export {};\n");
+    const out = runScript(repoDir, ["--local", "--format", "json"]);
     const scope = JSON.parse(out);
     expect(scope.changedFiles).toEqual(["src/lib/timeout.ts"]);
     expect(scope.docs).toBe(true);
@@ -711,24 +679,15 @@ process.exit(0);
   });
 
   it("does not report no tracked changes when base is unknown and tree is empty", () => {
-    const configPath = join(tempDir, "config.json");
-    writeFileSync(configPath, JSON.stringify({}));
-    const out = runScript(process.cwd(), ["--local", "--format", "json"], {
-      PATH: `${tempDir}${delimiter}${originalPath}`,
-      FAKE_GIT_CONFIG: configPath,
-    });
+    const out = runScript(repoDir, ["--local", "--format", "json"]);
     const scope = JSON.parse(out);
     expect(scope.reason).toBe("fail-safe");
     expect(out).not.toContain("no tracked changes");
   });
 
   it("runs fail-safe checks when base is unknown and tree is empty", () => {
-    const configPath = join(tempDir, "config.json");
-    writeFileSync(configPath, JSON.stringify({}));
-    const pnpmPath = join(tempDir, "pnpm.cjs");
-    const out = runScript(process.cwd(), ["--local", "--run"], {
-      PATH: `${tempDir}${delimiter}${originalPath}`,
-      FAKE_GIT_CONFIG: configPath,
+    const pnpmPath = join(toolsDir, "pnpm.cjs");
+    const out = runScript(repoDir, ["--local", "--run"], {
       npm_execpath: pnpmPath,
     });
     expect(out).toContain("verify:local: scope=fail-safe");
@@ -737,13 +696,10 @@ process.exit(0);
   });
 
   it("runs toolchain checks when base is unknown and package.json changed", () => {
-    const configPath = join(tempDir, "config.json");
-    const pnpmPath = join(tempDir, "pnpm.cjs");
-    const pnpmLogPath = join(tempDir, "pnpm.log");
-    writeFileSync(configPath, JSON.stringify({ unstaged: ["package.json"] }));
-    const out = runScript(process.cwd(), ["--local", "--run"], {
-      PATH: `${tempDir}${delimiter}${originalPath}`,
-      FAKE_GIT_CONFIG: configPath,
+    const pnpmPath = join(toolsDir, "pnpm.cjs");
+    const pnpmLogPath = join(toolsDir, "pnpm.log");
+    writeFileSync(join(repoDir, "package.json"), "{}");
+    const out = runScript(repoDir, ["--local", "--run"], {
       FAKE_PNPM_LOG: pnpmLogPath,
       npm_execpath: pnpmPath,
     });
@@ -756,16 +712,11 @@ process.exit(0);
   });
 
   it("runs process-control checks when base is unknown and timeout changed", () => {
-    const configPath = join(tempDir, "config.json");
-    const pnpmPath = join(tempDir, "pnpm.cjs");
-    const pnpmLogPath = join(tempDir, "pnpm.log");
-    writeFileSync(
-      configPath,
-      JSON.stringify({ unstaged: ["src/lib/timeout.ts"] }),
-    );
-    const out = runScript(process.cwd(), ["--local", "--run"], {
-      PATH: `${tempDir}${delimiter}${originalPath}`,
-      FAKE_GIT_CONFIG: configPath,
+    const pnpmPath = join(toolsDir, "pnpm.cjs");
+    const pnpmLogPath = join(toolsDir, "pnpm.log");
+    mkdirSync(join(repoDir, "src", "lib"), { recursive: true });
+    writeFileSync(join(repoDir, "src", "lib", "timeout.ts"), "export {};\n");
+    const out = runScript(repoDir, ["--local", "--run"], {
       FAKE_PNPM_LOG: pnpmLogPath,
       npm_execpath: pnpmPath,
     });
