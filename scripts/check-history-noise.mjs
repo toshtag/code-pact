@@ -43,7 +43,7 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import ts from "typescript-compiler-api";
+import ts from "./lib/typescript-compiler-api.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(resolve(repoRoot, rel), "utf8");

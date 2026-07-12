@@ -40,7 +40,7 @@
   "scripts": {
     "build": "tsup",
     "test": "pnpm test:unit && pnpm test:integration",
-    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:unit": "vitest run",
     "test:integration:smoke": "vitest run --config vitest.integration.smoke.config.ts",
     "test:integration:full": "pnpm build && vitest run --config vitest.integration.config.ts",
     "test:integration": "pnpm test:integration:full",
@@ -79,7 +79,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
+    "@types/node": "^22.20.1",
     "esbuild": "0.28.1",
     "github-slugger": "^2.0.0",
     "tsup": "^8.5.1",
