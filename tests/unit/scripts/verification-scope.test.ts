@@ -8,7 +8,7 @@ import {
   chmodSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
@@ -20,6 +20,30 @@ import {
 const scriptPath = fileURLToPath(
   new URL("../../../scripts/verification-scope.mjs", import.meta.url),
 );
+
+function writeFakeExecutable(
+  directory: string,
+  commandName: string,
+  scriptName: string,
+  nodeScript: string,
+) {
+  const scriptPath = join(directory, scriptName);
+  writeFileSync(scriptPath, nodeScript);
+
+  if (process.platform === "win32") {
+    const commandPath = join(directory, `${commandName}.cmd`);
+    writeFileSync(
+      commandPath,
+      `@echo off\r\n"${process.execPath}" "%~dp0${scriptName}" %*\r\n`,
+    );
+    return commandPath;
+  }
+
+  const commandPath = join(directory, commandName);
+  writeFileSync(commandPath, nodeScript, { mode: 0o755 });
+  chmodSync(commandPath, 0o755);
+  return commandPath;
+}
 
 describe("classifyChangedFiles", () => {
   it("returns empty scope for no changed files", () => {
@@ -522,11 +546,9 @@ process.exit(1);
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "fake-git-"));
     configPath = join(tempDir, "config.json");
-    const gitPath = join(tempDir, "git");
-    writeFileSync(gitPath, fakeGitNodeScript, { mode: 0o755 });
-    chmodSync(gitPath, 0o755);
+    writeFakeExecutable(tempDir, "git", "fake-git.mjs", fakeGitNodeScript);
     originalPath = process.env.PATH ?? "";
-    process.env.PATH = `${tempDir}:${originalPath}`;
+    process.env.PATH = `${tempDir}${delimiter}${originalPath}`;
     process.env.FAKE_GIT_CONFIG = configPath;
   });
 
@@ -626,10 +648,8 @@ process.exit(0);
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "verify-local-"));
-    const gitPath = join(tempDir, "git");
     const pnpmPath = join(tempDir, "pnpm.cjs");
-    writeFileSync(gitPath, fakeGitNodeScript, { mode: 0o755 });
-    chmodSync(gitPath, 0o755);
+    writeFakeExecutable(tempDir, "git", "fake-git.mjs", fakeGitNodeScript);
     writeFileSync(pnpmPath, fakePnpmScript);
     originalPath = process.env.PATH ?? "";
   });
@@ -643,7 +663,7 @@ process.exit(0);
     const configPath = join(tempDir, "config.json");
     writeFileSync(configPath, JSON.stringify({ unstaged: ["README.md"] }));
     const out = runScript(process.cwd(), ["--local", "--format", "json"], {
-      PATH: `${tempDir}:${originalPath}`,
+      PATH: `${tempDir}${delimiter}${originalPath}`,
       FAKE_GIT_CONFIG: configPath,
     });
     const scope = JSON.parse(out);
@@ -657,7 +677,7 @@ process.exit(0);
     const configPath = join(tempDir, "config.json");
     writeFileSync(configPath, JSON.stringify({ unstaged: ["package.json"] }));
     const out = runScript(process.cwd(), ["--local", "--format", "json"], {
-      PATH: `${tempDir}:${originalPath}`,
+      PATH: `${tempDir}${delimiter}${originalPath}`,
       FAKE_GIT_CONFIG: configPath,
     });
     const scope = JSON.parse(out);
@@ -677,7 +697,7 @@ process.exit(0);
       JSON.stringify({ unstaged: ["src/lib/timeout.ts"] }),
     );
     const out = runScript(process.cwd(), ["--local", "--format", "json"], {
-      PATH: `${tempDir}:${originalPath}`,
+      PATH: `${tempDir}${delimiter}${originalPath}`,
       FAKE_GIT_CONFIG: configPath,
     });
     const scope = JSON.parse(out);
@@ -694,7 +714,7 @@ process.exit(0);
     const configPath = join(tempDir, "config.json");
     writeFileSync(configPath, JSON.stringify({}));
     const out = runScript(process.cwd(), ["--local", "--format", "json"], {
-      PATH: `${tempDir}:${originalPath}`,
+      PATH: `${tempDir}${delimiter}${originalPath}`,
       FAKE_GIT_CONFIG: configPath,
     });
     const scope = JSON.parse(out);
@@ -707,7 +727,7 @@ process.exit(0);
     writeFileSync(configPath, JSON.stringify({}));
     const pnpmPath = join(tempDir, "pnpm.cjs");
     const out = runScript(process.cwd(), ["--local", "--run"], {
-      PATH: `${tempDir}:${originalPath}`,
+      PATH: `${tempDir}${delimiter}${originalPath}`,
       FAKE_GIT_CONFIG: configPath,
       npm_execpath: pnpmPath,
     });
@@ -722,7 +742,7 @@ process.exit(0);
     const pnpmLogPath = join(tempDir, "pnpm.log");
     writeFileSync(configPath, JSON.stringify({ unstaged: ["package.json"] }));
     const out = runScript(process.cwd(), ["--local", "--run"], {
-      PATH: `${tempDir}:${originalPath}`,
+      PATH: `${tempDir}${delimiter}${originalPath}`,
       FAKE_GIT_CONFIG: configPath,
       FAKE_PNPM_LOG: pnpmLogPath,
       npm_execpath: pnpmPath,
@@ -744,7 +764,7 @@ process.exit(0);
       JSON.stringify({ unstaged: ["src/lib/timeout.ts"] }),
     );
     const out = runScript(process.cwd(), ["--local", "--run"], {
-      PATH: `${tempDir}:${originalPath}`,
+      PATH: `${tempDir}${delimiter}${originalPath}`,
       FAKE_GIT_CONFIG: configPath,
       FAKE_PNPM_LOG: pnpmLogPath,
       npm_execpath: pnpmPath,
