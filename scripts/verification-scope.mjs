@@ -167,10 +167,12 @@ async function resolveMergeBase(baseRef) {
 }
 
 async function diffNames(baseOrRef) {
-  const args = ["diff", "--name-only", "--diff-filter=ACMR"];
+  const args = ["diff", "--no-renames", "--name-only"];
   if (baseOrRef) args.push(baseOrRef);
   const result = await runGit(args);
-  if (result.code !== 0) return [];
+  if (result.code !== 0) {
+    throw new Error(result.stderr || `git diff ${baseOrRef ?? ""} failed`);
+  }
   return result.stdout
     .split("\n")
     .map(line => line.trim())
@@ -209,9 +211,9 @@ async function collectLocalChangedFiles() {
 
   const staged = await runGit([
     "diff",
+    "--no-renames",
     "--cached",
     "--name-only",
-    "--diff-filter=ACMR",
   ]);
   if (staged.code === 0) {
     for (const f of staged.stdout
@@ -247,10 +249,22 @@ async function collectBaseChangedFiles(baseRef) {
 // --- command execution ---
 
 function runCommand(file, args) {
+  let shell = false;
+  if (file === "pnpm") {
+    const npmExecPath = process.env.npm_execpath;
+    if (npmExecPath) {
+      file = process.execPath;
+      args = [npmExecPath, ...args];
+    } else {
+      shell = process.platform === "win32";
+    }
+  }
+
   return new Promise((resolvePromise, reject) => {
     const child = spawn(file, args, {
       cwd: repoRoot,
       stdio: ["ignore", "pipe", "pipe"],
+      shell,
     });
 
     let stdout = "";
@@ -296,7 +310,7 @@ async function runCommands(commands) {
   }
 }
 
-function buildLocalCommands(scope, mergeBase) {
+export function buildLocalCommands(scope, mergeBase) {
   const commands = [];
 
   if (scope.docs) {
@@ -341,7 +355,7 @@ function buildLocalCommands(scope, mergeBase) {
     ]);
   }
 
-  if (scope.processControl && !scope.generic) {
+  if (scope.processControl) {
     commands.push([
       "pnpm",
       [
@@ -374,13 +388,39 @@ function buildLocalCommands(scope, mergeBase) {
 }
 
 async function runLocalVerification() {
-  const { files, mergeBase } = await collectLocalChangedFiles();
-  const scope = classifyChangedFiles(files);
+  let files;
+  let mergeBase;
+  let failOpen = false;
 
-  if (files.length === 0) {
+  try {
+    const collected = await collectLocalChangedFiles();
+    files = collected.files;
+    mergeBase = collected.mergeBase;
+  } catch (err) {
+    console.error(
+      `verify:local: failed to determine changed files: ${err.message}`,
+    );
+    files = [];
+    mergeBase = null;
+    failOpen = true;
+  }
+
+  if (!failOpen && files.length === 0) {
     console.log("verify:local: no tracked changes");
     process.exit(0);
   }
+
+  const scope = failOpen
+    ? {
+        changedFiles: [],
+        docs: true,
+        standard: true,
+        toolchain: false,
+        processControl: false,
+        generic: true,
+        reason: "fail-open",
+      }
+    : classifyChangedFiles(files);
 
   console.log(`verify:local: scope=${scope.reason}`);
 
@@ -417,11 +457,7 @@ function outputGitHub(scope) {
   const lines = [`docs=${scope.docs}`, `standard=${scope.standard}`];
 
   if (env) {
-    try {
-      writeFileSync(env, `${lines.join("\n")}\n`, { flag: "a" });
-    } catch {
-      // fall back to stdout
-    }
+    writeFileSync(env, `${lines.join("\n")}\n`, { flag: "a" });
   }
 
   console.log(lines.join("\n"));
@@ -452,27 +488,47 @@ async function main() {
 
   let files;
   let mergeBase;
+  let failOpen = false;
 
   if (values.local) {
     const collected = await collectLocalChangedFiles();
     files = collected.files;
     mergeBase = collected.mergeBase;
   } else if (values.base) {
-    const collected = await collectBaseChangedFiles(values.base);
-    files = collected.files;
-    mergeBase = collected.mergeBase;
+    try {
+      const collected = await collectBaseChangedFiles(values.base);
+      files = collected.files;
+      mergeBase = collected.mergeBase;
+    } catch (err) {
+      console.error(
+        `verify:local: failed to determine changed files for base ${values.base}: ${err.message}`,
+      );
+      files = [];
+      mergeBase = null;
+      failOpen = true;
+    }
   } else {
     console.error("verify:local: pass --local or --base <ref>");
     process.exit(2);
   }
 
-  const scope = classifyChangedFiles(files);
+  const scope = failOpen
+    ? {
+        changedFiles: [],
+        docs: true,
+        standard: true,
+        toolchain: false,
+        processControl: false,
+        generic: true,
+        reason: "fail-open",
+      }
+    : classifyChangedFiles(files);
 
-  if (mergeBase === null && values.base) {
-    // If base cannot be resolved, fail-safe to standard scope.
+  if (mergeBase === null && values.base && !failOpen) {
+    // If base cannot be resolved, fail-safe to run both docs and standard.
+    scope.docs = true;
     scope.standard = true;
-    scope.reason = "standard";
-    if (scope.docs) scope.reason = "docs+standard";
+    scope.reason = "docs+standard";
   }
 
   if (values.format === "github") {

@@ -1,5 +1,13 @@
-import { describe, it, expect } from "vitest";
-import { classifyChangedFiles } from "../../../scripts/verification-scope.mjs";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import {
+  classifyChangedFiles,
+  buildLocalCommands,
+} from "../../../scripts/verification-scope.mjs";
 
 describe("classifyChangedFiles", () => {
   it("returns empty scope for no changed files", () => {
@@ -196,5 +204,268 @@ describe("classifyChangedFiles", () => {
       "src/commands/init.ts",
     ]);
     expect(result.changedFiles).toEqual(["src/commands/init.ts"]);
+  });
+});
+
+describe("buildLocalCommands", () => {
+  it("plans docs-only checks", () => {
+    const scope = classifyChangedFiles(["README.md"]);
+    expect(buildLocalCommands(scope, "abc")).toEqual([
+      ["pnpm", ["check:docs"]],
+    ]);
+  });
+
+  it("plans standard source checks", () => {
+    const scope = classifyChangedFiles(["src/commands/init.ts"]);
+    const commands = buildLocalCommands(scope, "abc");
+    expect(commands).toHaveLength(2);
+    expect(commands[0]).toEqual(["pnpm", ["typecheck"]]);
+    expect(commands[1]).toEqual([
+      "pnpm",
+      [
+        "exec",
+        "vitest",
+        "run",
+        "--changed",
+        "abc",
+        "--reporter=agent",
+        "--passWithNoTests",
+      ],
+    ]);
+  });
+
+  it("plans toolchain checks", () => {
+    const scope = classifyChangedFiles(["package.json"]);
+    const commands = buildLocalCommands(scope, "abc");
+    expect(commands).toEqual([
+      ["pnpm", ["check:supply-chain"]],
+      ["pnpm", ["typecheck"]],
+      [
+        "pnpm",
+        [
+          "exec",
+          "vitest",
+          "run",
+          "tests/unit/scripts/check-supply-chain-invariants.test.ts",
+          "--reporter=agent",
+        ],
+      ],
+    ]);
+  });
+
+  it("plans process-control checks", () => {
+    const scope = classifyChangedFiles(["src/lib/timeout.ts"]);
+    const commands = buildLocalCommands(scope, "abc");
+    expect(commands).toEqual([
+      ["pnpm", ["typecheck"]],
+      ["pnpm", ["build"]],
+      [
+        "pnpm",
+        [
+          "exec",
+          "vitest",
+          "run",
+          "tests/unit/core/project-fs-authority-resolvers.test.ts",
+          "tests/unit/commands/verify-process.test.ts",
+          "--reporter=agent",
+        ],
+      ],
+      [
+        "pnpm",
+        [
+          "exec",
+          "vitest",
+          "run",
+          "--config",
+          "vitest.integration.config.ts",
+          "tests/integration/verify-timeout-abort.test.ts",
+          "--reporter=agent",
+        ],
+      ],
+    ]);
+  });
+
+  it("plans docs + source checks without duplication", () => {
+    const scope = classifyChangedFiles([
+      "docs/usage.md",
+      "src/commands/init.ts",
+    ]);
+    const commands = buildLocalCommands(scope, "abc");
+    expect(commands).toEqual([
+      ["pnpm", ["check:docs"]],
+      ["pnpm", ["typecheck"]],
+      [
+        "pnpm",
+        [
+          "exec",
+          "vitest",
+          "run",
+          "--changed",
+          "abc",
+          "--reporter=agent",
+          "--passWithNoTests",
+        ],
+      ],
+    ]);
+  });
+
+  it("plans process-control + source checks with targeted unit tests", () => {
+    const scope = classifyChangedFiles([
+      "src/lib/timeout.ts",
+      "src/commands/init.ts",
+    ]);
+    const commands = buildLocalCommands(scope, "abc");
+    const labels = commands.map(([file, args]) => `${file} ${args.join(" ")}`);
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(
+      commands.some(cmd =>
+        cmd[1].some(arg =>
+          arg.includes("project-fs-authority-resolvers.test.ts"),
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      commands.some(cmd =>
+        cmd[1].some(arg => arg.includes("verify-process.test.ts")),
+      ),
+    ).toBe(true);
+    expect(
+      commands.some(cmd =>
+        cmd[1].some(arg => arg.includes("verify-timeout-abort.test.ts")),
+      ),
+    ).toBe(true);
+    expect(commands.some(cmd => cmd[1].includes("--changed"))).toBe(true);
+    expect(commands.filter(cmd => cmd[1].includes("typecheck"))).toHaveLength(
+      1,
+    );
+  });
+
+  it("falls back to HEAD when mergeBase is unknown", () => {
+    const scope = classifyChangedFiles(["src/commands/init.ts"]);
+    const commands = buildLocalCommands(scope, null);
+    expect(commands[1]).toEqual([
+      "pnpm",
+      [
+        "exec",
+        "vitest",
+        "run",
+        "--changed",
+        "HEAD",
+        "--reporter=agent",
+        "--passWithNoTests",
+      ],
+    ]);
+  });
+
+  it("does not include full CI commands", () => {
+    const scopes = [
+      classifyChangedFiles(["README.md"]),
+      classifyChangedFiles(["package.json"]),
+      classifyChangedFiles(["src/lib/timeout.ts"]),
+      classifyChangedFiles(["docs/usage.md", "src/commands/init.ts"]),
+    ];
+    for (const scope of scopes) {
+      const commands = buildLocalCommands(scope, "abc");
+      const flat = JSON.stringify(commands);
+      expect(flat).not.toContain("test:ci");
+      expect(flat).not.toContain("test:ci:deep");
+      expect(flat).not.toContain("release:check");
+    }
+  });
+});
+
+describe("git diff integration", () => {
+  const scriptPath = fileURLToPath(
+    new URL("../../../scripts/verification-scope.mjs", import.meta.url),
+  );
+
+  function runInRepo(cwd: string, args: string[]) {
+    return execFileSync(process.execPath, [scriptPath, ...args], {
+      cwd,
+      encoding: "utf8",
+      env: { ...process.env, GITHUB_OUTPUT: "" },
+    }).trim();
+  }
+
+  function initRepo(cwd: string) {
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd });
+  }
+
+  function commitAll(cwd: string, message: string) {
+    execFileSync("git", ["add", "."], { cwd });
+    execFileSync("git", ["commit", "-m", message], { cwd });
+  }
+
+  function commitSha(cwd: string, ref = "HEAD") {
+    return execFileSync("git", ["rev-parse", ref], {
+      cwd,
+      encoding: "utf8",
+    }).trim();
+  }
+
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "verify-scope-"));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("detects deleted files as standard changes", () => {
+    initRepo(tempDir);
+    mkdirSync(join(tempDir, "src"), { recursive: true });
+    writeFileSync(join(tempDir, "src", "a.ts"), "export default 1;");
+    commitAll(tempDir, "base");
+    const base = commitSha(tempDir);
+
+    execFileSync("git", ["rm", "src/a.ts"], { cwd: tempDir });
+    commitAll(tempDir, "delete");
+
+    const out = runInRepo(tempDir, ["--base", base, "--format", "json"]);
+    const scope = JSON.parse(out);
+    expect(scope.changedFiles).toContain("src/a.ts");
+    expect(scope.standard).toBe(true);
+    expect(scope.docs).toBe(false);
+  });
+
+  it("detects renamed files as both deletion and addition", () => {
+    initRepo(tempDir);
+    mkdirSync(join(tempDir, "src"), { recursive: true });
+    writeFileSync(join(tempDir, "src", "a.ts"), "export default 1;");
+    commitAll(tempDir, "base");
+    const base = commitSha(tempDir);
+
+    mkdirSync(join(tempDir, "docs"), { recursive: true });
+    execFileSync("git", ["mv", "src/a.ts", "docs/a.md"], { cwd: tempDir });
+    commitAll(tempDir, "rename");
+
+    const out = runInRepo(tempDir, ["--base", base, "--format", "json"]);
+    const scope = JSON.parse(out);
+    expect(scope.changedFiles).toContain("src/a.ts");
+    expect(scope.changedFiles).toContain("docs/a.md");
+    expect(scope.standard).toBe(true);
+    expect(scope.docs).toBe(true);
+    expect(scope.reason).toBe("docs+standard");
+  });
+
+  it("falls back to docs+standard when base ref cannot be resolved", () => {
+    initRepo(tempDir);
+    writeFileSync(join(tempDir, "README.md"), "# test");
+    commitAll(tempDir, "base");
+
+    const out = runInRepo(tempDir, [
+      "--base",
+      "nonexistent-ref",
+      "--format",
+      "json",
+    ]);
+    const scope = JSON.parse(out);
+    expect(scope.docs).toBe(true);
+    expect(scope.standard).toBe(true);
+    expect(scope.reason).toBe("docs+standard");
   });
 });

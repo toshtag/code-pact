@@ -767,6 +767,38 @@ function checkFastCiWorkflow(ciDoc, ciContent) {
         violations.push(`ci.yml: ci-status job must verify ${check}`);
       }
     }
+    for (const output of [
+      "needs.classify.outputs.docs",
+      "needs.classify.outputs.standard",
+    ]) {
+      if (!ciStatusScripts.some(script => script.includes(output))) {
+        violations.push(`ci.yml: ci-status job must verify ${output}`);
+      }
+    }
+    const hasBooleanCheck = script =>
+      /!=\s*['"]true['"]/.test(script) && /!=\s*['"]false['"]/.test(script);
+    if (
+      !ciStatusScripts.some(
+        script =>
+          script.includes("needs.classify.outputs.docs") &&
+          hasBooleanCheck(script),
+      )
+    ) {
+      violations.push(
+        "ci.yml: ci-status job must validate needs.classify.outputs.docs is 'true' or 'false'",
+      );
+    }
+    if (
+      !ciStatusScripts.some(
+        script =>
+          script.includes("needs.classify.outputs.standard") &&
+          hasBooleanCheck(script),
+      )
+    ) {
+      violations.push(
+        "ci.yml: ci-status job must validate needs.classify.outputs.standard is 'true' or 'false'",
+      );
+    }
   }
 
   if (/windows-latest/.test(ciContent)) {

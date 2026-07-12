@@ -52,7 +52,6 @@
     "test:ci:deep": "pnpm verify:base && pnpm verify:deep:extra",
     "test:watch": "vitest",
     "prepush:fast": "pnpm verify:local",
-    "prepush:deep": "pnpm test:ci:deep",
     "verify:local": "node scripts/verification-scope.mjs --local --run",
     "typecheck": "tsc --noEmit",
     "check:doc-links": "tsx scripts/check-doc-links.ts",

@@ -88,15 +88,25 @@ jobs:
     steps:
       - name: Verify CI results
         run: |
+          docs_output="${{ needs.classify.outputs.docs }}"
+          standard_output="${{ needs.classify.outputs.standard }}"
+          if [ "$docs_output" != "true" ] && [ "$docs_output" != "false" ]; then
+            echo "classify output 'docs' is not a boolean: '$docs_output'"
+            exit 1
+          fi
+          if [ "$standard_output" != "true" ] && [ "$standard_output" != "false" ]; then
+            echo "classify output 'standard' is not a boolean: '$standard_output'"
+            exit 1
+          fi
           if [ "${{ needs.classify.result }}" != "success" ]; then
             echo "classify job did not succeed: ${{ needs.classify.result }}"
             exit 1
           fi
-          if [ "${{ needs.classify.outputs.docs }}" = "true" ] && [ "${{ needs.docs.result }}" != "success" ]; then
+          if [ "$docs_output" = "true" ] && [ "${{ needs.docs.result }}" != "success" ]; then
             echo "docs job did not succeed: docs=${{ needs.docs.result }}"
             exit 1
           fi
-          if [ "${{ needs.classify.outputs.standard }}" = "true" ] && [ "${{ needs.standard.result }}" != "success" ]; then
+          if [ "$standard_output" = "true" ] && [ "${{ needs.standard.result }}" != "success" ]; then
             echo "standard job did not succeed: standard=${{ needs.standard.result }}"
             exit 1
           fi
