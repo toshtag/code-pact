@@ -9,10 +9,10 @@ on:
         default: "linux-deep"
         type: choice
         options:
-          - "all"
           - "linux-deep"
-          - "node-24-smoke"
-          - "windows-process-control"
+          - "node24"
+          - "windows"
+          - "all"
 
 permissions:
   contents: read
@@ -41,7 +41,7 @@ jobs:
   node-24-smoke:
     name: Node 24 compatibility smoke
     runs-on: ubuntu-latest
-    if: github.event.inputs.scope == 'all' || github.event.inputs.scope == 'node-24-smoke'
+    if: github.event.inputs.scope == 'all' || github.event.inputs.scope == 'node24'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -69,7 +69,7 @@ jobs:
   windows-process-control:
     name: Windows process-control (Node 22)
     runs-on: windows-latest
-    if: github.event.inputs.scope == 'all' || github.event.inputs.scope == 'windows-process-control'
+    if: github.event.inputs.scope == 'all' || github.event.inputs.scope == 'windows'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -109,12 +109,12 @@ jobs:
               ok=false
             fi
           fi
-          if [ "$scope" = "all" ] || [ "$scope" = "node-24-smoke" ]; then
+          if [ "$scope" = "all" ] || [ "$scope" = "node24" ]; then
             if [ "${{ needs.node-24-smoke.result }}" != "success" ]; then
               ok=false
             fi
           fi
-          if [ "$scope" = "all" ] || [ "$scope" = "windows-process-control" ]; then
+          if [ "$scope" = "all" ] || [ "$scope" = "windows" ]; then
             if [ "${{ needs.windows-process-control.result }}" != "success" ]; then
               ok=false
             fi

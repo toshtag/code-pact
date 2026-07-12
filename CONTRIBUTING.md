@@ -37,19 +37,32 @@ docs(readme): clarify json response shape
 test(progress): cover expanded_work for project-b fixture
 ```
 
+## Local verification
+
+Contributors are not required to reproduce the full GitHub CI suite locally.
+
+Use `pnpm verify:local` for change-aware feedback, or run the smallest
+relevant test directly. Opening a PR without running the full suite is
+acceptable; GitHub CI owns the merge gate.
+
+- Docs-only changes: `pnpm check:docs`
+- Normal code changes: `pnpm verify:local`
+- A focused bug fix: the affected test file
+- `pnpm test:ci`: CI reproduction or verification-infrastructure changes
+- `pnpm test:ci:deep`: maintainer-selected deep investigation only
+- `pnpm release:check`: release preparation only
+
+Ordinary contributors are not expected to run Deep CI or platform compatibility
+jobs. Maintainers select those jobs when the changed risk surface requires them.
+
 ## Branch / PR workflow
 
 - One CLI command (or one cohesive concern) per branch: `feat/<command>` or `chore/<scope>`.
 - Open a PR even for solo work; do not push directly to `main`.
 - Inside a PR, prefer many small commits. Squash-merge at PR merge time is acceptable.
-- Fast local loop: `pnpm test:unit`.
-- Change-aware local verification: `pnpm verify:local` (runs only the checks relevant to your changed files).
-- Full required gate before merge: `pnpm test:ci`.
-- Deep local/manual gate for high-risk changes: `pnpm test:ci:deep`.
-- Release remains strict through `pnpm release:check`.
 - CI must be green before merge. Required PR CI is now change-aware: it classifies changed files into `docs` and `standard` scopes and runs only the matching jobs; manual Deep CI covers full integration, Node 24, Windows process-control, docs, and invariant checks.
-- Maintainers who want a local pre-push gate can opt in with a gitignored hook:
-  `mkdir -p .local/hooks && cp scripts/local/pre-push.example.sh .local/hooks/pre-push && chmod +x .local/hooks/pre-push && git config core.hooksPath .local/hooks`.
+- The optional pre-push hook runs `pnpm verify:local`; it does not reproduce the full GitHub CI or Deep CI suite.
+  Install it with `mkdir -p .local/hooks && cp scripts/local/pre-push.example.sh .local/hooks/pre-push && chmod +x .local/hooks/pre-push && git config core.hooksPath .local/hooks`.
 - Touching docs? See [`docs/maintainers/docs-maintenance.md`](docs/maintainers/docs-maintenance.md) for which doc owns which kind of change, so updates don't drift across files.
 
 ## Issues and questions

@@ -14,6 +14,8 @@ identifiers. Starting with v1.0.0, stable releases use plain
 ## [Unreleased]
 
 ### Changed
+
+- **Made local and GitHub verification change-aware.** Added `scripts/verification-scope.mjs` and `pnpm verify:local` so agents and contributors run only checks relevant to the changed files. Required PR CI now classifies changes into `docs` and `standard` scopes and runs matching jobs, and Deep CI is maintainer-selectable via `workflow_dispatch`. Deep CI and `release:check` remain strict but are no longer required for ordinary local development.
 - **Upgraded the reviewed Vite toolchain to 8.1.4.** The development/test stack now resolves Vite to 8.1.4 with Vitest 4.1.10 while retaining the existing tsup production build and esbuild 0.28.1 smoke/pinning policy.
 - **Retired the internal general-purpose Evidence Harness.** Removed its release-coupled aggregate CSV/JSON snapshots and dedicated unit/integration test path because the archived dogfood corpus no longer produced actionable live-task measurements. The focused P51 agent-detail byte fixture remains under `docs/maintainers/evidence/` as a direct regression check for the compact evidence contract.
 - **Leaned the automated npm release path.** Removed the duplicate release-gate build, added bounded timeouts to every publish job, and reduced transient release artifact retention to seven days while preserving Trusted Publishing, provenance, and registry tarball verification.
@@ -21,11 +23,13 @@ identifiers. Starting with v1.0.0, stable releases use plain
 ## [2.1.0] — 2026-07-11
 
 ### Added
+
 - **Agent-sized verification detail and local evidence retrieval.** `verify --json --detail agent` and `task complete --json --detail agent` now emit a compact Failure Capsule for agents while preserving the legacy default / `--detail full` JSON shapes. `task prepare` now returns those agent-detail forms in `commands.verify` and `commands.complete`, so generated adapters can consume the compact failure contract without inventing extra flags. Failed command stdout/stderr are stored once in the gitignored derived Evidence cache under `.code-pact/cache/evidence/`, referenced by an opaque `evidence:sha256:<digest>` value, and retrievable with `code-pact evidence show <ref> --json`. Agent-detail JSON is bounded below 24 KiB, including cancellation, timeout, preflight, and oversized-output failures.
 
 ## [2.0.1] — 2026-07-10
 
 ### Security
+
 - **Bounded verification commands and cancellation.** `verify` and `task complete` now apply a validated per-command timeout (default 300000 ms), preserve command-level exit/output/timing results, terminate descendant process trees on timeout or abort, and connect CLI `SIGINT` / `SIGTERM` to clean cancellation. `task complete` checks cancellation before its atomic event-write commit point, so a cancelled pre-commit run records no `done` event. POSIX CI exercises CLI signal translation; Windows CI exercises the same bounded-command timeout/AbortSignal path plus `taskkill` process-tree cleanup without depending on synthetic Windows signal delivery.
 - **Reviewed development toolchain is pinned and continuously checked.** pnpm is fixed at 10.34.2, Vite resolves to 6.4.3, and esbuild resolves to 0.28.1. pnpm explicitly denies esbuild lifecycle scripts with `allowBuilds.esbuild: false`; the supply-chain gate verifies package/workspace/lockfile pins, and Linux/Windows CI verify the installed pnpm, Vite, and esbuild versions, execute an esbuild transform smoke, and build the project.
 - **Portable permission-error and temporary-directory tests.** ADR unreadable-directory handling is exercised through injected filesystem failures instead of relying on `chmod 000` under root, and integration fixtures clean their per-test temporary projects on success and failure paths.

@@ -544,6 +544,16 @@ function checkFastCiWorkflow(ciDoc, ciContent) {
     violations.push("ci.yml: must run on pull_request and push to main");
   }
 
+  const onPullRequest = ciDoc.getIn(["on", "pull_request"]);
+  if (
+    onPullRequest &&
+    (onPullRequest.get("paths") || onPullRequest.get("paths-ignore"))
+  ) {
+    violations.push(
+      "ci.yml: workflow-level pull_request paths/paths-ignore filters are not allowed",
+    );
+  }
+
   const concurrency = ciDoc.get("concurrency");
   if (!concurrency) {
     violations.push("ci.yml: must define a concurrency block");
@@ -799,12 +809,7 @@ function checkDeepCiWorkflow(deepDoc) {
     const options = scopeInput.get("options");
     const optionValues =
       options && options.items ? options.items.map(i => i.value) : [];
-    for (const required of [
-      "all",
-      "linux-deep",
-      "node-24-smoke",
-      "windows-process-control",
-    ]) {
+    for (const required of ["all", "linux-deep", "node24", "windows"]) {
       if (!optionValues.includes(required)) {
         violations.push(`ci-deep.yml: scope input must include ${required}`);
       }
@@ -859,7 +864,7 @@ function checkDeepCiWorkflow(deepDoc) {
     const nodeIf = node24.get("if");
     if (
       !nodeIf ||
-      !/github\.event\.inputs\.scope\s*==\s*['"](?:all|node-24-smoke)['"]/.test(
+      !/github\.event\.inputs\.scope\s*==\s*['"](?:all|node24)['"]/.test(
         String(nodeIf),
       )
     ) {
@@ -887,7 +892,7 @@ function checkDeepCiWorkflow(deepDoc) {
     const windowsIf = windowsJob.get("if");
     if (
       !windowsIf ||
-      !/github\.event\.inputs\.scope\s*==\s*['"](?:all|windows-process-control)['"]/.test(
+      !/github\.event\.inputs\.scope\s*==\s*['"](?:all|windows)['"]/.test(
         String(windowsIf),
       )
     ) {
@@ -1199,6 +1204,35 @@ export function checkCiPackageScripts(packageContent) {
   } else if (chainPnpmScriptIndex(releaseCheckChain, "test") === -1) {
     violations.push(
       "package.json: scripts.release:check must invoke pnpm test",
+    );
+  }
+
+  if (!scripts["verify:local"]) {
+    violations.push("package.json: scripts.verify:local must be defined");
+  } else if (
+    !/scripts\/verification-scope\.mjs\s+--local\s+--run/.test(
+      String(scripts["verify:local"]),
+    )
+  ) {
+    violations.push(
+      "package.json: scripts.verify:local must run scripts/verification-scope.mjs --local --run",
+    );
+  }
+
+  const prepushFast = String(scripts["prepush:fast"] ?? "");
+  if (
+    prepushFast &&
+    /pnpm\s+(?:run\s+)?(?:test:ci|test:ci:deep|release:check)\b/.test(
+      prepushFast,
+    )
+  ) {
+    violations.push(
+      "package.json: scripts.prepush:fast must not invoke test:ci, test:ci:deep, or release:check",
+    );
+  }
+  if (prepushFast && !/pnpm\s+verify:local\b/.test(prepushFast)) {
+    violations.push(
+      "package.json: scripts.prepush:fast should use pnpm verify:local",
     );
   }
 

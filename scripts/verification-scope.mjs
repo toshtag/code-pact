@@ -99,7 +99,7 @@ function isGenericCode(file) {
 }
 
 export function classifyChangedFiles(files) {
-  const changedFiles = [...files];
+  const changedFiles = [...new Set(files)];
   const docs = changedFiles.some(isDocs);
   const standard = changedFiles.length > 0 && !changedFiles.every(isDocsOnly);
   const toolchain = changedFiles.some(isToolchain);
@@ -167,12 +167,9 @@ async function resolveMergeBase(baseRef) {
 }
 
 async function diffNames(baseOrRef) {
-  const result = await runGit([
-    "diff",
-    "--name-only",
-    "--diff-filter=ACMR",
-    baseOrRef,
-  ]);
+  const args = ["diff", "--name-only", "--diff-filter=ACMR"];
+  if (baseOrRef) args.push(baseOrRef);
+  const result = await runGit(args);
   if (result.code !== 0) return [];
   return result.stdout
     .split("\n")
@@ -207,7 +204,7 @@ async function collectLocalChangedFiles() {
   }
 
   // Always add staged, unstaged, and untracked (non-ignored) working-tree changes.
-  const unstaged = await diffNames("HEAD");
+  const unstaged = await diffNames("");
   for (const f of unstaged) files.add(f);
 
   const staged = await runGit([

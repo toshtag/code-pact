@@ -54,7 +54,9 @@ describe("classifyChangedFiles", () => {
   });
 
   it("classifies src/contracts/ files as docs and standard", () => {
-    const result = classifyChangedFiles(["src/contracts/plan-capture-details.ts"]);
+    const result = classifyChangedFiles([
+      "src/contracts/plan-capture-details.ts",
+    ]);
     expect(result.docs).toBe(true);
     expect(result.standard).toBe(true);
   });
@@ -111,7 +113,9 @@ describe("classifyChangedFiles", () => {
   });
 
   it("classifies src/core/process/ files as process-control and standard", () => {
-    const result = classifyChangedFiles(["src/core/process/bounded-command.ts"]);
+    const result = classifyChangedFiles([
+      "src/core/process/bounded-command.ts",
+    ]);
     expect(result.processControl).toBe(true);
     expect(result.standard).toBe(true);
   });
@@ -150,21 +154,30 @@ describe("classifyChangedFiles", () => {
   });
 
   it("combines docs and standard with docs first in reason", () => {
-    const result = classifyChangedFiles(["docs/usage.md", "src/commands/init.ts"]);
+    const result = classifyChangedFiles([
+      "docs/usage.md",
+      "src/commands/init.ts",
+    ]);
     expect(result.docs).toBe(true);
     expect(result.standard).toBe(true);
     expect(result.reason).toBe("docs+standard");
   });
 
   it("combines toolchain and standard without duplicating standard in reason", () => {
-    const result = classifyChangedFiles(["package.json", "src/commands/init.ts"]);
+    const result = classifyChangedFiles([
+      "package.json",
+      "src/commands/init.ts",
+    ]);
     expect(result.toolchain).toBe(true);
     expect(result.standard).toBe(true);
     expect(result.reason).toBe("toolchain");
   });
 
   it("combines process-control and standard without duplicating standard in reason", () => {
-    const result = classifyChangedFiles(["src/lib/timeout.ts", "src/commands/init.ts"]);
+    const result = classifyChangedFiles([
+      "src/lib/timeout.ts",
+      "src/commands/init.ts",
+    ]);
     expect(result.processControl).toBe(true);
     expect(result.standard).toBe(true);
     expect(result.reason).toBe("process-control");
@@ -178,7 +191,10 @@ describe("classifyChangedFiles", () => {
   });
 
   it("deduplicates changed files in the returned list", () => {
-    const result = classifyChangedFiles(["src/commands/init.ts", "src/commands/init.ts"]);
-    expect(result.changedFiles).toEqual(["src/commands/init.ts", "src/commands/init.ts"]);
+    const result = classifyChangedFiles([
+      "src/commands/init.ts",
+      "src/commands/init.ts",
+    ]);
+    expect(result.changedFiles).toEqual(["src/commands/init.ts"]);
   });
 });

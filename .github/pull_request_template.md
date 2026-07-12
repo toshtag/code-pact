@@ -12,9 +12,16 @@
 
 ## Verification
 
-- `pnpm verify:local` (change-aware, targeted):
-- `pnpm test:ci` (full required gate):
-- `pnpm test:ci:deep` (deep checks, when required):
+<!--
+Run only checks relevant to the change.
+It is acceptable to write "not run locally — GitHub CI owns the merge gate".
+Do not run `pnpm test:ci`, Deep CI, or release checks solely to fill this section.
+-->
+
+- Relevant local check:
+- Not run locally, if applicable:
+- GitHub-selected CI scope:
+- Additional maintainer check, if any:
 
 ## Risk / rollback
 
