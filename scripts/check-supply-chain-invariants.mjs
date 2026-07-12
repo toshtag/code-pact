@@ -5,6 +5,7 @@
 //   - All `uses:` (step-level and job-level) reference full 40-char commit SHAs
 //   - publish.yml has top-level `permissions: {}`
 //   - publish.yml has exactly 4 jobs: prepare, publish, verify, github-release
+//   - publish.yml release jobs have bounded timeouts
 //   - Each job's permission map exactly matches the expected set (no extra permissions)
 //   - Only the publish job has `id-token: write` and `environment: npm-publish`
 //   - Only the github-release job has `contents: write`
@@ -39,6 +40,13 @@ const EXPECTED_JOB_PERMISSIONS = {
   publish: { contents: "read", "id-token": "write" },
   verify: { contents: "read" },
   "github-release": { contents: "write" },
+};
+
+const EXPECTED_PUBLISH_JOB_TIMEOUTS = {
+  prepare: 15,
+  publish: 5,
+  verify: 10,
+  "github-release": 5,
 };
 
 // --- Canonical privileged job structures (source of truth) ---
@@ -77,6 +85,7 @@ export const EXPECTED_CANONICAL_JOBS = {
     outputs: {
       published_now: "${{ steps.publish.outputs.published_now }}",
     },
+    "timeout-minutes": 5,
     steps: [
       {
         name: "Download release artifact",
@@ -108,6 +117,7 @@ export const EXPECTED_CANONICAL_JOBS = {
     "runs-on": "ubuntu-latest",
     needs: ["verify", "prepare", "publish"],
     permissions: { contents: "write" },
+    "timeout-minutes": 5,
     steps: [
       {
         name: "Download release artifact",
@@ -411,6 +421,27 @@ function getJobSteps(doc, jobName) {
   return [];
 }
 
+function collectUploadArtifactRetention(doc) {
+  const retentionByName = {};
+  for (const jobPair of getWorkflowJobs(doc)) {
+    const job = jobPair.value;
+    if (!job) continue;
+    const steps = job.get("steps");
+    if (!steps || !steps.items) continue;
+    for (const step of steps.items) {
+      const uses = step.get("uses");
+      if (typeof uses !== "string" || !uses.startsWith("actions/upload-artifact")) {
+        continue;
+      }
+      const withBlock = step.get("with");
+      const name = withBlock?.get("name");
+      if (typeof name !== "string") continue;
+      retentionByName[name] = withBlock?.get("retention-days");
+    }
+  }
+  return retentionByName;
+}
+
 function getWorkflowJobs(doc) {
   const jobs = doc.get("jobs");
   return jobs?.items ?? [];
@@ -636,6 +667,35 @@ function findWindowsProcessControlWorkflow(workflowDocs, cancellationCoverageVio
   return null;
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function parseFailFastChain(script) {
+  if (
+    script.includes("||") ||
+    script.includes(";") ||
+    /(^|[^&])&([^&]|$)/.test(script) ||
+    /(^|[^|])\|([^|]|$)/.test(script)
+  ) {
+    return null;
+  }
+
+  return script
+    .split(/\s*&&\s*/)
+    .map(command => command.trim())
+    .filter(Boolean);
+}
+
+function commandInvokesPnpmScript(command, scriptName) {
+  const escaped = escapeRegExp(scriptName);
+  return new RegExp(`^pnpm\\s+(?:run\\s+)?${escaped}(?=$|\\s)`).test(command);
+}
+
+function chainPnpmScriptIndex(chain, scriptName) {
+  return chain.findIndex(command => commandInvokesPnpmScript(command, scriptName));
+}
+
 export function checkCiPackageScripts(packageContent) {
   const violations = [];
   let pkg;
@@ -648,8 +708,16 @@ export function checkCiPackageScripts(packageContent) {
   }
 
   const scripts = pkg.scripts ?? {};
+  const test = String(scripts.test ?? "");
+  const integration = String(scripts["test:integration"] ?? "");
   const testCi = String(scripts["test:ci"] ?? "");
   const testCiDeep = String(scripts["test:ci:deep"] ?? "");
+  const integrationFull = String(scripts["test:integration:full"] ?? "");
+  const releaseCheck = String(scripts["release:check"] ?? "");
+  const testChain = parseFailFastChain(test);
+  const integrationChain = parseFailFastChain(integration);
+  const integrationFullChain = parseFailFastChain(integrationFull);
+  const releaseCheckChain = parseFailFastChain(releaseCheck);
 
   const requiredFast = [
     "pnpm check:supply-chain",
@@ -700,6 +768,88 @@ export function checkCiPackageScripts(packageContent) {
   for (const command of requiredDeep) {
     if (!testCiDeep.includes(command)) {
       violations.push(`package.json: scripts.test:ci:deep must include ${command}`);
+    }
+  }
+
+  const fullIntegrationCommand = "vitest run --config vitest.integration.config.ts";
+  if (!integrationFullChain) {
+    violations.push(
+      "package.json: scripts.test:integration:full must use a fail-fast && chain",
+    );
+  } else {
+    const buildIndex = chainPnpmScriptIndex(integrationFullChain, "build");
+    const fullIntegrationIndex = integrationFullChain.indexOf(fullIntegrationCommand);
+    if (buildIndex === -1) {
+      violations.push("package.json: scripts.test:integration:full must invoke pnpm build");
+    }
+    if (fullIntegrationIndex === -1) {
+      violations.push("package.json: scripts.test:integration:full must run full integration");
+    }
+    if (buildIndex !== -1 && fullIntegrationIndex !== -1 && buildIndex > fullIntegrationIndex) {
+      violations.push(
+        "package.json: scripts.test:integration:full must build dist before full integration",
+      );
+    }
+  }
+
+  if (!testChain) {
+    violations.push("package.json: scripts.test must use a fail-fast && chain");
+  } else if (chainPnpmScriptIndex(testChain, "test:unit") === -1) {
+    violations.push("package.json: scripts.test must invoke pnpm test:unit");
+  }
+
+  if (testChain) {
+    const testUnitIndex = chainPnpmScriptIndex(testChain, "test:unit");
+    const testIntegrationIndex = chainPnpmScriptIndex(testChain, "test:integration");
+    if (testIntegrationIndex === -1) {
+      violations.push("package.json: scripts.test must invoke pnpm test:integration");
+    } else if (testUnitIndex !== -1 && testUnitIndex > testIntegrationIndex) {
+      violations.push(
+        "package.json: scripts.test must invoke pnpm test:unit before pnpm test:integration",
+      );
+    }
+  }
+
+  if (!integrationChain) {
+    violations.push(
+      "package.json: scripts.test:integration must use a fail-fast && chain",
+    );
+  } else if (chainPnpmScriptIndex(integrationChain, "test:integration:full") === -1) {
+    violations.push(
+      "package.json: scripts.test:integration must invoke pnpm test:integration:full",
+    );
+  }
+
+  if (
+    releaseCheckChain
+      ? releaseCheckChain.some(command => commandInvokesPnpmScript(command, "build"))
+      : /\bpnpm\s+(?:run\s+)?build(?:$|\s|&&|\|\||;)/.test(releaseCheck)
+  ) {
+    violations.push("package.json: scripts.release:check must not run a duplicate pnpm build");
+  }
+
+  if (!releaseCheckChain) {
+    violations.push("package.json: scripts.release:check must use a fail-fast && chain");
+  } else if (chainPnpmScriptIndex(releaseCheckChain, "test") === -1) {
+    violations.push("package.json: scripts.release:check must invoke pnpm test");
+  }
+
+  const releaseDistCommands = [
+    "node dist/cli.js validate --json",
+    "node dist/cli.js plan lint --include-quality --strict --json",
+    "node dist/cli.js plan analyze --strict --json",
+  ];
+  if (releaseCheckChain) {
+    const testIndex = chainPnpmScriptIndex(releaseCheckChain, "test");
+    for (const command of releaseDistCommands) {
+      const distCommandIndex = releaseCheckChain.indexOf(command);
+      if (distCommandIndex === -1) {
+        violations.push(`package.json: scripts.release:check must execute ${command}`);
+      } else if (testIndex !== -1 && testIndex > distCommandIndex) {
+        violations.push(
+          `package.json: scripts.release:check must invoke pnpm test before ${command}`,
+        );
+      }
     }
   }
 
@@ -1002,6 +1152,20 @@ export function checkSupplyChainInvariants(root) {
         );
       }
 
+      for (const jobName of expectedJobs) {
+        const jobNode = getJobNode(doc, jobName);
+        const actualTimeout = jobNode?.get("timeout-minutes");
+        const expectedTimeout = EXPECTED_PUBLISH_JOB_TIMEOUTS[jobName];
+        if (actualTimeout === expectedTimeout) {
+          pass(`publish.yml: ${jobName} job timeout is ${expectedTimeout} minutes`);
+        } else {
+          fail(
+            `publish.yml: ${jobName} job timeout must be ${expectedTimeout} minutes`,
+            `found: ${JSON.stringify(actualTimeout)}`,
+          );
+        }
+      }
+
       // Permission map exact match for each job
       for (const jobName of expectedJobs) {
         const actual = getJobPermissions(doc, jobName);
@@ -1194,6 +1358,18 @@ export function checkSupplyChainInvariants(root) {
         fail(
           "publish.yml: verify job must run post-publish tarball verification",
         );
+      }
+
+      const uploadRetention = collectUploadArtifactRetention(doc);
+      for (const artifactName of ["release-artifact", "release-integrity"]) {
+        if (uploadRetention[artifactName] === 7) {
+          pass(`publish.yml: ${artifactName} artifact retention is 7 days`);
+        } else {
+          fail(
+            `publish.yml: ${artifactName} artifact retention must be 7 days`,
+            `found: ${JSON.stringify(uploadRetention[artifactName])}`,
+          );
+        }
       }
 
       // verify job must have checkout (required for repository script execution)
@@ -1481,7 +1657,7 @@ export function checkSupplyChainInvariants(root) {
   try {
     const violations = checkCiPackageScripts(_read("package.json"));
     if (violations.length === 0) {
-      pass("package.json: fast and deep CI package scripts match the tiered policy");
+      pass("package.json: fast, deep, and release package scripts match the tiered policy");
     } else {
       for (const violation of violations) fail(violation);
     }
