@@ -716,6 +716,7 @@ export function checkCiPackageScripts(packageContent) {
   const releaseCheck = String(scripts["release:check"] ?? "");
   const testChain = parseFailFastChain(test);
   const integrationChain = parseFailFastChain(integration);
+  const integrationFullChain = parseFailFastChain(integrationFull);
   const releaseCheckChain = parseFailFastChain(releaseCheck);
 
   const requiredFast = [
@@ -770,10 +771,25 @@ export function checkCiPackageScripts(packageContent) {
     }
   }
 
-  if (!/pnpm\s+build\s+&&\s+vitest\s+run\s+--config\s+vitest\.integration\.config\.ts/.test(integrationFull)) {
+  const fullIntegrationCommand = "vitest run --config vitest.integration.config.ts";
+  if (!integrationFullChain) {
     violations.push(
-      "package.json: scripts.test:integration:full must build dist before full integration",
+      "package.json: scripts.test:integration:full must use a fail-fast && chain",
     );
+  } else {
+    const buildIndex = chainPnpmScriptIndex(integrationFullChain, "build");
+    const fullIntegrationIndex = integrationFullChain.indexOf(fullIntegrationCommand);
+    if (buildIndex === -1) {
+      violations.push("package.json: scripts.test:integration:full must invoke pnpm build");
+    }
+    if (fullIntegrationIndex === -1) {
+      violations.push("package.json: scripts.test:integration:full must run full integration");
+    }
+    if (buildIndex !== -1 && fullIntegrationIndex !== -1 && buildIndex > fullIntegrationIndex) {
+      violations.push(
+        "package.json: scripts.test:integration:full must build dist before full integration",
+      );
+    }
   }
 
   if (!testChain) {
@@ -823,17 +839,13 @@ export function checkCiPackageScripts(packageContent) {
     "node dist/cli.js plan lint --include-quality --strict --json",
     "node dist/cli.js plan analyze --strict --json",
   ];
-  for (const command of releaseDistCommands) {
-    if (!releaseCheck.includes(command)) {
-      violations.push(`package.json: scripts.release:check must include ${command}`);
-    }
-  }
-
   if (releaseCheckChain) {
     const testIndex = chainPnpmScriptIndex(releaseCheckChain, "test");
     for (const command of releaseDistCommands) {
       const distCommandIndex = releaseCheckChain.indexOf(command);
-      if (testIndex !== -1 && distCommandIndex !== -1 && testIndex > distCommandIndex) {
+      if (distCommandIndex === -1) {
+        violations.push(`package.json: scripts.release:check must execute ${command}`);
+      } else if (testIndex !== -1 && testIndex > distCommandIndex) {
         violations.push(
           `package.json: scripts.release:check must invoke pnpm test before ${command}`,
         );
