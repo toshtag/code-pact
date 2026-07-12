@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 
-pnpm prepush:fast
+pnpm verify:local

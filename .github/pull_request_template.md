@@ -12,9 +12,9 @@
 
 ## Verification
 
-- Targeted:
-- `pnpm test:ci`:
-- Deep checks, when required:
+- `pnpm verify:local` (change-aware, targeted):
+- `pnpm test:ci` (full required gate):
+- `pnpm test:ci:deep` (deep checks, when required):
 
 ## Risk / rollback
 
