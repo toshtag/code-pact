@@ -345,10 +345,48 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "permissions:",
     "  contents: read",
     "",
+    "concurrency:",
+    "  group: ci-${{ github.event.pull_request.number || github.ref }}",
+    "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+    "",
     "jobs:",
-    "  fast:",
-    "    name: Fast gate (Node 22)",
+    "  classify:",
+    "    name: Classify change scope",
     "    runs-on: ubuntu-latest",
+    "    outputs:",
+    "      docs: ${{ steps.classify.outputs.docs }}",
+    "      standard: ${{ steps.classify.outputs.standard }}",
+    "    steps:",
+    "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
+    "        with:",
+    "          fetch-depth: 0",
+    "          persist-credentials: false",
+    "      - name: Classify changed files",
+    "        id: classify",
+    "        run: node scripts/verification-scope.mjs --base HEAD --format github",
+    "",
+    "  docs:",
+    "    name: Docs checks",
+    "    runs-on: ubuntu-latest",
+    "    needs: [classify]",
+    "    if: needs.classify.outputs.docs == 'true'",
+    "    steps:",
+    "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
+    "        with:",
+    "          persist-credentials: false",
+    "      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9",
+    "      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0",
+    "        with:",
+    "          node-version: 22",
+    "          cache: pnpm",
+    "      - run: pnpm install --frozen-lockfile",
+    "      - run: pnpm check:docs",
+    "",
+    "  standard:",
+    "    name: Standard gate (Node 22)",
+    "    runs-on: ubuntu-latest",
+    "    needs: [classify]",
+    "    if: needs.classify.outputs.standard == 'true'",
     "    steps:",
     "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
     "        with:",
@@ -364,14 +402,21 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "  ci-status:",
     "    name: CI status",
     "    runs-on: ubuntu-latest",
-    "    needs: [fast]",
+    "    needs: [classify, docs, standard]",
     "    if: ${{ always() }}",
     "    steps:",
-    "      - name: Verify fast gate succeeded",
-    "        if: ${{ needs.fast.result != 'success' }}",
+    "      - name: Verify CI results",
     "        run: |",
-    "          echo \"fast gate did not succeed: fast=${{ needs.fast.result }}\"",
-    "          exit 1",
+    '          if [ "${{ needs.classify.result }}" != "success" ]; then',
+    '            echo "classify job did not succeed"',
+    "            exit 1",
+    "          fi",
+    '          if [ "${{ needs.classify.outputs.docs }}" = "true" ] && [ "${{ needs.docs.result }}" != "success" ]; then',
+    "            exit 1",
+    "          fi",
+    '          if [ "${{ needs.classify.outputs.standard }}" = "true" ] && [ "${{ needs.standard.result }}" != "success" ]; then',
+    "            exit 1",
+    "          fi",
   ].join("\n");
 
   const wellFormedCiDeep = [
@@ -379,6 +424,17 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "",
     "on:",
     "  workflow_dispatch:",
+    "    inputs:",
+    "      scope:",
+    '        description: "Scope to run"',
+    "        required: true",
+    '        default: "linux-deep"',
+    "        type: choice",
+    "        options:",
+    '          - "all"',
+    '          - "linux-deep"',
+    '          - "node-24-smoke"',
+    '          - "windows-process-control"',
     "",
     "permissions:",
     "  contents: read",
@@ -387,6 +443,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "  linux-deep:",
     "    name: Linux deep gate (Node 22)",
     "    runs-on: ubuntu-latest",
+    "    if: github.event.inputs.scope == 'all' || github.event.inputs.scope == 'linux-deep'",
     "    steps:",
     "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
     "        with:",
@@ -402,6 +459,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "  node-24-smoke:",
     "    name: Node 24 compatibility smoke",
     "    runs-on: ubuntu-latest",
+    "    if: github.event.inputs.scope == 'all' || github.event.inputs.scope == 'node-24-smoke'",
     "    steps:",
     "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
     "        with:",
@@ -421,6 +479,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "  windows-process-control:",
     "    name: Windows process-control (Node 22)",
     "    runs-on: windows-latest",
+    "    if: github.event.inputs.scope == 'all' || github.event.inputs.scope == 'windows-process-control'",
     "    steps:",
     "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
     "        with:",
@@ -437,6 +496,35 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "      - run: pnpm build",
     "      - run: pnpm exec vitest run tests/unit/core/project-fs-authority-resolvers.test.ts tests/unit/commands/verify-process.test.ts",
     "      - run: pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts",
+    "",
+    "  deep-ci-status:",
+    "    name: Deep CI status",
+    "    runs-on: ubuntu-latest",
+    "    needs: [linux-deep, node-24-smoke, windows-process-control]",
+    "    if: ${{ always() }}",
+    "    steps:",
+    "      - name: Verify deep CI succeeded",
+    "        run: |",
+    '          scope="${{ github.event.inputs.scope }}"',
+    "          ok=true",
+    '          if [ "$scope" = "all" ] || [ "$scope" = "linux-deep" ]; then',
+    '            if [ "${{ needs.linux-deep.result }}" != "success" ]; then',
+    "              ok=false",
+    "            fi",
+    "          fi",
+    '          if [ "$scope" = "all" ] || [ "$scope" = "node-24-smoke" ]; then',
+    '            if [ "${{ needs.node-24-smoke.result }}" != "success" ]; then',
+    "              ok=false",
+    "            fi",
+    "          fi",
+    '          if [ "$scope" = "all" ] || [ "$scope" = "windows-process-control" ]; then',
+    '            if [ "${{ needs.windows-process-control.result }}" != "success" ]; then',
+    "              ok=false",
+    "            fi",
+    "          fi",
+    '          if [ "$ok" != "true" ]; then',
+    "            exit 1",
+    "          fi",
   ].join("\n");
 
   const wellFormedVerifyTimeoutAbort = [
@@ -480,10 +568,15 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
         "test:integration": "pnpm test:integration:full",
         "test:integration:full":
           "pnpm build && vitest run --config vitest.integration.config.ts",
-        "test:ci":
-          "pnpm check:supply-chain && pnpm typecheck && pnpm test:unit && pnpm build && pnpm test:integration:smoke && node dist/cli.js --version && node dist/cli.js --json --version",
-        "test:ci:deep":
-          "pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm check:supply-chain && pnpm typecheck && pnpm test:unit && pnpm build && vitest run --config vitest.integration.config.ts && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json && pnpm test:cli:init-smoke",
+        "verify:base":
+          "pnpm check:supply-chain && pnpm typecheck && pnpm test:unit && pnpm build",
+        "verify:smoke":
+          "pnpm test:integration:smoke && node dist/cli.js --version && node dist/cli.js --json --version",
+        "verify:deep:extra":
+          "pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && vitest run --config vitest.integration.config.ts && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json && pnpm test:cli:init-smoke",
+        "test:ci": "pnpm verify:base && pnpm verify:smoke",
+        "test:ci:deep": "pnpm verify:base && pnpm verify:deep:extra",
+        "verify:local": "node scripts/verification-scope.mjs --local --run",
         "release:check":
           "pnpm typecheck && pnpm test && pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm check:supply-chain && pnpm check:release-version && node dist/cli.js validate --json && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json",
       },
@@ -639,7 +732,10 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
 
   it("fails when Windows process-control coverage is missing from all workflows", async () => {
     root = await buildTree({
-      ciDeepContent: wellFormedCiDeep.replace("windows-latest", "ubuntu-latest"),
+      ciDeepContent: wellFormedCiDeep.replace(
+        "windows-latest",
+        "ubuntu-latest",
+      ),
     });
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBeGreaterThan(0);
@@ -899,15 +995,15 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
 
   it("fails when POSIX signal cancellation coverage is missing", async () => {
     const brokenCoverage = wellFormedVerifyTimeoutAbort
-      .replace('if (process.platform !== "win32") {', '')
-      .replace('it.each(["SIGINT", "SIGTERM"] as const)', 'it(');
+      .replace('if (process.platform !== "win32") {', "")
+      .replace('it.each(["SIGINT", "SIGTERM"] as const)', "it(");
 
     const violations = checkCancellationCoverage(brokenCoverage);
     expect(violations).toContain(
-      'verify-timeout-abort.test.ts: POSIX CLI signal cancellation must be explicitly POSIX-gated',
+      "verify-timeout-abort.test.ts: POSIX CLI signal cancellation must be explicitly POSIX-gated",
     );
     expect(violations).toContain(
-      'verify-timeout-abort.test.ts: POSIX SIGINT/SIGTERM cancellation cases are missing',
+      "verify-timeout-abort.test.ts: POSIX SIGINT/SIGTERM cancellation cases are missing",
     );
 
     root = await buildTree({ verifyTimeoutAbortContent: brokenCoverage });
@@ -922,7 +1018,10 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
         'describe.runIf(process.platform === "win32")("Windows bounded-command cancellation contract"',
         'describe.skip("Windows bounded-command cancellation contract"',
       )
-      .replaceAll('termination: { strategy: "taskkill" },', "termination: undefined,");
+      .replaceAll(
+        'termination: { strategy: "taskkill" },',
+        "termination: undefined,",
+      );
 
     const violations = checkCancellationCoverage(brokenCoverage);
     expect(violations).toContain(

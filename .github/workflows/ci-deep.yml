@@ -2,6 +2,17 @@ name: Deep CI
 
 on:
   workflow_dispatch:
+    inputs:
+      scope:
+        description: "Scope to run"
+        required: true
+        default: "linux-deep"
+        type: choice
+        options:
+          - "all"
+          - "linux-deep"
+          - "node-24-smoke"
+          - "windows-process-control"
 
 permissions:
   contents: read
@@ -10,6 +21,7 @@ jobs:
   linux-deep:
     name: Linux deep gate (Node 22)
     runs-on: ubuntu-latest
+    if: github.event.inputs.scope == 'all' || github.event.inputs.scope == 'linux-deep'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -29,6 +41,7 @@ jobs:
   node-24-smoke:
     name: Node 24 compatibility smoke
     runs-on: ubuntu-latest
+    if: github.event.inputs.scope == 'all' || github.event.inputs.scope == 'node-24-smoke'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -56,6 +69,7 @@ jobs:
   windows-process-control:
     name: Windows process-control (Node 22)
     runs-on: windows-latest
+    if: github.event.inputs.scope == 'all' || github.event.inputs.scope == 'windows-process-control'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -87,7 +101,25 @@ jobs:
     if: ${{ always() }}
     steps:
       - name: Verify deep CI succeeded
-        if: ${{ needs.linux-deep.result != 'success' || needs.node-24-smoke.result != 'success' || needs.windows-process-control.result != 'success' }}
         run: |
-          echo "deep CI did not succeed: linux=${{ needs.linux-deep.result }} node24=${{ needs.node-24-smoke.result }} windows=${{ needs.windows-process-control.result }}"
-          exit 1
+          scope="${{ github.event.inputs.scope }}"
+          ok=true
+          if [ "$scope" = "all" ] || [ "$scope" = "linux-deep" ]; then
+            if [ "${{ needs.linux-deep.result }}" != "success" ]; then
+              ok=false
+            fi
+          fi
+          if [ "$scope" = "all" ] || [ "$scope" = "node-24-smoke" ]; then
+            if [ "${{ needs.node-24-smoke.result }}" != "success" ]; then
+              ok=false
+            fi
+          fi
+          if [ "$scope" = "all" ] || [ "$scope" = "windows-process-control" ]; then
+            if [ "${{ needs.windows-process-control.result }}" != "success" ]; then
+              ok=false
+            fi
+          fi
+          if [ "$ok" != "true" ]; then
+            echo "deep CI did not succeed: linux=${{ needs.linux-deep.result }} node24=${{ needs.node-24-smoke.result }} windows=${{ needs.windows-process-control.result }}"
+            exit 1
+          fi

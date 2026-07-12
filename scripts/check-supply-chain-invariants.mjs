@@ -430,7 +430,10 @@ function collectUploadArtifactRetention(doc) {
     if (!steps || !steps.items) continue;
     for (const step of steps.items) {
       const uses = step.get("uses");
-      if (typeof uses !== "string" || !uses.startsWith("actions/upload-artifact")) {
+      if (
+        typeof uses !== "string" ||
+        !uses.startsWith("actions/upload-artifact")
+      ) {
         continue;
       }
       const withBlock = step.get("with");
@@ -487,8 +490,11 @@ function workflowCheckoutCredentialsViolations(doc, rel) {
 function workflowHasPushMainAndPullRequest(doc) {
   const on = doc.get("on") ?? doc.get(true);
   if (!on || typeof on !== "object") return false;
-  const onKeys = on.items ? on.items.map(p => String(p.key.value ?? p.key)) : [];
-  if (!onKeys.includes("pull_request") || !onKeys.includes("push")) return false;
+  const onKeys = on.items
+    ? on.items.map(p => String(p.key.value ?? p.key))
+    : [];
+  if (!onKeys.includes("pull_request") || !onKeys.includes("push"))
+    return false;
   const push = on.get("push");
   const branches = push?.get("branches");
   if (!branches?.items) return false;
@@ -498,7 +504,9 @@ function workflowHasPushMainAndPullRequest(doc) {
 function workflowHasOnlyWorkflowDispatch(doc) {
   const on = doc.get("on") ?? doc.get(true);
   if (!on || typeof on !== "object") return false;
-  const onKeys = on.items ? on.items.map(p => String(p.key.value ?? p.key)) : [];
+  const onKeys = on.items
+    ? on.items.map(p => String(p.key.value ?? p.key))
+    : [];
   return onKeys.length === 1 && onKeys[0] === "workflow_dispatch";
 }
 
@@ -522,13 +530,13 @@ function jobSetupNodeVersion(doc, jobName) {
 function checkFastCiWorkflow(ciDoc, ciContent) {
   const violations = [];
   const jobNames = getWorkflowJobNames(ciDoc);
-  const expectedJobs = ["fast", "ci-status"];
+  const expectedJobs = ["classify", "docs", "standard", "ci-status"];
   const hasOnlyExpectedJobs =
     expectedJobs.every(job => jobNames.includes(job)) &&
     jobNames.every(job => expectedJobs.includes(job));
   if (!hasOnlyExpectedJobs) {
     violations.push(
-      `ci.yml: required PR CI must contain only fast and ci-status jobs (found: ${jobNames.join(", ")})`,
+      `ci.yml: required PR CI must contain only classify, docs, standard and ci-status jobs (found: ${jobNames.join(", ")})`,
     );
   }
 
@@ -536,48 +544,232 @@ function checkFastCiWorkflow(ciDoc, ciContent) {
     violations.push("ci.yml: must run on pull_request and push to main");
   }
 
-  const fastJob = getJobNode(ciDoc, "fast");
-  if (!fastJob) {
-    violations.push("ci.yml: missing fast job");
-    return violations;
+  const concurrency = ciDoc.get("concurrency");
+  if (!concurrency) {
+    violations.push("ci.yml: must define a concurrency block");
+  } else {
+    const group = concurrency.get("group");
+    const cancelInProgress = concurrency.get("cancel-in-progress");
+    if (!group) {
+      violations.push("ci.yml: concurrency must define a group");
+    }
+    if (
+      !cancelInProgress ||
+      !/github\s*\.\s*event_name\s*==\s*['"]pull_request['"]/.test(
+        String(cancelInProgress),
+      )
+    ) {
+      violations.push(
+        "ci.yml: concurrency must cancel in-progress pull_request runs only",
+      );
+    }
   }
 
-  if (!jobRunsOn(fastJob, "ubuntu-latest")) {
-    violations.push("ci.yml: fast job must run on ubuntu-latest");
-  }
-  if (jobSetupNodeVersion(ciDoc, "fast") !== "22") {
-    violations.push("ci.yml: fast job must use Node 22");
+  // classify
+  const classifyJob = getJobNode(ciDoc, "classify");
+  if (!classifyJob) {
+    violations.push("ci.yml: missing classify job");
+  } else {
+    if (!jobRunsOn(classifyJob, "ubuntu-latest")) {
+      violations.push("ci.yml: classify job must run on ubuntu-latest");
+    }
+    const classifyOutputs = classifyJob.get("outputs");
+    if (
+      !classifyOutputs ||
+      classifyOutputs.get("docs") === undefined ||
+      classifyOutputs.get("standard") === undefined
+    ) {
+      violations.push("ci.yml: classify job must output docs and standard");
+    }
+    const classifyScripts = collectRunScripts(ciDoc, "classify");
+    if (classifyScripts.some(script => /pnpm\s+install/.test(script))) {
+      violations.push("ci.yml: classify job must not install dependencies");
+    }
+    if (
+      !classifyScripts.some(script =>
+        /node\s+scripts\/verification-scope\.mjs/.test(script),
+      )
+    ) {
+      violations.push(
+        "ci.yml: classify job must run node scripts/verification-scope.mjs",
+      );
+    }
+    if (!classifyScripts.some(script => /--format\s+github/.test(script))) {
+      violations.push("ci.yml: classify job must use --format github");
+    }
+
+    let classifyFetchDepth = false;
+    let classifyPersistCredentials = false;
+    for (const step of getJobSteps(ciDoc, "classify")) {
+      const uses = step.get("uses");
+      if (typeof uses === "string" && uses.startsWith("actions/checkout")) {
+        const withBlock = step.get("with");
+        if (withBlock && withBlock.get("fetch-depth") === 0)
+          classifyFetchDepth = true;
+        if (withBlock && withBlock.get("persist-credentials") === false)
+          classifyPersistCredentials = true;
+      }
+    }
+    if (!classifyFetchDepth) {
+      violations.push("ci.yml: classify checkout must use fetch-depth: 0");
+    }
+    if (!classifyPersistCredentials) {
+      violations.push(
+        "ci.yml: classify checkout must set persist-credentials: false",
+      );
+    }
   }
 
-  const fastScripts = collectRunScripts(ciDoc, "fast");
-  if (!fastScripts.some(script => script.trim() === "pnpm install --frozen-lockfile")) {
-    violations.push("ci.yml: fast job must install with pnpm install --frozen-lockfile");
-  }
-  if (!fastScripts.some(script => script.trim() === "pnpm test:ci")) {
-    violations.push("ci.yml: fast job must run pnpm test:ci");
+  // docs
+  const docsJob = getJobNode(ciDoc, "docs");
+  if (!docsJob) {
+    violations.push("ci.yml: missing docs job");
+  } else {
+    if (!jobRunsOn(docsJob, "ubuntu-latest")) {
+      violations.push("ci.yml: docs job must run on ubuntu-latest");
+    }
+    if (jobSetupNodeVersion(ciDoc, "docs") !== "22") {
+      violations.push("ci.yml: docs job must use Node 22");
+    }
+    const docsIf = docsJob.get("if");
+    if (
+      !docsIf ||
+      !/needs\.classify\.outputs\.docs\s*==\s*['"]true['"]/.test(String(docsIf))
+    ) {
+      violations.push(
+        "ci.yml: docs job must be conditional on needs.classify.outputs.docs == 'true'",
+      );
+    }
+    const docsScripts = collectRunScripts(ciDoc, "docs");
+    if (
+      !docsScripts.some(
+        script => script.trim() === "pnpm install --frozen-lockfile",
+      )
+    ) {
+      violations.push(
+        "ci.yml: docs job must install with pnpm install --frozen-lockfile",
+      );
+    }
+    if (!docsScripts.some(script => script.trim() === "pnpm check:docs")) {
+      violations.push("ci.yml: docs job must run pnpm check:docs");
+    }
+    if (docsScripts.some(script => /pnpm\s+test:ci\b/.test(script))) {
+      violations.push("ci.yml: docs job must not run pnpm test:ci");
+    }
+    if (
+      docsScripts.some(script =>
+        /vitest\s+run\s+--config\s+vitest\.integration\.config\.ts|test:integration:full|pnpm\s+test:integration(?!:smoke)/.test(
+          script,
+        ),
+      )
+    ) {
+      violations.push("ci.yml: docs job must not run full integration tests");
+    }
   }
 
-  const forbiddenFastPatterns = [
-    ["full integration", /vitest\s+run\s+--config\s+vitest\.integration\.config\.ts|test:integration:full|pnpm\s+test:integration(?!:smoke)/],
-    ["docs checks", /pnpm\s+check:docs/],
-    ["filesystem containment checks", /pnpm\s+check:fs-containment/],
-    ["filesystem authority checks", /pnpm\s+check:fs-authority/],
-    ["security hardening checks", /pnpm\s+check:security-hardening/],
-    ["plan lint", /plan\s+lint\s+--include-quality\s+--strict\s+--json/],
-    ["plan analyze", /plan\s+analyze\s+--strict\s+--json/],
-    ["initialized-project smoke", /init\s+--non-interactive|doctor\s+--json/],
-  ];
-  for (const [label, pattern] of forbiddenFastPatterns) {
-    if (fastScripts.some(script => pattern.test(script))) {
-      violations.push(`ci.yml: fast job must not run ${label}`);
+  // standard
+  const standardJob = getJobNode(ciDoc, "standard");
+  if (!standardJob) {
+    violations.push("ci.yml: missing standard job");
+  } else {
+    if (!jobRunsOn(standardJob, "ubuntu-latest")) {
+      violations.push("ci.yml: standard job must run on ubuntu-latest");
+    }
+    if (jobSetupNodeVersion(ciDoc, "standard") !== "22") {
+      violations.push("ci.yml: standard job must use Node 22");
+    }
+    const standardIf = standardJob.get("if");
+    if (
+      !standardIf ||
+      !/needs\.classify\.outputs\.standard\s*==\s*['"]true['"]/.test(
+        String(standardIf),
+      )
+    ) {
+      violations.push(
+        "ci.yml: standard job must be conditional on needs.classify.outputs.standard == 'true'",
+      );
+    }
+    const standardScripts = collectRunScripts(ciDoc, "standard");
+    if (
+      !standardScripts.some(
+        script => script.trim() === "pnpm install --frozen-lockfile",
+      )
+    ) {
+      violations.push(
+        "ci.yml: standard job must install with pnpm install --frozen-lockfile",
+      );
+    }
+    if (!standardScripts.some(script => script.trim() === "pnpm test:ci")) {
+      violations.push("ci.yml: standard job must run pnpm test:ci");
+    }
+
+    const forbiddenStandardPatterns = [
+      ["docs checks", /pnpm\s+check:docs/],
+      ["filesystem containment checks", /pnpm\s+check:fs-containment/],
+      ["filesystem authority checks", /pnpm\s+check:fs-authority/],
+      ["security hardening checks", /pnpm\s+check:security-hardening/],
+      [
+        "full integration",
+        /vitest\s+run\s+--config\s+vitest\.integration\.config\.ts|test:integration:full|pnpm\s+test:integration(?!:smoke)/,
+      ],
+      ["plan lint", /plan\s+lint\s+--include-quality\s+--strict\s+--json/],
+      ["plan analyze", /plan\s+analyze\s+--strict\s+--json/],
+      ["initialized-project smoke", /init\s+--non-interactive|doctor\s+--json/],
+    ];
+    for (const [label, pattern] of forbiddenStandardPatterns) {
+      if (standardScripts.some(script => pattern.test(script))) {
+        violations.push(`ci.yml: standard job must not run ${label}`);
+      }
+    }
+  }
+
+  // ci-status
+  const ciStatusJob = getJobNode(ciDoc, "ci-status");
+  if (!ciStatusJob) {
+    violations.push("ci.yml: missing ci-status job");
+  } else {
+    if (!jobRunsOn(ciStatusJob, "ubuntu-latest")) {
+      violations.push("ci.yml: ci-status job must run on ubuntu-latest");
+    }
+    const ciStatusIf = ciStatusJob.get("if");
+    if (!ciStatusIf || !/always\s*\(\s*\)/.test(String(ciStatusIf))) {
+      violations.push("ci.yml: ci-status job must use if: always()");
+    }
+    const ciStatusNeeds = ciStatusJob.get("needs");
+    if (
+      !ciStatusNeeds ||
+      !Array.isArray(ciStatusNeeds.items) ||
+      !["classify", "docs", "standard"].every(n =>
+        ciStatusNeeds.items.some(i => i.value === n),
+      )
+    ) {
+      violations.push(
+        "ci.yml: ci-status job must need classify, docs, and standard",
+      );
+    }
+    const ciStatusScripts = collectRunScripts(ciDoc, "ci-status");
+    for (const check of [
+      "needs.classify.result",
+      "needs.docs.result",
+      "needs.standard.result",
+    ]) {
+      if (!ciStatusScripts.some(script => script.includes(check))) {
+        violations.push(`ci.yml: ci-status job must verify ${check}`);
+      }
     }
   }
 
   if (/windows-latest/.test(ciContent)) {
     violations.push("ci.yml: required PR CI must not run Windows jobs");
   }
-  if (/node-version:\s*(?:\$\{\{\s*matrix\.node-version\s*\}\}|24)\b/.test(ciContent)) {
-    violations.push("ci.yml: required PR CI must not run Node 24 or a Node version matrix");
+  if (
+    /node-version:\s*(?:\$\{\{\s*matrix\.node-version\s*\}\}|24)\b/.test(
+      ciContent,
+    )
+  ) {
+    violations.push(
+      "ci.yml: required PR CI must not run Node 24 or a Node version matrix",
+    );
   }
   if (/matrix:/.test(ciContent)) {
     violations.push("ci.yml: required PR CI must not use a matrix");
@@ -593,8 +785,39 @@ function checkDeepCiWorkflow(deepDoc) {
     violations.push("ci-deep.yml: must run only on workflow_dispatch");
   }
 
+  const scopeInput = deepDoc.getIn([
+    "on",
+    "workflow_dispatch",
+    "inputs",
+    "scope",
+  ]);
+  if (!scopeInput || String(scopeInput.get("type")) !== "choice") {
+    violations.push(
+      "ci-deep.yml: workflow_dispatch must define a choice scope input",
+    );
+  } else {
+    const options = scopeInput.get("options");
+    const optionValues =
+      options && options.items ? options.items.map(i => i.value) : [];
+    for (const required of [
+      "all",
+      "linux-deep",
+      "node-24-smoke",
+      "windows-process-control",
+    ]) {
+      if (!optionValues.includes(required)) {
+        violations.push(`ci-deep.yml: scope input must include ${required}`);
+      }
+    }
+  }
+
   const jobNames = getWorkflowJobNames(deepDoc);
-  for (const jobName of ["linux-deep", "node-24-smoke", "windows-process-control"]) {
+  for (const jobName of [
+    "linux-deep",
+    "node-24-smoke",
+    "windows-process-control",
+    "deep-ci-status",
+  ]) {
     if (!jobNames.includes(jobName)) {
       violations.push(`ci-deep.yml: missing ${jobName} job`);
     }
@@ -607,6 +830,17 @@ function checkDeepCiWorkflow(deepDoc) {
     }
     if (jobSetupNodeVersion(deepDoc, "linux-deep") !== "22") {
       violations.push("ci-deep.yml: linux-deep must use Node 22");
+    }
+    const linuxIf = linuxDeep.get("if");
+    if (
+      !linuxIf ||
+      !/github\.event\.inputs\.scope\s*==\s*['"](?:all|linux-deep)['"]/.test(
+        String(linuxIf),
+      )
+    ) {
+      violations.push(
+        "ci-deep.yml: linux-deep must be conditional on workflow_dispatch scope",
+      );
     }
     const scripts = collectRunScripts(deepDoc, "linux-deep");
     if (!scripts.some(script => script.trim() === "pnpm test:ci:deep")) {
@@ -621,6 +855,17 @@ function checkDeepCiWorkflow(deepDoc) {
     }
     if (jobSetupNodeVersion(deepDoc, "node-24-smoke") !== "24") {
       violations.push("ci-deep.yml: node-24-smoke must use Node 24");
+    }
+    const nodeIf = node24.get("if");
+    if (
+      !nodeIf ||
+      !/github\.event\.inputs\.scope\s*==\s*['"](?:all|node-24-smoke)['"]/.test(
+        String(nodeIf),
+      )
+    ) {
+      violations.push(
+        "ci-deep.yml: node-24-smoke must be conditional on workflow_dispatch scope",
+      );
     }
     const scripts = collectRunScripts(deepDoc, "node-24-smoke");
     const required = [
@@ -637,10 +882,54 @@ function checkDeepCiWorkflow(deepDoc) {
     }
   }
 
+  const windowsJob = getJobNode(deepDoc, "windows-process-control");
+  if (windowsJob) {
+    const windowsIf = windowsJob.get("if");
+    if (
+      !windowsIf ||
+      !/github\.event\.inputs\.scope\s*==\s*['"](?:all|windows-process-control)['"]/.test(
+        String(windowsIf),
+      )
+    ) {
+      violations.push(
+        "ci-deep.yml: windows-process-control must be conditional on workflow_dispatch scope",
+      );
+    }
+  }
+
+  const deepStatus = getJobNode(deepDoc, "deep-ci-status");
+  if (deepStatus) {
+    const needs = deepStatus.get("needs");
+    if (
+      !needs ||
+      !Array.isArray(needs.items) ||
+      !["linux-deep", "node-24-smoke", "windows-process-control"].every(n =>
+        needs.items.some(i => i.value === n),
+      )
+    ) {
+      violations.push(
+        "ci-deep.yml: deep-ci-status must need linux-deep, node-24-smoke, and windows-process-control",
+      );
+    }
+    const statusIf = deepStatus.get("if");
+    if (!statusIf || !/always\s*\(\s*\)/.test(String(statusIf))) {
+      violations.push("ci-deep.yml: deep-ci-status must use if: always()");
+    }
+    const scripts = collectRunScripts(deepDoc, "deep-ci-status");
+    if (!scripts.some(script => /github\.event\.inputs\.scope/.test(script))) {
+      violations.push(
+        "ci-deep.yml: deep-ci-status must check workflow_dispatch scope",
+      );
+    }
+  }
+
   return violations;
 }
 
-function findWindowsProcessControlWorkflow(workflowDocs, cancellationCoverageViolations) {
+function findWindowsProcessControlWorkflow(
+  workflowDocs,
+  cancellationCoverageViolations,
+) {
   for (const { rel, doc } of workflowDocs) {
     for (const jobPair of getWorkflowJobs(doc)) {
       const jobName = String(jobPair.key.value ?? jobPair.key);
@@ -649,15 +938,21 @@ function findWindowsProcessControlWorkflow(workflowDocs, cancellationCoverageVio
 
       const scripts = collectRunScripts(doc, jobName);
       const hasCoverage =
-        scripts.some(script => script.trim() === "pnpm check:toolchain-binaries") &&
+        scripts.some(
+          script => script.trim() === "pnpm check:toolchain-binaries",
+        ) &&
         scripts.some(script => script.trim() === "pnpm build") &&
-        scripts.some(script => /\btests\/unit\/commands\/verify-process\.test\.ts\b/.test(script)) &&
+        scripts.some(script =>
+          /\btests\/unit\/commands\/verify-process\.test\.ts\b/.test(script),
+        ) &&
         scripts.some(
           script =>
             script.trim() ===
             "pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts",
         ) &&
-        !scripts.some(script => /(?:^|\s)-t\s+|--testNamePattern\b/.test(script)) &&
+        !scripts.some(script =>
+          /(?:^|\s)-t\s+|--testNamePattern\b/.test(script),
+        ) &&
         cancellationCoverageViolations.length === 0;
       if (hasCoverage) {
         return { rel, jobName };
@@ -693,7 +988,45 @@ function commandInvokesPnpmScript(command, scriptName) {
 }
 
 function chainPnpmScriptIndex(chain, scriptName) {
-  return chain.findIndex(command => commandInvokesPnpmScript(command, scriptName));
+  return chain.findIndex(command =>
+    commandInvokesPnpmScript(command, scriptName),
+  );
+}
+
+const COMPOSITE_SCRIPT_NAMES = [
+  "verify:base",
+  "verify:smoke",
+  "verify:deep:extra",
+];
+
+function expandCompositeScripts(script, scripts) {
+  let expanded = script;
+  const seen = new Set();
+
+  for (let depth = 0; depth < 3; depth++) {
+    let changed = false;
+
+    for (const name of COMPOSITE_SCRIPT_NAMES) {
+      if (seen.has(name)) continue;
+
+      const value = scripts[name];
+      if (!value) continue;
+
+      const pattern = new RegExp(
+        `pnpm(?:\\s+run)?\\s+${escapeRegExp(name)}\\b`,
+        "g",
+      );
+      if (pattern.test(expanded)) {
+        seen.add(name);
+        expanded = expanded.replace(pattern, value);
+        changed = true;
+      }
+    }
+
+    if (!changed) break;
+  }
+
+  return expanded;
 }
 
 export function checkCiPackageScripts(packageContent) {
@@ -710,8 +1043,10 @@ export function checkCiPackageScripts(packageContent) {
   const scripts = pkg.scripts ?? {};
   const test = String(scripts.test ?? "");
   const integration = String(scripts["test:integration"] ?? "");
-  const testCi = String(scripts["test:ci"] ?? "");
-  const testCiDeep = String(scripts["test:ci:deep"] ?? "");
+  const testCiRaw = String(scripts["test:ci"] ?? "");
+  const testCiDeepRaw = String(scripts["test:ci:deep"] ?? "");
+  const testCi = expandCompositeScripts(testCiRaw, scripts);
+  const testCiDeep = expandCompositeScripts(testCiDeepRaw, scripts);
   const integrationFull = String(scripts["test:integration:full"] ?? "");
   const releaseCheck = String(scripts["release:check"] ?? "");
   const testChain = parseFailFastChain(test);
@@ -742,12 +1077,17 @@ export function checkCiPackageScripts(packageContent) {
     ["vitest.integration.config.ts", /vitest\.integration\.config\.ts/],
     ["pnpm test:integration", /pnpm\s+test:integration(?:\s|$)/],
     ["pnpm test:integration:full", /pnpm\s+test:integration:full\b/],
-    ["plan lint --include-quality --strict --json", /plan\s+lint\s+--include-quality\s+--strict\s+--json/],
+    [
+      "plan lint --include-quality --strict --json",
+      /plan\s+lint\s+--include-quality\s+--strict\s+--json/,
+    ],
     ["plan analyze --strict --json", /plan\s+analyze\s+--strict\s+--json/],
   ];
   for (const [label, pattern] of forbiddenFast) {
     if (pattern.test(testCi)) {
-      violations.push(`package.json: scripts.test:ci must not include ${label}`);
+      violations.push(
+        `package.json: scripts.test:ci must not include ${label}`,
+      );
     }
   }
 
@@ -767,25 +1107,38 @@ export function checkCiPackageScripts(packageContent) {
   ];
   for (const command of requiredDeep) {
     if (!testCiDeep.includes(command)) {
-      violations.push(`package.json: scripts.test:ci:deep must include ${command}`);
+      violations.push(
+        `package.json: scripts.test:ci:deep must include ${command}`,
+      );
     }
   }
 
-  const fullIntegrationCommand = "vitest run --config vitest.integration.config.ts";
+  const fullIntegrationCommand =
+    "vitest run --config vitest.integration.config.ts";
   if (!integrationFullChain) {
     violations.push(
       "package.json: scripts.test:integration:full must use a fail-fast && chain",
     );
   } else {
     const buildIndex = chainPnpmScriptIndex(integrationFullChain, "build");
-    const fullIntegrationIndex = integrationFullChain.indexOf(fullIntegrationCommand);
+    const fullIntegrationIndex = integrationFullChain.indexOf(
+      fullIntegrationCommand,
+    );
     if (buildIndex === -1) {
-      violations.push("package.json: scripts.test:integration:full must invoke pnpm build");
+      violations.push(
+        "package.json: scripts.test:integration:full must invoke pnpm build",
+      );
     }
     if (fullIntegrationIndex === -1) {
-      violations.push("package.json: scripts.test:integration:full must run full integration");
+      violations.push(
+        "package.json: scripts.test:integration:full must run full integration",
+      );
     }
-    if (buildIndex !== -1 && fullIntegrationIndex !== -1 && buildIndex > fullIntegrationIndex) {
+    if (
+      buildIndex !== -1 &&
+      fullIntegrationIndex !== -1 &&
+      buildIndex > fullIntegrationIndex
+    ) {
       violations.push(
         "package.json: scripts.test:integration:full must build dist before full integration",
       );
@@ -800,9 +1153,14 @@ export function checkCiPackageScripts(packageContent) {
 
   if (testChain) {
     const testUnitIndex = chainPnpmScriptIndex(testChain, "test:unit");
-    const testIntegrationIndex = chainPnpmScriptIndex(testChain, "test:integration");
+    const testIntegrationIndex = chainPnpmScriptIndex(
+      testChain,
+      "test:integration",
+    );
     if (testIntegrationIndex === -1) {
-      violations.push("package.json: scripts.test must invoke pnpm test:integration");
+      violations.push(
+        "package.json: scripts.test must invoke pnpm test:integration",
+      );
     } else if (testUnitIndex !== -1 && testUnitIndex > testIntegrationIndex) {
       violations.push(
         "package.json: scripts.test must invoke pnpm test:unit before pnpm test:integration",
@@ -814,7 +1172,9 @@ export function checkCiPackageScripts(packageContent) {
     violations.push(
       "package.json: scripts.test:integration must use a fail-fast && chain",
     );
-  } else if (chainPnpmScriptIndex(integrationChain, "test:integration:full") === -1) {
+  } else if (
+    chainPnpmScriptIndex(integrationChain, "test:integration:full") === -1
+  ) {
     violations.push(
       "package.json: scripts.test:integration must invoke pnpm test:integration:full",
     );
@@ -822,16 +1182,24 @@ export function checkCiPackageScripts(packageContent) {
 
   if (
     releaseCheckChain
-      ? releaseCheckChain.some(command => commandInvokesPnpmScript(command, "build"))
+      ? releaseCheckChain.some(command =>
+          commandInvokesPnpmScript(command, "build"),
+        )
       : /\bpnpm\s+(?:run\s+)?build(?:$|\s|&&|\|\||;)/.test(releaseCheck)
   ) {
-    violations.push("package.json: scripts.release:check must not run a duplicate pnpm build");
+    violations.push(
+      "package.json: scripts.release:check must not run a duplicate pnpm build",
+    );
   }
 
   if (!releaseCheckChain) {
-    violations.push("package.json: scripts.release:check must use a fail-fast && chain");
+    violations.push(
+      "package.json: scripts.release:check must use a fail-fast && chain",
+    );
   } else if (chainPnpmScriptIndex(releaseCheckChain, "test") === -1) {
-    violations.push("package.json: scripts.release:check must invoke pnpm test");
+    violations.push(
+      "package.json: scripts.release:check must invoke pnpm test",
+    );
   }
 
   const releaseDistCommands = [
@@ -844,7 +1212,9 @@ export function checkCiPackageScripts(packageContent) {
     for (const command of releaseDistCommands) {
       const distCommandIndex = releaseCheckChain.indexOf(command);
       if (distCommandIndex === -1) {
-        violations.push(`package.json: scripts.release:check must execute ${command}`);
+        violations.push(
+          `package.json: scripts.release:check must execute ${command}`,
+        );
       } else if (testIndex !== -1 && testIndex > distCommandIndex) {
         violations.push(
           `package.json: scripts.release:check must invoke pnpm test before ${command}`,
@@ -868,7 +1238,11 @@ export function checkCancellationCoverage(testContent) {
       "verify-timeout-abort.test.ts: POSIX SIGINT/SIGTERM cancellation cases are missing",
     );
   }
-  if (!/cancels task complete on %s, removes descendants, and records no event/.test(testContent)) {
+  if (
+    !/cancels task complete on %s, removes descendants, and records no event/.test(
+      testContent,
+    )
+  ) {
     violations.push(
       "verify-timeout-abort.test.ts: task complete signal cancellation test is missing",
     );
@@ -878,7 +1252,11 @@ export function checkCancellationCoverage(testContent) {
       "verify-timeout-abort.test.ts: cancellation test must assert cause_code ABORTED",
     );
   }
-  if (!/loadMergedProgress\(dir\)\)\.log\.events\)\.toHaveLength\(0\)/.test(testContent)) {
+  if (
+    !/loadMergedProgress\(dir\)\)\.log\.events\)\.toHaveLength\(0\)/.test(
+      testContent,
+    )
+  ) {
     violations.push(
       "verify-timeout-abort.test.ts: cancellation test must assert no done event is recorded",
     );
@@ -897,13 +1275,18 @@ export function checkCancellationCoverage(testContent) {
       "verify-timeout-abort.test.ts: Windows coverage must exercise runBoundedCommand directly",
     );
   }
-  if (!/timedOut:\s*true/.test(testContent) || !/aborted:\s*true/.test(testContent)) {
+  if (
+    !/timedOut:\s*true/.test(testContent) ||
+    !/aborted:\s*true/.test(testContent)
+  ) {
     violations.push(
       "verify-timeout-abort.test.ts: Windows coverage must assert timeout and AbortSignal cancellation",
     );
   }
   if (!/strategy:\s*"taskkill"/.test(testContent)) {
-    violations.push("verify-timeout-abort.test.ts: Windows coverage must assert taskkill cleanup");
+    violations.push(
+      "verify-timeout-abort.test.ts: Windows coverage must assert taskkill cleanup",
+    );
   }
   return violations;
 }
@@ -915,12 +1298,15 @@ export function checkCancellationCoverage(testContent) {
 // translation.
 export const checkWindowsCancellationCoverage = checkCancellationCoverage;
 
-
 /**
  * Verify the reviewed pnpm/Vite/esbuild versions and the explicit lifecycle-script
  * policy in package.json, pnpm-workspace.yaml, and pnpm-lock.yaml.
  */
-export function checkToolchainPins(packageContent, workspaceContent, lockContent) {
+export function checkToolchainPins(
+  packageContent,
+  workspaceContent,
+  lockContent,
+) {
   const violations = [];
   let pkg;
   try {
@@ -932,21 +1318,29 @@ export function checkToolchainPins(packageContent, workspaceContent, lockContent
   }
 
   if (pkg.packageManager !== "pnpm@10.34.2") {
-    violations.push('package.json: packageManager must be exactly "pnpm@10.34.2"');
+    violations.push(
+      'package.json: packageManager must be exactly "pnpm@10.34.2"',
+    );
   }
   if (pkg.devDependencies?.vite !== "^8.1.4") {
     violations.push('package.json: devDependencies.vite must be "^8.1.4"');
   }
   if (pkg.devDependencies?.esbuild !== "0.28.1") {
-    violations.push('package.json: devDependencies.esbuild must be exactly "0.28.1"');
+    violations.push(
+      'package.json: devDependencies.esbuild must be exactly "0.28.1"',
+    );
   }
 
   const workspace = parseDocument(workspaceContent);
   if (workspace.errors.length > 0) {
-    violations.push(`pnpm-workspace.yaml parse error: ${workspace.errors[0].message}`);
+    violations.push(
+      `pnpm-workspace.yaml parse error: ${workspace.errors[0].message}`,
+    );
   } else {
     if (workspace.getIn(["overrides", "esbuild"]) !== "0.28.1") {
-      violations.push('pnpm-workspace.yaml: overrides.esbuild must be exactly "0.28.1"');
+      violations.push(
+        'pnpm-workspace.yaml: overrides.esbuild must be exactly "0.28.1"',
+      );
     }
     if (workspace.getIn(["allowBuilds", "esbuild"]) !== false) {
       violations.push("pnpm-workspace.yaml: allowBuilds.esbuild must be false");
@@ -965,13 +1359,17 @@ export function checkToolchainPins(packageContent, workspaceContent, lockContent
     importer.vite?.specifier !== "^8.1.4" ||
     baseVersion(importer.vite?.version) !== "8.1.4"
   ) {
-    violations.push("pnpm-lock.yaml: root importer must resolve vite 8.1.4 from ^8.1.4");
+    violations.push(
+      "pnpm-lock.yaml: root importer must resolve vite 8.1.4 from ^8.1.4",
+    );
   }
   if (
     importer.esbuild?.specifier !== "0.28.1" ||
     baseVersion(importer.esbuild?.version) !== "0.28.1"
   ) {
-    violations.push("pnpm-lock.yaml: root importer must resolve esbuild 0.28.1 exactly");
+    violations.push(
+      "pnpm-lock.yaml: root importer must resolve esbuild 0.28.1 exactly",
+    );
   }
 
   const lockKeys = [
@@ -984,7 +1382,10 @@ export function checkToolchainPins(packageContent, workspaceContent, lockContent
   const esbuildVersions = lockKeys
     .map(key => /^esbuild@([^()]+)(?:\(|$)/.exec(key)?.[1])
     .filter(Boolean);
-  if (viteVersions.length === 0 || viteVersions.some(version => version !== "8.1.4")) {
+  if (
+    viteVersions.length === 0 ||
+    viteVersions.some(version => version !== "8.1.4")
+  ) {
     violations.push(
       `pnpm-lock.yaml: every vite package must be 8.1.4 (found: ${viteVersions.join(", ") || "none"})`,
     );
@@ -1157,7 +1558,9 @@ export function checkSupplyChainInvariants(root) {
         const actualTimeout = jobNode?.get("timeout-minutes");
         const expectedTimeout = EXPECTED_PUBLISH_JOB_TIMEOUTS[jobName];
         if (actualTimeout === expectedTimeout) {
-          pass(`publish.yml: ${jobName} job timeout is ${expectedTimeout} minutes`);
+          pass(
+            `publish.yml: ${jobName} job timeout is ${expectedTimeout} minutes`,
+          );
         } else {
           fail(
             `publish.yml: ${jobName} job timeout must be ${expectedTimeout} minutes`,
@@ -1564,16 +1967,18 @@ export function checkSupplyChainInvariants(root) {
 
       const fastCiViolations = checkFastCiWorkflow(ciDoc, ciContent);
       if (fastCiViolations.length === 0) {
-        pass("ci.yml: required PR CI is a single Ubuntu Node 22 fast gate with stable ci-status");
+        pass(
+          "ci.yml: required PR CI uses change-aware classify/docs/standard/ci-status jobs",
+        );
       } else {
         for (const violation of fastCiViolations) fail(violation);
       }
 
-      const fastScripts = collectRunScripts(ciDoc, "fast");
-      if (fastScripts.some(script => script.trim() === "pnpm test:ci")) {
-        pass("ci.yml: fast gate delegates to pnpm test:ci");
+      const standardScripts = collectRunScripts(ciDoc, "standard");
+      if (standardScripts.some(script => script.trim() === "pnpm test:ci")) {
+        pass("ci.yml: standard gate delegates to pnpm test:ci");
       } else {
-        fail("ci.yml: fast gate must delegate to pnpm test:ci");
+        fail("ci.yml: standard gate must delegate to pnpm test:ci");
       }
     }
 
@@ -1594,7 +1999,9 @@ export function checkSupplyChainInvariants(root) {
     } else {
       const deepViolations = checkDeepCiWorkflow(deepDoc);
       if (deepViolations.length === 0) {
-        pass("ci-deep.yml: manual Deep CI has Linux deep, Node 24 smoke, and Windows process-control jobs");
+        pass(
+          "ci-deep.yml: manual Deep CI has Linux deep, Node 24 smoke, and Windows process-control jobs",
+        );
       } else {
         for (const violation of deepViolations) fail(violation);
       }
@@ -1643,7 +2050,9 @@ export function checkSupplyChainInvariants(root) {
       _read("pnpm-lock.yaml"),
     );
     if (violations.length === 0) {
-      pass("pnpm/Vite/esbuild versions and esbuild build-script policy are pinned");
+      pass(
+        "pnpm/Vite/esbuild versions and esbuild build-script policy are pinned",
+      );
     } else {
       for (const violation of violations) fail(violation);
     }
@@ -1657,7 +2066,9 @@ export function checkSupplyChainInvariants(root) {
   try {
     const violations = checkCiPackageScripts(_read("package.json"));
     if (violations.length === 0) {
-      pass("package.json: fast, deep, and release package scripts match the tiered policy");
+      pass(
+        "package.json: fast, deep, and release package scripts match the tiered policy",
+      );
     } else {
       for (const violation of violations) fail(violation);
     }
