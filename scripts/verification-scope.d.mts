@@ -12,9 +12,15 @@ export function classifyChangedFiles(files: string[]): VerificationScope;
 export function buildLocalCommands(
   scope: VerificationScope,
   mergeBase: string | null,
+  changeSet?: Partial<LocalChangedFiles>,
 ): [string, string[]][];
 
 export interface LocalChangedFiles {
+  baseFiles: string[];
+  unstagedFiles: string[];
+  stagedFiles: string[];
+  untrackedFiles: string[];
+  workingTreeFiles: string[];
   files: string[];
   mergeBase: string | null;
   baseResolved: boolean;

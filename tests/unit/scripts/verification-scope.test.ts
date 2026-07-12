@@ -351,9 +351,22 @@ describe("buildLocalCommands", () => {
     );
   });
 
-  it("falls back to HEAD when mergeBase is unknown", () => {
+  it("runs all unit tests when mergeBase is unknown", () => {
     const scope = classifyChangedFiles(["src/commands/init.ts"]);
     const commands = buildLocalCommands(scope, null);
+    expect(commands[1]).toEqual([
+      "pnpm",
+      ["exec", "vitest", "run", "--reporter=agent"],
+    ]);
+  });
+
+  it("uses valueless --changed for unstaged source changes", () => {
+    const scope = classifyChangedFiles(["src/commands/init.ts"]);
+    const commands = buildLocalCommands(scope, "abc", {
+      baseFiles: [],
+      workingTreeFiles: ["src/commands/init.ts"],
+      untrackedFiles: [],
+    });
     expect(commands[1]).toEqual([
       "pnpm",
       [
@@ -361,10 +374,127 @@ describe("buildLocalCommands", () => {
         "vitest",
         "run",
         "--changed",
-        "HEAD",
         "--reporter=agent",
         "--passWithNoTests",
       ],
+    ]);
+  });
+
+  it("uses valueless --changed for staged test file changes", () => {
+    const scope = classifyChangedFiles(["tests/unit/commands/init.test.ts"]);
+    const commands = buildLocalCommands(scope, "abc", {
+      baseFiles: [],
+      workingTreeFiles: ["tests/unit/commands/init.test.ts"],
+      untrackedFiles: [],
+    });
+    expect(commands[1]).toEqual([
+      "pnpm",
+      [
+        "exec",
+        "vitest",
+        "run",
+        "--changed",
+        "--reporter=agent",
+        "--passWithNoTests",
+      ],
+    ]);
+  });
+
+  it("runs all unit tests for untracked source changes", () => {
+    const scope = classifyChangedFiles(["src/new-feature.ts"]);
+    const commands = buildLocalCommands(scope, "abc", {
+      baseFiles: [],
+      workingTreeFiles: ["src/new-feature.ts"],
+      untrackedFiles: ["src/new-feature.ts"],
+    });
+    expect(commands[1]).toEqual([
+      "pnpm",
+      ["exec", "vitest", "run", "--reporter=agent"],
+    ]);
+    const unitCommand = commands[1] as [string, string[]];
+    expect(unitCommand[1]).not.toContain("--passWithNoTests");
+  });
+
+  it("runs all unit tests for untracked test file changes", () => {
+    const scope = classifyChangedFiles(["tests/unit/new-feature.test.ts"]);
+    const commands = buildLocalCommands(scope, "abc", {
+      baseFiles: [],
+      workingTreeFiles: ["tests/unit/new-feature.test.ts"],
+      untrackedFiles: ["tests/unit/new-feature.test.ts"],
+    });
+    expect(commands[1]).toEqual([
+      "pnpm",
+      ["exec", "vitest", "run", "--reporter=agent"],
+    ]);
+  });
+
+  it("keeps --changed mergeBase for committed source changes only", () => {
+    const scope = classifyChangedFiles(["src/commands/init.ts"]);
+    const commands = buildLocalCommands(scope, "abc", {
+      baseFiles: ["src/commands/init.ts"],
+      workingTreeFiles: [],
+      untrackedFiles: [],
+    });
+    expect(commands[1]).toEqual([
+      "pnpm",
+      [
+        "exec",
+        "vitest",
+        "run",
+        "--changed",
+        "abc",
+        "--reporter=agent",
+        "--passWithNoTests",
+      ],
+    ]);
+  });
+
+  it("plans committed and working-tree source checks separately", () => {
+    const scope = classifyChangedFiles([
+      "src/commands/init.ts",
+      "src/commands/task-start.ts",
+    ]);
+    const commands = buildLocalCommands(scope, "abc", {
+      baseFiles: ["src/commands/init.ts"],
+      workingTreeFiles: ["src/commands/task-start.ts"],
+      untrackedFiles: [],
+    });
+    expect(commands).toContainEqual([
+      "pnpm",
+      [
+        "exec",
+        "vitest",
+        "run",
+        "--changed",
+        "abc",
+        "--reporter=agent",
+        "--passWithNoTests",
+      ],
+    ]);
+    expect(commands).toContainEqual([
+      "pnpm",
+      [
+        "exec",
+        "vitest",
+        "run",
+        "--changed",
+        "--reporter=agent",
+        "--passWithNoTests",
+      ],
+    ]);
+  });
+
+  it("runs all unit tests when local git state is indeterminate", () => {
+    const scope = classifyChangedFiles(["src/commands/init.ts"]);
+    const commands = buildLocalCommands(scope, "abc", {
+      baseFiles: ["src/commands/init.ts"],
+      workingTreeFiles: [],
+      untrackedFiles: [],
+      indeterminate: true,
+    });
+    expect(commands[1]).toEqual([
+      "pnpm",
+      ["exec", "vitest", "run", "--reporter=agent"],
     ]);
   });
 
@@ -545,6 +675,7 @@ describe("collectLocalChangedFiles", () => {
       runGitImpl: fakeGit({ unstaged: ["README.md"], stagedFail: true }),
     });
     expect(result.files).toEqual(["README.md"]);
+    expect(result.workingTreeFiles).toEqual(["README.md"]);
     expect(result.indeterminate).toBe(true);
   });
 
@@ -553,6 +684,7 @@ describe("collectLocalChangedFiles", () => {
       runGitImpl: fakeGit({ unstaged: ["README.md"], untrackedFail: true }),
     });
     expect(result.files).toEqual(["README.md"]);
+    expect(result.workingTreeFiles).toEqual(["README.md"]);
     expect(result.indeterminate).toBe(true);
   });
 
@@ -565,6 +697,8 @@ describe("collectLocalChangedFiles", () => {
       }),
     });
     expect(result.files).toEqual(["package.json"]);
+    expect(result.baseFiles).toEqual(["package.json"]);
+    expect(result.workingTreeFiles).toEqual([]);
     expect(result.mergeBase).toBe("abc123");
     expect(result.baseResolved).toBe(true);
     expect(result.indeterminate).toBe(true);
@@ -575,6 +709,11 @@ describe("collectLocalChangedFiles", () => {
       runGitImpl: fakeGit({ unstaged: ["README.md"] }),
     });
     expect(result.files).toEqual(["README.md"]);
+    expect(result.baseFiles).toEqual([]);
+    expect(result.workingTreeFiles).toEqual(["README.md"]);
+    expect(result.unstagedFiles).toEqual(["README.md"]);
+    expect(result.stagedFiles).toEqual([]);
+    expect(result.untrackedFiles).toEqual([]);
     expect(result.mergeBase).toBeNull();
     expect(result.baseResolved).toBe(false);
     expect(result.indeterminate).toBe(false);
@@ -583,6 +722,8 @@ describe("collectLocalChangedFiles", () => {
   it("returns empty files and baseResolved false when no base and no working tree changes", async () => {
     const result = await collectLocalChangedFiles({ runGitImpl: fakeGit({}) });
     expect(result.files).toEqual([]);
+    expect(result.baseFiles).toEqual([]);
+    expect(result.workingTreeFiles).toEqual([]);
     expect(result.mergeBase).toBeNull();
     expect(result.baseResolved).toBe(false);
     expect(result.indeterminate).toBe(false);
@@ -624,6 +765,30 @@ process.exit(0);
     writeFileSync(join(cwd, ".initial"), "initial\n");
     execFileSync("git", ["add", ".initial"], { cwd });
     execFileSync("git", ["commit", "-m", "initial"], { cwd });
+  }
+
+  function initRepoWithMainAndFeature(cwd: string) {
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd });
+    mkdirSync(join(cwd, "src"), { recursive: true });
+    writeFileSync(join(cwd, ".initial"), "initial\n");
+    writeFileSync(join(cwd, "src", "existing.ts"), "export const a = 1;\n");
+    execFileSync("git", ["add", ".initial"], { cwd });
+    execFileSync("git", ["add", "src/existing.ts"], { cwd });
+    execFileSync("git", ["commit", "-m", "initial"], { cwd });
+    execFileSync("git", ["switch", "-c", "feature"], { cwd });
+  }
+
+  function runLocalWithPnpmLog() {
+    const pnpmPath = join(toolsDir, "pnpm.cjs");
+    const pnpmLogPath = join(toolsDir, "pnpm.log");
+    const out = runScript(repoDir, ["--local", "--run"], {
+      FAKE_PNPM_LOG: pnpmLogPath,
+      npm_execpath: pnpmPath,
+    });
+    const pnpmLog = readFileSync(pnpmLogPath, "utf8");
+    return { out, pnpmLog };
   }
 
   beforeEach(() => {
@@ -712,15 +877,9 @@ process.exit(0);
   });
 
   it("runs process-control checks when base is unknown and timeout changed", () => {
-    const pnpmPath = join(toolsDir, "pnpm.cjs");
-    const pnpmLogPath = join(toolsDir, "pnpm.log");
     mkdirSync(join(repoDir, "src", "lib"), { recursive: true });
     writeFileSync(join(repoDir, "src", "lib", "timeout.ts"), "export {};\n");
-    const out = runScript(repoDir, ["--local", "--run"], {
-      FAKE_PNPM_LOG: pnpmLogPath,
-      npm_execpath: pnpmPath,
-    });
-    const pnpmLog = readFileSync(pnpmLogPath, "utf8");
+    const { out, pnpmLog } = runLocalWithPnpmLog();
     expect(out).toContain("verify:local: scope=fail-safe");
     expect(pnpmLog).toContain("build");
     expect(pnpmLog).toContain(
@@ -728,5 +887,81 @@ process.exit(0);
     );
     expect(pnpmLog).toContain("tests/unit/commands/verify-process.test.ts");
     expect(pnpmLog).toContain("tests/integration/verify-timeout-abort.test.ts");
+  });
+
+  it("uses valueless --changed for unstaged source changes when base resolves", () => {
+    rmSync(repoDir, { recursive: true, force: true });
+    mkdirSync(repoDir, { recursive: true });
+    initRepoWithMainAndFeature(repoDir);
+    writeFileSync(join(repoDir, "src", "existing.ts"), "export const a = 2;\n");
+
+    const { pnpmLog } = runLocalWithPnpmLog();
+    expect(pnpmLog).toContain(
+      "exec vitest run --changed --reporter=agent --passWithNoTests",
+    );
+    expect(pnpmLog).not.toMatch(/--changed [0-9a-f]{40}/);
+  });
+
+  it("uses valueless --changed for staged test file changes when base resolves", () => {
+    rmSync(repoDir, { recursive: true, force: true });
+    mkdirSync(repoDir, { recursive: true });
+    initRepoWithMainAndFeature(repoDir);
+    mkdirSync(join(repoDir, "tests", "unit"), { recursive: true });
+    writeFileSync(
+      join(repoDir, "tests", "unit", "a.test.ts"),
+      "it('a', () => {});\n",
+    );
+    execFileSync("git", ["add", "tests/unit/a.test.ts"], { cwd: repoDir });
+
+    const { pnpmLog } = runLocalWithPnpmLog();
+    expect(pnpmLog).toContain(
+      "exec vitest run --changed --reporter=agent --passWithNoTests",
+    );
+  });
+
+  it("runs all unit tests for untracked source changes when base resolves", () => {
+    rmSync(repoDir, { recursive: true, force: true });
+    mkdirSync(repoDir, { recursive: true });
+    initRepoWithMainAndFeature(repoDir);
+    mkdirSync(join(repoDir, "src"), { recursive: true });
+    writeFileSync(join(repoDir, "src", "untracked.ts"), "export {};\n");
+
+    const { pnpmLog } = runLocalWithPnpmLog();
+    expect(pnpmLog).toContain("exec vitest run --reporter=agent");
+    expect(pnpmLog).not.toContain("--passWithNoTests");
+  });
+
+  it("keeps merge-base --changed for committed source changes only", () => {
+    rmSync(repoDir, { recursive: true, force: true });
+    mkdirSync(repoDir, { recursive: true });
+    initRepoWithMainAndFeature(repoDir);
+    mkdirSync(join(repoDir, "src"), { recursive: true });
+    writeFileSync(join(repoDir, "src", "committed.ts"), "export {};\n");
+    execFileSync("git", ["add", "src/committed.ts"], { cwd: repoDir });
+    execFileSync("git", ["commit", "-m", "feature"], { cwd: repoDir });
+
+    const { pnpmLog } = runLocalWithPnpmLog();
+    expect(pnpmLog).toMatch(
+      /exec vitest run --changed [0-9a-f]{40} --reporter=agent --passWithNoTests/,
+    );
+  });
+
+  it("checks both committed and working-tree source changes", () => {
+    rmSync(repoDir, { recursive: true, force: true });
+    mkdirSync(repoDir, { recursive: true });
+    initRepoWithMainAndFeature(repoDir);
+    mkdirSync(join(repoDir, "src"), { recursive: true });
+    writeFileSync(join(repoDir, "src", "committed.ts"), "export {};\n");
+    execFileSync("git", ["add", "src/committed.ts"], { cwd: repoDir });
+    execFileSync("git", ["commit", "-m", "feature"], { cwd: repoDir });
+    writeFileSync(join(repoDir, "src", "existing.ts"), "export const a = 2;\n");
+
+    const { pnpmLog } = runLocalWithPnpmLog();
+    expect(pnpmLog).toMatch(
+      /exec vitest run --changed [0-9a-f]{40} --reporter=agent --passWithNoTests/,
+    );
+    expect(pnpmLog).toContain(
+      "exec vitest run --changed --reporter=agent --passWithNoTests",
+    );
   });
 });

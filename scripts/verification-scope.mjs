@@ -138,6 +138,14 @@ function buildFailSafeScope(files) {
   };
 }
 
+function uniqueFiles(files) {
+  return [...new Set(files)];
+}
+
+function hasGenericFiles(files) {
+  return classifyChangedFiles(files).generic;
+}
+
 // --- git helpers ---
 
 function runGit(args, options = {}) {
@@ -204,7 +212,10 @@ async function mergeBaseDiffNames(baseRef, runGitImpl = runGit) {
 }
 
 export async function collectLocalChangedFiles({ runGitImpl = runGit } = {}) {
-  const files = new Set();
+  const baseFiles = new Set();
+  const unstagedFiles = new Set();
+  const stagedFiles = new Set();
+  const untrackedFiles = new Set();
   const errors = [];
   let mergeBase = null;
   let baseResolved = false;
@@ -212,10 +223,10 @@ export async function collectLocalChangedFiles({ runGitImpl = runGit } = {}) {
   // Try to find a sensible base for branch changes.
   for (const baseRef of ["origin/main", "main"]) {
     try {
-      const { files: baseFiles, mergeBase: mb } =
+      const { files: baseChangedFiles, mergeBase: mb } =
         await mergeBaseDiffNames(baseRef, runGitImpl);
       if (mb) {
-        for (const f of baseFiles) files.add(f);
+        for (const f of baseChangedFiles) baseFiles.add(f);
         mergeBase = mb;
         baseResolved = true;
         break;
@@ -227,21 +238,32 @@ export async function collectLocalChangedFiles({ runGitImpl = runGit } = {}) {
   }
 
   // Always add staged, unstaged, and untracked (non-ignored) working-tree changes.
-  for (const args of [
-    ["diff", "--no-renames", "--name-only"],
-    ["diff", "--no-renames", "--cached", "--name-only"],
-    ["ls-files", "--others", "--exclude-standard"],
+  for (const [target, args] of [
+    [unstagedFiles, ["diff", "--no-renames", "--name-only"]],
+    [stagedFiles, ["diff", "--no-renames", "--cached", "--name-only"]],
+    [untrackedFiles, ["ls-files", "--others", "--exclude-standard"]],
   ]) {
     try {
       const names = await gitNameList(args, runGitImpl);
-      for (const f of names) files.add(f);
+      for (const f of names) target.add(f);
     } catch (err) {
       errors.push(err);
     }
   }
 
+  const workingTreeFiles = uniqueFiles([
+    ...unstagedFiles,
+    ...stagedFiles,
+    ...untrackedFiles,
+  ]);
+
   return {
-    files: [...files],
+    baseFiles: [...baseFiles],
+    unstagedFiles: [...unstagedFiles],
+    stagedFiles: [...stagedFiles],
+    untrackedFiles: [...untrackedFiles],
+    workingTreeFiles,
+    files: uniqueFiles([...baseFiles, ...workingTreeFiles]),
     mergeBase,
     baseResolved,
     indeterminate: errors.length > 0,
@@ -317,8 +339,14 @@ async function runCommands(commands) {
   }
 }
 
-export function buildLocalCommands(scope, mergeBase) {
+export function buildLocalCommands(scope, mergeBase, changeSet = {}) {
   const commands = [];
+  const {
+    baseFiles = scope.changedFiles,
+    workingTreeFiles = [],
+    untrackedFiles = [],
+    indeterminate = false,
+  } = changeSet;
 
   if (scope.docs) {
     commands.push(["pnpm", ["check:docs"]]);
@@ -337,16 +365,37 @@ export function buildLocalCommands(scope, mergeBase) {
   }
 
   if (scope.generic) {
-    const vitestArgs = [
-      "exec",
-      "vitest",
-      "run",
-      "--changed",
-      mergeBase ?? "HEAD",
-      "--reporter=agent",
-      "--passWithNoTests",
-    ];
-    commands.push(["pnpm", vitestArgs]);
+    if (indeterminate || hasGenericFiles(untrackedFiles) || mergeBase === null) {
+      commands.push(["pnpm", ["exec", "vitest", "run", "--reporter=agent"]]);
+    } else {
+      if (hasGenericFiles(baseFiles)) {
+        commands.push([
+          "pnpm",
+          [
+            "exec",
+            "vitest",
+            "run",
+            "--changed",
+            mergeBase,
+            "--reporter=agent",
+            "--passWithNoTests",
+          ],
+        ]);
+      }
+      if (hasGenericFiles(workingTreeFiles)) {
+        commands.push([
+          "pnpm",
+          [
+            "exec",
+            "vitest",
+            "run",
+            "--changed",
+            "--reporter=agent",
+            "--passWithNoTests",
+          ],
+        ]);
+      }
+    }
   }
 
   if (scope.toolchain) {
@@ -398,6 +447,7 @@ async function runLocalVerification() {
   let files;
   let mergeBase;
   let baseResolved;
+  let changeSet;
   let failSafe = false;
 
   try {
@@ -405,6 +455,7 @@ async function runLocalVerification() {
     files = collected.files;
     mergeBase = collected.mergeBase;
     baseResolved = collected.baseResolved;
+    changeSet = collected;
     failSafe = collected.indeterminate;
   } catch (err) {
     console.error(
@@ -413,6 +464,7 @@ async function runLocalVerification() {
     files = [];
     mergeBase = null;
     baseResolved = false;
+    changeSet = { indeterminate: true };
     failSafe = true;
   }
 
@@ -431,19 +483,10 @@ async function runLocalVerification() {
 
   console.log(`verify:local: scope=${scope.reason}`);
 
-  const commands = buildLocalCommands(scope, mergeBase);
-
-  // No base could be determined but we have working-tree changes; fall back to
-  // full unit test run instead of `--changed` so local verification still works.
-  if (mergeBase === null && scope.generic) {
-    const vitestIndex = commands.findIndex(cmd => cmd[1].includes("--changed"));
-    if (vitestIndex !== -1) {
-      commands[vitestIndex] = [
-        "pnpm",
-        ["exec", "vitest", "run", "--reporter=agent"],
-      ];
-    }
-  }
+  const commands = buildLocalCommands(scope, mergeBase, {
+    ...changeSet,
+    indeterminate: failSafe,
+  });
 
   if (commands.length === 0) {
     console.log("verify:local: 0 checks passed");
