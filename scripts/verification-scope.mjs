@@ -142,8 +142,17 @@ function uniqueFiles(files) {
   return [...new Set(files)];
 }
 
+function genericFiles(files) {
+  return uniqueFiles(files.filter(isGenericCode));
+}
+
+function isSubset(left, right) {
+  const rightSet = new Set(right);
+  return left.every(file => rightSet.has(file));
+}
+
 function hasGenericFiles(files) {
-  return classifyChangedFiles(files).generic;
+  return genericFiles(files).length > 0;
 }
 
 // --- git helpers ---
@@ -368,7 +377,23 @@ export function buildLocalCommands(scope, mergeBase, changeSet = {}) {
     if (indeterminate || hasGenericFiles(untrackedFiles) || mergeBase === null) {
       commands.push(["pnpm", ["exec", "vitest", "run", "--reporter=agent"]]);
     } else {
-      if (hasGenericFiles(baseFiles)) {
+      const baseGenericFiles = genericFiles(baseFiles);
+      const workingGenericFiles = genericFiles(workingTreeFiles);
+      const hasBaseGenericFiles = baseGenericFiles.length > 0;
+      const hasWorkingGenericFiles = workingGenericFiles.length > 0;
+
+      let runBaseChanged = hasBaseGenericFiles;
+      let runWorkingChanged = hasWorkingGenericFiles;
+
+      if (hasBaseGenericFiles && hasWorkingGenericFiles) {
+        if (isSubset(baseGenericFiles, workingGenericFiles)) {
+          runBaseChanged = false;
+        } else if (isSubset(workingGenericFiles, baseGenericFiles)) {
+          runWorkingChanged = false;
+        }
+      }
+
+      if (runBaseChanged) {
         commands.push([
           "pnpm",
           [
@@ -382,7 +407,7 @@ export function buildLocalCommands(scope, mergeBase, changeSet = {}) {
           ],
         ]);
       }
-      if (hasGenericFiles(workingTreeFiles)) {
+      if (runWorkingChanged) {
         commands.push([
           "pnpm",
           [
