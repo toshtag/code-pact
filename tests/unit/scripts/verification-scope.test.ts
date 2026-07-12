@@ -20,6 +20,22 @@ const scriptPath = fileURLToPath(
   new URL("../../../scripts/verification-scope.mjs", import.meta.url),
 );
 
+function commandLabels(commands: Array<[string, string[]]>) {
+  return commands.map(([file, args]) => `${file} ${args.join(" ")}`);
+}
+
+function vitestCommands(commands: Array<[string, string[]]>) {
+  return commands.filter(
+    ([file, args]) => file === "pnpm" && args.includes("vitest"),
+  );
+}
+
+function changedVitestCommands(commands: Array<[string, string[]]>) {
+  return vitestCommands(commands).filter(([, args]) =>
+    args.includes("--changed"),
+  );
+}
+
 describe("classifyChangedFiles", () => {
   it("returns empty scope for no changed files", () => {
     expect(classifyChangedFiles([])).toEqual({
@@ -326,7 +342,7 @@ describe("buildLocalCommands", () => {
       "src/commands/init.ts",
     ]);
     const commands = buildLocalCommands(scope, "abc");
-    const labels = commands.map(([file, args]) => `${file} ${args.join(" ")}`);
+    const labels = commandLabels(commands);
     expect(new Set(labels).size).toBe(labels.length);
     expect(
       commands.some(cmd =>
@@ -415,6 +431,21 @@ describe("buildLocalCommands", () => {
     expect(unitCommand[1]).not.toContain("--passWithNoTests");
   });
 
+  it("runs all unit tests when an untracked generic file is present alongside tracked changes", () => {
+    const scope = classifyChangedFiles([
+      "src/commands/init.ts",
+      "src/commands/task-start.ts",
+    ]);
+    const commands = buildLocalCommands(scope, "abc", {
+      baseFiles: ["src/commands/init.ts"],
+      workingTreeFiles: ["src/commands/task-start.ts"],
+      untrackedFiles: ["src/commands/task-start.ts"],
+    });
+    expect(vitestCommands(commands)).toEqual([
+      ["pnpm", ["exec", "vitest", "run", "--reporter=agent"]],
+    ]);
+  });
+
   it("runs all unit tests for untracked test file changes", () => {
     const scope = classifyChangedFiles(["tests/unit/new-feature.test.ts"]);
     const commands = buildLocalCommands(scope, "abc", {
@@ -484,6 +515,144 @@ describe("buildLocalCommands", () => {
     ]);
   });
 
+  it("deduplicates changed Vitest when base and working tree contain the same generic file", () => {
+    const scope = classifyChangedFiles(["src/commands/init.ts"]);
+    const commands = buildLocalCommands(scope, "abc", {
+      baseFiles: ["src/commands/init.ts"],
+      workingTreeFiles: ["src/commands/init.ts"],
+      untrackedFiles: [],
+    });
+    expect(changedVitestCommands(commands)).toEqual([
+      [
+        "pnpm",
+        [
+          "exec",
+          "vitest",
+          "run",
+          "--changed",
+          "--reporter=agent",
+          "--passWithNoTests",
+        ],
+      ],
+    ]);
+  });
+
+  it("uses valueless changed Vitest when working tree generic files contain base generic files", () => {
+    const scope = classifyChangedFiles([
+      "src/commands/init.ts",
+      "src/commands/task-start.ts",
+    ]);
+    const commands = buildLocalCommands(scope, "abc", {
+      baseFiles: ["src/commands/init.ts"],
+      workingTreeFiles: ["src/commands/init.ts", "src/commands/task-start.ts"],
+      untrackedFiles: [],
+    });
+    expect(changedVitestCommands(commands)).toEqual([
+      [
+        "pnpm",
+        [
+          "exec",
+          "vitest",
+          "run",
+          "--changed",
+          "--reporter=agent",
+          "--passWithNoTests",
+        ],
+      ],
+    ]);
+  });
+
+  it("uses merge-base changed Vitest when base generic files contain working tree generic files", () => {
+    const scope = classifyChangedFiles([
+      "src/commands/init.ts",
+      "src/commands/task-start.ts",
+    ]);
+    const commands = buildLocalCommands(scope, "abc", {
+      baseFiles: ["src/commands/init.ts", "src/commands/task-start.ts"],
+      workingTreeFiles: ["src/commands/init.ts"],
+      untrackedFiles: [],
+    });
+    expect(changedVitestCommands(commands)).toEqual([
+      [
+        "pnpm",
+        [
+          "exec",
+          "vitest",
+          "run",
+          "--changed",
+          "abc",
+          "--reporter=agent",
+          "--passWithNoTests",
+        ],
+      ],
+    ]);
+  });
+
+  it("keeps both changed Vitest commands for disjoint generic files", () => {
+    const scope = classifyChangedFiles([
+      "src/commands/init.ts",
+      "src/commands/task-start.ts",
+    ]);
+    const commands = buildLocalCommands(scope, "abc", {
+      baseFiles: ["src/commands/init.ts"],
+      workingTreeFiles: ["src/commands/task-start.ts"],
+      untrackedFiles: [],
+    });
+    expect(changedVitestCommands(commands)).toEqual([
+      [
+        "pnpm",
+        [
+          "exec",
+          "vitest",
+          "run",
+          "--changed",
+          "abc",
+          "--reporter=agent",
+          "--passWithNoTests",
+        ],
+      ],
+      [
+        "pnpm",
+        [
+          "exec",
+          "vitest",
+          "run",
+          "--changed",
+          "--reporter=agent",
+          "--passWithNoTests",
+        ],
+      ],
+    ]);
+  });
+
+  it("keeps both changed Vitest commands when generic files only partially overlap", () => {
+    const scope = classifyChangedFiles([
+      "src/commands/init.ts",
+      "src/commands/task-start.ts",
+      "src/commands/status.ts",
+    ]);
+    const commands = buildLocalCommands(scope, "abc", {
+      baseFiles: ["src/commands/init.ts", "src/commands/task-start.ts"],
+      workingTreeFiles: ["src/commands/task-start.ts", "src/commands/status.ts"],
+      untrackedFiles: [],
+    });
+    expect(changedVitestCommands(commands)).toHaveLength(2);
+  });
+
+  it("does not use vitest related for partial overlap", () => {
+    const scope = classifyChangedFiles([
+      "src/commands/init.ts",
+      "src/commands/task-start.ts",
+      "src/commands/status.ts",
+    ]);
+    const commands = buildLocalCommands(scope, "abc", {
+      baseFiles: ["src/commands/init.ts", "src/commands/task-start.ts"],
+      workingTreeFiles: ["src/commands/task-start.ts", "src/commands/status.ts"],
+      untrackedFiles: [],
+    });
+    expect(JSON.stringify(commands)).not.toContain("related");
+  });
+
   it("runs all unit tests when local git state is indeterminate", () => {
     const scope = classifyChangedFiles(["src/commands/init.ts"]);
     const commands = buildLocalCommands(scope, "abc", {
@@ -496,6 +665,59 @@ describe("buildLocalCommands", () => {
       "pnpm",
       ["exec", "vitest", "run", "--reporter=agent"],
     ]);
+  });
+
+  it("keeps targeted process-control and toolchain commands when optimizing generic Vitest", () => {
+    const scope = classifyChangedFiles([
+      "src/lib/timeout.ts",
+      "package.json",
+      "src/commands/init.ts",
+    ]);
+    const commands = buildLocalCommands(scope, "abc", {
+      baseFiles: ["src/commands/init.ts"],
+      workingTreeFiles: ["src/commands/init.ts"],
+      untrackedFiles: [],
+    });
+    expect(
+      commands.some(cmd =>
+        cmd[1].some(arg =>
+          arg.includes("check-supply-chain-invariants.test.ts"),
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      commands.some(cmd =>
+        cmd[1].some(arg =>
+          arg.includes("project-fs-authority-resolvers.test.ts"),
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      commands.some(cmd =>
+        cmd[1].some(arg => arg.includes("verify-process.test.ts")),
+      ),
+    ).toBe(true);
+    expect(
+      commands.some(cmd =>
+        cmd[1].some(arg => arg.includes("verify-timeout-abort.test.ts")),
+      ),
+    ).toBe(true);
+    expect(changedVitestCommands(commands)).toHaveLength(1);
+  });
+
+  it("does not plan duplicate command labels", () => {
+    const scope = classifyChangedFiles([
+      "src/lib/timeout.ts",
+      "package.json",
+      "src/commands/init.ts",
+    ]);
+    const commands = buildLocalCommands(scope, "abc", {
+      baseFiles: ["src/commands/init.ts"],
+      workingTreeFiles: ["src/commands/init.ts"],
+      untrackedFiles: [],
+    });
+    const labels = commandLabels(commands);
+    expect(new Set(labels).size).toBe(labels.length);
   });
 
   it("does not include full CI commands", () => {
