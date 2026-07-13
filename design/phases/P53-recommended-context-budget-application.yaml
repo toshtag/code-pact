@@ -87,7 +87,6 @@ tasks:
       - src/core/context-fit/resolve-budget-profile.ts
       - src/core/schemas/recommend-result.ts
     writes:
-      - design/phases/P53-recommended-context-budget-application.yaml
       - src/cli.ts
       - src/cli/commands/task.ts
       - src/commands/task-prepare.ts
@@ -127,7 +126,6 @@ tasks:
       - src/core/context-fit/resolve-budget-profile.ts
       - src/core/adapters/template-sections.ts
     writes:
-      - design/phases/P53-recommended-context-budget-application.yaml
       - src/core/schemas/agent-profile.ts
       - src/core/context-fit/applied-context-budget.ts
       - src/core/context-fit/resolve-budget-profile.ts
