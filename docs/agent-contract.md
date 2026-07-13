@@ -247,6 +247,11 @@ ids require an RFC and an entry in `src/core/adapters/conformance-spec.ts`.
 | `recommendation_consumption_guidance_present` | The guidance tells the agent to consume the recommendation (anchored on `data.recommendation`). Verifies **documentation presence, not runtime obedience** |
 | `lifecycle_mode_guidance_present` | The guidance documents `lifecycleMode` and the `record_only` lane (anchored on `lifecycleMode` + `record_only`) |
 | `cannot_switch_model_fallback_present` | The guidance tells the agent to report a limitation when it `cannot switch model` rather than ignore the recommendation |
+| `repair_policy_guidance_present` | The guidance documents bounded repair policy basics (`repairPolicy`, `maxRepairAttempts`, `command_failed`) |
+| `repair_policy_json_paths_present` | The guidance documents the command-specific JSON paths for `repairPolicy` and `allowedEscalation` |
+| `bounded_repair_runtime_constraints_present` | The guidance says the first bounded repair keeps the same model, effort, and context, and uses the failure delta |
+| `bounded_repair_stop_guidance_present` | The guidance documents repeated-fingerprint stopping and allowed escalation after exhaustion |
+| `bounded_repair_nonretryable_guidance_present` | The guidance documents the closed list of nonretryable failure kinds |
 | `file_checksum_match` | Per-file: on-disk sha256 equals manifest |
 | `adapter_file_path_unowned` | Manifest entry names a path this adapter could not have generated (narrow built-in read authority, not the broad write namespace — so `.claude/skills/private.md` is refused), or one resolving through a symlink. Target is not read (no `actual_sha256`, no heading inspection) — forged-manifest content/SHA-oracle guard. Always `required` |
 | `file_checksum_skipped_unverifiable` | Manifest entry is a dynamic skill in the shared `.claude/skills/` namespace without `ownership: handed_off` — read-ownership cannot be proven, so it is not read/checksummed. Always `advisory` |
@@ -268,7 +273,11 @@ hard-fails until it is re-upgraded. The three consumption-guidance checks
 are gated the same way but on their **own** threshold
 (`RECOMMENDATION_CONSUMPTION_FROM_VERSION`), so an adapter generated after
 the hardening threshold but before the consumption templates stays
-advisory rather than failing all at once. Dynamic read-authority checks
+advisory rather than failing all at once. Bounded-repair checks are also
+gated on their own first-shipped version
+(`BOUNDED_REPAIR_GUIDANCE_FROM_VERSION`): adapters generated before that
+version report missing repair anchors as advisory; adapters generated at
+or after that version require them. Dynamic read-authority checks
 that cannot prove safe byte reads (`file_checksum_skipped_unverifiable`,
 `dynamic_handoff_orphan_unverified`, `dynamic_handoff_manifest_stale`) are
 always `advisory`. All other checks are `required`. Exit is 0 when

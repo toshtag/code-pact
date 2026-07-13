@@ -190,6 +190,28 @@ export const RECOMMENDATION_CONSUMPTION_ANCHORS: ReadonlyArray<{
     id: "cannot_switch_model_fallback_present",
     anchors: ["cannot switch model"],
   },
+];
+
+// ---------------------------------------------------------------------------
+// Bounded repair guidance
+//
+// P51 adds a repair policy to the recommendation contract. These checks are
+// intentionally gated on their own release threshold: adapters generated after
+// the recommendation-consumption guidance but before bounded-repair guidance
+// must warn rather than become non-compliant all at once.
+// ---------------------------------------------------------------------------
+
+/**
+ * Release that first ships the bounded-repair guidance templates. These checks
+ * run at `required` for adapters whose manifest `generator_version` is semver
+ * >= this, and `advisory` below.
+ */
+export const BOUNDED_REPAIR_GUIDANCE_FROM_VERSION = "2.2.0";
+
+export const BOUNDED_REPAIR_GUIDANCE_ANCHORS: ReadonlyArray<{
+  id: string;
+  anchors: ReadonlyArray<string>;
+}> = [
   {
     id: "repair_policy_guidance_present",
     anchors: [

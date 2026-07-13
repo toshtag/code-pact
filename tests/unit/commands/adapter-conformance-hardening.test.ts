@@ -7,6 +7,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   gteVersion,
+  resolveBoundedRepairSeverity,
   resolveHardeningSeverity,
   resolveConsumptionSeverity,
   checkConsumptionAnchors,
@@ -18,6 +19,7 @@ import {
 } from "../../../src/commands/adapter-conformance.ts";
 import {
   ADAPTER_CONTRACT_HARDENING_FROM_VERSION,
+  BOUNDED_REPAIR_GUIDANCE_FROM_VERSION,
   RECOMMENDATION_CONSUMPTION_FROM_VERSION,
 } from "../../../src/core/adapters/conformance-spec.ts";
 
@@ -73,6 +75,20 @@ describe("resolveConsumptionSeverity (P33, own threshold)", () => {
       resolveConsumptionSeverity(RECOMMENDATION_CONSUMPTION_FROM_VERSION),
     ).toBe("required");
     expect(resolveConsumptionSeverity("2.0.0")).toBe("required");
+  });
+});
+
+describe("resolveBoundedRepairSeverity (P51, own threshold)", () => {
+  it("is advisory when generator_version is missing or before bounded repair shipped", () => {
+    expect(resolveBoundedRepairSeverity(undefined)).toBe("advisory");
+    expect(resolveBoundedRepairSeverity("2.1.0")).toBe("advisory");
+  });
+
+  it("is required at or above the bounded repair threshold", () => {
+    expect(resolveBoundedRepairSeverity(BOUNDED_REPAIR_GUIDANCE_FROM_VERSION)).toBe(
+      "required",
+    );
+    expect(resolveBoundedRepairSeverity("2.2.0")).toBe("required");
   });
 });
 

@@ -19,6 +19,8 @@ import { assertSafeRelativePath } from "../../src/core/adapters/file-state.ts";
 import {
   AGENT_CONTRACT_AXIS_HEADINGS as SHARED_AXIS_HEADINGS,
   AGENT_CONTRACT_SECTION_HEADING as SHARED_SECTION_HEADING,
+  BOUNDED_REPAIR_GUIDANCE_ANCHORS,
+  BOUNDED_REPAIR_GUIDANCE_FROM_VERSION,
   DIAGNOSTIC_REQUIRED_SURFACES,
   LIFECYCLE_REQUIRED_SURFACES,
   RECOMMENDATION_CONSUMPTION_ANCHORS,
@@ -83,7 +85,16 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-async function installAdapter(agent: (typeof STABLE_AGENTS)[number]) {
+function sha256(content: string): string {
+  return createHash("sha256")
+    .update(content.replace(/\r\n/g, "\n"), "utf8")
+    .digest("hex");
+}
+
+async function installAdapter(
+  agent: (typeof STABLE_AGENTS)[number],
+  generatorVersionOverride = "0.9.0-alpha.0",
+) {
   await runInit({
     cwd: dir,
     locale: "en-US",
@@ -96,7 +107,7 @@ async function installAdapter(agent: (typeof STABLE_AGENTS)[number]) {
     agentName: agent,
     force: false,
     locale: "en-US",
-    generatorVersionOverride: "0.9.0-alpha.0",
+    generatorVersionOverride,
   });
 }
 
@@ -322,6 +333,19 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
     }
   });
 
+  it("fresh instruction contains every bounded repair guidance anchor", async () => {
+    await installAdapter(agent);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    const content = await readFile(join(dir, instruction!.path), "utf8");
+
+    for (const check of BOUNDED_REPAIR_GUIDANCE_ANCHORS) {
+      for (const anchor of check.anchors) {
+        expect(content, `${agent} ${check.id} missing ${anchor}`).toContain(anchor);
+      }
+    }
+  });
+
   it("fails the bounded repair runtime check when its anchor is tampered", async () => {
     await installAdapter(agent);
     const manifest = await readManifest(dir, agent);
@@ -343,6 +367,34 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
     expect((check?.details?.missing as string[]) ?? []).toContain(
       "same_model_same_effort_same_context",
     );
+  });
+
+  it("requires bounded repair JSON paths at the P51 release threshold", async () => {
+    await installAdapter(agent, BOUNDED_REPAIR_GUIDANCE_FROM_VERSION);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    const path = join(dir, instruction!.path);
+    const original = await readFile(path, "utf8");
+    const tampered = original.replace("data.repairPolicy", "data.repair_policy");
+    expect(tampered).not.toBe(original);
+    await writeFile(path, tampered, "utf8");
+
+    const manifestPath = join(dir, ".code-pact", "adapters", `${agent}.manifest.yaml`);
+    const rawManifest = await readFile(manifestPath, "utf8");
+    const updatedManifest = rawManifest.replace(instruction!.sha256, sha256(tampered));
+    expect(updatedManifest).not.toBe(rawManifest);
+    await writeFile(manifestPath, updatedManifest, "utf8");
+
+    const result = await runAdapterConformance({ cwd: dir, agentName: agent });
+    const check = result.checks.find(
+      (c) => c.id === "repair_policy_json_paths_present",
+    );
+    expect(check?.status).toBe("fail");
+    expect(check?.severity).toBe("required");
+    expect((check?.details?.missing as string[]) ?? []).toContain(
+      "data.repairPolicy",
+    );
+    expect(result.compliant).toBe(false);
   });
 
   it("runAdapterConformance returns compliant: false when the agent contract section is removed", async () => {

@@ -3,7 +3,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runAdapterConformance } from "../../../src/commands/adapter-conformance.ts";
+import {
+  resolveBoundedRepairSeverity,
+  runAdapterConformance,
+} from "../../../src/commands/adapter-conformance.ts";
 import { runInit } from "../../../src/commands/init.ts";
 import { runAdapterInstall } from "../../../src/commands/adapter-install.ts";
 import { createPhase } from "../../../src/core/services/createPhase.ts";
@@ -12,6 +15,9 @@ import {
   readManifest,
   writeManifest,
 } from "../../../src/core/adapters/manifest.ts";
+import {
+  BOUNDED_REPAIR_GUIDANCE_FROM_VERSION,
+} from "../../../src/core/adapters/conformance-spec.ts";
 
 const VALID_CONTRACT_BODY = `# Some Adapter
 
@@ -65,6 +71,53 @@ Activation rules:
 - Nonretryable kinds: \`timed_out\`, \`aborted\`, \`decision_required\`, \`unsafe_write\`, \`invalid_state\`, \`unknown\`.
 `;
 
+const LEGACY_CONTRACT_WITHOUT_REPAIR = `# Some Adapter
+
+> Managed file.
+
+## How to work on a task
+
+Some workflow text.
+
+## Agent contract
+
+The canonical workflow.
+
+### When to invoke code-pact
+
+Per task:
+
+\`\`\`sh
+code-pact task prepare <task-id> --agent claude-code --json
+code-pact task start    <task-id> --agent claude-code
+code-pact task context <task-id> --agent claude-code
+code-pact task complete <task-id> --agent claude-code
+code-pact task finalize <task-id> --write --json
+code-pact verify --phase <p> --task <task-id>
+code-pact validate --json
+\`\`\`
+
+Activation rules:
+
+- Run \`task finalize --write\` only after \`task complete\`.
+- If \`next_action.type\` is \`wait_for_dependencies\`, do not implement.
+- On \`CONTEXT_OVER_BUDGET\`, report rather than widen.
+
+### What to verify first
+
+- run verify
+- check the audit
+- After \`task prepare --json\`, read \`data.recommendation\`. After \`recommend --json\`, read \`data\`. Let \`lifecycleMode\` pick the loop. When the runtime cannot switch model, report the limitation.
+- \`record_only\` is a lighter loop, not lighter verification — run verification, then \`task record-done\`.
+
+### How to handle failures
+
+- **blocked dependency** — wait or resume.
+- **verification failure** — fix and re-run.
+- **adapter drift** — re-upgrade.
+- **missing context pack** — task prepare rebuilds it.
+`;
+
 function sha256(content: string): string {
   return createHash("sha256")
     .update(content.replace(/\r\n/g, "\n"), "utf8")
@@ -73,15 +126,16 @@ function sha256(content: string): string {
 
 async function setupAdapter(
   dir: string,
-  opts: { instructionContent?: string } = {},
+  opts: { instructionContent?: string; generatorVersion?: string } = {},
 ): Promise<void> {
   const instructionContent = opts.instructionContent ?? VALID_CONTRACT_BODY;
+  const generatorVersion = opts.generatorVersion ?? "1.11.0";
   await mkdir(join(dir, ".code-pact", "adapters"), { recursive: true });
   await writeFile(join(dir, "CLAUDE.md"), instructionContent, "utf8");
   const manifest = {
     schema_version: 1,
     agent_name: "claude-code",
-    generator_version: "1.11.0",
+    generator_version: generatorVersion,
     adapter_schema_version: 1,
     generated_at: "2026-05-22T00:00:00+00:00",
     profile_fingerprint: {
@@ -101,7 +155,7 @@ async function setupAdapter(
   const yaml = [
     `schema_version: 1`,
     `agent_name: claude-code`,
-    `generator_version: 1.11.0`,
+    `generator_version: ${generatorVersion}`,
     `adapter_schema_version: 1`,
     `generated_at: "${manifest.generated_at}"`,
     `profile_fingerprint:`,
@@ -441,15 +495,53 @@ describe("runAdapterConformance — bounded repair recommendation guidance", () 
     );
   });
 
-  it("keeps the new checks on the recommendation-consumption severity gate", async () => {
-    await setupAdapter(dir);
-    const below = await runAdapterConformance({
+  it("keeps repair guidance advisory for a pre-P51 2.1.0 adapter", async () => {
+    await setupAdapter(dir, {
+      instructionContent: LEGACY_CONTRACT_WITHOUT_REPAIR,
+      generatorVersion: "2.1.0",
+    });
+
+    const result = await runAdapterConformance({
       cwd: dir,
       agentName: "claude-code",
     });
-    expect(
-      below.checks.find(c => c.id === "repair_policy_guidance_present")?.severity,
-    ).toBe("advisory");
+
+    for (const id of [
+      "repair_policy_guidance_present",
+      "repair_policy_json_paths_present",
+      "bounded_repair_runtime_constraints_present",
+      "bounded_repair_stop_guidance_present",
+      "bounded_repair_nonretryable_guidance_present",
+    ]) {
+      const check = result.checks.find(c => c.id === id);
+      expect(check?.status, `${id} status`).toBe("fail");
+      expect(check?.severity, `${id} severity`).toBe("advisory");
+    }
+    expect(result.compliant).toBe(true);
+  });
+
+  it("requires repair guidance at the P51 release threshold", async () => {
+    await setupAdapter(dir, {
+      instructionContent: LEGACY_CONTRACT_WITHOUT_REPAIR,
+      generatorVersion: BOUNDED_REPAIR_GUIDANCE_FROM_VERSION,
+    });
+
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    const check = result.checks.find(
+      c => c.id === "repair_policy_guidance_present",
+    );
+    expect(check?.status).toBe("fail");
+    expect(check?.severity).toBe("required");
+    expect(result.compliant).toBe(false);
+  });
+
+  it("gates bounded repair guidance on its own threshold", () => {
+    expect(resolveBoundedRepairSeverity("2.1.0")).toBe("advisory");
+    expect(resolveBoundedRepairSeverity("2.2.0")).toBe("required");
   });
 });
 
