@@ -546,7 +546,9 @@ export const messages = {
         verifyBody: [
           "Before implementing:",
           "",
-          "- After `task prepare --json` (or `recommend --json`), read `data.recommendation` and treat it as an execution profile, not a report:",
+          "- After `task prepare --json`, read `data.recommendation`.",
+          "- After `recommend --json`, read `data`.",
+          "- Treat that recommendation object as an execution profile, not a report:",
           "  - `tier` / `modelId` → continue, switch model, or — when the runtime **cannot switch model** — report the limitation rather than silently ignoring the recommendation.",
           "  - `effort` → reasoning depth. `planningRequired` → write a plan before editing when true.",
           "  - `lifecycleMode` → choose the loop: `full_loop` (prepare→start→complete→finalize), `decision_loop` (resolve the decision ADR first), or `record_only`.",
@@ -581,7 +583,7 @@ export const messages = {
           "- **`CONFIG_ERROR`** — structural argument problem (mutually exclusive flags; missing positional; `--audit-strict` / `--base-ref` without `--json`; `--from-file` + `--stdin` together; etc.). Re-read the command surface.",
         ].join("\n"),
         repairBody: [
-          "- After a failure, first read `data.recommendation.repairPolicy` from the existing `task prepare` / `recommend` result.",
+          "- After a failure, read the existing repair policy: `data.recommendation.repairPolicy` from `task prepare --json`, or `data.repairPolicy` from `recommend --json`.",
           "- If `mode` is `disabled`, do not automatically repair.",
           "- If `mode` is `bounded`, repair only `command_failed`, and only while `maxRepairAttempts` permits the single attempt.",
           "- Keep `same_model_same_effort_same_context`: do not change model, effort, or context before that first repair.",
@@ -589,7 +591,7 @@ export const messages = {
           "- The nonretryable kinds are terminal for bounded repair: `timed_out`, `aborted`, `decision_required`, `unsafe_write`, `invalid_state`, and `unknown`.",
           "- Fetch full evidence only when excerpts are insufficient; do not fetch it by default.",
           "- If `stopOnRepeatedFingerprint` is true and the same fingerprint recurs, stop.",
-          "- After the single bounded attempt is exhausted, follow `use_allowed_escalation`.",
+          "- When `afterExhaustion` is `use_allowed_escalation`, consult `data.recommendation.allowedEscalation` from `task prepare --json`, or `data.allowedEscalation` from `recommend --json`.",
         ].join("\n"),
       },
     },

@@ -49,7 +49,7 @@ Activation rules:
 
 - run verify
 - check the audit
-- Read \`data.recommendation\`; let \`lifecycleMode\` pick the loop. When the runtime cannot switch model, report the limitation.
+- After \`task prepare --json\`, read \`data.recommendation\`. After \`recommend --json\`, read \`data\`. Let \`lifecycleMode\` pick the loop. When the runtime cannot switch model, report the limitation.
 - \`record_only\` is a lighter loop, not lighter verification — run verification, then \`task record-done\`.
 
 ### How to handle failures
@@ -58,9 +58,10 @@ Activation rules:
 - **verification failure** — fix and re-run.
 - **adapter drift** — re-upgrade.
 - **missing context pack** — task prepare rebuilds it.
-- After a failure, read \`data.recommendation.repairPolicy\`. If \`mode\` is \`disabled\`, do not repair. If \`mode\` is \`bounded\`, use \`maxRepairAttempts\` for \`command_failed\` only.
+- After a failure, read \`data.recommendation.repairPolicy\` from \`task prepare --json\`, or \`data.repairPolicy\` from \`recommend --json\`. If \`mode\` is \`disabled\`, do not repair. If \`mode\` is \`bounded\`, use \`maxRepairAttempts\` for \`command_failed\` only.
 - Keep \`same_model_same_effort_same_context\` and use \`failure_delta\`.
 - Stop on \`stopOnRepeatedFingerprint\`; after exhaustion follow \`use_allowed_escalation\`.
+- When \`afterExhaustion\` is \`use_allowed_escalation\`, read \`data.recommendation.allowedEscalation\` from \`task prepare --json\`, or \`data.allowedEscalation\` from \`recommend --json\`.
 - Nonretryable kinds: \`timed_out\`, \`aborted\`, \`decision_required\`, \`unsafe_write\`, \`invalid_state\`, \`unknown\`.
 `;
 
@@ -377,6 +378,66 @@ describe("runAdapterConformance — bounded repair recommendation guidance", () 
     expect(check?.status).toBe("fail");
     expect((check?.details?.missing as string[]) ?? []).toContain(
       "same_model_same_effort_same_context",
+    );
+  });
+
+  it("fails when the recommend repairPolicy JSON path is missing", async () => {
+    const body = VALID_CONTRACT_BODY.replace(
+      "data.repairPolicy",
+      "data.repair_policy",
+    );
+    await setupAdapter(dir, { instructionContent: body });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    const check = result.checks.find(
+      c => c.id === "repair_policy_json_paths_present",
+    );
+    expect(check?.status).toBe("fail");
+    expect((check?.details?.missing as string[]) ?? []).toContain(
+      "data.repairPolicy",
+    );
+  });
+
+  it("fails when the task prepare repairPolicy JSON path is missing", async () => {
+    const body = VALID_CONTRACT_BODY.replace(
+      "data.recommendation.repairPolicy",
+      "data.recommendation.repair_policy",
+    );
+    await setupAdapter(dir, { instructionContent: body });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    const check = result.checks.find(
+      c => c.id === "repair_policy_json_paths_present",
+    );
+    expect(check?.status).toBe("fail");
+    expect((check?.details?.missing as string[]) ?? []).toContain(
+      "data.recommendation.repairPolicy",
+    );
+  });
+
+  it("fails when the recommend allowedEscalation JSON path is missing", async () => {
+    const body = VALID_CONTRACT_BODY.replace(
+      "data.allowedEscalation",
+      "data.allowed_escalation",
+    );
+    await setupAdapter(dir, { instructionContent: body });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    const check = result.checks.find(
+      c => c.id === "repair_policy_json_paths_present",
+    );
+    expect(check?.status).toBe("fail");
+    expect((check?.details?.missing as string[]) ?? []).toContain(
+      "data.allowedEscalation",
     );
   });
 

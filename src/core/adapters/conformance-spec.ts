@@ -199,6 +199,15 @@ export const RECOMMENDATION_CONSUMPTION_ANCHORS: ReadonlyArray<{
     ],
   },
   {
+    id: "repair_policy_json_paths_present",
+    anchors: [
+      "data.recommendation.repairPolicy",
+      "data.repairPolicy",
+      "data.recommendation.allowedEscalation",
+      "data.allowedEscalation",
+    ],
+  },
+  {
     id: "bounded_repair_runtime_constraints_present",
     anchors: [
       "same_model_same_effort_same_context",

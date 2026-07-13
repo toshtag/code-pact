@@ -53,7 +53,7 @@ Full set of allowed transitions (the deterministic state machine):
 When `task complete --json --detail agent` fails, the loop remains finite:
 
 1. Read the compact failure capsule.
-2. Read the existing `data.recommendation.repairPolicy`.
+2. Read `data.recommendation.repairPolicy` from the earlier `task prepare --json` result. If you used `recommend --json` separately, its path is `data.repairPolicy`.
 3. If `repairPolicy.mode` is `disabled`, stop bounded repair and use the normal escalation guidance.
 4. If it is `bounded` and the failure kind is `command_failed`, make one minimal repair using the same model, effort, and context.
 5. Re-run the same `task complete` command.

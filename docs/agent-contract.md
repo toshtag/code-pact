@@ -351,9 +351,19 @@ The verbs in detail:
 ### Bounded repair recommendation
 
 Code Pact does not repair a failed task, restart an agent, schedule retries, call
-a model API, or append progress events after a verification failure. It only
-reports deterministic guidance in `data.recommendation.repairPolicy` when a
-recommendation is non-null.
+a model API, or append progress events after a verification failure. It reports
+deterministic repair guidance on the existing recommendation object.
+
+The JSON path depends on the command:
+
+- `task prepare --json`: `data.recommendation.repairPolicy`
+- `recommend --json`: `data.repairPolicy`
+
+The same distinction applies after repair exhaustion when the policy says to use
+the existing escalation guidance:
+
+- `task prepare --json`: `data.recommendation.allowedEscalation`
+- `recommend --json`: `data.allowedEscalation`
 
 The disabled shape is:
 

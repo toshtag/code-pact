@@ -45,9 +45,16 @@ describe("agent contract failure guidance", () => {
     });
 
     it(`${locale} documents bounded repair policy anchors`, () => {
+      const verifyBody = messages[locale].templates.adapterCommon.agentContract.verifyBody;
       const repairBody = messages[locale].templates.adapterCommon.agentContract.repairBody;
+      const combined = `${verifyBody}\n${repairBody}`;
 
       for (const anchor of [
+        "data.recommendation",
+        "data.recommendation.repairPolicy",
+        "data.repairPolicy",
+        "data.recommendation.allowedEscalation",
+        "data.allowedEscalation",
         "repairPolicy",
         "maxRepairAttempts",
         "command_failed",
@@ -71,6 +78,12 @@ describe("agent contract failure guidance", () => {
       expect(repairBody).not.toContain("成功するまで繰り返す");
       expect(repairBody).not.toContain("retry 前に context を増やす");
       expect(repairBody).not.toContain("retry 前に model を上げる");
+      expect(combined).not.toContain(
+        "data.recommendation.repairPolicy` from the existing `task prepare` / `recommend` result",
+      );
+      expect(combined).not.toContain(
+        "既存の `task prepare` / `recommend` 結果にある `data.recommendation.repairPolicy`",
+      );
     });
   }
 });

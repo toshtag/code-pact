@@ -570,7 +570,9 @@ export const messages = {
         verifyBody: [
           "実装前:",
           "",
-          "- `task prepare --json`（または `recommend --json`）の後、`data.recommendation` を読み、レポートではなく実行プロファイルとして扱ってください:",
+          "- `task prepare --json` の後は `data.recommendation` を読みます。",
+          "- `recommend --json` の後は `data` を読みます。",
+          "- その recommendation object を、レポートではなく実行プロファイルとして扱ってください:",
           "  - `tier` / `modelId` → 継続 / モデル切替 / runtime が **cannot switch model**（モデルを切り替えられない）場合は無視せず限界として報告する。",
           "  - `effort` → 推論の深さ。`planningRequired` が true なら編集前に plan を書く。",
           "  - `lifecycleMode` → ループを選ぶ: `full_loop`（prepare→start→complete→finalize）/ `decision_loop`（先に decision ADR を解決）/ `record_only`。",
@@ -605,7 +607,7 @@ export const messages = {
           "- **`CONFIG_ERROR`** — 構造的な引数エラー（mutex flag、必須 positional の欠落、`--audit-strict` / `--base-ref` を `--json` なしで渡した、`--from-file` と `--stdin` 同時指定など）。コマンド surface を再確認してください。",
         ].join("\n"),
         repairBody: [
-          "- failure 後は、既存の `task prepare` / `recommend` 結果にある `data.recommendation.repairPolicy` を最初に読みます。",
+          "- failure 後は既存の repair policy を読みます: `task prepare --json` では `data.recommendation.repairPolicy`、`recommend --json` では `data.repairPolicy`。",
           "- `mode` が `disabled` なら自動 repair はしません。",
           "- `mode` が `bounded` でも repair 対象は `command_failed` のみで、`maxRepairAttempts` が許す 1 回だけです。",
           "- 最初の repair では `same_model_same_effort_same_context` を守り、model / effort / context を変更しません。",
@@ -613,7 +615,7 @@ export const messages = {
           "- bounded repair で非対象の kind は terminal です: `timed_out`, `aborted`, `decision_required`, `unsafe_write`, `invalid_state`, `unknown`。",
           "- full evidence は excerpt が不足する場合だけ取得し、デフォルト取得しません。",
           "- `stopOnRepeatedFingerprint` が true で同一 fingerprint が再発したら停止します。",
-          "- 1 回の bounded attempt を使い切った後は `use_allowed_escalation` に従います。",
+          "- `afterExhaustion` が `use_allowed_escalation` の場合は、`task prepare --json` では `data.recommendation.allowedEscalation`、`recommend --json` では `data.allowedEscalation` を参照します。",
         ].join("\n"),
       },
     },
