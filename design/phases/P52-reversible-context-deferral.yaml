@@ -1,0 +1,128 @@
+id: P52
+name: Reversible Context Deferral
+weight: 8
+confidence: medium
+risk: medium
+status: planned
+objective: >
+  Replace irreversible context section elision with content-addressed deferral
+  records so an agent can retrieve the exact omitted context only when needed.
+non_goals:
+  - Summarize natural-language rules, constitution text, decisions, or source code.
+  - Create one reference per deferred section when a single manifest can cover the pack.
+  - Change the default no-budget context pack output.
+definition_of_done:
+  - Deferred context is stored locally under a content-addressed reference.
+  - A context pack lists deferred section names, a manifest reference, and a retrieval command.
+  - Retrieval returns the exact deferred section content without semantic rewriting.
+  - Context pack byte metrics include deferred bytes separately from final bytes.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+tasks:
+  - id: P52-T1
+    type: architecture
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: Specify the deferred context manifest, reference format, and retrieval contract.
+    reads:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+      - src/core/pack/index.ts
+      - src/core/pack/budget.ts
+    writes:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+    acceptance_refs:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+  - id: P52-T2
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: large
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P52-T1
+    description: Persist deferred sections and render a compact manifest reference in budgeted context packs.
+    reads:
+      - src/core/pack/index.ts
+      - src/core/pack/budget.ts
+      - src/core/pack/formatters/markdown.ts
+      - src/core/pack/context-output-path.ts
+    writes:
+      - src/core/pack/index.ts
+      - src/core/pack/budget.ts
+      - src/core/pack/formatters/markdown.ts
+      - src/core/context-deferral/**
+      - tests/unit/core/pack/budget.test.ts
+      - tests/unit/core/pack-core.test.ts
+      - tests/integration/task-context-budget.test.ts
+    acceptance_refs:
+      - tests/unit/core/pack/budget.test.ts
+      - tests/unit/core/pack-core.test.ts
+      - tests/integration/task-context-budget.test.ts
+  - id: P52-T3
+    type: feature
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P52-T2
+    description: Add a local command that shows deferred context by reference.
+    reads:
+      - src/cli/spec/root.ts
+      - src/cli/spec/task.ts
+      - src/commands/task-context.ts
+      - src/commands/pack.ts
+    writes:
+      - src/cli/spec/root.ts
+      - src/commands/context-show.ts
+      - src/cli.ts
+      - docs/cli-reference.generated.md
+      - tests/integration/cli-help.test.ts
+      - tests/integration/json-stdout.test.ts
+      - tests/unit/commands/task-context.test.ts
+    acceptance_refs:
+      - tests/integration/cli-help.test.ts
+      - tests/integration/json-stdout.test.ts
+      - tests/unit/commands/task-context.test.ts
+  - id: P52-T4
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P52-T3
+    description: Document deferred context retrieval in agent guidance and the generated CLI reference.
+    reads:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - CHANGELOG.md
+    writes:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - CHANGELOG.md

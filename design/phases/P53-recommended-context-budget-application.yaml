@@ -1,0 +1,105 @@
+id: P53
+name: Recommended Context Budget Application
+weight: 6
+confidence: medium
+risk: medium
+status: planned
+objective: >
+  Allow task preparation to apply the deterministic recommended context budget
+  explicitly after reversible context deferral makes omitted context recoverable.
+non_goals:
+  - Change the default no-flag task-prepare or task-context behavior.
+  - Apply a custom agent profile budget name as the recommended profile.
+  - Use tokenizers, provider APIs, embeddings, ranking, or model-generated summaries.
+definition_of_done:
+  - "`task prepare --context-budget auto` uses the same recommendation returned in the response."
+  - The commands dictionary remains explicit about the selected budget mode.
+  - Agent profiles can opt into recommended budget mode without changing legacy projects.
+  - Oversized packs still fail honestly when the recommended budget cannot fit.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+tasks:
+  - id: P53-T1
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P52-T4
+    description: Add explicit `auto` budget resolution for task preparation.
+    reads:
+      - src/commands/task-prepare.ts
+      - src/core/recommend/context-fit.ts
+      - src/core/context-fit/resolve-budget-profile.ts
+      - src/core/schemas/recommend-result.ts
+    writes:
+      - src/commands/task-prepare.ts
+      - src/core/context-fit/resolve-budget-profile.ts
+      - src/cli/spec/task.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/integration/task-prepare-commands-contract.test.ts
+    acceptance_refs:
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/integration/task-prepare-commands-contract.test.ts
+  - id: P53-T2
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P53-T1
+    description: Add an agent profile mode that applies the recommended budget only when configured.
+    reads:
+      - src/core/schemas/agent-profile.ts
+      - src/core/context-fit/load-context-budget.ts
+      - src/core/adapters/template-sections.ts
+    writes:
+      - src/core/schemas/agent-profile.ts
+      - src/core/context-fit/load-context-budget.ts
+      - src/core/adapters/template-sections.ts
+      - tests/unit/schemas/agent-profile.test.ts
+      - tests/unit/core/context-fit/resolve-budget-profile.test.ts
+      - tests/unit/core/adapters/desired.test.ts
+    acceptance_refs:
+      - tests/unit/schemas/agent-profile.test.ts
+      - tests/unit/core/context-fit/resolve-budget-profile.test.ts
+      - tests/unit/core/adapters/desired.test.ts
+  - id: P53-T3
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P53-T2
+    description: Document explicit and profile-driven recommended budget application.
+    reads:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/upgrading.md
+      - CHANGELOG.md
+    writes:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/upgrading.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/upgrading.md
+      - CHANGELOG.md

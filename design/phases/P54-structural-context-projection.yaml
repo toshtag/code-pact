@@ -1,0 +1,125 @@
+id: P54
+name: Structural Context Projection
+weight: 7
+confidence: medium
+risk: medium
+status: planned
+objective: >
+  Add deterministic, content-type-aware context projections that reduce context
+  size only where the structure is safe to preserve mechanically.
+non_goals:
+  - Summarize natural-language requirements.
+  - Compress source code.
+  - Keep lines only because they contain imperative keywords.
+  - Delegate projection quality to a model.
+definition_of_done:
+  - Read glob output can be grouped while the complete list remains retrievable.
+  - Completed tasks render only stable identifiers, state, and minimal evidence.
+  - Decision rendering prefers explicit implementation commitments when present.
+  - JSON projection keeps only named agent-facing fields and fails closed on unknown projection recipes.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+tasks:
+  - id: P54-T1
+    type: architecture
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P52-T1
+    description: Define safe projection rules by content type and document the non-summarization boundary.
+    reads:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+      - src/core/pack/loaders.ts
+      - src/core/pack/formatters/markdown.ts
+    writes:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+    acceptance_refs:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+  - id: P54-T2
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P54-T1
+    description: Project large read glob results by directory while deferring the complete file list.
+    reads:
+      - src/core/pack/loaders.ts
+      - src/core/glob.ts
+      - src/core/pack/formatters/markdown.ts
+    writes:
+      - src/core/pack/loaders.ts
+      - src/core/pack/formatters/markdown.ts
+      - tests/unit/core/pack/loaders.test.ts
+      - tests/unit/core/glob.test.ts
+      - tests/integration/task-context-budget.test.ts
+    acceptance_refs:
+      - tests/unit/core/pack/loaders.test.ts
+      - tests/unit/core/glob.test.ts
+      - tests/integration/task-context-budget.test.ts
+  - id: P54-T3
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P54-T1
+    description: Project completed task, decision, and JSON records through deterministic structural fields.
+    reads:
+      - src/core/pack/loaders.ts
+      - src/core/pack/formatters/markdown.ts
+      - src/core/decisions/adr.ts
+      - src/core/schemas/recommend-result.ts
+    writes:
+      - src/core/pack/loaders.ts
+      - src/core/pack/formatters/markdown.ts
+      - tests/unit/core/pack/loaders.test.ts
+      - tests/unit/core/pack/loaders-decisions.test.ts
+      - tests/unit/core/pack-core.test.ts
+    acceptance_refs:
+      - tests/unit/core/pack/loaders.test.ts
+      - tests/unit/core/pack/loaders-decisions.test.ts
+      - tests/unit/core/pack-core.test.ts
+  - id: P54-T4
+    type: test
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P54-T2
+      - P54-T3
+    description: Add fixed fixtures for projection bytes and deferred reference retrieval.
+    reads:
+      - tests/fixtures/**
+      - tests/integration/task-context-budget.test.ts
+    writes:
+      - tests/fixtures/context-projection/**
+      - tests/integration/task-context-budget.test.ts
+      - tests/unit/core/pack-core.test.ts
+    acceptance_refs:
+      - tests/integration/task-context-budget.test.ts
+      - tests/unit/core/pack-core.test.ts
