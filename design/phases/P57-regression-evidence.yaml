@@ -14,6 +14,10 @@ non_goals:
   - Link runtime failure fingerprints to regression artifacts.
   - Add structured completion evidence, task evidence commands, terminal repair summaries, or runtime regression artifacts.
 definition_of_done:
+  - "The advisory applies only to tasks with `type: bugfix`."
+  - Static evidence exists only when `writes` names a test, fixture, or reproduction artifact, or when `acceptance_refs` names an existing test, fixture, or reproduction artifact.
+  - Path classification is closed to `**/*.test.ts`, `**/*.test.tsx`, `**/*.spec.ts`, `**/*.spec.tsx`, `tests/**`, `test/**`, `fixtures/**`, and `reproductions/**`.
+  - "`acceptance_refs` are for existing evidence files; new tests, fixtures, or reproduction artifacts belong in `writes`."
   - Bugfix completion guidance names accepted regression evidence forms.
   - The advisory checks only static acceptance declarations and does not claim to prove that a test prevents a runtime failure.
   - Missing regression evidence is surfaced as an advisory first, not a hard block.

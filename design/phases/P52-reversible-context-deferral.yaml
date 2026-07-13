@@ -28,6 +28,9 @@ verification:
     - pnpm typecheck
     - pnpm test:unit
     - pnpm test:integration:smoke
+    - pnpm check:fs-authority
+    - pnpm check:fs-containment
+    - pnpm check:security-hardening
 tasks:
   - id: P52-T1
     type: architecture
@@ -39,7 +42,7 @@ tasks:
     expected_duration: short
     status: planned
     depends_on:
-      - P51-T4
+      - P57-T3
     description: Specify the deferred context manifest, reference format, filesystem authority, and retrieval contract.
     reads:
       - docs/cli-contract.md
@@ -67,7 +70,7 @@ tasks:
     status: planned
     depends_on:
       - P52-T1
-    description: Persist deferred sections through a shared content-addressed store primitive and render a compact manifest reference in budgeted context packs.
+    description: Persist deferred sections through a shared content-addressed store primitive without changing existing Evidence artifact references, schema, storage, round-trip, or security contracts.
     reads:
       - src/core/pack/index.ts
       - src/core/pack/budget.ts
@@ -76,6 +79,7 @@ tasks:
       - src/core/evidence/evidence-store.ts
       - src/core/project-fs/operations.ts
     writes:
+      - src/core/evidence/evidence-store.ts
       - src/core/pack/index.ts
       - src/core/pack/budget.ts
       - src/core/pack/formatters/markdown.ts
@@ -83,16 +87,19 @@ tasks:
       - src/core/content-addressed-store/**
       - src/core/project-fs/authorities/context-deferral-authority.ts
       - src/core/project-fs/index.ts
+      - scripts/check-fs-authority.mjs
       - tests/unit/core/pack/budget.test.ts
       - tests/unit/core/pack-core.test.ts
       - tests/unit/core/evidence.test.ts
       - tests/unit/security/filesystem-operation-proof.test.ts
+      - tests/unit/scripts/check-fs-authority.test.ts
       - tests/integration/task-context-budget.test.ts
     acceptance_refs:
       - tests/unit/core/pack/budget.test.ts
       - tests/unit/core/pack-core.test.ts
       - tests/unit/core/evidence.test.ts
       - tests/unit/security/filesystem-operation-proof.test.ts
+      - tests/unit/scripts/check-fs-authority.test.ts
       - tests/integration/task-context-budget.test.ts
   - id: P52-T3
     type: feature
@@ -117,16 +124,16 @@ tasks:
       - src/commands/context-show.ts
       - src/cli.ts
       - src/cli/usage.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
       - docs/cli-reference.generated.md
       - tests/integration/cli-help.test.ts
       - tests/integration/json-stdout.test.ts
       - tests/unit/commands/task-context.test.ts
-      - tests/unit/commands/evidence.test.ts
     acceptance_refs:
       - tests/integration/cli-help.test.ts
       - tests/integration/json-stdout.test.ts
       - tests/unit/commands/task-context.test.ts
-      - tests/unit/commands/evidence.test.ts
   - id: P52-T4
     type: docs
     ambiguity: low

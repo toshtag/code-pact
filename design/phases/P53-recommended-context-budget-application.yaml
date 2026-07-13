@@ -12,8 +12,11 @@ non_goals:
   - Apply a custom agent profile budget name as the recommended profile.
   - Use tokenizers, provider APIs, embeddings, ranking, or model-generated summaries.
 definition_of_done:
-  - "`task prepare --context-budget auto` uses the same recommendation returned in the response."
-  - Budget precedence is fixed as `--budget-bytes`, explicit `--context-budget <profile>`, `--context-budget auto`, agent-profile recommended mode, then no budget.
+  - "`task prepare --recommended-context-budget` uses the same recommendation returned in the response."
+  - "`--budget-bytes`, `--context-budget <profile>`, and `--recommended-context-budget` are mutually exclusive; multiple budget modes are `CONFIG_ERROR`."
+  - Existing custom context-budget profile names, including `auto`, keep their current meaning.
+  - "Agent profile opt-in uses `context_budget.application_mode: recommended`; omitted or `manual` means no implicit budget."
+  - Existing `context_budget.default_profile` semantics do not change.
   - Explicit CLI flags always override agent profile recommended mode.
   - Auto budget resolution uses the recommendation already produced in the same call and does not load the agent profile twice.
   - Done, blocked, and unmet-dependency early returns do not perform auto budget resolution or extra context I/O.
@@ -38,7 +41,7 @@ tasks:
     status: planned
     depends_on:
       - P52-T4
-    description: Add explicit `auto` budget resolution for task preparation.
+    description: Add explicit recommended budget resolution for task preparation without using `auto` as a sentinel profile name.
     reads:
       - src/cli/commands/task.ts
       - src/commands/task-prepare.ts
@@ -52,10 +55,12 @@ tasks:
       - src/cli/spec/task.ts
       - tests/unit/commands/task-prepare.test.ts
       - tests/integration/cli.test.ts
+      - tests/integration/pack-byte-identical.test.ts
       - tests/integration/task-prepare-commands-contract.test.ts
     acceptance_refs:
       - tests/unit/commands/task-prepare.test.ts
       - tests/integration/cli.test.ts
+      - tests/integration/pack-byte-identical.test.ts
       - tests/integration/task-prepare-commands-contract.test.ts
   - id: P53-T2
     type: feature
@@ -68,7 +73,7 @@ tasks:
     status: planned
     depends_on:
       - P53-T1
-    description: Add an agent profile mode that applies the recommended budget only when configured.
+    description: Add `context_budget.application_mode` so recommended budget application is opt-in and legacy profile selection remains unchanged.
     reads:
       - src/cli/commands/task.ts
       - src/commands/task-prepare.ts
