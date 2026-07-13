@@ -144,9 +144,10 @@ export function resolveRecommendation(
       task,
       lifecycleMode,
     ),
-    // Additive, recommendation-only context budget. Reuses the already-
-    // loaded agent profile's context_budget for the same-name byte override, so
-    // no extra I/O. Never auto-applied; surfaced for the agent to act on.
+    // Additive context budget recommendation. Reuses the already-loaded agent
+    // profile's context_budget for the same-name byte override, so no extra
+    // I/O. The recommendation stays advisory in `recommend`; `task prepare`
+    // may apply this already-produced value only through explicit opt-in.
     contextFit: recommendContextFit({
       contextSize: task.context_size,
       ambiguity: task.ambiguity,

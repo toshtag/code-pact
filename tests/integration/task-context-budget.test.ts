@@ -180,7 +180,7 @@ describe("task prepare --context-budget (P47)", () => {
     expect(res.code).toBe(2);
   });
 
-  it("the commands dictionary does not echo --context-budget", () => {
+  it("the commands dictionary uses resolved --budget-bytes, not --context-budget", () => {
     const env = expectJsonOk<{ commands: Record<string, string> }>(
       project.run([
         "task", "prepare", "P1-T1", "--agent", "claude-code", "--dry-run",
@@ -190,15 +190,80 @@ describe("task prepare --context-budget (P47)", () => {
     for (const cmd of Object.values(env.data.commands)) {
       expect(cmd).not.toMatch(/--context-budget/);
     }
-    // And the context command remains exactly the unchanged buildCommands form.
     expect(env.data.commands.context).toBe(
-      "code-pact task context P1-T1 --agent claude-code",
+      "code-pact task context P1-T1 --agent claude-code --budget-bytes 30000",
     );
   });
 
-  it("--help includes --context-budget", () => {
+  it("--recommended-context-budget applies recommendation and emits resolved bytes", () => {
+    const env = expectJsonOk<{
+      recommendation: {
+        contextFit: {
+          recommendedProfile: string;
+          recommendedBudgetBytes: number;
+        };
+      };
+      applied_context_budget: {
+        source: string;
+        profile: string;
+        budget_bytes: number;
+      };
+      commands: Record<string, string>;
+    }>(
+      project.run([
+        "task", "prepare", "P1-T1", "--agent", "claude-code", "--dry-run",
+        "--recommended-context-budget", "--json",
+      ]),
+    );
+    expect(env.data.applied_context_budget).toEqual({
+      source: "recommended_cli",
+      profile: env.data.recommendation.contextFit.recommendedProfile,
+      budget_bytes: env.data.recommendation.contextFit.recommendedBudgetBytes,
+    });
+    expect(env.data.commands.context).toBe(
+      `code-pact task context P1-T1 --agent claude-code --budget-bytes ${env.data.recommendation.contextFit.recommendedBudgetBytes}`,
+    );
+    expect(env.data.commands.context).not.toContain("--recommended-context-budget");
+    expect(env.data.commands.context).not.toContain("--context-budget");
+  });
+
+  it.each([
+    ["--budget-bytes + --context-budget", ["--budget-bytes", "30000", "--context-budget", "tight"]],
+    ["--budget-bytes + --recommended-context-budget", ["--budget-bytes", "30000", "--recommended-context-budget"]],
+    ["--context-budget + --recommended-context-budget", ["--context-budget", "tight", "--recommended-context-budget"]],
+    ["all three budget modes", ["--budget-bytes", "30000", "--context-budget", "tight", "--recommended-context-budget"]],
+  ])("%s is CONFIG_ERROR (exit 2)", (_label, flags) => {
+    const res = project.run([
+      "task", "prepare", "P1-T1", "--agent", "claude-code",
+      ...flags, "--dry-run", "--json",
+    ]);
+    const env = expectJsonErr(res, "CONFIG_ERROR");
+    expect(env.error.message).toMatch(/mutually exclusive/);
+    expect(res.code).toBe(2);
+  });
+
+  it("task context rejects --recommended-context-budget as an unknown flag", () => {
+    const res = project.run([
+      "task", "context", "P1-T1", "--agent", "claude-code",
+      "--recommended-context-budget", "--json",
+    ]);
+    expectJsonErr(res, "CONFIG_ERROR");
+    expect(res.code).toBe(2);
+  });
+
+  it("pack rejects --recommended-context-budget as an unknown flag", () => {
+    const res = project.run([
+      "pack", "--phase", "P1", "--task", "P1-T1", "--agent", "claude-code",
+      "--recommended-context-budget", "--json",
+    ]);
+    expectJsonErr(res, "CONFIG_ERROR");
+    expect(res.code).toBe(2);
+  });
+
+  it("--help includes both prepare budget flags", () => {
     const res = project.run(["task", "prepare", "--help"]);
     expect(res.stdout + res.stderr).toMatch(/--context-budget/);
+    expect(res.stdout + res.stderr).toMatch(/--recommended-context-budget/);
   });
 });
 
@@ -396,6 +461,8 @@ describe("task prepare --context-budget skips resolution on early-return states 
       next_action: { type: string };
       context_pack_bytes: number;
       context_pack_path: string | null;
+      applied_context_budget?: unknown;
+      commands: { context: string };
     }>(
       project.run([
         "task", "prepare", "P1-T1", "--agent", "claude-code",
@@ -406,6 +473,33 @@ describe("task prepare --context-budget skips resolution on early-return states 
     expect(env.data.next_action.type).toBe("noop_already_done");
     expect(env.data.context_pack_bytes).toBe(0);
     expect(env.data.context_pack_path).toBeNull();
+    expect(env.data.applied_context_budget).toBeUndefined();
+    expect(env.data.commands.context).toBe(
+      "code-pact task context P1-T1 --agent claude-code",
+    );
+  });
+
+  it("a done task omits applied_context_budget even with --recommended-context-budget", () => {
+    expectJsonOk(project.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]));
+    expectJsonOk(project.run(["task", "complete", "P1-T1", "--agent", "claude-code", "--json"]));
+
+    const env = expectJsonOk<{
+      recommendation: null;
+      applied_context_budget?: unknown;
+      commands: { context: string };
+      context_pack_bytes: number;
+    }>(
+      project.run([
+        "task", "prepare", "P1-T1", "--agent", "claude-code",
+        "--recommended-context-budget", "--json",
+      ]),
+    );
+    expect(env.data.recommendation).toBeNull();
+    expect(env.data.applied_context_budget).toBeUndefined();
+    expect(env.data.context_pack_bytes).toBe(0);
+    expect(env.data.commands.context).toBe(
+      "code-pact task context P1-T1 --agent claude-code",
+    );
   });
 });
 

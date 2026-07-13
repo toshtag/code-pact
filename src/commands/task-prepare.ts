@@ -29,6 +29,12 @@ import {
 import { loadPhase } from "../core/plan/load-phase.ts";
 import { loadProject, resolveEnabledAgent } from "../core/project.ts";
 import type { Task as TaskT } from "../core/schemas/task.ts";
+import {
+  appliedBudgetBytes,
+  resolveAppliedContextBudget,
+  type AppliedContextBudget,
+  type TaskPrepareBudgetSelection,
+} from "../core/context-fit/applied-context-budget.ts";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -41,22 +47,7 @@ export type TaskPrepareOptions = {
   agent?: string;
   /** When true, build the context pack but do not write it to disk. */
   dryRun?: boolean;
-  /**
-   * Upper bound on the rendered pack size in UTF-8 bytes. When
-   * set, sections elide in the locked priority order until the bound
-   * is met; throws `ContextOverBudgetError` when unachievable.
-   * Progress-read-only invariant is preserved on the new failure path.
-   */
-  budgetBytes?: number;
-  /**
-   * Lazy budget resolver, invoked ONLY on the pack-build path (after the
-   * done / blocked / unmet-deps early returns). This lets `task prepare
-   * --context-budget <profile>` defer profile resolution — and the agent-
-   * profile read it entails — so an early-return state never pays for it.
-   * Mutually exclusive with `budgetBytes` at the call site. Its resolved value
-   * (when not undefined) is used exactly like `budgetBytes`.
-   */
-  resolveBudgetBytes?: () => Promise<number | undefined>;
+  budgetSelection?: TaskPrepareBudgetSelection;
 };
 
 export type NextActionType =
@@ -121,6 +112,8 @@ export type TaskPrepareResult = {
     items: { text: string; done: boolean }[];
   }[];
   deferred_context?: DeferredContextProjection;
+  /** Present only on the context-pack build path; omitted for early returns. */
+  applied_context_budget?: AppliedContextBudget;
 };
 
 // ---------------------------------------------------------------------------
@@ -167,9 +160,12 @@ function buildCommands(
   agent: string,
   phaseId: string,
   taskId: string,
+  contextBudgetBytes?: number | undefined,
 ): TaskPrepareCommands {
   return {
-    context: `code-pact task context ${taskId} --agent ${agent}`,
+    context: `code-pact task context ${taskId} --agent ${agent}${
+      contextBudgetBytes !== undefined ? ` --budget-bytes ${contextBudgetBytes}` : ""
+    }`,
     start: `code-pact task start ${taskId} --agent ${agent}`,
     verify: `code-pact verify --phase ${phaseId} --task ${taskId} --json --detail agent`,
     complete: `code-pact task complete ${taskId} --agent ${agent} --json --detail agent`,
@@ -262,6 +258,7 @@ export async function runTaskPrepare(
 ): Promise<TaskPrepareResult> {
   const { cwd, taskId } = opts;
   const dryRun = opts.dryRun ?? false;
+  const budgetSelection = opts.budgetSelection ?? { kind: "none" };
 
   // 1. Agent validation (mirrors task context / task start order).
   const project = await loadProject(cwd);
@@ -408,13 +405,14 @@ export async function runTaskPrepare(
 
   // 9. Context pack — build always, write unless dry-run. The budget is
   // resolved here, on the build path, so the done / blocked / unmet-deps early
-  // returns above never trigger profile resolution or an agent-profile read.
-  const budgetBytes =
-    opts.budgetBytes !== undefined
-      ? opts.budgetBytes
-      : opts.resolveBudgetBytes
-        ? await opts.resolveBudgetBytes()
-        : undefined;
+  // returns above never trigger budget resolution or extra profile I/O.
+  const appliedContextBudget = resolveAppliedContextBudget({
+    selection: budgetSelection,
+    agentName,
+    contextBudget: agentProfile.context_budget,
+    recommendation,
+  });
+  const budgetBytes = appliedBudgetBytes(appliedContextBudget);
   const pack = await buildContextPack({
     cwd,
     phaseId,
@@ -471,8 +469,9 @@ export async function runTaskPrepare(
       type: nextActionType,
       message: messageFor(nextActionType, recommendation.lifecycleMode),
     },
-    commands,
+    commands: buildCommands(agentName, phaseId, taskId, budgetBytes),
     blocked_by: [],
+    applied_context_budget: appliedContextBudget,
   };
 
   if (wouldWritePath !== undefined) {

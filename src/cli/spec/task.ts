@@ -26,6 +26,7 @@ const prepare: CommandSpec = {
     { name: "agent", value: "<name>", description: "Agent name. Defaults to project default_agent." },
     { name: "budget-bytes", value: "<N>", description: "Cap the rendered context pack at N bytes." },
     { name: "context-budget", value: "<profile>", description: "Use a named context budget profile (tight, balanced, wide, or an agent-defined profile). Resolves to a byte budget. Mutually exclusive with --budget-bytes." },
+    { name: "recommended-context-budget", description: "Apply the deterministic context budget recommended in this same task prepare call. Mutually exclusive with --budget-bytes and --context-budget." },
     { name: "dry-run", description: "Report the would-write pack path without writing it." },
     { name: "json", description: "Emit JSON." },
   ],

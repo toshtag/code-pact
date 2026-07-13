@@ -917,6 +917,14 @@ async function cmdPack(
   });
 
   const json = globalJson || values.json === true;
+  if (values["recommended-context-budget"] === true) {
+    emitError(
+      json,
+      "CONFIG_ERROR",
+      "pack: --recommended-context-budget is only supported by task prepare.",
+    );
+    return 2;
+  }
   const phaseId = values.phase as string | undefined;
   const taskId = values.task as string | undefined;
   const agentName = (values.agent as string | undefined) ?? "claude-code";
