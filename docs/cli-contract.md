@@ -1663,6 +1663,54 @@ Conformance is intentionally narrower than `adapter doctor` — it inspects only
         "file": "CLAUDE.md"
       },
       {
+        "id": "recommendation_consumption_guidance_present",
+        "status": "pass",
+        "severity": "advisory",
+        "file": "CLAUDE.md"
+      },
+      {
+        "id": "lifecycle_mode_guidance_present",
+        "status": "pass",
+        "severity": "advisory",
+        "file": "CLAUDE.md"
+      },
+      {
+        "id": "cannot_switch_model_fallback_present",
+        "status": "pass",
+        "severity": "advisory",
+        "file": "CLAUDE.md"
+      },
+      {
+        "id": "repair_policy_guidance_present",
+        "status": "pass",
+        "severity": "advisory",
+        "file": "CLAUDE.md"
+      },
+      {
+        "id": "repair_policy_json_paths_present",
+        "status": "pass",
+        "severity": "advisory",
+        "file": "CLAUDE.md"
+      },
+      {
+        "id": "bounded_repair_runtime_constraints_present",
+        "status": "pass",
+        "severity": "advisory",
+        "file": "CLAUDE.md"
+      },
+      {
+        "id": "bounded_repair_stop_guidance_present",
+        "status": "pass",
+        "severity": "advisory",
+        "file": "CLAUDE.md"
+      },
+      {
+        "id": "bounded_repair_nonretryable_guidance_present",
+        "status": "pass",
+        "severity": "advisory",
+        "file": "CLAUDE.md"
+      },
+      {
         "id": "file_checksum_match",
         "status": "pass",
         "severity": "required",
@@ -1673,7 +1721,7 @@ Conformance is intentionally narrower than `adapter doctor` — it inspects only
 }
 ```
 
-Every check object carries a `severity` (`required` | `advisory`). The three P30 hardening checks (`task_prepare_is_primary`, `no_contract_antipatterns`, `activation_rules_documented`) show `advisory` above because this example's manifest `generator_version` predates the hardening threshold; on an adapter generated at or after it they are `required`.
+Every check object carries a `severity` (`required` | `advisory`). The hardening, recommendation-consumption, and bounded-repair checks show `advisory` above because this example's manifest `generator_version` predates their thresholds; on an adapter generated at or after a group's threshold, that group's checks are `required`.
 
 #### Checks
 
@@ -1690,15 +1738,51 @@ Every check object carries a `severity` (`required` | `advisory`). The three P30
 | `task_prepare_is_primary`            | `code-pact task prepare` appears in the instruction and precedes the first `code-pact recommend` / `code-pact task context` mention (it is the primary per-task entrypoint)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `no_contract_antipatterns`           | The instruction / its examples contain no P29 anti-pattern (e.g. `task finalize ... --agent`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `activation_rules_documented`        | The activation-rule anchors (`task finalize --write`, `wait_for_dependencies`, `CONTEXT_OVER_BUDGET`) are present — verifies documentation presence, not runtime obedience                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `recommendation_consumption_guidance_present` | The guidance tells the agent to consume the recommendation, anchored on `data.recommendation`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `lifecycle_mode_guidance_present` | The guidance documents `lifecycleMode` and the `record_only` lane.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `cannot_switch_model_fallback_present` | The guidance tells the agent to report a limitation when it `cannot switch model`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `repair_policy_guidance_present` | The guidance documents bounded repair basics: `repairPolicy`, `maxRepairAttempts`, and `command_failed`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `repair_policy_json_paths_present` | The guidance documents the command-specific JSON paths for `repairPolicy` and `allowedEscalation`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `bounded_repair_runtime_constraints_present` | The guidance requires the same model, effort, and context and uses the failure delta for the bounded attempt.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `bounded_repair_stop_guidance_present` | The guidance documents repeated-fingerprint stopping and allowed escalation after exhaustion.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `bounded_repair_nonretryable_guidance_present` | The guidance documents the closed nonretryable failure-kind list.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `file_checksum_match`                | One per manifest file: the on-disk LF-normalised UTF-8 sha256 equals the manifest's recorded value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `adapter_file_path_unowned`          | A manifest entry (the `role: instruction` file, or any `files[]` entry) names a path this adapter could not have generated, that resolves through a symlink, or whose declared role disagrees with the path's only legitimate static role. The target is NOT read — no `actual_sha256` and no contract-heading inspection are produced — so a forged manifest cannot turn conformance into a file-content/SHA oracle on arbitrary local files (e.g. `.env`). Read authority is the NARROW built-in path set (`ownedPathRoles`) with a matching declared role, NOT the broad create namespace — so a victim's hand-authored `.claude/skills/private.md` is refused too, and a role-swap (e.g. `CLAUDE.md` with `role: skill`) is `unowned` before any filesystem access. Always `required` severity (fail-closed). |
 | `file_checksum_skipped_unverifiable` | A manifest entry names a dynamically-generated skill in the shared `.claude/skills/` namespace (matches the role-scoped `createPathGlobsByRole` for role=skill but not the narrow read-authority set `ownedPathRoles`) and is not recorded as `ownership: handed_off`. Its name is attacker-influenceable, so read-ownership cannot be proven: the file is NOT read or checksummed. `advisory` severity. To regenerate, move or delete the file, then run `adapter upgrade <agent> --write`.                                                                                                                                                                                                                                                                              |
 | `dynamic_handoff_orphan_unverified`  | A manifest entry is `ownership: handed_off` and names a dynamic skill under the adapter's role-scoped create namespace, but the file is missing. Existing bytes are not read. Conformance compares only the current desired output hash with the manifest hash; when they match, `adapter upgrade <agent> --write` can safely prune the stale manifest entry. `advisory` severity.                                                                                                                                                                                                                                                                                                                                                                          |
 | `dynamic_handoff_manifest_stale`     | A manifest entry is `ownership: handed_off` and names a dynamic skill under the adapter's role-scoped create namespace, but the current desired output hash differs from the manifest hash. Existing bytes are not read or checksummed. The stale manifest entry is surfaced as `advisory`; regenerate the adapter or review the handoff before relying on orphan pruning.                                                                                                                                                                                                                                                                                                                                                                             |
 
-#### Severity (v1.x, P30)
+#### Severity and generator-version gates
 
-Each check carries a `severity`: `required` or `advisory`. `compliant` is `true` unless a **required** check fails; a failing `advisory` check is reported (its `details` carry an `adapter upgrade <agent> --write` remediation) but does not break compliance or change the exit code. Most checks are `required`. The three P30 hardening checks (`task_prepare_is_primary`, `no_contract_antipatterns`, `activation_rules_documented`) resolve severity per install from the manifest `generator_version`: `required` when it is semver >= `ADAPTER_CONTRACT_HARDENING_FROM_VERSION` (defined in `src/core/adapters/conformance-spec.ts`), `advisory` below (or when the version is missing / unparseable). This keeps adapters that predate the P29-aligned templates warning rather than hard-failing until they are re-upgraded. Dynamic read-authority checks that cannot prove safe byte reads (`file_checksum_skipped_unverifiable`, `dynamic_handoff_orphan_unverified`, `dynamic_handoff_manifest_stale`) are always `advisory`.
+Each check carries a `severity`: `required` or `advisory`.
+`compliant` is `true` unless a required check fails.
+
+The hardening checks (`task_prepare_is_primary`,
+`no_contract_antipatterns`, and `activation_rules_documented`) use
+`ADAPTER_CONTRACT_HARDENING_FROM_VERSION`.
+
+The recommendation-consumption checks
+(`recommendation_consumption_guidance_present`,
+`lifecycle_mode_guidance_present`, and
+`cannot_switch_model_fallback_present`) use
+`RECOMMENDATION_CONSUMPTION_FROM_VERSION`.
+
+The bounded-repair checks
+(`repair_policy_guidance_present`,
+`repair_policy_json_paths_present`,
+`bounded_repair_runtime_constraints_present`,
+`bounded_repair_stop_guidance_present`, and
+`bounded_repair_nonretryable_guidance_present`) use
+`BOUNDED_REPAIR_GUIDANCE_FROM_VERSION`.
+
+For each group, adapters generated below the group's threshold, or with a
+missing or unparseable `generator_version`, report missing anchors as
+`advisory`. Adapters generated at or above the threshold report them as
+`required`. This prevents an upgrade of the Code Pact executable from making
+older generated adapters non-compliant before those adapters are regenerated.
+
+Dynamic read-authority checks that cannot prove a safe byte read remain
+always advisory. All other checks are required.
 
 `adapter conformance` and `adapter doctor` share the module `src/core/adapters/conformance-spec.ts`, but they consume different parts of it and check different things. `adapter conformance` is the only caller that reads the `lifecycle_required` / `diagnostic_required` surface lists and the `REQUIRED_FAILURE_GUIDANCE` keywords (the `required_cli_surface_mentions` and `required_failure_guidance` checks above). `adapter doctor`'s `ADAPTER_CONTRACT_DRIFT` check consumes only the heading constants from the same module (`AGENT_CONTRACT_SECTION_HEADING` and `AGENT_CONTRACT_AXIS_HEADINGS`) — it asserts the `## Agent contract` section and its three axis sub-headings are present, not that the required CLI surface or failure guidance is mentioned. So the shared module guarantees the two callers agree on the contract's _headings_; the required-surface and failure-guidance checks are `adapter conformance`-only.
 

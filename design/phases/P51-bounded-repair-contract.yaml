@@ -122,16 +122,20 @@ tasks:
       - src/i18n/ja-JP.ts
       - src/core/adapters/template-sections.ts
       - src/core/adapters/conformance-spec.ts
+      - src/commands/adapter-conformance.ts
     writes:
       - src/i18n/en-US.ts
       - src/i18n/ja-JP.ts
       - src/core/adapters/template-sections.ts
       - src/core/adapters/conformance-spec.ts
+      - src/commands/adapter-conformance.ts
       - tests/unit/commands/adapter-conformance.test.ts
+      - tests/unit/commands/adapter-conformance-hardening.test.ts
       - tests/integration/adapter-conformance.test.ts
       - tests/unit/i18n/agent-contract-guidance.test.ts
     acceptance_refs:
       - tests/unit/commands/adapter-conformance.test.ts
+      - tests/unit/commands/adapter-conformance-hardening.test.ts
       - tests/integration/adapter-conformance.test.ts
       - tests/unit/i18n/agent-contract-guidance.test.ts
   - id: P51-T4
