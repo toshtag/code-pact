@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { buildAgentDetailMeasurements } from "../../../scripts/measure-agent-detail.ts";
 
 describe("agent detail measurement fixture", () => {
-  it("keeps the committed P51 byte measurements reproducible", async () => {
+  it("keeps the committed agent-detail byte measurements reproducible", async () => {
     const actual = await buildAgentDetailMeasurements();
     const expected = JSON.parse(
       await readFile("docs/maintainers/evidence/agent-detail-evidence.json", "utf8"),

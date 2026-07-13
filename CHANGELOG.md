@@ -13,6 +13,8 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-07-13
+
 ### Added
 
 - **Added a deterministic bounded repair recommendation contract.** `recommend` and `task prepare` now include `repairPolicy` on non-null recommendations, and generated adapter guidance documents one same-model, same-effort, same-context repair attempt for command failures only.
@@ -21,7 +23,7 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 - **Made local and GitHub verification change-aware.** Added `scripts/verification-scope.mjs` and `pnpm verify:local` so agents and contributors run only checks relevant to the changed files. Required PR CI now classifies changes into `docs` and `standard` scopes and runs matching jobs, and Deep CI is maintainer-selectable via `workflow_dispatch`. Deep CI and `release:check` remain strict but are no longer required for ordinary local development.
 - **Upgraded the reviewed Vite toolchain to 8.1.4.** The development/test stack now resolves Vite to 8.1.4 with Vitest 4.1.10 while retaining the existing tsup production build and esbuild 0.28.1 smoke/pinning policy.
-- **Retired the internal general-purpose Evidence Harness.** Removed its release-coupled aggregate CSV/JSON snapshots and dedicated unit/integration test path because the archived dogfood corpus no longer produced actionable live-task measurements. The focused P51 agent-detail byte fixture remains under `docs/maintainers/evidence/` as a direct regression check for the compact evidence contract.
+- **Retired the internal general-purpose Evidence Harness.** Removed its release-coupled aggregate CSV/JSON snapshots and dedicated unit/integration test path because the archived dogfood corpus no longer produced actionable live-task measurements. The focused agent-detail byte fixture introduced for v2.1.0 remains under `docs/maintainers/evidence/` as a direct regression check for the compact evidence contract.
 - **Leaned the automated npm release path.** Removed the duplicate release-gate build, added bounded timeouts to every publish job, and reduced transient release artifact retention to seven days while preserving Trusted Publishing, provenance, and registry tarball verification.
 
 ## [2.1.0] — 2026-07-11
