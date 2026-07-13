@@ -2,7 +2,7 @@ id: P52
 name: Reversible Context Deferral
 weight: 8
 confidence: medium
-risk: medium
+risk: high
 status: planned
 objective: >
   Replace irreversible context section elision with content-addressed deferral
@@ -42,7 +42,7 @@ tasks:
     expected_duration: short
     status: planned
     depends_on:
-      - P57-T3
+      - P51-T4
     description: Specify the deferred context manifest, reference format, filesystem authority, and retrieval contract.
     reads:
       - docs/cli-contract.md
@@ -62,11 +62,11 @@ tasks:
   - id: P52-T2
     type: feature
     ambiguity: medium
-    risk: medium
+    risk: high
     context_size: large
-    write_surface: medium
+    write_surface: high
     verification_strength: strong
-    expected_duration: medium
+    expected_duration: long
     status: planned
     depends_on:
       - P52-T1
@@ -118,7 +118,6 @@ tasks:
       - src/commands/task-context.ts
       - src/commands/pack.ts
     writes:
-      - src/cli/spec/root.ts
       - src/cli/spec/context.ts
       - src/cli/commands/context.ts
       - src/commands/context-show.ts
@@ -126,13 +125,19 @@ tasks:
       - src/cli/usage.ts
       - src/i18n/en-US.ts
       - src/i18n/ja-JP.ts
+      - scripts/gen-cli-reference.ts
       - docs/cli-reference.generated.md
       - tests/integration/cli-help.test.ts
       - tests/integration/json-stdout.test.ts
+      - tests/unit/cli/spec-render.test.ts
+      - tests/unit/cli/leaf-help-coverage.test.ts
       - tests/unit/commands/task-context.test.ts
+      - tests/unit/commands/context-show.test.ts
     acceptance_refs:
       - tests/integration/cli-help.test.ts
       - tests/integration/json-stdout.test.ts
+      - tests/unit/cli/spec-render.test.ts
+      - tests/unit/cli/leaf-help-coverage.test.ts
       - tests/unit/commands/task-context.test.ts
   - id: P52-T4
     type: docs

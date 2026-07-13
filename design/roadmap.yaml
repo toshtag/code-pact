@@ -149,9 +149,9 @@ phases:
   - id: P54
     path: design/phases/P54-structural-context-projection.yaml
     weight: 7
-  - id: P55
-    path: design/phases/P55-stable-core-task-delta.yaml
-    weight: 7
   - id: P57
     path: design/phases/P57-regression-evidence.yaml
     weight: 5
+  - id: P55
+    path: design/phases/P55-stable-core-task-delta.yaml
+    weight: 7

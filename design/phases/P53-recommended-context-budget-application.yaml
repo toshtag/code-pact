@@ -41,7 +41,7 @@ tasks:
     status: planned
     depends_on:
       - P52-T4
-    description: Add explicit recommended budget resolution for task preparation without using `auto` as a sentinel profile name.
+    description: Add explicit recommended budget resolution for task preparation without using `auto` as a sentinel profile name, then update the generated CLI reference with `pnpm gen:cli-reference`.
     reads:
       - src/cli/commands/task.ts
       - src/commands/task-prepare.ts
@@ -53,6 +53,7 @@ tasks:
       - src/commands/task-prepare.ts
       - src/core/context-fit/resolve-budget-profile.ts
       - src/cli/spec/task.ts
+      - docs/cli-reference.generated.md
       - tests/unit/commands/task-prepare.test.ts
       - tests/integration/cli.test.ts
       - tests/integration/pack-byte-identical.test.ts
@@ -110,15 +111,12 @@ tasks:
     reads:
       - docs/agent-contract.md
       - docs/cli-contract.md
-      - docs/upgrading.md
       - CHANGELOG.md
     writes:
       - docs/agent-contract.md
       - docs/cli-contract.md
-      - docs/upgrading.md
       - CHANGELOG.md
     acceptance_refs:
       - docs/agent-contract.md
       - docs/cli-contract.md
-      - docs/upgrading.md
       - CHANGELOG.md

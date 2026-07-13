@@ -17,6 +17,7 @@ non_goals:
   - Implement split output before the decision is accepted.
 definition_of_done:
   - The decision evaluates P52-P54 measurement evidence before approving any implementation.
+  - The task creates `design/decisions/P55-stable-core-task-delta-rfc.md` with an accepted, rejected, or deferred outcome.
   - If approved, split artifacts must be explicit opt-in and the default combined pack must remain unchanged.
   - If approved, the public contract must define `task context <task-id> --context-output split` and `task prepare <task-id> --context-output split` or an equivalent non-conflicting flag.
   - If approved, split JSON must include context output mode, manifest reference, stable-core reference, stable-core digest and bytes, task-delta reference, task-delta digest and bytes, and retrieval commands for both parts.
@@ -47,8 +48,7 @@ tasks:
       - src/core/pack/index.ts
       - src/core/pack/front-matter.ts
     writes:
-      - docs/agent-contract.md
-      - docs/cli-contract.md
+      - design/decisions/P55-stable-core-task-delta-rfc.md
     acceptance_refs:
       - docs/agent-contract.md
       - docs/cli-contract.md

@@ -80,14 +80,13 @@ tasks:
       - src/commands/task-prepare.ts
       - src/cli/commands/task.ts
       - tests/unit/core/recommend/resolve.test.ts
-      - tests/unit/recommend/escalation.test.ts
+      - tests/unit/core/recommend/repair-policy.test.ts
       - tests/unit/commands/recommend.test.ts
       - tests/unit/commands/task-prepare.test.ts
       - tests/integration/cli.test.ts
       - tests/integration/task-prepare-commands-contract.test.ts
     acceptance_refs:
       - tests/unit/core/recommend/resolve.test.ts
-      - tests/unit/recommend/escalation.test.ts
       - tests/unit/commands/recommend.test.ts
       - tests/unit/commands/task-prepare.test.ts
       - tests/integration/cli.test.ts
