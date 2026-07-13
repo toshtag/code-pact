@@ -13,11 +13,13 @@ non_goals:
   - Keep lines only because they contain imperative keywords.
   - Delegate projection quality to a model.
 definition_of_done:
+  - Projection is enabled only on explicit budgeted context paths; default no-budget packs stay byte-identical.
+  - "`task context --explain` does not enable projection by itself."
   - Read glob output can be grouped while the complete list remains retrievable.
-  - Completed task, decision, and JSON projections preserve an exact content reference for omitted original material.
-  - Completed tasks render only stable identifiers, state, and minimal evidence when the projection is smaller than the original.
+  - Read-glob and decision projections preserve an exact content reference for omitted original material.
+  - Completed task projection is excluded unless measurement proves a reduction beyond the current minimal rendering.
   - Decision rendering prefers explicit implementation commitments when present and falls back to the original on parse failure.
-  - JSON projection keeps only named agent-facing fields and falls back to the original on unknown schemas or recipes.
+  - JSON projection is out of scope until a concrete context-pack JSON section exists.
   - Projected output falls back to the original or normal rendering when it would be larger.
 verification:
   commands:
@@ -40,6 +42,8 @@ tasks:
       - P53-T3
     description: Define safe projection rules by content type and document the non-summarization boundary.
     reads:
+      - src/core/pack/index.ts
+      - src/core/pack/budget.ts
       - docs/cli-contract.md
       - docs/agent-contract.md
       - src/core/pack/loaders.ts
@@ -63,18 +67,24 @@ tasks:
       - P54-T1
     description: Project large read glob results by directory while deferring the complete file list.
     reads:
+      - src/core/pack/index.ts
+      - src/core/pack/budget.ts
       - src/core/pack/loaders.ts
       - src/core/glob.ts
       - src/core/pack/formatters/markdown.ts
     writes:
+      - src/core/pack/index.ts
+      - src/core/pack/budget.ts
       - src/core/pack/loaders.ts
       - src/core/pack/formatters/markdown.ts
       - tests/unit/core/pack/loaders.test.ts
       - tests/unit/core/glob.test.ts
+      - tests/integration/pack-byte-identical.test.ts
       - tests/integration/task-context-budget.test.ts
     acceptance_refs:
       - tests/unit/core/pack/loaders.test.ts
       - tests/unit/core/glob.test.ts
+      - tests/integration/pack-byte-identical.test.ts
       - tests/integration/task-context-budget.test.ts
   - id: P54-T3
     type: feature
@@ -87,22 +97,23 @@ tasks:
     status: planned
     depends_on:
       - P54-T2
-    description: Project completed task, decision, and JSON records through deterministic structural fields with original-content references.
+    description: Project decision records through deterministic implementation-commitment fields with original-content references.
     reads:
       - src/core/pack/loaders.ts
       - src/core/pack/formatters/markdown.ts
       - src/core/decisions/adr.ts
-      - src/core/schemas/recommend-result.ts
     writes:
       - src/core/pack/loaders.ts
       - src/core/pack/formatters/markdown.ts
       - tests/unit/core/pack/loaders.test.ts
       - tests/unit/core/pack/loaders-decisions.test.ts
       - tests/unit/core/pack-core.test.ts
+      - tests/integration/pack-byte-identical.test.ts
     acceptance_refs:
       - tests/unit/core/pack/loaders.test.ts
       - tests/unit/core/pack/loaders-decisions.test.ts
       - tests/unit/core/pack-core.test.ts
+      - tests/integration/pack-byte-identical.test.ts
   - id: P54-T4
     type: test
     ambiguity: low

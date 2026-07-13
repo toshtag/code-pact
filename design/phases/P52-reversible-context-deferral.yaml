@@ -17,7 +17,9 @@ definition_of_done:
   - Deferred manifests use canonical serialization and deterministic digests.
   - Writes are atomic, partial files are cleaned up, and digest conflicts fail closed.
   - References are Windows-safe and corrupted artifacts are detected before content is returned.
-  - A context pack lists deferred section names, a manifest reference, and a retrieval command.
+  - A context pack lists deferred section names, one manifest reference, and `code-pact context show` retrieval commands.
+  - "`context show <ref> --list` lists sections; `--section <name>` retrieves only named sections; `--json` preserves the same contract for machine readers."
+  - The no-section default returns manifest metadata, not all deferred source text.
   - Retrieval returns the exact deferred section content without semantic rewriting and round-trips byte-for-byte.
   - Context pack byte metrics include deferred bytes separately from final bytes.
 verification:
@@ -47,6 +49,7 @@ tasks:
       - src/core/evidence/evidence-store.ts
       - src/core/project-fs/authority-resolvers.ts
       - src/core/project-fs/operations.ts
+      - src/core/project-fs/index.ts
     writes:
       - docs/cli-contract.md
       - docs/agent-contract.md
@@ -78,6 +81,8 @@ tasks:
       - src/core/pack/formatters/markdown.ts
       - src/core/context-deferral/**
       - src/core/content-addressed-store/**
+      - src/core/project-fs/authorities/context-deferral-authority.ts
+      - src/core/project-fs/index.ts
       - tests/unit/core/pack/budget.test.ts
       - tests/unit/core/pack-core.test.ts
       - tests/unit/core/evidence.test.ts
@@ -100,25 +105,28 @@ tasks:
     status: planned
     depends_on:
       - P52-T2
-    description: Add a local command that shows deferred context by reference and updates CLI docs through the spec generator.
+    description: Add `code-pact context show` with list, section, and JSON retrieval modes, then update CLI docs through the spec generator.
     reads:
       - src/cli/spec/root.ts
-      - src/cli/spec/task.ts
       - src/commands/task-context.ts
       - src/commands/pack.ts
     writes:
       - src/cli/spec/root.ts
+      - src/cli/spec/context.ts
+      - src/cli/commands/context.ts
       - src/commands/context-show.ts
       - src/cli.ts
-      - src/cli/spec/evidence.ts
+      - src/cli/usage.ts
       - docs/cli-reference.generated.md
       - tests/integration/cli-help.test.ts
       - tests/integration/json-stdout.test.ts
       - tests/unit/commands/task-context.test.ts
+      - tests/unit/commands/evidence.test.ts
     acceptance_refs:
       - tests/integration/cli-help.test.ts
       - tests/integration/json-stdout.test.ts
       - tests/unit/commands/task-context.test.ts
+      - tests/unit/commands/evidence.test.ts
   - id: P52-T4
     type: docs
     ambiguity: low

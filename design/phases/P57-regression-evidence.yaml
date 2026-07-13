@@ -5,16 +5,17 @@ confidence: medium
 risk: medium
 status: planned
 objective: >
-  Surface advisory guidance for bugfix tasks to declare concrete regression
-  evidence associated with an observed failure fingerprint.
+  Surface static advisory guidance for bugfix tasks to declare regression
+  evidence such as tests, fixtures, reproduction artifacts, or acceptance artifacts.
 non_goals:
   - Require every documentation or refactor task to add a new test.
   - Treat a passing manual command as sufficient regression evidence for a bugfix.
   - Store full command output inside progress events when an evidence reference exists.
+  - Link runtime failure fingerprints to regression artifacts.
+  - Add structured completion evidence, task evidence commands, terminal repair summaries, or runtime regression artifacts.
 definition_of_done:
   - Bugfix completion guidance names accepted regression evidence forms.
-  - Failure fingerprints can be declared alongside tests, fixtures, reproduction artifacts, or acceptance artifacts.
-  - The advisory checks only declared linkage and does not claim to prove that a test prevents the failure.
+  - The advisory checks only static acceptance declarations and does not claim to prove that a test prevents a runtime failure.
   - Missing regression evidence is surfaced as an advisory first, not a hard block.
   - Agent guidance explains how to report evidence without duplicating large command output.
 verification:
@@ -34,8 +35,8 @@ tasks:
     expected_duration: short
     status: planned
     depends_on:
-      - P55-T3
-    description: Define accepted regression evidence declarations and the limits of fingerprint linkage.
+      - P51-T4
+    description: Define accepted static regression evidence declarations and explicitly defer runtime fingerprint linkage.
     reads:
       - docs/agent-contract.md
       - docs/cli-contract.md
@@ -63,11 +64,9 @@ tasks:
     reads:
       - src/core/plan/lint.ts
       - src/core/schemas/task.ts
-      - src/core/evidence/failure-fingerprint.ts
       - tests/unit/core/plan/lint.test.ts
     writes:
       - src/core/plan/lint.ts
-      - src/core/schemas/task.ts
       - tests/unit/core/plan/lint.test.ts
       - tests/unit/error-code-surface.test.ts
       - tests/integration/plan-lint.test.ts

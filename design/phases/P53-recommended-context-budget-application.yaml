@@ -13,6 +13,10 @@ non_goals:
   - Use tokenizers, provider APIs, embeddings, ranking, or model-generated summaries.
 definition_of_done:
   - "`task prepare --context-budget auto` uses the same recommendation returned in the response."
+  - Budget precedence is fixed as `--budget-bytes`, explicit `--context-budget <profile>`, `--context-budget auto`, agent-profile recommended mode, then no budget.
+  - Explicit CLI flags always override agent profile recommended mode.
+  - Auto budget resolution uses the recommendation already produced in the same call and does not load the agent profile twice.
+  - Done, blocked, and unmet-dependency early returns do not perform auto budget resolution or extra context I/O.
   - The commands dictionary remains explicit about the selected budget mode.
   - Agent profiles can opt into recommended budget mode without changing legacy projects.
   - Oversized packs still fail honestly when the recommended budget cannot fit.
@@ -36,18 +40,22 @@ tasks:
       - P52-T4
     description: Add explicit `auto` budget resolution for task preparation.
     reads:
+      - src/cli/commands/task.ts
       - src/commands/task-prepare.ts
       - src/core/recommend/context-fit.ts
       - src/core/context-fit/resolve-budget-profile.ts
       - src/core/schemas/recommend-result.ts
     writes:
+      - src/cli/commands/task.ts
       - src/commands/task-prepare.ts
       - src/core/context-fit/resolve-budget-profile.ts
       - src/cli/spec/task.ts
       - tests/unit/commands/task-prepare.test.ts
+      - tests/integration/cli.test.ts
       - tests/integration/task-prepare-commands-contract.test.ts
     acceptance_refs:
       - tests/unit/commands/task-prepare.test.ts
+      - tests/integration/cli.test.ts
       - tests/integration/task-prepare-commands-contract.test.ts
   - id: P53-T2
     type: feature
@@ -62,19 +70,25 @@ tasks:
       - P53-T1
     description: Add an agent profile mode that applies the recommended budget only when configured.
     reads:
+      - src/cli/commands/task.ts
+      - src/commands/task-prepare.ts
       - src/core/schemas/agent-profile.ts
       - src/core/context-fit/load-context-budget.ts
       - src/core/adapters/template-sections.ts
     writes:
+      - src/cli/commands/task.ts
+      - src/commands/task-prepare.ts
       - src/core/schemas/agent-profile.ts
       - src/core/context-fit/load-context-budget.ts
       - src/core/adapters/template-sections.ts
       - tests/unit/schemas/agent-profile.test.ts
       - tests/unit/core/context-fit/resolve-budget-profile.test.ts
+      - tests/unit/commands/task-prepare.test.ts
       - tests/unit/core/adapters/desired.test.ts
     acceptance_refs:
       - tests/unit/schemas/agent-profile.test.ts
       - tests/unit/core/context-fit/resolve-budget-profile.test.ts
+      - tests/unit/commands/task-prepare.test.ts
       - tests/unit/core/adapters/desired.test.ts
   - id: P53-T3
     type: docs
