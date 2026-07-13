@@ -21,12 +21,12 @@ definition_of_done:
   - "`default_profile` is valid only when it names an existing profile."
   - "`task prepare --json` reports `applied_context_budget` with source, profile when applicable, and budget bytes."
   - "`applied_context_budget.source` is a closed enum: none, explicit_bytes, explicit_profile, recommended_cli, or recommended_agent_profile."
-  - "`commands.context` uses the resolved byte value, for example `--budget-bytes 60000`, so it reproduces the actual pack build."
-  - "`recommendation.contextFit`, the actual pack build, `applied_context_budget`, and `commands.context` agree in integration coverage."
+  - "`commands.context` uses the resolved byte value, for example `--budget-bytes 60000`, so it reproduces the same resolved byte budget and deterministic context content; materialization metadata remains command-result metadata."
+  - "`recommendation.contextFit`, the deterministic pack build, `applied_context_budget`, and `commands.context` agree in integration coverage."
   - Recommended mode honors an agent profile override for the recommended standard profile name; custom-only profile names are never selected by the recommendation.
   - Explicit CLI flags always override agent profile recommended mode.
-  - Auto budget resolution uses the recommendation already produced in the same call and does not load the agent profile twice.
-  - Done, blocked, and unmet-dependency early returns do not perform auto budget resolution or extra context I/O.
+  - Recommended budget resolution uses the recommendation already produced in the same call and does not load the agent profile twice.
+  - Done, blocked, and unmet-dependency early returns do not perform recommended budget resolution or extra context I/O.
   - The commands dictionary remains explicit about the selected budget mode.
   - Agent profiles can opt into recommended budget mode without changing legacy projects.
   - Oversized packs still fail honestly when the recommended budget cannot fit.
