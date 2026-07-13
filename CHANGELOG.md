@@ -13,6 +13,8 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-07-13
+
 ### Added
 
 - **Added a deterministic bounded repair recommendation contract.** `recommend` and `task prepare` now include `repairPolicy` on non-null recommendations, and generated adapter guidance documents one same-model, same-effort, same-context repair attempt for command failures only.
