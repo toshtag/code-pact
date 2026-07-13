@@ -12,6 +12,11 @@ non_goals:
   - Create one reference per deferred section when a single manifest can cover the pack.
   - Change the default no-budget context pack output.
 definition_of_done:
+  - "`buildContextPack()` remains side-effect-free and does not write deferred artifacts to disk."
+  - Context pack build results include deterministic deferred artifact references and pending artifact payloads for later materialization.
+  - Normal `task prepare` materializes the context pack and deferred artifacts together with atomic writes.
+  - "`task prepare --dry-run` does not materialize artifacts, marks deferred references as `persisted: false`, and does not emit runnable retrieval commands."
+  - "`task context` materializes deferred artifacts only through an explicit flag or documented explicit contract, never as an undocumented side effect."
   - Deferred context is stored locally under a content-addressed reference.
   - The artifact store has an explicit filesystem authority and rejects symlink escape or traversal.
   - Deferred manifests use canonical serialization and deterministic digests.
@@ -50,6 +55,8 @@ tasks:
       - src/core/pack/index.ts
       - src/core/pack/budget.ts
       - src/core/evidence/evidence-store.ts
+      - src/commands/task-prepare.ts
+      - src/commands/task-context.ts
       - src/core/project-fs/authority-resolvers.ts
       - src/core/project-fs/operations.ts
       - src/core/project-fs/index.ts
@@ -77,6 +84,8 @@ tasks:
       - src/core/pack/formatters/markdown.ts
       - src/core/pack/context-output-path.ts
       - src/core/evidence/evidence-store.ts
+      - src/core/evidence/canonical-json.ts
+      - src/io/atomic-text.ts
       - src/core/project-fs/operations.ts
     writes:
       - src/core/evidence/evidence-store.ts
@@ -91,15 +100,19 @@ tasks:
       - tests/unit/core/pack/budget.test.ts
       - tests/unit/core/pack-core.test.ts
       - tests/unit/core/evidence.test.ts
+      - tests/unit/commands/evidence.test.ts
       - tests/unit/security/filesystem-operation-proof.test.ts
       - tests/unit/scripts/check-fs-authority.test.ts
+      - tests/integration/evidence-agent-detail.test.ts
       - tests/integration/task-context-budget.test.ts
     acceptance_refs:
       - tests/unit/core/pack/budget.test.ts
       - tests/unit/core/pack-core.test.ts
       - tests/unit/core/evidence.test.ts
+      - tests/unit/commands/evidence.test.ts
       - tests/unit/security/filesystem-operation-proof.test.ts
       - tests/unit/scripts/check-fs-authority.test.ts
+      - tests/integration/evidence-agent-detail.test.ts
       - tests/integration/task-context-budget.test.ts
   - id: P52-T3
     type: feature

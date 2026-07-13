@@ -17,7 +17,8 @@ non_goals:
   - Implement split output before the decision is accepted.
 definition_of_done:
   - The decision evaluates P52-P54 measurement evidence before approving any implementation.
-  - The task creates `design/decisions/P55-stable-core-task-delta-rfc.md` with an accepted, rejected, or deferred outcome.
+  - "The task creates `design/decisions/P55-T1-stable-core-task-delta-rfc.md` with `Status: accepted` and a decision outcome of accepted, rejected, or deferred."
+  - The ADR records natural bytes, final budgeted bytes, deferred bytes, projection before and after bytes, retrieval bytes, default combined-pack bytes, and artifact or command count changes.
   - If approved, split artifacts must be explicit opt-in and the default combined pack must remain unchanged.
   - If approved, the public contract must define `task context <task-id> --context-output split` and `task prepare <task-id> --context-output split` or an equivalent non-conflicting flag.
   - If approved, split JSON must include context output mode, manifest reference, stable-core reference, stable-core digest and bytes, task-delta reference, task-delta digest and bytes, and retrieval commands for both parts.
@@ -41,14 +42,18 @@ tasks:
     status: planned
     depends_on:
       - P54-T4
-    description: Define the stable-core, task-delta, and failure-delta artifact boundary and manifest contract.
+    description: Evaluate P52-P54 measurement evidence and decide whether split context output should be accepted, rejected, or deferred.
     reads:
       - docs/agent-contract.md
       - docs/cli-contract.md
       - src/core/pack/index.ts
       - src/core/pack/front-matter.ts
+      - tests/integration/task-context-budget.test.ts
+      - tests/integration/task-context-explain-metrics.test.ts
+      - tests/integration/pack-byte-identical.test.ts
+      - tests/fixtures/**
     writes:
-      - design/decisions/P55-stable-core-task-delta-rfc.md
+      - design/decisions/P55-T1-stable-core-task-delta-rfc.md
     acceptance_refs:
       - docs/agent-contract.md
       - docs/cli-contract.md

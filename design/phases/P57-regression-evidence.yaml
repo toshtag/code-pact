@@ -16,7 +16,7 @@ non_goals:
 definition_of_done:
   - "The advisory applies only to tasks with `type: bugfix`."
   - Static evidence exists only when `writes` names a test, fixture, or reproduction artifact, or when `acceptance_refs` names an existing test, fixture, or reproduction artifact.
-  - Path classification is closed to `**/*.test.*`, `**/*.spec.*`, `tests/**`, `test/**`, `__tests__/**`, `spec/**`, `specs/**`, `fixtures/**`, and `reproductions/**`.
+  - Path classification is closed to `**/*.test.*`, `**/*.spec.*`, `**/*_test.*`, `**/test_*.*`, `tests/**`, `test/**`, `__tests__/**`, `spec/**`, `specs/**`, `fixtures/**`, `reproductions/**`, `**/tests/**`, `**/test/**`, `**/__tests__/**`, `**/spec/**`, `**/specs/**`, `**/fixtures/**`, and `**/reproductions/**`.
   - "`acceptance_refs` are for existing evidence files; new tests, fixtures, or reproduction artifacts belong in `writes`."
   - Bugfix completion guidance names accepted regression evidence forms.
   - The advisory checks only static acceptance declarations and does not claim to prove that a test prevents a runtime failure.
