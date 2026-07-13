@@ -74,6 +74,7 @@ tasks:
       - tests/unit/commands/task-prepare.test.ts
       - tests/integration/cli.test.ts
       - tests/integration/pack-byte-identical.test.ts
+      - tests/integration/task-context-budget.test.ts
       - tests/integration/task-prepare-commands-contract.test.ts
   - id: P53-T2
     type: feature
