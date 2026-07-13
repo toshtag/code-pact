@@ -8,6 +8,8 @@ import {
   type RecommendResult,
 } from "../core/recommend/index.ts";
 import { buildContextPack, writeContextPack } from "../core/pack/index.ts";
+import { storeContextManifestArtifact } from "../core/context-deferral/context-store.ts";
+import type { DeferredContextProjection } from "../core/context-deferral/deferred-section.ts";
 import { resolveProfileContextOutputPath } from "../core/pack/context-output-path.ts";
 import {
   isDecisionRequiredForTask,
@@ -119,6 +121,7 @@ export type TaskPrepareResult = {
     has_section: boolean;
     items: { text: string; done: boolean }[];
   }[];
+  deferred_context?: DeferredContextProjection;
 };
 
 // ---------------------------------------------------------------------------
@@ -424,6 +427,7 @@ export async function runTaskPrepare(
 
   let contextPackPath: string | null = null;
   let wouldWritePath: string | undefined;
+  let deferredContext: DeferredContextProjection | undefined;
   if (dryRun) {
     // Use the same resolver as the actual write so the would-write hint
     // matches what an actual write would produce, and the same .context/**
@@ -433,7 +437,22 @@ export async function runTaskPrepare(
       agentProfile.context_dir,
       taskId,
     );
+    if (pack.deferredContext) {
+      deferredContext = {
+        ...pack.deferredContext,
+        persisted: false,
+        retrieve_command: null,
+      };
+    }
   } else {
+    if (pack.pendingContextManifest && pack.deferredContext) {
+      await storeContextManifestArtifact(cwd, pack.pendingContextManifest);
+      deferredContext = {
+        ...pack.deferredContext,
+        persisted: true,
+        retrieve_command: `code-pact context show ${pack.deferredContext.manifest_ref} --list --json`,
+      };
+    }
     const written = await writeContextPack(pack, { cwd, agentName });
     contextPackPath = written.outputPath;
   }
@@ -464,6 +483,10 @@ export async function runTaskPrepare(
 
   if (decisionCommitments !== undefined) {
     result.decision_commitments = decisionCommitments;
+  }
+
+  if (deferredContext !== undefined) {
+    result.deferred_context = deferredContext;
   }
 
   return result;

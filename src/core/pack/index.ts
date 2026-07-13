@@ -29,6 +29,11 @@ import {
   loadReadMatches,
 } from "./loaders.ts";
 import { applyBudgetElision } from "./budget.ts";
+import type {
+  DeferredContextMetadata,
+  DeferredContextProjection,
+} from "../context-deferral/deferred-section.ts";
+import type { PendingContextManifestArtifact } from "../context-deferral/context-manifest.ts";
 import {
   computeExplainSections,
   computeExplainExcluded,
@@ -97,7 +102,20 @@ export type ContextPackResult = {
    * deterministic; computing them does not change `content`.
    */
   explainMetrics?: ContextExplainMetrics;
+  /**
+   * Present only when an explicit budget deferred one or more sections.
+   * This is public metadata only; it never includes deferred section content.
+   */
+  deferredContext?: DeferredContextMetadata;
+  /**
+   * Internal pending artifact for the caller that is allowed to materialize it
+   * (`task prepare` normal mode). `task context`, dry-run prepare, and
+   * buildContextPack itself must not write it.
+   */
+  pendingContextManifest?: PendingContextManifestArtifact;
 };
+
+export type { DeferredContextProjection };
 
 export type WriteContextPackOptions = {
   cwd: string;
@@ -233,6 +251,12 @@ export async function buildContextPack(
     includedRules: rules.map(r => r.filename),
     includedDecisions: decisions.map(d => d.filename),
     includedConstitution: constitution !== null,
+    ...(budgetResult.deferredContext
+      ? { deferredContext: budgetResult.deferredContext }
+      : {}),
+    ...(budgetResult.pendingContextManifest
+      ? { pendingContextManifest: budgetResult.pendingContextManifest }
+      : {}),
   };
 
   if (opts.explain === true) {
@@ -270,6 +294,7 @@ export async function buildContextPack(
       savedBytes,
       savedRatio: bm.naturalBytes === 0 ? 0 : savedBytes / bm.naturalBytes,
       minimumAchievableBytes: bm.minimumAchievableBytes,
+      deferredBytes: bm.deferredBytes,
       elidedSections: bm.elidedSections,
     };
 

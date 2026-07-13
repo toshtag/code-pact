@@ -9,6 +9,14 @@ import {
   ELISION_ORDER,
   type RenderedSection,
 } from "./formatters/markdown.ts";
+import {
+  buildContextManifest,
+  type PendingContextManifestArtifact,
+} from "../context-deferral/context-manifest.ts";
+import {
+  makeDeferredContextRenderedSection,
+  type DeferredContextMetadata,
+} from "../context-deferral/deferred-section.ts";
 
 /**
  * Thrown by `buildContextPack` when `budgetBytes` is set but maximal
@@ -44,6 +52,7 @@ export type BudgetElisionMetrics = {
   naturalBytes: number;
   finalBytes: number;
   minimumAchievableBytes: number;
+  deferredBytes: number;
   elidedSections: Array<{ name: string; bytes: number }>;
 };
 
@@ -52,6 +61,8 @@ export type BudgetElisionResult = {
   elidedNames: string[];
   elidedBytes: Map<string, number>;
   metrics: BudgetElisionMetrics;
+  deferredContext?: DeferredContextMetadata;
+  pendingContextManifest?: PendingContextManifestArtifact;
 };
 
 // The readiness signals that gate conditional elision eligibility.
@@ -74,6 +85,20 @@ function sectionBytes(section: RenderedSection): number {
   return Buffer.byteLength(section.lines.join("\n"), "utf8");
 }
 
+function insertDeferredContextSection(
+  sections: ReadonlyArray<RenderedSection>,
+  metadata: DeferredContextMetadata,
+): RenderedSection[] {
+  const result = [...sections];
+  const taskDefinitionIndex = result.findIndex(
+    section => section.name === "task_definition",
+  );
+  const insertAt =
+    taskDefinitionIndex === -1 ? Math.min(1, result.length) : taskDefinitionIndex + 1;
+  result.splice(insertAt, 0, makeDeferredContextRenderedSection(metadata));
+  return result;
+}
+
 // Elision ELIGIBILITY is conditional, per context-budget-rfc.md.
 // `related_decisions` is elidable only when it is the `context_size: large`
 // "all decisions" expansion; `rules` only when it is the `write_surface: high`
@@ -91,20 +116,18 @@ function eligibleElisionOrder(eligibility: BudgetElisionEligibility): string[] {
   });
 }
 
-// The floor below which no budget can drive this task — the rendered byte
-// size after every budget-ELIGIBLE section is removed. This is the SINGLE
-// helper behind both the successful `--explain` `minimum_achievable_bytes` and
-// the `CONTEXT_OVER_BUDGET` error's `minimum_achievable_bytes`; the two can
-// never disagree (the RFC's principal correctness invariant). It is order-
-// independent (it removes the whole eligible set), so it agrees with the
-// loop's post-maximal-elision `surviving` size: sections not present are no-ops
-// in the filter, and the loop removes exactly the eligible-and-present set.
-function computeMinimumAchievableBytes(
+function computeMinimumAchievableBytesWithDeferral(
   rendered: ReadonlyArray<RenderedSection>,
   eligibility: BudgetElisionEligibility,
 ): number {
   const eligible = new Set(eligibleElisionOrder(eligibility));
-  return computeRenderedBytes(rendered.filter((s) => !eligible.has(s.name)));
+  const deferred = rendered.filter(section => eligible.has(section.name));
+  const surviving = rendered.filter(section => !eligible.has(section.name));
+  if (deferred.length === 0) return computeRenderedBytes(surviving);
+  const manifest = buildContextManifest(deferred);
+  return computeRenderedBytes(
+    insertDeferredContextSection(surviving, manifest.metadata),
+  );
 }
 
 export function applyBudgetElision(
@@ -116,12 +139,15 @@ export function applyBudgetElision(
   // derived from the shared helper so the success and CONTEXT_OVER_BUDGET paths
   // can never report a different minimum.
   const naturalBytes = computeRenderedBytes(rendered);
-  const minimumAchievableBytes = computeMinimumAchievableBytes(rendered, eligibility);
 
   const makeResult = (
     sections: RenderedSection[],
     elidedNames: string[],
     elidedBytes: Map<string, number>,
+    minimumAchievableBytes: number,
+    deferredBytes: number,
+    deferredContext?: DeferredContextMetadata,
+    pendingContextManifest?: PendingContextManifestArtifact,
   ): BudgetElisionResult => ({
     sections,
     elidedNames,
@@ -132,38 +158,71 @@ export function applyBudgetElision(
       // the pack body uses, so it equals the caller's `totalBytes`.
       finalBytes: computeRenderedBytes(sections),
       minimumAchievableBytes,
+      deferredBytes,
       elidedSections: elidedNames.map((name) => ({
         name,
         bytes: elidedBytes.get(name) ?? 0,
       })),
     },
+    ...(deferredContext ? { deferredContext } : {}),
+    ...(pendingContextManifest ? { pendingContextManifest } : {}),
   });
 
   if (budgetBytes === undefined) {
-    return makeResult([...rendered], [], new Map());
+    return makeResult(
+      [...rendered],
+      [],
+      new Map(),
+      computeMinimumAchievableBytesWithDeferral(rendered, eligibility),
+      0,
+    );
   }
 
   let surviving = [...rendered];
+  const deferredSections: RenderedSection[] = [];
   const elidedNames: string[] = [];
   const elidedBytes = new Map<string, number>();
 
   if (computeRenderedBytes(surviving) <= budgetBytes) {
-    return makeResult(surviving, elidedNames, elidedBytes);
+    return makeResult(
+      surviving,
+      elidedNames,
+      elidedBytes,
+      computeMinimumAchievableBytesWithDeferral(rendered, eligibility),
+      0,
+    );
   }
+
+  const minimumAchievableBytes = computeMinimumAchievableBytesWithDeferral(
+    rendered,
+    eligibility,
+  );
 
   for (const name of eligibleElisionOrder(eligibility)) {
     const idx = surviving.findIndex((s) => s.name === name);
     if (idx === -1) continue;
-    elidedBytes.set(name, sectionBytes(surviving[idx]!));
+    const deferred = surviving[idx]!;
+    deferredSections.push(deferred);
+    elidedBytes.set(name, sectionBytes(deferred));
     surviving = surviving.filter((_, i) => i !== idx);
     elidedNames.push(name);
-    if (computeRenderedBytes(surviving) <= budgetBytes) {
-      return makeResult(surviving, elidedNames, elidedBytes);
+    const manifest = buildContextManifest(deferredSections);
+    const candidate = insertDeferredContextSection(surviving, manifest.metadata);
+    if (computeRenderedBytes(candidate) <= budgetBytes) {
+      return makeResult(
+        candidate,
+        elidedNames,
+        elidedBytes,
+        minimumAchievableBytes,
+        manifest.deferredBytes,
+        manifest.metadata,
+        manifest.artifact,
+      );
     }
   }
 
-  // Maximal elision performed; still over budget. The reported floor comes from
-  // the shared helper (not a second computation), matching the explain floor.
+  // Maximal deferral performed; still over budget. The reported floor comes
+  // from the shared helper (not a second computation), matching the explain floor.
   throw new ContextOverBudgetError(
     budgetBytes,
     minimumAchievableBytes,

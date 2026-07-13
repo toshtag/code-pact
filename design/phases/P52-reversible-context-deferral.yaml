@@ -121,7 +121,7 @@ tasks:
     write_surface: high
     verification_strength: strong
     expected_duration: long
-    status: planned
+    status: done
     description: Persist deferred sections through a shared content-addressed store
       primitive without changing existing Evidence artifact contracts;
       materialize and verify deferred artifacts before atomically writing the
@@ -150,13 +150,12 @@ tasks:
       - tests/integration/task-prepare-commands-contract.test.ts
       - tests/integration/evidence-agent-detail.test.ts
     writes:
-      - src/core/evidence/evidence-store.ts
+      - design/phases/P52-reversible-context-deferral.yaml
+      - src/core/evidence/canonical-json.ts
       - src/core/pack/index.ts
       - src/core/pack/budget.ts
       - src/core/pack/explain.ts
-      - src/core/pack/formatters/markdown.ts
       - src/commands/task-prepare.ts
-      - src/commands/task-context.ts
       - src/cli/commands/task.ts
       - src/core/context-deferral/**
       - src/core/content-addressed-store/**
@@ -165,19 +164,9 @@ tasks:
       - scripts/check-fs-authority.mjs
       - scripts/check-security-hardening-invariants.mjs
       - tests/unit/core/context-deferral.test.ts
-      - tests/unit/core/content-addressed-store.test.ts
       - tests/unit/core/pack/budget.test.ts
-      - tests/unit/core/pack-core.test.ts
-      - tests/unit/core/evidence.test.ts
       - tests/unit/commands/task-prepare.test.ts
-      - tests/unit/commands/evidence.test.ts
-      - tests/unit/security/filesystem-operation-proof.test.ts
-      - tests/unit/scripts/check-fs-authority.test.ts
-      - tests/integration/evidence-agent-detail.test.ts
-      - tests/integration/pack-byte-identical.test.ts
-      - tests/integration/task-context-budget.test.ts
-      - tests/integration/task-context-explain-metrics.test.ts
-      - tests/integration/task-prepare-commands-contract.test.ts
+      - tests/unit/error-code-surface.test.ts
     acceptance_refs:
       - tests/unit/core/pack/budget.test.ts
       - tests/unit/core/pack-core.test.ts

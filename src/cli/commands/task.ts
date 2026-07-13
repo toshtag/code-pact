@@ -728,6 +728,13 @@ async function cmdTaskContext(
         char_count: pack.charCount,
         content: pack.content,
       };
+      if (pack.deferredContext) {
+        data.deferred_context = {
+          ...pack.deferredContext,
+          persisted: false,
+          retrieve_command: null,
+        };
+      }
       if (explain) {
         data.total_bytes = pack.totalBytes;
         data.context_pack_bytes = pack.totalBytes;
@@ -744,6 +751,7 @@ async function cmdTaskContext(
           data.final_bytes = em.finalBytes;
           if (em.budgetBytes !== undefined) data.budget_bytes = em.budgetBytes;
           data.saved_bytes = em.savedBytes;
+          data.deferred_bytes = em.deferredBytes;
           data.saved_ratio = em.savedRatio;
           data.minimum_achievable_bytes = em.minimumAchievableBytes;
           data.elided_sections = em.elidedSections.map((e) => ({

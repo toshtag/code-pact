@@ -92,6 +92,7 @@ const KNOWN_CODES: Record<
   EVIDENCE_READ_FAILED: "public",
   EVIDENCE_UNAVAILABLE: "public",
   FS_AUTHORITY_FAILURE: "public",
+  INVALID_CONTEXT_REF: "public",
   INVALID_EVIDENCE_REF: "public",
   INVALID_TASK_TRANSITION: "public",
   LOCK_HELD: "public",

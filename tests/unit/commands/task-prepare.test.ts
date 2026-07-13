@@ -10,6 +10,7 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runTaskPrepare } from "../../../src/commands/task-prepare.ts";
+import { buildContextPack } from "../../../src/core/pack/index.ts";
 
 const ROADMAP_YAML = `phases:
   - id: P1
@@ -73,6 +74,11 @@ tasks:
     depends_on:
       - P1-T1
 `;
+
+const PHASE_YAML_DEFERRABLE = PHASE_YAML.replace(
+  "context_size: small",
+  "context_size: large",
+);
 
 const BOUNDED_POLICY = {
   mode: "bounded",
@@ -644,6 +650,80 @@ describe("runTaskPrepare — budget enforcement (P24)", () => {
 
     const after = await readProgress(dir);
     expect(after).toBe(before);
+  });
+
+  it("normal prepare persists deferred context before writing the context pack", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_YAML_DEFERRABLE });
+    await writeFile(
+      join(dir, "design", "constitution.md"),
+      `# Constitution\n${"contract text\n".repeat(400)}`,
+      "utf8",
+    );
+    const baseline = await buildContextPack({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      agentName: "claude-code",
+    });
+
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      budgetBytes: baseline.totalBytes - 1000,
+    });
+
+    expect(result.deferred_context).toMatchObject({
+      persisted: true,
+      retrieve_command: expect.stringContaining("code-pact context show"),
+    });
+    const ref = result.deferred_context!.manifest_ref;
+    const digest = ref.replace("context:sha256:", "");
+    const artifactPath = join(
+      dir,
+      ".code-pact",
+      "cache",
+      "context",
+      `${digest}.json`,
+    );
+    expect(await fileExists(artifactPath)).toBe(true);
+    expect(await fileExists(result.context_pack_path!)).toBe(true);
+    const packContent = await readFile(result.context_pack_path!, "utf8");
+    expect(packContent).toContain("## Deferred Context");
+    expect(packContent).toContain(ref);
+  });
+
+  it("dry-run prepare computes deferred metadata without writing cache or pack", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_YAML_DEFERRABLE });
+    await writeFile(
+      join(dir, "design", "constitution.md"),
+      `# Constitution\n${"contract text\n".repeat(400)}`,
+      "utf8",
+    );
+    const baseline = await buildContextPack({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      agentName: "claude-code",
+    });
+
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+      budgetBytes: baseline.totalBytes - 1000,
+    });
+
+    expect(result.deferred_context).toMatchObject({
+      persisted: false,
+      retrieve_command: null,
+    });
+    expect(result.context_pack_path).toBeNull();
+    expect(await fileExists(result.would_write_context_pack_path!)).toBe(false);
+    expect(await fileExists(join(dir, ".code-pact", "cache", "context"))).toBe(
+      false,
+    );
   });
 });
 

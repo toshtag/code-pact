@@ -49,6 +49,7 @@ function authorityModulesWithGenericProofWrappers() {
 const AUTHORITY_MODULES = [
   "src/core/project-fs/authorities/adapter-authority.ts",
   "src/core/project-fs/authorities/archive-authority.ts",
+  "src/core/project-fs/authorities/context-deferral-authority.ts",
   "src/core/project-fs/authorities/context-output-authority.ts",
   "src/core/project-fs/authorities/decision-authority.ts",
   "src/core/project-fs/authorities/normalize-authority.ts",

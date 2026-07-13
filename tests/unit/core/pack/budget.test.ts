@@ -318,7 +318,7 @@ describe("buildContextPack — conditional elision eligibility (P28, context-bud
       taskId: "P2-E1-T1",
       agentName: "claude-code",
       explain: true,
-      budgetBytes: baseline.totalBytes - relatedBytes!,
+      budgetBytes: baseline.explainMetrics!.minimumAchievableBytes,
     });
     const elided = (pack.excluded ?? [])
       .filter((x) => x.reason_code === "budget_reserved_for_later")
@@ -345,7 +345,7 @@ describe("buildContextPack — conditional elision eligibility (P28, context-bud
       taskId: "P2-E1-T1",
       agentName: "claude-code",
       explain: true,
-      budgetBytes: baseline.totalBytes - rulesBytes!,
+      budgetBytes: baseline.explainMetrics!.minimumAchievableBytes,
     });
     const elided = (pack.excluded ?? [])
       .filter((x) => x.reason_code === "budget_reserved_for_later")
@@ -371,6 +371,7 @@ describe("buildContextPack — explain metrics (P49)", () => {
     expect(m).toBeDefined();
     expect(m!.naturalBytes).toBe(m!.finalBytes);
     expect(m!.savedBytes).toBe(0);
+    expect(m!.deferredBytes).toBe(0);
     expect(m!.savedRatio).toBe(0);
     expect(m!.elidedSections).toEqual([]);
     expect(m!.budgetBytes).toBeUndefined();
@@ -427,12 +428,13 @@ describe("buildContextPack — explain metrics (P49)", () => {
     const m = pack.explainMetrics!;
     expect(m.naturalBytes).toBe(m.finalBytes);
     expect(m.savedBytes).toBe(0);
+    expect(m.deferredBytes).toBe(0);
     expect(m.savedRatio).toBe(0);
     expect(m.elidedSections).toEqual([]);
     expect(m.budgetBytes).toBe(generous);
   });
 
-  it("with a budget that triggers elision: saved == natural - final and elided sections follow ELISION_ORDER", async () => {
+  it("with a budget that triggers deferral: saved == natural - final and elided sections follow ELISION_ORDER", async () => {
     // large + high so the full eligible set genuinely applies.
     await setTaskReadiness(workDir, { contextSize: "large", writeSurface: "high" });
     const baseline = await buildContextPack({
@@ -462,6 +464,9 @@ describe("buildContextPack — explain metrics (P49)", () => {
     expect(m.naturalBytes).toBeGreaterThan(m.finalBytes);
     expect(m.finalBytes).toBe(pack.totalBytes);
     expect(m.savedBytes).toBe(m.naturalBytes - m.finalBytes);
+    expect(m.deferredBytes).toBe(
+      m.elidedSections.reduce((sum, section) => sum + section.bytes, 0),
+    );
     expect(m.savedRatio).toBe(m.savedBytes / m.naturalBytes);
     expect(m.elidedSections.length).toBeGreaterThan(0);
 
@@ -483,6 +488,50 @@ describe("buildContextPack — explain metrics (P49)", () => {
       const ex = budgetExcluded.find((x) => x.name === e.name);
       expect(ex?.details?.section_bytes).toBe(e.bytes);
     }
+  });
+
+  it("counts the Deferred Context guidance section inside the requested budget", async () => {
+    await setTaskReadiness(workDir, { contextSize: "large", writeSurface: "high" });
+    const baseline = await buildContextPack({
+      cwd: workDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+      explain: true,
+    });
+    const firstPresentEligible = ELISION_ORDER.map(name =>
+      (baseline.sections ?? []).find(section => section.name === name),
+    ).find(Boolean)!;
+
+    // Old elision accepted this exact budget after dropping only the first
+    // eligible section. P52 must include the guidance overhead, so it needs at
+    // least one additional deferred section.
+    const budget = baseline.totalBytes - firstPresentEligible.bytes;
+    const pack = await buildContextPack({
+      cwd: workDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+      explain: true,
+      budgetBytes: budget,
+    });
+
+    expect(pack.totalBytes).toBeLessThanOrEqual(budget);
+    expect(pack.content).toContain("## Deferred Context");
+    expect(pack.deferredContext).toBeDefined();
+    expect(pack.deferredContext!.manifest_ref).toMatch(
+      /^context:sha256:[0-9a-f]{64}$/,
+    );
+    expect(pack.deferredContext!.sections.length).toBeGreaterThan(1);
+    expect(pack.explainMetrics!.deferredBytes).toBe(
+      pack.explainMetrics!.elidedSections.reduce(
+        (sum, section) => sum + section.bytes,
+        0,
+      ),
+    );
+    expect(pack.explainMetrics!.savedBytes).not.toBe(
+      pack.explainMetrics!.deferredBytes,
+    );
   });
 
   it("FLOOR INVARIANT: the explain minimum_achievable_bytes equals the CONTEXT_OVER_BUDGET floor for the same task", async () => {

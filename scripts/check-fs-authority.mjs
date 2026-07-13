@@ -425,6 +425,7 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveRoadmapReadPath", "owned_read"],
       ["resolveProjectConfigReadPath", "owned_read"],
       ["resolveEvidenceReadPath", "owned_read"],
+      ["resolveContextManifestReadPath", "owned_read"],
       ["resolveModelProfileReadPath", "owned_read"],
       ["resolveModelProfileDirectoryReadPath", "owned_read"],
       ["resolveProgressReadPath", "owned_read"],
@@ -447,6 +448,7 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveAgentProfileWritePath", "owned_write"],
       ["resolveProjectConfigWritePath", "owned_write"],
       ["resolveEvidenceWritePath", "owned_write"],
+      ["resolveContextManifestWritePath", "owned_write"],
       ["resolveGitignoreWritePath", "owned_write"],
       // Delete resolvers
       ["resolveDecisionDeletePath", "owned_delete"],
@@ -539,6 +541,19 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveProfileContextOutputWritePath", "owned_write"],
       ["resolveExplicitProjectContextOutputWritePath", "explicit_user_output"],
       ["resolveExplicitContextOutputWritePath", "explicit_user_output"],
+    ]),
+  ],
+  [
+    join(
+      "src",
+      "core",
+      "project-fs",
+      "authorities",
+      "context-deferral-authority.ts",
+    ),
+    new Map([
+      ["resolveContextManifestReadPath", "owned_read"],
+      ["resolveContextManifestWritePath", "owned_write"],
     ]),
   ],
   [
