@@ -3654,7 +3654,7 @@ The repository contains internal scripts under `scripts/` that are **not** part 
 
 The current maintainer-only tools are:
 
-- **`pnpm exec tsx scripts/measure-agent-detail.ts --write`** — refreshes the maintained P51 agent-detail byte fixture under `docs/maintainers/evidence/`. This is **not** `code-pact measure-agent-detail` — the command does not exist on the public CLI.
+- **`pnpm exec tsx scripts/measure-agent-detail.ts --write`** — refreshes the maintained agent-detail byte fixture for the compact evidence contract under `docs/maintainers/evidence/`. This is **not** `code-pact measure-agent-detail` — the command does not exist on the public CLI.
 
 These tools have no stability commitment, no JSON envelope contract, no error code surface. They can change shape between minors without a deprecation cycle. If you find yourself wanting to depend on one from outside the repository, open an issue first to discuss promoting it to a public surface.
 

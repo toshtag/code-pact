@@ -173,8 +173,8 @@ finalize`) was followed without skipping or reordering. A
 There is no release-refreshed aggregate metrics snapshot. Historical
 baselines remain in git history; new measurements should be introduced
 only as feature-specific fixtures with a clear contract and a focused
-test. The current maintained evidence is the P51 agent-detail byte
-fixture at
+test. The current maintained evidence is the agent-detail byte fixture
+introduced for the compact evidence contract at
 [`docs/maintainers/evidence/agent-detail-evidence.json`](maintainers/evidence/agent-detail-evidence.json),
 which directly verifies that compact agent JSON stays under the intended
 byte budget and that large command output is moved into evidence files.
