@@ -5,15 +5,16 @@ confidence: medium
 risk: medium
 status: planned
 objective: >
-  Require bugfix tasks to leave concrete regression evidence that links the
-  observed failure fingerprint to the prevention artifact.
+  Surface advisory guidance for bugfix tasks to declare concrete regression
+  evidence associated with an observed failure fingerprint.
 non_goals:
   - Require every documentation or refactor task to add a new test.
   - Treat a passing manual command as sufficient regression evidence for a bugfix.
   - Store full command output inside progress events when an evidence reference exists.
 definition_of_done:
   - Bugfix completion guidance names accepted regression evidence forms.
-  - Failure fingerprints can be associated with tests, fixtures, reproduction artifacts, or acceptance artifacts.
+  - Failure fingerprints can be declared alongside tests, fixtures, reproduction artifacts, or acceptance artifacts.
+  - The advisory checks only declared linkage and does not claim to prove that a test prevents the failure.
   - Missing regression evidence is surfaced as an advisory first, not a hard block.
   - Agent guidance explains how to report evidence without duplicating large command output.
 verification:
@@ -33,8 +34,8 @@ tasks:
     expected_duration: short
     status: planned
     depends_on:
-      - P51-T1
-    description: Define accepted regression evidence forms and fingerprint linkage.
+      - P55-T3
+    description: Define accepted regression evidence declarations and the limits of fingerprint linkage.
     reads:
       - docs/agent-contract.md
       - docs/cli-contract.md

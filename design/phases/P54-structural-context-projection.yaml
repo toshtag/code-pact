@@ -14,9 +14,11 @@ non_goals:
   - Delegate projection quality to a model.
 definition_of_done:
   - Read glob output can be grouped while the complete list remains retrievable.
-  - Completed tasks render only stable identifiers, state, and minimal evidence.
-  - Decision rendering prefers explicit implementation commitments when present.
-  - JSON projection keeps only named agent-facing fields and fails closed on unknown projection recipes.
+  - Completed task, decision, and JSON projections preserve an exact content reference for omitted original material.
+  - Completed tasks render only stable identifiers, state, and minimal evidence when the projection is smaller than the original.
+  - Decision rendering prefers explicit implementation commitments when present and falls back to the original on parse failure.
+  - JSON projection keeps only named agent-facing fields and falls back to the original on unknown schemas or recipes.
+  - Projected output falls back to the original or normal rendering when it would be larger.
 verification:
   commands:
     - pnpm check:docs
@@ -34,7 +36,8 @@ tasks:
     expected_duration: short
     status: planned
     depends_on:
-      - P52-T1
+      - P52-T4
+      - P53-T3
     description: Define safe projection rules by content type and document the non-summarization boundary.
     reads:
       - docs/cli-contract.md
@@ -83,8 +86,8 @@ tasks:
     expected_duration: medium
     status: planned
     depends_on:
-      - P54-T1
-    description: Project completed task, decision, and JSON records through deterministic structural fields.
+      - P54-T2
+    description: Project completed task, decision, and JSON records through deterministic structural fields with original-content references.
     reads:
       - src/core/pack/loaders.ts
       - src/core/pack/formatters/markdown.ts

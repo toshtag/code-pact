@@ -13,8 +13,12 @@ non_goals:
   - Change the default no-budget context pack output.
 definition_of_done:
   - Deferred context is stored locally under a content-addressed reference.
+  - The artifact store has an explicit filesystem authority and rejects symlink escape or traversal.
+  - Deferred manifests use canonical serialization and deterministic digests.
+  - Writes are atomic, partial files are cleaned up, and digest conflicts fail closed.
+  - References are Windows-safe and corrupted artifacts are detected before content is returned.
   - A context pack lists deferred section names, a manifest reference, and a retrieval command.
-  - Retrieval returns the exact deferred section content without semantic rewriting.
+  - Retrieval returns the exact deferred section content without semantic rewriting and round-trips byte-for-byte.
   - Context pack byte metrics include deferred bytes separately from final bytes.
 verification:
   commands:
@@ -32,12 +36,17 @@ tasks:
     verification_strength: medium
     expected_duration: short
     status: planned
-    description: Specify the deferred context manifest, reference format, and retrieval contract.
+    depends_on:
+      - P51-T4
+    description: Specify the deferred context manifest, reference format, filesystem authority, and retrieval contract.
     reads:
       - docs/cli-contract.md
       - docs/agent-contract.md
       - src/core/pack/index.ts
       - src/core/pack/budget.ts
+      - src/core/evidence/evidence-store.ts
+      - src/core/project-fs/authority-resolvers.ts
+      - src/core/project-fs/operations.ts
     writes:
       - docs/cli-contract.md
       - docs/agent-contract.md
@@ -55,23 +64,30 @@ tasks:
     status: planned
     depends_on:
       - P52-T1
-    description: Persist deferred sections and render a compact manifest reference in budgeted context packs.
+    description: Persist deferred sections through a shared content-addressed store primitive and render a compact manifest reference in budgeted context packs.
     reads:
       - src/core/pack/index.ts
       - src/core/pack/budget.ts
       - src/core/pack/formatters/markdown.ts
       - src/core/pack/context-output-path.ts
+      - src/core/evidence/evidence-store.ts
+      - src/core/project-fs/operations.ts
     writes:
       - src/core/pack/index.ts
       - src/core/pack/budget.ts
       - src/core/pack/formatters/markdown.ts
       - src/core/context-deferral/**
+      - src/core/content-addressed-store/**
       - tests/unit/core/pack/budget.test.ts
       - tests/unit/core/pack-core.test.ts
+      - tests/unit/core/evidence.test.ts
+      - tests/unit/security/filesystem-operation-proof.test.ts
       - tests/integration/task-context-budget.test.ts
     acceptance_refs:
       - tests/unit/core/pack/budget.test.ts
       - tests/unit/core/pack-core.test.ts
+      - tests/unit/core/evidence.test.ts
+      - tests/unit/security/filesystem-operation-proof.test.ts
       - tests/integration/task-context-budget.test.ts
   - id: P52-T3
     type: feature
@@ -84,7 +100,7 @@ tasks:
     status: planned
     depends_on:
       - P52-T2
-    description: Add a local command that shows deferred context by reference.
+    description: Add a local command that shows deferred context by reference and updates CLI docs through the spec generator.
     reads:
       - src/cli/spec/root.ts
       - src/cli/spec/task.ts
@@ -94,6 +110,7 @@ tasks:
       - src/cli/spec/root.ts
       - src/commands/context-show.ts
       - src/cli.ts
+      - src/cli/spec/evidence.ts
       - docs/cli-reference.generated.md
       - tests/integration/cli-help.test.ts
       - tests/integration/json-stdout.test.ts
