@@ -13,6 +13,8 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-07-13
+
 ### Added
 
 - **Added reversible deferred context retrieval.** Budgeted `task prepare` now persists exact deferred sections through the context-pack write boundary and returns a `deferred_context.retrieve_command`. `code-pact context show <ref> --list --json` lists section metadata without bodies, and `--section <name>` retrieves only the requested original section content. Context cache write failures surface as `CONTEXT_WRITE_FAILED` instead of an internal error.
