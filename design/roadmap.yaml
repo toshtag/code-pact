@@ -137,3 +137,6 @@ phases:
   - id: P50
     path: design/phases/P50-context-fit-advisories.yaml
     weight: 5
+  - id: P51
+    path: design/phases/P51-bounded-repair-contract.yaml
+    weight: 6
