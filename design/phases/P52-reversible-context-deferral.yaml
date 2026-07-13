@@ -14,9 +14,11 @@ non_goals:
 definition_of_done:
   - "`buildContextPack()` remains side-effect-free and does not write deferred artifacts to disk."
   - Context pack build results include deterministic deferred artifact references and pending artifact payloads for later materialization.
-  - "Normal `task prepare` materializes deferred artifacts and the context pack, marks references as `persisted: true`, and emits runnable retrieval commands."
-  - "`task prepare --dry-run` does not materialize artifacts, marks deferred references as `persisted: false`, and does not emit runnable retrieval commands."
-  - "Default `task context` remains read-only, does not materialize artifacts, marks references as `persisted: false`, and does not emit runnable retrieval commands."
+  - "For the same task, agent, and resolved byte budget, `task context`, normal `task prepare`, and `task prepare --dry-run` produce byte-identical Markdown context content."
+  - Runtime persistence state and runnable retrieval commands are command-result metadata and are never embedded in the Markdown context content.
+  - "Normal `task prepare` materializes deferred artifacts before writing the context pack and returns `deferred_context.persisted: true` with a runnable `retrieve_command`."
+  - "`task prepare --dry-run` does not materialize deferred artifacts and returns `deferred_context.persisted: false` with `retrieve_command: null`."
+  - "Default `task context` remains read-only, does not materialize deferred artifacts, and returns `deferred_context.persisted: false` with `retrieve_command: null`."
   - No-budget context packs do not create deferred artifacts.
   - Each artifact and pack file is written atomically.
   - Deferred artifacts are written and verified before the context pack.
@@ -28,7 +30,9 @@ definition_of_done:
   - Deferred manifests use canonical serialization and deterministic digests.
   - Writes are atomic, partial files are cleaned up, and digest conflicts fail closed.
   - References are Windows-safe and corrupted artifacts are detected before content is returned.
-  - A context pack lists deferred section names, one manifest reference, and `code-pact context show` retrieval commands.
+  - A context pack lists deferred section names, one deterministic manifest reference, and static retrieval guidance.
+  - A context pack does not embed runtime persistence state or a conditionally runnable retrieval command.
+  - "`task prepare` and `task context` expose deferred materialization state through an additive `deferred_context` result object containing `manifest_ref`, `sections`, `persisted`, and nullable `retrieve_command`."
   - "`context show <ref> --list` lists sections; `--section <name>` retrieves only named sections; `--json` preserves the same contract for machine readers."
   - The no-section default returns manifest metadata, not all deferred source text.
   - Retrieval returns the exact deferred section content without semantic rewriting and round-trips byte-for-byte.
@@ -40,7 +44,7 @@ verification:
     - pnpm check:docs
     - pnpm typecheck
     - pnpm test:unit
-    - pnpm test:integration:smoke
+    - pnpm test:integration:full
     - pnpm check:fs-authority
     - pnpm check:fs-containment
     - pnpm check:security-hardening
@@ -56,7 +60,7 @@ tasks:
     status: planned
     depends_on:
       - P51-T4
-    description: Specify the deferred context manifest, reference format, filesystem authority, and retrieval contract.
+    description: Specify the deferred context manifest, reference format, filesystem authority, context-specific error mapping, byte-identical Markdown contract, and command-result-only `deferred_context` materialization metadata.
     reads:
       - docs/cli-contract.md
       - docs/agent-contract.md
@@ -87,7 +91,7 @@ tasks:
     status: planned
     depends_on:
       - P52-T1
-    description: Persist deferred sections through a shared content-addressed store primitive without changing existing Evidence artifact references, schema, storage, round-trip, or security contracts.
+    description: Persist deferred sections through a shared content-addressed store primitive without changing existing Evidence artifact contracts; materialize and verify deferred artifacts before atomically writing the context pack so a written pack never contains a dangling reference.
     reads:
       - src/core/pack/index.ts
       - src/core/pack/budget.ts
@@ -99,10 +103,16 @@ tasks:
       - src/io/atomic-text.ts
       - src/commands/task-prepare.ts
       - src/commands/task-context.ts
+      - src/cli/commands/task.ts
       - src/core/project-fs/operations.ts
       - src/core/project-fs/authority-resolvers.ts
       - scripts/check-fs-authority.mjs
       - scripts/check-security-hardening-invariants.mjs
+      - tests/integration/pack-byte-identical.test.ts
+      - tests/integration/task-context-budget.test.ts
+      - tests/integration/task-context-explain-metrics.test.ts
+      - tests/integration/task-prepare-commands-contract.test.ts
+      - tests/integration/evidence-agent-detail.test.ts
     writes:
       - src/core/evidence/evidence-store.ts
       - src/core/pack/index.ts
@@ -128,6 +138,7 @@ tasks:
       - tests/unit/security/filesystem-operation-proof.test.ts
       - tests/unit/scripts/check-fs-authority.test.ts
       - tests/integration/evidence-agent-detail.test.ts
+      - tests/integration/pack-byte-identical.test.ts
       - tests/integration/task-context-budget.test.ts
       - tests/integration/task-context-explain-metrics.test.ts
       - tests/integration/task-prepare-commands-contract.test.ts
@@ -140,6 +151,7 @@ tasks:
       - tests/unit/security/filesystem-operation-proof.test.ts
       - tests/unit/scripts/check-fs-authority.test.ts
       - tests/integration/evidence-agent-detail.test.ts
+      - tests/integration/pack-byte-identical.test.ts
       - tests/integration/task-context-budget.test.ts
       - tests/integration/task-context-explain-metrics.test.ts
       - tests/integration/task-prepare-commands-contract.test.ts

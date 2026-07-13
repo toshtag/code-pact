@@ -26,7 +26,7 @@ verification:
     - pnpm check:docs
     - pnpm typecheck
     - pnpm test:unit
-    - pnpm test:integration:smoke
+    - pnpm test:integration:full
 tasks:
   - id: P54-T1
     type: architecture

@@ -29,7 +29,7 @@ verification:
     - pnpm typecheck
     - pnpm test:unit
     - pnpm build
-    - pnpm test:integration:smoke
+    - pnpm test:integration:full
 tasks:
   - id: P51-T1
     type: architecture
