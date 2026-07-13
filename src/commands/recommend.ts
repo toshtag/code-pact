@@ -13,6 +13,9 @@ import {
   resolveRecommendation,
   type RecommendResult,
 } from "../core/recommend/index.ts";
+import {
+  formatRepairPolicySummary,
+} from "../core/recommend/repair-policy.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -137,6 +140,9 @@ export function formatRecommend(r: RecommendResult): string {
   );
 
   sections.push(`Lifecycle: ${r.lifecycleMode}`);
+  sections.push(
+    `Repair: ${formatRepairPolicySummary(r.repairPolicy)}`,
+  );
 
   sections.push(
     [

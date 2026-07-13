@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runInit } from "../../../src/commands/init.ts";
 import { runPhaseAdd } from "../../../src/commands/phase.ts";
-import { runRecommend } from "../../../src/commands/recommend.ts";
+import { formatRecommend, runRecommend } from "../../../src/commands/recommend.ts";
 import { recommendTier } from "../../../src/core/recommend/tier.ts";
 import type { Task } from "../../../src/core/schemas/task.ts";
 
@@ -185,6 +185,60 @@ describe("runRecommend — integration", () => {
     expect(result.tier).toBe("balanced_coding");
     expect(result.modelId).toBe("claude-sonnet-4-6");
     expect(result.agentName).toBe("claude-code");
+    expect(result.repairPolicy).toEqual({
+      mode: "disabled",
+      reasonCode: "decision_loop",
+    });
+  });
+
+  it("formats bounded repair in human output", async () => {
+    const fixtureDir = new URL("../../../tests/fixtures/project-a", import.meta.url).pathname;
+    const result = await runRecommend({
+      cwd: fixtureDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+    });
+
+    expect(
+      formatRecommend({
+        ...result,
+        repairPolicy: {
+          mode: "bounded",
+          maxRepairAttempts: 1,
+          retryableFailureKinds: ["command_failed"],
+          nonRetryableFailureKinds: [
+            "timed_out",
+            "aborted",
+            "decision_required",
+            "unsafe_write",
+            "invalid_state",
+            "unknown",
+          ],
+          retryContext: "failure_delta",
+          firstRetry: "same_model_same_effort_same_context",
+          stopOnRepeatedFingerprint: true,
+          afterExhaustion: "use_allowed_escalation",
+        },
+      }),
+    ).toContain("Repair: bounded (max 1; command_failed only; same model/effort/context)");
+  });
+
+  it("formats disabled repair in human output", async () => {
+    const fixtureDir = new URL("../../../tests/fixtures/project-a", import.meta.url).pathname;
+    const result = await runRecommend({
+      cwd: fixtureDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+    });
+
+    expect(
+      formatRecommend({
+        ...result,
+        repairPolicy: { mode: "disabled", reasonCode: "architecture" },
+      }),
+    ).toContain("Repair: disabled (architecture)");
   });
 
   it("throws PHASE_NOT_FOUND for unknown phase", async () => {

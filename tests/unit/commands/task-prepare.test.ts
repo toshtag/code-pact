@@ -74,6 +74,24 @@ tasks:
       - P1-T1
 `;
 
+const BOUNDED_POLICY = {
+  mode: "bounded",
+  maxRepairAttempts: 1,
+  retryableFailureKinds: ["command_failed"],
+  nonRetryableFailureKinds: [
+    "timed_out",
+    "aborted",
+    "decision_required",
+    "unsafe_write",
+    "invalid_state",
+    "unknown",
+  ],
+  retryContext: "failure_delta",
+  firstRetry: "same_model_same_effort_same_context",
+  stopOnRepeatedFingerprint: true,
+  afterExhaustion: "use_allowed_escalation",
+} as const;
+
 async function setupProject(
   dir: string,
   opts: { progressYaml?: string; phaseYaml?: string } = {},
@@ -142,6 +160,7 @@ describe("runTaskPrepare — planned state", () => {
     expect(result.current_state).toBe("planned");
     expect(result.next_action.type).toBe("start_task");
     expect(result.recommendation).not.toBeNull();
+    expect(result.recommendation!.repairPolicy).toEqual(BOUNDED_POLICY);
     expect(result.context_pack_path).not.toBeNull();
     expect(result.context_pack_bytes).toBeGreaterThan(0);
     expect(result.dry_run).toBe(false);
@@ -224,6 +243,10 @@ describe("runTaskPrepare — recommendation observability (regression)", () => {
     expect(typeof rec.tier).toBe("string");
     expect(typeof rec.effort).toBe("string");
     expect(typeof rec.modelId).toBe("string");
+    expect(rec.repairPolicy).toEqual({
+      mode: "disabled",
+      reasonCode: "weak_verification",
+    });
     expect(rec.modelId.length).toBeGreaterThan(0);
   });
 
@@ -270,6 +293,7 @@ describe("runTaskPrepare — P48 contextFit", () => {
     });
     expect(result.recommendation).not.toBeNull();
     const cf = result.recommendation!.contextFit;
+    expect(result.recommendation!.repairPolicy).toEqual(BOUNDED_POLICY);
     expect(cf).toBeDefined();
     // P1-T1: context_size=small, ambiguity=low, write_surface=low -> tight.
     expect(cf?.recommendedProfile).toBe("tight");
@@ -500,6 +524,7 @@ describe("runTaskPrepare — started / resumed states", () => {
     expect(result.current_state).toBe("started");
     expect(result.next_action.type).toBe("continue_implementation");
     expect(result.recommendation).not.toBeNull();
+    expect(result.recommendation!.repairPolicy).toEqual(BOUNDED_POLICY);
     expect(result.context_pack_path).not.toBeNull();
   });
 });
@@ -529,6 +554,8 @@ describe("runTaskPrepare — failed state", () => {
 
     expect(result.current_state).toBe("failed");
     expect(result.next_action.type).toBe("investigate_failure");
+    expect(result.recommendation).not.toBeNull();
+    expect(result.recommendation!.repairPolicy).toEqual(BOUNDED_POLICY);
   });
 });
 
@@ -657,6 +684,7 @@ ${extra}
     await setupProject(dir, { phaseYaml: phaseYaml() });
     const result = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
     expect(result.recommendation?.lifecycleMode).toBe("full_loop");
+    expect(result.recommendation?.repairPolicy).toEqual(BOUNDED_POLICY);
     expect(result.next_action.message).toContain("complete");
     expect(result.commands["record-done"]).toContain("task record-done");
     expect(result.commands["record-done"]).toContain("--evidence");
@@ -667,6 +695,10 @@ ${extra}
     await setupProject(dir, { phaseYaml: phaseYaml({ type: "docs" }) });
     const result = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
     expect(result.recommendation?.lifecycleMode).toBe("record_only");
+    expect(result.recommendation?.repairPolicy).toEqual({
+      mode: "disabled",
+      reasonCode: "record_only",
+    });
     expect(result.next_action.message).toContain("task record-done --evidence");
     expect(result.next_action.message).toContain("not lighter verification");
     expect(result.next_action.message).not.toContain("complete the task");
@@ -677,6 +709,10 @@ ${extra}
     await setupProject(dir, { phaseYaml: phaseYaml({ extraTaskLines: ["requires_decision: true"] }) });
     const result = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
     expect(result.recommendation?.lifecycleMode).toBe("decision_loop");
+    expect(result.recommendation?.repairPolicy).toEqual({
+      mode: "disabled",
+      reasonCode: "decision_loop",
+    });
     expect(result.next_action.message).toContain("Resolve/accept the gating ADR first");
     expect(result.next_action.message).not.toContain("task record-done");
     expect(result.next_action.message).not.toContain("complete the task");

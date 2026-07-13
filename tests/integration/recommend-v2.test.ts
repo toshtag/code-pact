@@ -244,6 +244,23 @@ describe("recommend v0.8 — human formatter", () => {
       budgetProfile: { toolCalls: "low", contextFiles: "few", verificationCommands: "full" },
       structuredReasons: [{ factor: "stub", value: "stub", effect: "stub" }],
       lifecycleMode: "full_loop",
+      repairPolicy: {
+        mode: "bounded",
+        maxRepairAttempts: 1,
+        retryableFailureKinds: ["command_failed"],
+        nonRetryableFailureKinds: [
+          "timed_out",
+          "aborted",
+          "decision_required",
+          "unsafe_write",
+          "invalid_state",
+          "unknown",
+        ],
+        retryContext: "failure_delta",
+        firstRetry: "same_model_same_effort_same_context",
+        stopOnRepeatedFingerprint: true,
+        afterExhaustion: "use_allowed_escalation",
+      },
     };
     const out = formatRecommend(stub);
     expect(out).toContain("Preflight: (none)");

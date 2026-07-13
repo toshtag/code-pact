@@ -71,7 +71,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: Add the repair policy schema, pure decision function, and
       recommendation/task-prepare JSON parity.
     depends_on:
@@ -84,6 +84,7 @@ tasks:
       - src/commands/task-prepare.ts
       - src/cli/commands/task.ts
     writes:
+      - design/phases/P51-bounded-repair-contract.yaml
       - src/core/recommend/repair-policy.ts
       - src/core/recommend/index.ts
       - src/core/schemas/recommend-result.ts
@@ -94,7 +95,9 @@ tasks:
       - tests/unit/core/recommend/repair-policy.test.ts
       - tests/unit/commands/recommend.test.ts
       - tests/unit/commands/task-prepare.test.ts
+      - tests/unit/schemas/recommend-result.test.ts
       - tests/integration/cli.test.ts
+      - tests/integration/recommend-v2.test.ts
       - tests/integration/task-prepare-commands-contract.test.ts
     acceptance_refs:
       - tests/unit/core/recommend/resolve.test.ts

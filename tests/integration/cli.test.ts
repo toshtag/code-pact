@@ -246,6 +246,151 @@ describe("CLI: post-command --json (BUG-001)", () => {
   });
 });
 
+describe("CLI: P51 repairPolicy recommendation contract", () => {
+  const boundedPolicy = {
+    mode: "bounded",
+    maxRepairAttempts: 1,
+    retryableFailureKinds: ["command_failed"],
+    nonRetryableFailureKinds: [
+      "timed_out",
+      "aborted",
+      "decision_required",
+      "unsafe_write",
+      "invalid_state",
+      "unknown",
+    ],
+    retryContext: "failure_delta",
+    firstRetry: "same_model_same_effort_same_context",
+    stopOnRepeatedFingerprint: true,
+    afterExhaustion: "use_allowed_escalation",
+  };
+
+  async function setupRepairPolicyTask(): Promise<void> {
+    run(["init", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    run([
+      "phase",
+      "add",
+      "--id",
+      "P1",
+      "--name",
+      "Foundation",
+      "--objective",
+      "Foundation phase",
+      "--weight",
+      "10",
+      "--verify-command",
+      "node --version",
+      "--json",
+    ]);
+    const phaseFile = join(tmpDir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phaseFile, "utf8")) as Record<string, unknown>;
+    doc.tasks = [
+      {
+        id: "P1-T1",
+        type: "feature",
+        ambiguity: "low",
+        risk: "low",
+        context_size: "small",
+        write_surface: "low",
+        verification_strength: "strong",
+        expected_duration: "short",
+        status: "planned",
+        description: "repair policy contract test",
+      },
+    ];
+    await writeFile(phaseFile, stringifyYaml(doc), "utf8");
+  }
+
+  it("recommend --json and task prepare --json expose the same repairPolicy", async () => {
+    await setupRepairPolicyTask();
+
+    const rec = run([
+      "recommend",
+      "--phase",
+      "P1",
+      "--task",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    const prep = run([
+      "task",
+      "prepare",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    const recEnv = JSON.parse(rec.stdout) as {
+      ok: true;
+      data: { repairPolicy: unknown; repair_policy?: unknown };
+    };
+    const prepEnv = JSON.parse(prep.stdout) as {
+      ok: true;
+      data: { recommendation: { repairPolicy: unknown; repair_policy?: unknown } };
+    };
+
+    expect(recEnv.ok).toBe(true);
+    expect(prepEnv.ok).toBe(true);
+    expect(recEnv.data.repairPolicy).toEqual(boundedPolicy);
+    expect(prepEnv.data.recommendation.repairPolicy).toEqual(boundedPolicy);
+    expect(prepEnv.data.recommendation.repairPolicy).toEqual(recEnv.data.repairPolicy);
+    expect(recEnv.data.repair_policy).toBeUndefined();
+    expect(prepEnv.data.recommendation.repair_policy).toBeUndefined();
+  });
+
+  it("human recommend and task prepare include a Repair line", async () => {
+    await setupRepairPolicyTask();
+
+    const rec = run([
+      "recommend",
+      "--phase",
+      "P1",
+      "--task",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+    ]);
+    const prep = run([
+      "task",
+      "prepare",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+    ]);
+
+    expect(rec.stdout).toContain(
+      "Repair: bounded (max 1; command_failed only; same model/effort/context)",
+    );
+    expect(prep.stdout).toContain(
+      "Repair:         bounded (max 1; command_failed only; same model/effort/context)",
+    );
+  });
+
+  it("human recommend includes disabled reasonCode", async () => {
+    await setupRepairPolicyTask();
+    const phaseFile = join(tmpDir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phaseFile, "utf8")) as {
+      tasks: Array<Record<string, unknown>>;
+    };
+    doc.tasks[0]!.type = "architecture";
+    await writeFile(phaseFile, stringifyYaml(doc), "utf8");
+
+    const rec = run([
+      "recommend",
+      "--phase",
+      "P1",
+      "--task",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+    ]);
+
+    expect(rec.stdout).toContain("Repair: disabled (architecture)");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // BUG-002: phase add --verify-command must not silently truncate
 // ---------------------------------------------------------------------------
