@@ -2007,7 +2007,7 @@ The flag list, value types, and examples live in the generated [CLI reference §
 
 The `commands` dictionary is populated in every state — including the early-return states — so the agent can choose to invoke them directly after resolving the blocker.
 
-`recommendation` is `null` **only** in the early-return states (`wait_for_dependencies`, `noop_already_done`) — i.e. `done`, `blocked`, or an unmet `depends_on`. In every workable state (`planned`, `started`, `resumed`, `failed`) it is a populated `RecommendResult` whose `tier` / `effort` / `modelId` an agent can trust without a separate `recommend` call. A `null` here means "nothing to recommend yet", never "recommendation unavailable".
+`recommendation` is `null` **only** in the early-return states (`wait_for_dependencies`, `noop_already_done`) — i.e. `done`, `blocked`, or an unmet `depends_on`. In every workable state (`planned`, `started`, `resumed`, `failed`) it is a populated `RecommendResult` whose `tier` / `effort` / `modelId` / `lifecycleMode` / `repairPolicy` an agent can trust without a separate `recommend` call. A `null` here means "nothing to recommend yet", never "recommendation unavailable".
 
 ### Exit codes
 
@@ -3166,6 +3166,23 @@ All field names are camelCase. Enum / identifier values are snake_case where app
       }
     ],
     "lifecycleMode": "full_loop",
+    "repairPolicy": {
+      "mode": "bounded",
+      "maxRepairAttempts": 1,
+      "retryableFailureKinds": ["command_failed"],
+      "nonRetryableFailureKinds": [
+        "timed_out",
+        "aborted",
+        "decision_required",
+        "unsafe_write",
+        "invalid_state",
+        "unknown"
+      ],
+      "retryContext": "failure_delta",
+      "firstRetry": "same_model_same_effort_same_context",
+      "stopOnRepeatedFingerprint": true,
+      "afterExhaustion": "use_allowed_escalation"
+    },
     "contextFit": {
       "recommendedProfile": "wide",
       "recommendedBudgetBytes": 120000,
@@ -3209,6 +3226,57 @@ The output is zod-validated before return. The contract uses strict mode at ever
 | Field           | Type                                            | Trigger                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | --------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `lifecycleMode` | `full_loop` \| `record_only` \| `decision_loop` | The recommended loop for this task (advisory; code-pact's own loop behavior is unchanged). Deterministic switch: `decision_loop` when the task or its phase `requires_decision`; else `record_only` when `type ∈ {docs, test}` AND `ambiguity == low` AND `risk == low` AND `verification_strength == strong`; else `full_loop`. `record_only` means a lighter _loop_ (implement, run verification, then `task record-done`), **not** lighter verification. |
+
+**P51 additive field:**
+
+| Field          | Type         | Trigger                                                                                                                                                                                                                                                                |
+| -------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repairPolicy` | RepairPolicy | Present on every non-null recommendation from `recommend --json` and `task prepare --json`. Advisory only: code-pact does not execute retries, add retry commands, add flags, add exit codes, or mutate the `commands` dictionary for repair. |
+
+**RepairPolicy shape:**
+
+Disabled repair:
+
+```json
+{
+  "mode": "disabled",
+  "reasonCode": "decision_loop"
+}
+```
+
+`reasonCode` is a closed enum: `decision_loop`, `record_only`,
+`architecture`, `high_ambiguity`, `high_risk`, `high_write_surface`,
+`weak_verification`.
+
+Bounded repair:
+
+```json
+{
+  "mode": "bounded",
+  "maxRepairAttempts": 1,
+  "retryableFailureKinds": ["command_failed"],
+  "nonRetryableFailureKinds": [
+    "timed_out",
+    "aborted",
+    "decision_required",
+    "unsafe_write",
+    "invalid_state",
+    "unknown"
+  ],
+  "retryContext": "failure_delta",
+  "firstRetry": "same_model_same_effort_same_context",
+  "stopOnRepeatedFingerprint": true,
+  "afterExhaustion": "use_allowed_escalation"
+}
+```
+
+The bounded branch permits at most one repair attempt, only after
+`command_failed`, with the same model, same effort, and same context. Agents use
+the compact Failure Capsule and current diff; full evidence is fetched only when
+the excerpts are insufficient. A repeated fingerprint stops repair. After the
+single attempt is exhausted, agents move to the existing `allowedEscalation`
+sequence. Timeout, abort, decision, unsafe-write, invalid-state, and unknown
+failures are non-retryable.
 
 **P48 additive field (Context Fit, layer b):**
 

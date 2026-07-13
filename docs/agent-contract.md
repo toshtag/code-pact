@@ -348,6 +348,55 @@ The verbs in detail:
   normally exist only for command-output failures. Do not fetch full evidence by
   default.
 
+### Bounded repair recommendation
+
+Code Pact does not repair a failed task, restart an agent, schedule retries, call
+a model API, or append progress events after a verification failure. It only
+reports deterministic guidance in `data.recommendation.repairPolicy` when a
+recommendation is non-null.
+
+The disabled shape is:
+
+```json
+{
+  "mode": "disabled",
+  "reasonCode": "decision_loop"
+}
+```
+
+`reasonCode` is one of `decision_loop`, `record_only`, `architecture`,
+`high_ambiguity`, `high_risk`, `high_write_surface`, or `weak_verification`.
+
+The bounded shape is:
+
+```json
+{
+  "mode": "bounded",
+  "maxRepairAttempts": 1,
+  "retryableFailureKinds": ["command_failed"],
+  "nonRetryableFailureKinds": [
+    "timed_out",
+    "aborted",
+    "decision_required",
+    "unsafe_write",
+    "invalid_state",
+    "unknown"
+  ],
+  "retryContext": "failure_delta",
+  "firstRetry": "same_model_same_effort_same_context",
+  "stopOnRepeatedFingerprint": true,
+  "afterExhaustion": "use_allowed_escalation"
+}
+```
+
+Agents may attempt bounded repair only for `command_failed`, at most once, and
+with the same model, effort, and context. The only extra input is the Failure
+Capsule plus the current diff; do not rerun `task prepare`, `task context`, or
+repository-wide discovery just to widen context. Fetch full evidence only when
+the capsule excerpts are insufficient. If the same fingerprint recurs, or the
+single repair attempt fails, stop and follow the existing `allowedEscalation`
+guidance. Non-retryable kinds are terminal for bounded repair.
+
 - **`task complete <task-id>`** — runs verification and, on pass,
   appends a `done` event (`source: loop`). Idempotent — a second call
   from `done` state returns success without appending a duplicate event.
