@@ -3,7 +3,7 @@ name: Reversible Context Deferral
 weight: 8
 confidence: medium
 risk: high
-status: planned
+status: done
 objective: >
   Replace irreversible context section elision with content-addressed deferral
   records so an agent can retrieve the exact omitted context only when needed.
