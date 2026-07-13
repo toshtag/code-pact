@@ -137,3 +137,21 @@ phases:
   - id: P50
     path: design/phases/P50-context-fit-advisories.yaml
     weight: 5
+  - id: P51
+    path: design/phases/P51-bounded-repair-contract.yaml
+    weight: 6
+  - id: P52
+    path: design/phases/P52-reversible-context-deferral.yaml
+    weight: 8
+  - id: P53
+    path: design/phases/P53-recommended-context-budget-application.yaml
+    weight: 6
+  - id: P54
+    path: design/phases/P54-structural-context-projection.yaml
+    weight: 7
+  - id: P57
+    path: design/phases/P57-regression-evidence.yaml
+    weight: 5
+  - id: P55
+    path: design/phases/P55-stable-core-task-delta.yaml
+    weight: 7

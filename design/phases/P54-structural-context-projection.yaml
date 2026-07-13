@@ -1,0 +1,139 @@
+id: P54
+name: Structural Context Projection
+weight: 7
+confidence: medium
+risk: medium
+status: planned
+objective: >
+  Add deterministic, content-type-aware context projections that reduce context
+  size only where the structure is safe to preserve mechanically.
+non_goals:
+  - Summarize natural-language requirements.
+  - Compress source code.
+  - Keep lines only because they contain imperative keywords.
+  - Delegate projection quality to a model.
+definition_of_done:
+  - Projection is enabled only on explicit budgeted context paths; default no-budget packs stay byte-identical.
+  - "`task context --explain` does not enable projection by itself."
+  - Read glob output can be grouped while the complete list remains retrievable.
+  - Read-glob and decision projections preserve an exact content reference for omitted original material.
+  - Completed task projection is excluded unless measurement proves a reduction beyond the current minimal rendering.
+  - Decision rendering prefers explicit implementation commitments when present and falls back to the original on parse failure.
+  - JSON projection is out of scope until a concrete context-pack JSON section exists.
+  - Projected output falls back to the original or normal rendering when it would be larger.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:full
+tasks:
+  - id: P54-T1
+    type: architecture
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P52-T4
+      - P53-T3
+    description: Define safe projection rules by content type and document the non-summarization boundary.
+    reads:
+      - src/core/pack/index.ts
+      - src/core/pack/budget.ts
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+      - src/core/pack/loaders.ts
+      - src/core/pack/formatters/markdown.ts
+    writes:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+    acceptance_refs:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+  - id: P54-T2
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P54-T1
+    description: Project large read glob results by directory while deferring the complete file list.
+    reads:
+      - src/core/pack/index.ts
+      - src/core/pack/budget.ts
+      - src/core/pack/loaders.ts
+      - src/core/glob.ts
+      - src/core/pack/formatters/markdown.ts
+    writes:
+      - src/core/pack/index.ts
+      - src/core/pack/budget.ts
+      - src/core/pack/loaders.ts
+      - src/core/pack/formatters/markdown.ts
+      - tests/unit/core/pack/loaders.test.ts
+      - tests/unit/core/glob.test.ts
+      - tests/integration/pack-byte-identical.test.ts
+      - tests/integration/task-context-budget.test.ts
+    acceptance_refs:
+      - tests/unit/core/pack/loaders.test.ts
+      - tests/unit/core/glob.test.ts
+      - tests/integration/pack-byte-identical.test.ts
+      - tests/integration/task-context-budget.test.ts
+  - id: P54-T3
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P54-T2
+    description: Project decision records through deterministic implementation-commitment fields with original-content references.
+    reads:
+      - src/core/pack/loaders.ts
+      - src/core/pack/formatters/markdown.ts
+      - src/core/decisions/adr.ts
+    writes:
+      - src/core/pack/loaders.ts
+      - src/core/pack/formatters/markdown.ts
+      - tests/unit/core/pack/loaders.test.ts
+      - tests/unit/core/pack/loaders-decisions.test.ts
+      - tests/unit/core/pack-core.test.ts
+      - tests/integration/pack-byte-identical.test.ts
+    acceptance_refs:
+      - tests/unit/core/pack/loaders.test.ts
+      - tests/unit/core/pack/loaders-decisions.test.ts
+      - tests/unit/core/pack-core.test.ts
+      - tests/integration/pack-byte-identical.test.ts
+  - id: P54-T4
+    type: test
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P54-T2
+      - P54-T3
+    description: Add fixed fixtures for projection bytes and deferred reference retrieval.
+    reads:
+      - tests/fixtures/**
+      - tests/integration/task-context-budget.test.ts
+    writes:
+      - tests/fixtures/context-projection/**
+      - tests/integration/task-context-budget.test.ts
+      - tests/unit/core/pack-core.test.ts
+    acceptance_refs:
+      - tests/integration/task-context-budget.test.ts
+      - tests/unit/core/pack-core.test.ts

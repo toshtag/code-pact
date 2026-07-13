@@ -1,0 +1,149 @@
+id: P51
+name: Bounded Repair Contract
+weight: 6
+confidence: medium
+risk: medium
+status: planned
+objective: >
+  Turn the compact failure capsule and normalized failure fingerprint into a
+  deterministic agent contract for one bounded repair attempt before any model
+  escalation is considered.
+non_goals:
+  - Restart or orchestrate an agent process from code-pact.
+  - Apply a wider context pack automatically.
+  - Retry timeout, abort, decision, unsafe write, or invalid-state failures.
+definition_of_done:
+  - The agent contract documents when a repair attempt is allowed, skipped, or stopped.
+  - The contract requires the same model, effort, and context for the bounded repair attempt.
+  - The repair policy is a pure total function with a priority-stable decision table and exhaustive branch tests.
+  - Eligibility priority is fixed as decision loop, record-only, architecture, high ambiguity, high risk, high write surface, weak verification, then bounded repair.
+  - Decision-loop, record-only, architecture, high-ambiguity, high-risk, high-write-surface, and weak-verification tasks are repair-disabled.
+  - Only command failures are repair-eligible, and only for one attempt before escalation guidance can apply.
+  - Same-fingerprint recurrence stops instead of retrying again.
+  - Generated adapter guidance and adapter conformance invariants carry the same repair contract.
+  - Full evidence retrieval is recommended only when excerpts are insufficient.
+  - Existing escalation guidance is used only after the bounded repair budget is exhausted.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm build
+    - pnpm test:integration:full
+tasks:
+  - id: P51-T1
+    type: architecture
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: Define the bounded repair state machine, static failure routing, and terminal stop reasons.
+    reads:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - src/core/evidence/failure-capsule.ts
+      - src/core/evidence/failure-fingerprint.ts
+      - src/core/recommend/escalation.ts
+    writes:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+    acceptance_refs:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+  - id: P51-T2
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P51-T1
+    description: Add the repair policy schema, pure decision function, and recommendation/task-prepare JSON parity.
+    reads:
+      - src/core/recommend/index.ts
+      - src/core/recommend/escalation.ts
+      - src/core/schemas/recommend-result.ts
+      - src/commands/recommend.ts
+      - src/commands/task-prepare.ts
+      - src/cli/commands/task.ts
+    writes:
+      - src/core/recommend/repair-policy.ts
+      - src/core/recommend/index.ts
+      - src/core/schemas/recommend-result.ts
+      - src/commands/recommend.ts
+      - src/commands/task-prepare.ts
+      - src/cli/commands/task.ts
+      - tests/unit/core/recommend/resolve.test.ts
+      - tests/unit/core/recommend/repair-policy.test.ts
+      - tests/unit/commands/recommend.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/integration/cli.test.ts
+      - tests/integration/task-prepare-commands-contract.test.ts
+    acceptance_refs:
+      - tests/unit/core/recommend/resolve.test.ts
+      - tests/unit/commands/recommend.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/integration/cli.test.ts
+      - tests/integration/task-prepare-commands-contract.test.ts
+  - id: P51-T3
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P51-T2
+    description: Propagate the bounded repair contract into generated adapter guidance and conformance checks.
+    reads:
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - src/core/adapters/template-sections.ts
+      - src/core/adapters/conformance-spec.ts
+    writes:
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - src/core/adapters/template-sections.ts
+      - src/core/adapters/conformance-spec.ts
+      - tests/unit/commands/adapter-conformance.test.ts
+      - tests/integration/adapter-conformance.test.ts
+      - tests/unit/i18n/agent-contract-guidance.test.ts
+    acceptance_refs:
+      - tests/unit/commands/adapter-conformance.test.ts
+      - tests/integration/adapter-conformance.test.ts
+      - tests/unit/i18n/agent-contract-guidance.test.ts
+  - id: P51-T4
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P51-T3
+    description: Document bounded repair in the per-task loop and changelog.
+    reads:
+      - docs/per-task-loop.md
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - CHANGELOG.md
+    writes:
+      - docs/per-task-loop.md
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - docs/per-task-loop.md
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - CHANGELOG.md
