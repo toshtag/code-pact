@@ -38,7 +38,17 @@ export type FlagSpec = {
 /** The single source for one subcommand. */
 export type CommandSpec = {
   /** Cluster the command belongs to, or "root" for a top-level command. */
-  cluster: "task" | "plan" | "phase" | "adapter" | "decision" | "state" | "spec" | "evidence" | "root";
+  cluster:
+    | "task"
+    | "plan"
+    | "phase"
+    | "adapter"
+    | "decision"
+    | "state"
+    | "spec"
+    | "evidence"
+    | "context"
+    | "root";
   /** Subcommand name, e.g. "prepare". */
   command: string;
   /** Positional placeholder for the synopsis, e.g. "<task-id>". Omit if none. */

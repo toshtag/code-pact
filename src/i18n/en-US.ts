@@ -16,6 +16,7 @@ export const messages = {
     "  pack       write a context pack file to the agent profile's context_dir",
     "  verify     run deterministic completion criteria",
     "  evidence   show cached verification evidence by reference",
+    "  context    inspect or retrieve deferred context by reference",
     "  adapter    generate or refresh per-agent rule files",
     "  recommend  suggest a model tier for a task",
     "  doctor     report project structure issues (human-friendly)",

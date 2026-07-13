@@ -55,6 +55,28 @@ code-pact evidence show evidence:sha256:0123456789abcdef0123456789abcdef01234567
 code-pact evidence show evidence:sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef --stream stderr
 ```
 
+## Context commands
+
+### `context show`
+
+`code-pact context show <context-ref> [options]`
+
+Inspect or retrieve exact sections from a deferred context manifest.
+Default output shows manifest metadata only; --list lists sections without
+content; --section prints exactly one section body. Read-only — never records a progress event.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--list` | — | List deferred sections without section content. |
+| `--section` | `<name>` | Print exactly one deferred section body. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact context show context:sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+code-pact context show context:sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef --list --json
+code-pact context show context:sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef --section rules
+```
+
 ## Task commands
 
 ### `task add`

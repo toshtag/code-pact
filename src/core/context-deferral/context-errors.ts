@@ -1,13 +1,17 @@
-export const CONTEXT_ERROR_CODES = [
-  "INVALID_CONTEXT_REF",
-  "CONTEXT_NOT_FOUND",
-  "CONTEXT_INVALID",
-  "CONTEXT_DIGEST_MISMATCH",
-  "CONTEXT_PATH_UNSAFE",
-  "CONTEXT_READ_FAILED",
+export const CONTEXT_ERROR_DESCRIPTORS = [
+  { code: "INVALID_CONTEXT_REF" },
+  { code: "CONTEXT_NOT_FOUND" },
+  { code: "CONTEXT_INVALID" },
+  { code: "CONTEXT_DIGEST_MISMATCH" },
+  { code: "CONTEXT_PATH_UNSAFE" },
+  { code: "CONTEXT_READ_FAILED" },
 ] as const;
 
-export type ContextErrorCode = (typeof CONTEXT_ERROR_CODES)[number];
+export type ContextErrorCode = (typeof CONTEXT_ERROR_DESCRIPTORS)[number]["code"];
+
+export const CONTEXT_ERROR_CODES = CONTEXT_ERROR_DESCRIPTORS.map(
+  item => item.code,
+) as ContextErrorCode[];
 
 export function contextError(
   code: ContextErrorCode,

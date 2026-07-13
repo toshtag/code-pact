@@ -2358,6 +2358,12 @@ The first observed `SIGINT` or `SIGTERM` requests clean cancellation. Code Pact 
 
 `code-pact evidence show <evidence-ref> [--stream all|stdout|stderr] [--json]` retrieves a cached verification evidence artifact. It is read-only and never records progress. Invalid references, missing evidence, digest mismatches, traversal attempts, and symlink/authority failures are fail-closed. Filesystem authority failures surface as stable public error codes (`EVIDENCE_PATH_UNSAFE` or `EVIDENCE_READ_FAILED`), not internal path/errno codes; JSON envelopes may include `data.system_code` as diagnostics. The artifact is the exact bounded output Code Pact captured under its existing command-output cap, not an unbounded process log.
 
+## `context show`
+
+`code-pact context show <context-ref> [--list | --section <name>] [--json]` retrieves deferred context created by budgeted `task prepare`. It is read-only and never records progress. Default output reports manifest metadata only. `--list` reports section names, byte counts, and section digests without section content. `--section <name>` prints exactly one deferred section body; human output is the exact body bytes decoded as UTF-8 and does not append a newline.
+
+Context references use `context:sha256:<64 lowercase hex>` and resolve under `.code-pact/cache/context/`. Invalid references are `INVALID_CONTEXT_REF` at exit 2. Missing artifacts, corrupt manifests, digest mismatches, traversal attempts, and symlink/authority failures are fail-closed at exit 1 with the `CONTEXT_*` public codes listed in [Public codes](#public-codes-top-level-error-envelopes). JSON envelopes for platform read failures may include `data.system_code` as a diagnostic.
+
 ## `task complete`
 
 `code-pact task complete <task-id> [--agent <name>] [--timeout <ms>] [--json] [--dry-run] [--detail full|agent]` is the deterministic completion entry point for agents.

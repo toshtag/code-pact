@@ -16,7 +16,14 @@ import { subcommandUsage } from "../../../src/cli/usage.ts";
 const STUB_MARKER = "for the full subcommand list.";
 
 type Cmd = {
-  cluster: "plan" | "phase" | "adapter" | "decision" | "state" | "spec";
+  cluster:
+    | "plan"
+    | "phase"
+    | "adapter"
+    | "decision"
+    | "state"
+    | "spec"
+    | "context";
   sub: string;
   /** Mutates files/state (writes a doc, flips YAML, installs an adapter, …). */
   mutating: boolean;
@@ -64,6 +71,8 @@ const COMMANDS: Cmd[] = [
   { cluster: "state", sub: "archive-maintain", mutating: true, json: true },
   // spec
   { cluster: "spec", sub: "import", mutating: true, json: true },
+  // context
+  { cluster: "context", sub: "show", mutating: false, json: true },
 ];
 
 // Commands still on the 2-line stub. Each line here is a known gap, not a

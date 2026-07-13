@@ -188,7 +188,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: Add `code-pact context show` with list, section, and JSON retrieval
       modes, then update CLI docs through the spec generator.
     depends_on:
@@ -198,11 +198,14 @@ tasks:
       - src/commands/task-context.ts
       - src/commands/pack.ts
     writes:
+      - design/phases/P52-reversible-context-deferral.yaml
       - src/cli/spec/context.ts
+      - src/cli/spec/types.ts
       - src/cli/commands/context.ts
       - src/commands/context-show.ts
       - src/cli.ts
       - src/cli/usage.ts
+      - src/core/context-deferral/context-errors.ts
       - src/i18n/en-US.ts
       - src/i18n/ja-JP.ts
       - scripts/gen-cli-reference.ts
@@ -212,9 +215,7 @@ tasks:
       - tests/unit/error-code-surface.test.ts
       - tests/integration/cli-help.test.ts
       - tests/integration/json-stdout.test.ts
-      - tests/unit/cli/spec-render.test.ts
       - tests/unit/cli/leaf-help-coverage.test.ts
-      - tests/unit/commands/task-context.test.ts
       - tests/unit/commands/context-show.test.ts
     acceptance_refs:
       - docs/cli-contract.md

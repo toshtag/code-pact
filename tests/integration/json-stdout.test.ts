@@ -201,6 +201,14 @@ describe("json-stdout contract: read-only Stable (v1.0) commands", () => {
     );
   });
 
+  it("context show invalid ref --json", async () => {
+    const p = await freshProject("context-show-invalid-ref");
+    expectStdoutIsJson(
+      p.run(["context", "show", "context:sha256:not-a-digest", "--json"]),
+      "context show",
+    );
+  });
+
   it("task status P1-T1 --json", async () => {
     const p = await projectWithTask("task-status");
     expectStdoutIsJson(p.run(["task", "status", "P1-T1", "--json"]), "task status");
