@@ -3,7 +3,7 @@ name: Recommended Context Budget Application
 weight: 6
 confidence: medium
 risk: medium
-status: planned
+status: done
 objective: >
   Allow task preparation to apply the deterministic recommended context budget
   explicitly after reversible context deferral makes omitted context
