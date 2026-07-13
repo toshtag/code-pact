@@ -48,40 +48,69 @@ const ContextBudgetProfileName = z
     "context budget profile name must use only letters, digits, '-' or '_'",
   );
 
+const ContextBudgetProfileMap = z
+  .record(
+    ContextBudgetProfileName,
+    z.object({ max_bytes: z.number().int().positive() }),
+  )
+  .refine(p => Object.keys(p).length > 0, {
+    message: "context_budget.profiles must declare at least one profile",
+  });
+
+const ContextBudgetBase = z.object({
+  // Optional convenience pointer. Validated to reference an existing profile,
+  // but it is NOT auto-applied anywhere.
+  default_profile: ContextBudgetProfileName.optional(),
+});
+
+const ManualContextBudget = ContextBudgetBase.extend({
+  application_mode: z.literal("manual"),
+  profiles: ContextBudgetProfileMap,
+}).refine(
+  cb =>
+    cb.default_profile === undefined ||
+    Object.prototype.hasOwnProperty.call(cb.profiles, cb.default_profile),
+  {
+    message:
+      "context_budget.default_profile must reference a profile declared in context_budget.profiles",
+    path: ["default_profile"],
+  },
+);
+
+const RecommendedContextBudget = ContextBudgetBase.extend({
+  application_mode: z.literal("recommended"),
+  profiles: ContextBudgetProfileMap.optional(),
+}).refine(
+  cb =>
+    cb.default_profile === undefined ||
+    (cb.profiles !== undefined &&
+      Object.prototype.hasOwnProperty.call(cb.profiles, cb.default_profile)),
+  {
+    message:
+      "context_budget.default_profile must reference a profile declared in context_budget.profiles",
+    path: ["default_profile"],
+  },
+);
+
 /**
- * Optional `context_budget` block. Names a small set of byte budgets the
- * agent can refer to by name via `--context-budget <profile>`. Validated when
- * present; a missing block is valid (backward compatible) and is NOT applied
- * automatically to any command — there is no implicit default-budget behavior.
- * `default_profile` is validated for future ergonomics only.
+ * Optional `context_budget` block. Omitted block is valid. Omitted
+ * `application_mode` normalizes to `manual`, preserving legacy behavior:
+ * manual requires named profiles and no command applies a budget implicitly.
+ * `recommended` is an explicit task-prepare opt-in; profiles may be omitted
+ * there, and same-name standard profile entries only override bytes.
  */
-export const ContextBudgetProfiles = z
-  .object({
-    // Optional convenience pointer. Validated to reference an existing profile,
-    // but it is NOT auto-applied anywhere.
-    default_profile: ContextBudgetProfileName.optional(),
-    // A `max_bytes` is a positive integer byte cap (the unit the budget enforcement
-    // path already speaks). Non-empty: an empty block carries no information and
-    // is almost certainly a mistake.
-    profiles: z
-      .record(
-        ContextBudgetProfileName,
-        z.object({ max_bytes: z.number().int().positive() }),
-      )
-      .refine(p => Object.keys(p).length > 0, {
-        message: "context_budget.profiles must declare at least one profile",
-      }),
-  })
-  .refine(
-    cb =>
-      cb.default_profile === undefined ||
-      Object.prototype.hasOwnProperty.call(cb.profiles, cb.default_profile),
-    {
-      message:
-        "context_budget.default_profile must reference a profile declared in context_budget.profiles",
-      path: ["default_profile"],
-    },
-  );
+export const ContextBudgetProfiles = z.preprocess((value) => {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    if (record.application_mode === undefined) {
+      return { ...record, application_mode: "manual" };
+    }
+  }
+  return value;
+}, z.discriminatedUnion("application_mode", [
+  ManualContextBudget,
+  RecommendedContextBudget,
+]));
 export type ContextBudgetProfiles = z.infer<typeof ContextBudgetProfiles>;
 
 /**

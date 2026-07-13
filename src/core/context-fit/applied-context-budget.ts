@@ -80,6 +80,12 @@ export function resolveAppliedContextBudget(
   const { selection, agentName, contextBudget, recommendation } = input;
   switch (selection.kind) {
     case "none":
+      if (contextBudget?.application_mode === "recommended") {
+        return recommendedAppliedContextBudget(
+          "recommended_agent_profile",
+          recommendation.contextFit,
+        );
+      }
       return { source: "none" };
     case "explicit_bytes":
       return {

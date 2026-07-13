@@ -123,7 +123,42 @@ describe("AgentProfile.context_budget (P47)", () => {
         },
       },
     });
-    expect(a.context_budget?.profiles.balanced?.max_bytes).toBe(60000);
+    expect(a.context_budget?.application_mode).toBe("manual");
+    if (a.context_budget?.application_mode !== "manual") {
+      throw new Error("expected manual context budget");
+    }
+    expect(a.context_budget.profiles.balanced?.max_bytes).toBe(60000);
+  });
+
+  it("accepts explicit manual mode with non-empty profiles", () => {
+    const a = AgentProfile.parse({
+      ...VALID,
+      context_budget: {
+        application_mode: "manual",
+        profiles: { balanced: { max_bytes: 60000 } },
+      },
+    });
+    expect(a.context_budget?.application_mode).toBe("manual");
+  });
+
+  it("accepts recommended mode without profiles", () => {
+    const a = AgentProfile.parse({
+      ...VALID,
+      context_budget: { application_mode: "recommended" },
+    });
+    expect(a.context_budget).toEqual({ application_mode: "recommended" });
+  });
+
+  it("accepts recommended mode with non-empty profile overrides", () => {
+    const a = AgentProfile.parse({
+      ...VALID,
+      context_budget: {
+        application_mode: "recommended",
+        profiles: { tight: { max_bytes: 28000 } },
+      },
+    });
+    expect(a.context_budget?.application_mode).toBe("recommended");
+    expect(a.context_budget?.profiles?.tight?.max_bytes).toBe(28000);
   });
 
   it("accepts a custom profile name", () => {
@@ -131,7 +166,10 @@ describe("AgentProfile.context_budget (P47)", () => {
       ...VALID,
       context_budget: { profiles: { review_pack: { max_bytes: 45000 } } },
     });
-    expect(a.context_budget?.profiles.review_pack?.max_bytes).toBe(45000);
+    if (a.context_budget?.application_mode !== "manual") {
+      throw new Error("expected manual context budget");
+    }
+    expect(a.context_budget.profiles.review_pack?.max_bytes).toBe(45000);
   });
 
   it("accepts a default_profile that references a declared profile", () => {
@@ -178,6 +216,33 @@ describe("AgentProfile.context_budget (P47)", () => {
     ).toThrow();
   });
 
+  it("rejects an explicit manual mode without profiles", () => {
+    expect(() =>
+      AgentProfile.parse({
+        ...VALID,
+        context_budget: { application_mode: "manual" },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects recommended mode with an empty profiles object", () => {
+    expect(() =>
+      AgentProfile.parse({
+        ...VALID,
+        context_budget: { application_mode: "recommended", profiles: {} },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects an unknown application_mode", () => {
+    expect(() =>
+      AgentProfile.parse({
+        ...VALID,
+        context_budget: { application_mode: "auto", profiles: { tight: { max_bytes: 30000 } } },
+      }),
+    ).toThrow();
+  });
+
   it("rejects a dangling default_profile (not in profiles)", () => {
     expect(() =>
       AgentProfile.parse({
@@ -188,6 +253,30 @@ describe("AgentProfile.context_budget (P47)", () => {
         },
       }),
     ).toThrow();
+  });
+
+  it("rejects recommended default_profile when profiles are omitted", () => {
+    expect(() =>
+      AgentProfile.parse({
+        ...VALID,
+        context_budget: {
+          application_mode: "recommended",
+          default_profile: "balanced",
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("accepts recommended default_profile when it references a declared profile", () => {
+    const a = AgentProfile.parse({
+      ...VALID,
+      context_budget: {
+        application_mode: "recommended",
+        default_profile: "balanced",
+        profiles: { balanced: { max_bytes: 56000 } },
+      },
+    });
+    expect(a.context_budget?.default_profile).toBe("balanced");
   });
 
   it.each([

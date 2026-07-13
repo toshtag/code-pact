@@ -84,6 +84,18 @@ describe("runGenerateAdapter — claude-code", () => {
     expect(content).toContain("code-pact task complete");
   });
 
+  it("CLAUDE.md tells agents to use commands.context without changing the budget", async () => {
+    await runGenerateAdapter({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+    });
+    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(content).toContain("Use `data.commands.context` exactly");
+    expect(content).toContain("Do not reconstruct, widen, or replace");
+  });
+
   it("CLAUDE.md does NOT reference unimplemented `progress --add-event`", async () => {
     // task complete (v0.2) writes progress.yaml on the agent's behalf,
     // so the file is now mentioned descriptively, but the unsupported
@@ -292,6 +304,18 @@ describe("runGenerateAdapter — codex", () => {
     expect(content).toContain("gpt-5.5");
     expect(content).toContain("balanced_coding");
     expect(content).toContain("cheap_mechanical");
+  });
+
+  it("AGENTS.md carries the commands.context budget contract", async () => {
+    await runGenerateAdapter({
+      cwd: dir,
+      agentName: "codex",
+      force: false,
+      locale: "en-US",
+    });
+    const content = await readFile(join(dir, "AGENTS.md"), "utf8");
+    expect(content).toContain("Use `data.commands.context` exactly");
+    expect(content).toContain("Do not reconstruct, widen, or replace");
   });
 });
 

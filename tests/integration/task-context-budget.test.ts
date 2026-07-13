@@ -549,3 +549,83 @@ describe("task prepare --context-budget broken context_budget is CONFIG_ERROR (P
     expect(res.code).toBe(2);
   });
 });
+
+describe("task prepare agent-profile recommended application mode (P53)", () => {
+  let project: Awaited<ReturnType<typeof createTempProject>>;
+  const profilePath = (dir: string) =>
+    join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+
+  beforeEach(async () => {
+    project = await createTempProject({ prefix: "code-pact-prep-recommended-" });
+    await setupTask(project);
+  });
+
+  afterEach(async () => {
+    await project.cleanup();
+  });
+
+  async function setContextBudget(contextBudget: Record<string, unknown>): Promise<void> {
+    const profile = parseYaml(await readFile(profilePath(project.dir), "utf8")) as Record<string, unknown>;
+    profile.context_budget = contextBudget;
+    await writeFile(profilePath(project.dir), stringifyYaml(profile), "utf8");
+  }
+
+  it("no-flag task prepare applies profile opt-in and emits resolved bytes", async () => {
+    await setContextBudget({ application_mode: "recommended" });
+    const env = expectJsonOk<{
+      recommendation: {
+        contextFit: { recommendedProfile: string; recommendedBudgetBytes: number };
+      };
+      applied_context_budget: { source: string; profile: string; budget_bytes: number };
+      commands: { context: string };
+    }>(
+      project.run([
+        "task", "prepare", "P1-T1", "--agent", "claude-code",
+        "--dry-run", "--json",
+      ]),
+    );
+    expect(env.data.applied_context_budget).toEqual({
+      source: "recommended_agent_profile",
+      profile: env.data.recommendation.contextFit.recommendedProfile,
+      budget_bytes: env.data.recommendation.contextFit.recommendedBudgetBytes,
+    });
+    expect(env.data.commands.context).toBe(
+      `code-pact task context P1-T1 --agent claude-code --budget-bytes ${env.data.recommendation.contextFit.recommendedBudgetBytes}`,
+    );
+  });
+
+  it("manual mode keeps no-flag task prepare unbudgeted", async () => {
+    await setContextBudget({
+      application_mode: "manual",
+      profiles: { tight: { max_bytes: 28000 } },
+    });
+    const env = expectJsonOk<{
+      applied_context_budget: { source: string };
+      commands: { context: string };
+    }>(
+      project.run([
+        "task", "prepare", "P1-T1", "--agent", "claude-code",
+        "--dry-run", "--json",
+      ]),
+    );
+    expect(env.data.applied_context_budget).toEqual({ source: "none" });
+    expect(env.data.commands.context).toBe(
+      "code-pact task context P1-T1 --agent claude-code",
+    );
+  });
+
+  it("direct task context ignores profile recommended mode", async () => {
+    await setContextBudget({ application_mode: "recommended" });
+    const direct = expectJsonOk<{ content: string }>(
+      project.run(["task", "context", "P1-T1", "--agent", "claude-code", "--json"]),
+    );
+    const explicit = expectJsonOk<{ content: string }>(
+      project.run([
+        "task", "context", "P1-T1", "--agent", "claude-code",
+        "--budget-bytes", "30000", "--json",
+      ]),
+    );
+    expect(direct.data.content.length).toBeGreaterThan(0);
+    expect(direct.data.content).toBe(explicit.data.content);
+  });
+});

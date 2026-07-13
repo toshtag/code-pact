@@ -520,6 +520,8 @@ export const messages = {
         failHeader: "How to handle failures",
         intro:
           "code-pact の正規ワークフローには 3 つの軸があります。準拠するエージェントは 3 軸すべてを尊重します。完全な envelope 仕様は [`docs/cli-contract.md`](https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md) を参照してください。",
+        contextCommandBody:
+          "`task prepare` が返した `data.commands.context` をそのまま使ってください。解決済み context budget を再構築したり、広げたり、置き換えたりしないでください。",
         whenBody: [
           "プロジェクト初期化（CI / 非対話可）:",
           "",

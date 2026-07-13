@@ -26,8 +26,9 @@ import {
  * importing it, so this stays a pure, schema-agnostic helper.
  */
 export type ContextBudgetConfig = {
+  application_mode?: "manual" | "recommended";
   default_profile?: string;
-  profiles: Record<string, { max_bytes: number }>;
+  profiles?: Record<string, { max_bytes: number }> | undefined;
 };
 
 export type ResolveContextBudgetProfileInput = {
@@ -76,7 +77,9 @@ export function resolveContextBudgetProfile(
   // 3. Unknown — name the missing profile, the agent (when known), and the
   //    standard vocabulary plus any custom names the agent declared.
   const standardList = STANDARD_CONTEXT_BUDGET_PROFILE_NAMES.join(" | ");
-  const customNames = contextBudget ? Object.keys(contextBudget.profiles) : [];
+  const customNames = contextBudget?.profiles
+    ? Object.keys(contextBudget.profiles)
+    : [];
   const known =
     customNames.length > 0
       ? `${standardList}, or an agent-defined profile (${customNames.join(", ")})`

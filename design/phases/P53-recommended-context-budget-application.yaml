@@ -112,7 +112,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: "Add `context_budget.application_mode` as a discriminated schema
       where omitted mode means manual, manual requires non-empty profiles,
       recommended may omit profiles, empty `context_budget: {}` remains invalid,
@@ -127,19 +127,17 @@ tasks:
       - src/core/context-fit/resolve-budget-profile.ts
       - src/core/adapters/template-sections.ts
     writes:
-      - src/cli/commands/task.ts
-      - src/commands/task-prepare.ts
+      - design/phases/P53-recommended-context-budget-application.yaml
       - src/core/schemas/agent-profile.ts
-      - src/core/context-fit/load-context-budget.ts
+      - src/core/context-fit/applied-context-budget.ts
       - src/core/context-fit/resolve-budget-profile.ts
       - src/core/adapters/template-sections.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
       - tests/unit/schemas/agent-profile.test.ts
-      - tests/unit/core/context-fit/resolve-budget-profile.test.ts
       - tests/unit/commands/task-prepare.test.ts
-      - tests/unit/core/adapters/desired.test.ts
-      - tests/integration/pack-byte-identical.test.ts
+      - tests/unit/commands/adapter.test.ts
       - tests/integration/task-context-budget.test.ts
-      - tests/integration/task-prepare-commands-contract.test.ts
     acceptance_refs:
       - tests/unit/schemas/agent-profile.test.ts
       - tests/unit/core/context-fit/resolve-budget-profile.test.ts

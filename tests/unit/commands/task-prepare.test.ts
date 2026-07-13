@@ -397,6 +397,69 @@ describe("runTaskPrepare — P48 contextFit", () => {
     );
   });
 
+  it("applies recommended_agent_profile when the agent profile opts in", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      `${AGENT_PROFILE_YAML}context_budget:\n  application_mode: recommended\n`,
+      "utf8",
+    );
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+    });
+    expect(result.recommendation).not.toBeNull();
+    expect(result.applied_context_budget).toEqual({
+      source: "recommended_agent_profile",
+      profile: result.recommendation!.contextFit!.recommendedProfile,
+      budget_bytes: result.recommendation!.contextFit!.recommendedBudgetBytes,
+    });
+  });
+
+  it("explicit CLI bytes override agent profile recommended mode", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      `${AGENT_PROFILE_YAML}context_budget:\n  application_mode: recommended\n`,
+      "utf8",
+    );
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+      budgetSelection: { kind: "explicit_bytes", budgetBytes: 45000 },
+    });
+    expect(result.applied_context_budget).toEqual({
+      source: "explicit_bytes",
+      budget_bytes: 45000,
+    });
+  });
+
+  it("recommended mode uses same-name standard overrides but not custom defaults", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      `${AGENT_PROFILE_YAML}context_budget:\n  application_mode: recommended\n  default_profile: custom\n  profiles:\n    tight:\n      max_bytes: 28000\n    custom:\n      max_bytes: 90000\n`,
+      "utf8",
+    );
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+    });
+    expect(result.recommendation!.contextFit?.recommendedProfile).toBe("tight");
+    expect(result.recommendation!.contextFit?.recommendedBudgetBytes).toBe(28000);
+    expect(result.applied_context_budget).toEqual({
+      source: "recommended_agent_profile",
+      profile: "tight",
+      budget_bytes: 28000,
+    });
+  });
+
   it("early-return done state stays unchanged — null recommendation, no contextFit", async () => {
     const progressWithDone = `events:
   - task_id: P1-T1
