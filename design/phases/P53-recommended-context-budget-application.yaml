@@ -154,7 +154,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: Document explicit and profile-driven recommended budget application.
     depends_on:
       - P53-T2
