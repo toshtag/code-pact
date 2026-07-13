@@ -23,6 +23,7 @@ definition_of_done:
   - "`applied_context_budget.source` is a closed enum: none, explicit_bytes, explicit_profile, recommended_cli, or recommended_agent_profile."
   - "`commands.context` uses the resolved byte value, for example `--budget-bytes 60000`, so it reproduces the actual pack build."
   - "`recommendation.contextFit`, the actual pack build, `applied_context_budget`, and `commands.context` agree in integration coverage."
+  - Recommended mode honors an agent profile override for the recommended standard profile name; custom-only profile names are never selected by the recommendation.
   - Explicit CLI flags always override agent profile recommended mode.
   - Auto budget resolution uses the recommendation already produced in the same call and does not load the agent profile twice.
   - Done, blocked, and unmet-dependency early returns do not perform auto budget resolution or extra context I/O.
@@ -86,12 +87,14 @@ tasks:
       - src/commands/task-prepare.ts
       - src/core/schemas/agent-profile.ts
       - src/core/context-fit/load-context-budget.ts
+      - src/core/context-fit/resolve-budget-profile.ts
       - src/core/adapters/template-sections.ts
     writes:
       - src/cli/commands/task.ts
       - src/commands/task-prepare.ts
       - src/core/schemas/agent-profile.ts
       - src/core/context-fit/load-context-budget.ts
+      - src/core/context-fit/resolve-budget-profile.ts
       - src/core/adapters/template-sections.ts
       - tests/unit/schemas/agent-profile.test.ts
       - tests/unit/core/context-fit/resolve-budget-profile.test.ts

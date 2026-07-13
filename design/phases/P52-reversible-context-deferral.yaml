@@ -14,9 +14,15 @@ non_goals:
 definition_of_done:
   - "`buildContextPack()` remains side-effect-free and does not write deferred artifacts to disk."
   - Context pack build results include deterministic deferred artifact references and pending artifact payloads for later materialization.
-  - Normal `task prepare` materializes the context pack and deferred artifacts together with atomic writes.
+  - "Normal `task prepare` materializes deferred artifacts and the context pack, marks references as `persisted: true`, and emits runnable retrieval commands."
   - "`task prepare --dry-run` does not materialize artifacts, marks deferred references as `persisted: false`, and does not emit runnable retrieval commands."
-  - "`task context` materializes deferred artifacts only through an explicit flag or documented explicit contract, never as an undocumented side effect."
+  - "Default `task context` remains read-only, does not materialize artifacts, marks references as `persisted: false`, and does not emit runnable retrieval commands."
+  - No-budget context packs do not create deferred artifacts.
+  - Each artifact and pack file is written atomically.
+  - Deferred artifacts are written and verified before the context pack.
+  - A written context pack must never contain a dangling deferred reference.
+  - Orphaned content-addressed artifacts are allowed if a later context pack write fails.
+  - Deferred bytes are reported as the UTF-8 bytes of original sections removed from the pack by budget elision and saved to deferred artifacts; projection reduction bytes are separate.
   - Deferred context is stored locally under a content-addressed reference.
   - The artifact store has an explicit filesystem authority and rejects symlink escape or traversal.
   - Deferred manifests use canonical serialization and deterministic digests.
@@ -57,6 +63,8 @@ tasks:
       - src/core/evidence/evidence-store.ts
       - src/commands/task-prepare.ts
       - src/commands/task-context.ts
+      - src/cli/commands/task.ts
+      - src/cli/spec/task.ts
       - src/core/project-fs/authority-resolvers.ts
       - src/core/project-fs/operations.ts
       - src/core/project-fs/index.ts
@@ -81,17 +89,24 @@ tasks:
     reads:
       - src/core/pack/index.ts
       - src/core/pack/budget.ts
+      - src/core/pack/explain.ts
       - src/core/pack/formatters/markdown.ts
       - src/core/pack/context-output-path.ts
       - src/core/evidence/evidence-store.ts
       - src/core/evidence/canonical-json.ts
       - src/io/atomic-text.ts
+      - src/commands/task-prepare.ts
+      - src/commands/task-context.ts
       - src/core/project-fs/operations.ts
     writes:
       - src/core/evidence/evidence-store.ts
       - src/core/pack/index.ts
       - src/core/pack/budget.ts
+      - src/core/pack/explain.ts
       - src/core/pack/formatters/markdown.ts
+      - src/commands/task-prepare.ts
+      - src/commands/task-context.ts
+      - src/cli/commands/task.ts
       - src/core/context-deferral/**
       - src/core/content-addressed-store/**
       - src/core/project-fs/authorities/context-deferral-authority.ts
@@ -100,20 +115,26 @@ tasks:
       - tests/unit/core/pack/budget.test.ts
       - tests/unit/core/pack-core.test.ts
       - tests/unit/core/evidence.test.ts
+      - tests/unit/commands/task-prepare.test.ts
       - tests/unit/commands/evidence.test.ts
       - tests/unit/security/filesystem-operation-proof.test.ts
       - tests/unit/scripts/check-fs-authority.test.ts
       - tests/integration/evidence-agent-detail.test.ts
       - tests/integration/task-context-budget.test.ts
+      - tests/integration/task-context-explain-metrics.test.ts
+      - tests/integration/task-prepare-commands-contract.test.ts
     acceptance_refs:
       - tests/unit/core/pack/budget.test.ts
       - tests/unit/core/pack-core.test.ts
       - tests/unit/core/evidence.test.ts
+      - tests/unit/commands/task-prepare.test.ts
       - tests/unit/commands/evidence.test.ts
       - tests/unit/security/filesystem-operation-proof.test.ts
       - tests/unit/scripts/check-fs-authority.test.ts
       - tests/integration/evidence-agent-detail.test.ts
       - tests/integration/task-context-budget.test.ts
+      - tests/integration/task-context-explain-metrics.test.ts
+      - tests/integration/task-prepare-commands-contract.test.ts
   - id: P52-T3
     type: feature
     ambiguity: low
@@ -163,7 +184,7 @@ tasks:
     status: planned
     depends_on:
       - P52-T3
-    description: Document deferred context retrieval in agent guidance and the generated CLI reference.
+    description: Document deferred context retrieval in agent and CLI contract guidance, then record the change in the changelog.
     reads:
       - docs/agent-contract.md
       - docs/cli-contract.md
