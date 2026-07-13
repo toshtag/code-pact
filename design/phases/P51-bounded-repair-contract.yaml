@@ -3,7 +3,7 @@ name: Bounded Repair Contract
 weight: 6
 confidence: medium
 risk: medium
-status: planned
+status: done
 objective: >
   Turn the compact failure capsule and normalized failure fingerprint into a
   deterministic agent contract for one bounded repair attempt before any model
