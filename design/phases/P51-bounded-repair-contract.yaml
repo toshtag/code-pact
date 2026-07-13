@@ -143,7 +143,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: Document bounded repair in the per-task loop and changelog.
     depends_on:
       - P51-T3

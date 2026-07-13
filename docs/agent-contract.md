@@ -397,6 +397,10 @@ the capsule excerpts are insufficient. If the same fingerprint recurs, or the
 single repair attempt fails, stop and follow the existing `allowedEscalation`
 guidance. Non-retryable kinds are terminal for bounded repair.
 
+The user-facing lifecycle summary is in
+[`docs/per-task-loop.md`](per-task-loop.md); this section is the adapter-facing
+contract shape.
+
 - **`task complete <task-id>`** — runs verification and, on pass,
   appends a `done` event (`source: loop`). Idempotent — a second call
   from `done` state returns success without appending a duplicate event.

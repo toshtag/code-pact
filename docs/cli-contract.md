@@ -2009,6 +2009,10 @@ The `commands` dictionary is populated in every state — including the early-re
 
 `recommendation` is `null` **only** in the early-return states (`wait_for_dependencies`, `noop_already_done`) — i.e. `done`, `blocked`, or an unmet `depends_on`. In every workable state (`planned`, `started`, `resumed`, `failed`) it is a populated `RecommendResult` whose `tier` / `effort` / `modelId` / `lifecycleMode` / `repairPolicy` an agent can trust without a separate `recommend` call. A `null` here means "nothing to recommend yet", never "recommendation unavailable".
 
+P51 adds no repair command, retry command, CLI flag, exit code, or progress
+event. `repairPolicy` is advisory data on the existing non-null recommendation,
+and the `commands` dictionary remains unchanged.
+
 ### Exit codes
 
 | Code | Condition                                                                                                                       |

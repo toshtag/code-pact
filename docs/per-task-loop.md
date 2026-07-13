@@ -50,6 +50,21 @@ Full set of allowed transitions (the deterministic state machine):
 | **Complete** | `task complete <id> --agent <a>` | Re-runs verification; appends `done` on pass. Idempotent — a second call returns `already_done`. | `done` (on pass) |
 | **Finalize** | `task finalize <id> --write --json` | Flips the task's design status to `done`, and audits declared vs. actual writes. Run without `--write` first to preview. | No |
 
+When `task complete --json --detail agent` fails, the loop remains finite:
+
+1. Read the compact failure capsule.
+2. Read the existing `data.recommendation.repairPolicy`.
+3. If `repairPolicy.mode` is `disabled`, stop bounded repair and use the normal escalation guidance.
+4. If it is `bounded` and the failure kind is `command_failed`, make one minimal repair using the same model, effort, and context.
+5. Re-run the same `task complete` command.
+6. If it passes, continue to `task finalize`.
+7. If the same fingerprint recurs, or the repair attempt fails again, stop and move to `allowedEscalation`.
+
+Timeouts, aborts, decision failures, unsafe writes, invalid state, and unknown
+failures are not bounded-repair inputs. Code Pact reports the policy; it does
+not run a retry worker, restart an agent, widen context, or add progress events
+for repair attempts.
+
 If a task is waiting on something, record it explicitly:
 
 | Command | What it does | Records an event? |
