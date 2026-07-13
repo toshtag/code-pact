@@ -1,0 +1,105 @@
+id: P56
+name: Failure-Aware Escalation
+weight: 7
+confidence: medium
+risk: medium
+status: planned
+objective: >
+  Route post-failure guidance by failure kind and bounded repair state instead
+  of deriving escalation only from the initial model tier.
+non_goals:
+  - Escalate automatically after every failed verification command.
+  - Persist every repair attempt as a large progress event.
+  - Treat timeout, abort, unsafe write, or invalid state as ordinary code-repair failures.
+definition_of_done:
+  - Failure kind determines whether to repair, stop, request a decision, repair state, add context, or consider escalation.
+  - Same-fingerprint recurrence stops without another repair attempt.
+  - Terminal summaries are recorded only when a failure path stops.
+  - Existing model-tier escalation remains available after the repair budget is exhausted.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+tasks:
+  - id: P56-T1
+    type: architecture
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P51-T2
+    description: Define failure-kind routing and attempt-state transitions.
+    reads:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - src/core/evidence/failure-capsule.ts
+      - src/core/recommend/escalation.ts
+    writes:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+    acceptance_refs:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+  - id: P56-T2
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P56-T1
+    description: Add failure-aware escalation guidance to recommendation output.
+    reads:
+      - src/core/recommend/index.ts
+      - src/core/recommend/escalation.ts
+      - src/core/schemas/recommend-result.ts
+      - src/commands/recommend.ts
+    writes:
+      - src/core/recommend/index.ts
+      - src/core/recommend/escalation.ts
+      - src/core/schemas/recommend-result.ts
+      - src/commands/recommend.ts
+      - tests/unit/recommend/escalation.test.ts
+      - tests/unit/core/recommend/resolve.test.ts
+      - tests/unit/commands/recommend.test.ts
+    acceptance_refs:
+      - tests/unit/recommend/escalation.test.ts
+      - tests/unit/core/recommend/resolve.test.ts
+      - tests/unit/commands/recommend.test.ts
+  - id: P56-T3
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P56-T2
+    description: Record compact terminal summaries for stopped repair paths.
+    reads:
+      - src/core/progress/events-io.ts
+      - src/core/schemas/progress-event.ts
+      - src/commands/task-complete.ts
+      - src/commands/task-record-done.ts
+    writes:
+      - src/core/progress/events-io.ts
+      - src/core/schemas/progress-event.ts
+      - src/commands/task-complete.ts
+      - tests/unit/schemas/progress-event.test.ts
+      - tests/unit/commands/task-complete.test.ts
+      - tests/integration/completion-cause-code.test.ts
+    acceptance_refs:
+      - tests/unit/schemas/progress-event.test.ts
+      - tests/unit/commands/task-complete.test.ts
+      - tests/integration/completion-cause-code.test.ts

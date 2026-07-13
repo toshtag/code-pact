@@ -1,0 +1,100 @@
+id: P57
+name: Regression Evidence
+weight: 5
+confidence: medium
+risk: medium
+status: planned
+objective: >
+  Require bugfix tasks to leave concrete regression evidence that links the
+  observed failure fingerprint to the prevention artifact.
+non_goals:
+  - Require every documentation or refactor task to add a new test.
+  - Treat a passing manual command as sufficient regression evidence for a bugfix.
+  - Store full command output inside progress events when an evidence reference exists.
+definition_of_done:
+  - Bugfix completion guidance names accepted regression evidence forms.
+  - Failure fingerprints can be associated with tests, fixtures, reproduction artifacts, or acceptance artifacts.
+  - Missing regression evidence is surfaced as an advisory first, not a hard block.
+  - Agent guidance explains how to report evidence without duplicating large command output.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+tasks:
+  - id: P57-T1
+    type: architecture
+    ambiguity: low
+    risk: medium
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P51-T1
+    description: Define accepted regression evidence forms and fingerprint linkage.
+    reads:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/concepts/task-readiness-fields.md
+    writes:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/concepts/task-readiness-fields.md
+    acceptance_refs:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/concepts/task-readiness-fields.md
+  - id: P57-T2
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P57-T1
+    description: Surface a bugfix regression-evidence advisory through existing quality linting.
+    reads:
+      - src/core/plan/lint.ts
+      - src/core/schemas/task.ts
+      - src/core/evidence/failure-fingerprint.ts
+      - tests/unit/core/plan/lint.test.ts
+    writes:
+      - src/core/plan/lint.ts
+      - src/core/schemas/task.ts
+      - tests/unit/core/plan/lint.test.ts
+      - tests/unit/error-code-surface.test.ts
+      - tests/integration/plan-lint.test.ts
+    acceptance_refs:
+      - tests/unit/core/plan/lint.test.ts
+      - tests/unit/error-code-surface.test.ts
+      - tests/integration/plan-lint.test.ts
+  - id: P57-T3
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P57-T2
+    description: Document regression evidence examples in maintainer and agent-facing guidance.
+    reads:
+      - docs/agent-contract.md
+      - docs/maintainers/operations.md
+      - CHANGELOG.md
+    writes:
+      - docs/agent-contract.md
+      - docs/maintainers/operations.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - docs/agent-contract.md
+      - docs/maintainers/operations.md
+      - CHANGELOG.md

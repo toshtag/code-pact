@@ -152,3 +152,15 @@ phases:
   - id: P55
     path: design/phases/P55-stable-core-task-delta.yaml
     weight: 7
+  - id: P56
+    path: design/phases/P56-failure-aware-escalation.yaml
+    weight: 7
+  - id: P57
+    path: design/phases/P57-regression-evidence.yaml
+    weight: 5
+  - id: P58
+    path: design/phases/P58-approved-project-learnings.yaml
+    weight: 6
+  - id: P59
+    path: design/phases/P59-execution-measurement-fixtures.yaml
+    weight: 5
