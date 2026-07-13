@@ -13,6 +13,10 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Added
+
+- **Added reversible deferred context retrieval.** Budgeted `task prepare` can now persist exact deferred sections in a derived content-addressed context cache and return a `deferred_context.retrieve_command`. `code-pact context show <ref> --list --json` lists section metadata without bodies, and `--section <name>` retrieves only the requested original section content.
+
 ## [2.2.0] — 2026-07-13
 
 ### Added

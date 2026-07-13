@@ -2364,6 +2364,8 @@ The first observed `SIGINT` or `SIGTERM` requests clean cancellation. Code Pact 
 
 Context references use `context:sha256:<64 lowercase hex>` and resolve under `.code-pact/cache/context/`. Invalid references are `INVALID_CONTEXT_REF` at exit 2. Missing artifacts, corrupt manifests, digest mismatches, traversal attempts, and symlink/authority failures are fail-closed at exit 1 with the `CONTEXT_*` public codes listed in [Public codes](#public-codes-top-level-error-envelopes). JSON envelopes for platform read failures may include `data.system_code` as a diagnostic.
 
+JSON output follows the same content boundary: default and `--list` responses omit section bodies, while `--section <name> --json` returns only the requested section. Use `--list --json` first when selecting a section programmatically.
+
 ## `task complete`
 
 `code-pact task complete <task-id> [--agent <name>] [--timeout <ms>] [--json] [--dry-run] [--detail full|agent]` is the deterministic completion entry point for agents.

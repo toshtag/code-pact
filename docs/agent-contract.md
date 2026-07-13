@@ -336,10 +336,11 @@ The verbs in detail:
   fetch every deferred section up front. Fetch only when a concrete missing
   section is necessary, only when `deferred_context.retrieve_command` is
   non-null, and start with the listed command to inspect section names before
-  retrieving one section by name. When `retrieve_command` is null, do not infer
-  a cache path or construct a retrieval command yourself. Deferred content is
-  exact original section content, not a summary; the cache is derived and must
-  not be committed.
+  retrieving one section by name. The retrieval flow is `context show <ref>
+  --list --json` to choose a section, then `context show <ref> --section <name>`
+  for the exact body. When `retrieve_command` is null, do not infer a cache path
+  or construct a retrieval command yourself. Deferred content is exact original
+  section content, not a summary; the cache is derived and must not be committed.
   `commands.verify` and `commands.complete` include `--json --detail agent`;
   use those strings verbatim so verification failures arrive as compact
   capsules instead of duplicated raw stdout/stderr.

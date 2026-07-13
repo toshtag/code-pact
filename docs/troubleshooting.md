@@ -140,6 +140,8 @@ For nested agent-detail cache failures, the top-level error remains `VERIFICATIO
 
 Budgeted `task prepare` may return a `deferred_context.manifest_ref` and `retrieve_command`. The cache is derived and content-addressed; it is safe to recreate by rerunning the same prepare command when inputs have not changed.
 
+Do not hand-edit or commit `.code-pact/cache/context/`. Use `context show <ref> --list --json` to inspect available sections, then retrieve only the needed section with `--section <name>`.
+
 | Code | Recovery |
 | ---- | -------- |
 | `INVALID_CONTEXT_REF` | The ref is malformed. Use the exact `retrieve_command` emitted by `task prepare`. |

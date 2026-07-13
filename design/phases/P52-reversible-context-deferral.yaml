@@ -234,7 +234,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: Document deferred context retrieval in agent and CLI contract
       guidance, then record the change in the changelog.
     depends_on:
