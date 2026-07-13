@@ -14,6 +14,7 @@ import {
   findContextSection,
   runContextShow,
 } from "../../commands/context-show.ts";
+import { underlyingSystemCode } from "../../core/context-deferral/context-errors.ts";
 
 const PUBLIC_CONTEXT_SHOW_CODES = new Set([
   "INVALID_CONTEXT_REF",
@@ -22,6 +23,7 @@ const PUBLIC_CONTEXT_SHOW_CODES = new Set([
   "CONTEXT_DIGEST_MISMATCH",
   "CONTEXT_PATH_UNSAFE",
   "CONTEXT_READ_FAILED",
+  "CONTEXT_WRITE_FAILED",
   "CONFIG_ERROR",
 ]);
 
@@ -33,7 +35,12 @@ function mapContextShowError(error: unknown): {
   const systemCode = (error as NodeJS.ErrnoException).code;
   const message = error instanceof Error ? error.message : String(error);
   if (systemCode && PUBLIC_CONTEXT_SHOW_CODES.has(systemCode)) {
-    return { code: systemCode, message };
+    const underlying = underlyingSystemCode(error);
+    return {
+      code: systemCode,
+      ...(underlying ? { systemCode: underlying } : {}),
+      message,
+    };
   }
   return {
     code: "CONTEXT_READ_FAILED",

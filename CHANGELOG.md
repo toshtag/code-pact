@@ -15,7 +15,7 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
-- **Added reversible deferred context retrieval.** Budgeted `task prepare` can now persist exact deferred sections in a derived content-addressed context cache and return a `deferred_context.retrieve_command`. `code-pact context show <ref> --list --json` lists section metadata without bodies, and `--section <name>` retrieves only the requested original section content.
+- **Added reversible deferred context retrieval.** Budgeted `task prepare` now persists exact deferred sections through the context-pack write boundary and returns a `deferred_context.retrieve_command`. `code-pact context show <ref> --list --json` lists section metadata without bodies, and `--section <name>` retrieves only the requested original section content. Context cache write failures surface as `CONTEXT_WRITE_FAILED` instead of an internal error.
 
 ## [2.2.0] — 2026-07-13
 

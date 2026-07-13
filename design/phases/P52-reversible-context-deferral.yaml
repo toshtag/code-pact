@@ -65,8 +65,8 @@ definition_of_done:
   - Context pack byte metrics include deferred bytes separately from final bytes.
   - "Context artifact failures use closed context-specific errors, not Evidence
     errors: `INVALID_CONTEXT_REF`, `CONTEXT_NOT_FOUND`, `CONTEXT_INVALID`,
-    `CONTEXT_DIGEST_MISMATCH`, `CONTEXT_PATH_UNSAFE`, and
-    `CONTEXT_READ_FAILED`."
+    `CONTEXT_DIGEST_MISMATCH`, `CONTEXT_PATH_UNSAFE`, and `CONTEXT_READ_FAILED`,
+    and `CONTEXT_WRITE_FAILED`."
   - Each context error defines its exit behavior, JSON error code, optional
     `data.system_code`, recoverability, and troubleshooting coverage.
 verification:
@@ -254,3 +254,52 @@ tasks:
       - docs/cli-contract.md
       - docs/troubleshooting.md
       - CHANGELOG.md
+  - id: P52-T5
+    type: bugfix
+    ambiguity: low
+    risk: high
+    context_size: medium
+    write_surface: high
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: Enforce deferred artifact materialization at the context-pack write
+      boundary, close context cache error mapping, and add adversarial runtime
+      coverage for corruption, symlink, digest conflict, and write ordering.
+    depends_on:
+      - P52-T4
+    reads:
+      - src/core/pack/index.ts
+      - src/core/context-deferral/**
+      - src/commands/task-prepare.ts
+      - src/cli/commands/task.ts
+      - src/cli/commands/context.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/troubleshooting.md
+      - CHANGELOG.md
+    writes:
+      - design/phases/P52-reversible-context-deferral.yaml
+      - src/core/pack/index.ts
+      - src/core/context-deferral/**
+      - src/commands/task-prepare.ts
+      - src/cli/commands/task.ts
+      - src/cli/commands/context.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/troubleshooting.md
+      - CHANGELOG.md
+      - tests/unit/core/context-deferral.test.ts
+      - tests/unit/core/pack-core.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/unit/commands/context-show.test.ts
+      - tests/unit/error-code-surface.test.ts
+    acceptance_refs:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/troubleshooting.md
+      - tests/unit/core/context-deferral.test.ts
+      - tests/unit/core/pack-core.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/unit/commands/context-show.test.ts
+      - tests/unit/error-code-surface.test.ts

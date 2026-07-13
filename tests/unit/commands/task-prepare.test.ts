@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   access,
   mkdir,
@@ -11,6 +11,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runTaskPrepare } from "../../../src/commands/task-prepare.ts";
 import { buildContextPack } from "../../../src/core/pack/index.ts";
+import { cmdTask } from "../../../src/cli/commands/task.ts";
+import { __setAtomicWriteFailAfterOpenForTests } from "../../../src/io/atomic-text.ts";
 
 const ROADMAP_YAML = `phases:
   - id: P1
@@ -151,6 +153,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  __setAtomicWriteFailAfterOpenForTests(null);
+  vi.restoreAllMocks();
   if (dir) await rm(dir, { recursive: true, force: true });
 });
 
@@ -724,6 +728,67 @@ describe("runTaskPrepare — budget enforcement (P24)", () => {
     expect(await fileExists(join(dir, ".code-pact", "cache", "context"))).toBe(
       false,
     );
+  });
+
+  it("maps deferred artifact write failure to a public context error", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_YAML_DEFERRABLE });
+    await writeFile(
+      join(dir, "design", "constitution.md"),
+      `# Constitution\n${"contract text\n".repeat(400)}`,
+      "utf8",
+    );
+    const baseline = await buildContextPack({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      agentName: "claude-code",
+    });
+    const writeError = new Error("disk full");
+    (writeError as NodeJS.ErrnoException).code = "ENOSPC";
+    __setAtomicWriteFailAfterOpenForTests(() => writeError);
+
+    let stdout = "";
+    let stderr = "";
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+      stdout += chunk.toString();
+      return true;
+    });
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
+      stderr += chunk.toString();
+      return true;
+    });
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const exit = await cmdTask(
+        [
+          "prepare",
+          "P1-T1",
+          "--agent",
+          "claude-code",
+          "--budget-bytes",
+          String(baseline.totalBytes - 1000),
+          "--json",
+        ],
+        "en-US",
+        false,
+      );
+      expect(exit).toBe(1);
+    } finally {
+      process.chdir(originalCwd);
+    }
+
+    const parsed = JSON.parse(stdout) as {
+      ok: false;
+      error: { code: string };
+      data: { system_code: string };
+    };
+    expect(stderr).toBe("");
+    expect(parsed.error.code).toBe("CONTEXT_WRITE_FAILED");
+    expect(parsed.data.system_code).toBe("ENOSPC");
+    expect(
+      await fileExists(join(dir, ".context", "claude-code", "P1-T1.md")),
+    ).toBe(false);
   });
 });
 

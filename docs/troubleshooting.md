@@ -150,6 +150,7 @@ Do not hand-edit or commit `.code-pact/cache/context/`. Use `context show <ref> 
 | `CONTEXT_DIGEST_MISMATCH` | The artifact bytes or section body no longer match the recorded digest. Treat the cache as untrusted and rerun `task prepare`. |
 | `CONTEXT_PATH_UNSAFE` | Context path resolution crossed a traversal, symlink, or authority boundary. Inspect `.code-pact/cache/context/` and remove the unsafe cache shape before retrying. |
 | `CONTEXT_READ_FAILED` | The cache could not be read for an I/O/platform reason. Inspect `data.system_code`, fix permissions or filesystem state, then retry. |
+| `CONTEXT_WRITE_FAILED` | The cache could not be written for an I/O/platform reason. Inspect `data.system_code`, fix permissions or disk state, then rerun `task prepare`. No context pack is written before this failure. |
 
 ## `TASK_FINALIZE_NOT_ELIGIBLE` from `task finalize`
 

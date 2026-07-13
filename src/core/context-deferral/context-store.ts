@@ -9,7 +9,7 @@ import {
   validateContextManifestContent,
   type PendingContextManifestArtifact,
 } from "./context-manifest.ts";
-import { contextError } from "./context-errors.ts";
+import { contextError, contextErrorCode } from "./context-errors.ts";
 
 function isPathUnsafe(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException).code;
@@ -24,13 +24,23 @@ export async function storeContextManifestArtifact(
   cwd: string,
   artifact: PendingContextManifestArtifact,
 ): Promise<PendingContextManifestArtifact> {
-  try {
-    const writePath = await resolveContextManifestWritePath(cwd, artifact.digest);
-    await atomicCreateTextExclusive(
-      writePath,
-      artifact.content,
+  const digestFromRef = parseContextRef(artifact.ref);
+  if (digestFromRef !== artifact.digest) {
+    throw contextError(
+      "CONTEXT_INVALID",
+      "context manifest reference does not match artifact digest",
     );
+  }
+  const validated = validateContextManifestContent(
+    artifact.content,
+    artifact.digest,
+  );
+
+  try {
+    const writePath = await resolveContextManifestWritePath(cwd, validated.digest);
+    await atomicCreateTextExclusive(writePath, validated.content);
   } catch (error) {
+    if (contextErrorCode(error)) throw error;
     if (isPathUnsafe(error)) {
       throw contextError(
         "CONTEXT_PATH_UNSAFE",
@@ -38,20 +48,24 @@ export async function storeContextManifestArtifact(
         error,
       );
     }
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    const readPath = await resolveContextManifestReadPath(cwd, artifact.ref);
-    const existing = await readOwnedText(
-      readPath,
-    );
-    if (existing !== artifact.content) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw contextError(
+        "CONTEXT_WRITE_FAILED",
+        "failed to write context manifest",
+        error,
+      );
+    }
+    const existing = await loadContextManifestArtifact(cwd, validated.ref);
+    if (existing.content !== validated.content) {
       throw contextError(
         "CONTEXT_DIGEST_MISMATCH",
         "context digest collision or corrupted context manifest",
       );
     }
+    return existing;
   }
 
-  return loadContextManifestArtifact(cwd, artifact.ref);
+  return loadContextManifestArtifact(cwd, validated.ref);
 }
 
 export async function loadContextManifestArtifact(

@@ -79,12 +79,12 @@ codes are additive within a major; existing codes do not change meaning.
 The `code` field of an error envelope is the contract — agents may
 branch on the value.
 
-`task prepare`, `task context --explain`, and `adapter conformance`
-deliberately ship **no new public error codes**. Every
-failure mode reuses an existing code (`TASK_NOT_FOUND`,
-`AMBIGUOUS_TASK_ID`, `AMBIGUOUS_PHASE_ID`, `PHASE_NOT_FOUND`, `AGENT_NOT_FOUND`,
-`AGENT_NOT_ENABLED`, `CONFIG_ERROR`, the existing `ADAPTER_*`
-family).
+`task context --explain` and `adapter conformance` deliberately ship **no new
+public error codes**. `task prepare` reuses the same task/agent/configuration
+codes as `task context`; when budgeted deferred context materialization fails,
+it surfaces the context-specific public codes documented in
+[`docs/cli-contract.md`](cli-contract.md#error-codes), including
+`CONTEXT_WRITE_FAILED`.
 
 ### Collaboration conflicts: fail closed, then recover
 

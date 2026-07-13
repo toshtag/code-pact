@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdContext } from "../../../src/cli/commands/context.ts";
 import { runContextShow } from "../../../src/commands/context-show.ts";
 import { buildContextManifest } from "../../../src/core/context-deferral/context-manifest.ts";
+import { sha256Utf8 } from "../../../src/core/context-deferral/context-manifest.ts";
+import { contextRefFromDigest } from "../../../src/core/context-deferral/context-ref.ts";
 import { storeContextManifestArtifact } from "../../../src/core/context-deferral/context-store.ts";
 import type { RenderedSection } from "../../../src/core/pack/formatters/markdown.ts";
 
@@ -121,5 +123,25 @@ describe("context show", () => {
     expect(parseStdout<{ ok: false; error: { code: string } }>(stdout).error.code).toBe(
       "CONFIG_ERROR",
     );
+  });
+
+  it("reports the underlying platform code for read failures", async () => {
+    const digest = sha256Utf8("not used");
+    const ref = contextRefFromDigest(digest);
+    await mkdir(join(cwd, ".code-pact", "cache", "context", `${digest}.json`), {
+      recursive: true,
+    });
+
+    const exit = await cmdContext(["show", ref, "--json"], "en-US", false);
+
+    expect(exit).toBe(1);
+    const parsed = parseStdout<{
+      ok: false;
+      error: { code: string };
+      data: { system_code: string };
+    }>(stdout);
+    expect(parsed.error.code).toBe("CONTEXT_READ_FAILED");
+    expect(parsed.data.system_code).toMatch(/^E/);
+    expect(parsed.data.system_code).not.toBe("CONTEXT_READ_FAILED");
   });
 });

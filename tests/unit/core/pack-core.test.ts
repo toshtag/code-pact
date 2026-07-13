@@ -16,6 +16,8 @@ import {
   buildContextPack,
   writeContextPack,
 } from "../../../src/core/pack/index.ts";
+import { loadContextManifestArtifact } from "../../../src/core/context-deferral/context-store.ts";
+import { __setAtomicWriteFailAfterOpenForTests } from "../../../src/io/atomic-text.ts";
 
 const fixtureDir = new URL("../../../tests/fixtures/project-a", import.meta.url).pathname;
 
@@ -109,9 +111,46 @@ describe("writeContextPack — side effects", () => {
   });
 
   afterEach(async () => {
+    __setAtomicWriteFailAfterOpenForTests(null);
     await rm(workDir, { recursive: true, force: true });
     await rm(outDir, { recursive: true, force: true });
   });
+
+  async function buildBudgetedDeferredPack() {
+    const phasePath = join(workDir, "design", "phases", "P2-core.yaml");
+    const phaseYaml = await readFile(phasePath, "utf8");
+    await writeFile(
+      phasePath,
+      phaseYaml.replace(/context_size: \w+/, "context_size: large"),
+      "utf8",
+    );
+    await writeFile(
+      join(workDir, "design", "constitution.md"),
+      `# Constitution\n${"contract text\n".repeat(400)}`,
+      "utf8",
+    );
+    const baseline = await buildContextPack({
+      cwd: workDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+    });
+    const pack = await buildContextPack({
+      cwd: workDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+      budgetBytes: baseline.totalBytes - 1000,
+    });
+    expect(pack.deferredContext).toBeDefined();
+    expect(pack.pendingContextManifest).toBeDefined();
+    return pack;
+  }
+
+  function artifactPath(ref: string): string {
+    const digest = ref.replace("context:sha256:", "");
+    return join(workDir, ".code-pact", "cache", "context", `${digest}.json`);
+  }
 
   it("writes the pack content to outputDir/<taskId>.md", async () => {
     const pack = await buildContextPack({
@@ -191,6 +230,116 @@ describe("writeContextPack — side effects", () => {
       agentName: "custom-agent",
     });
     expect(result.outputPath).toContain(join(".context", "custom"));
+  });
+
+  it("materializes deferred artifacts before writing a budgeted pack directly", async () => {
+    const pack = await buildBudgetedDeferredPack();
+
+    const result = await writeContextPack(pack, {
+      cwd: workDir,
+      agentName: "claude-code",
+      outputDir: outDir,
+    });
+
+    expect(await readFile(result.outputPath, "utf8")).toBe(pack.content);
+    const ref = pack.deferredContext!.manifest_ref;
+    expect(await readFile(artifactPath(ref), "utf8")).toBe(
+      pack.pendingContextManifest!.content,
+    );
+    await expect(loadContextManifestArtifact(workDir, ref)).resolves.toMatchObject({
+      ref,
+    });
+
+    const second = await writeContextPack(pack, {
+      cwd: workDir,
+      agentName: "claude-code",
+      outputDir: outDir,
+    });
+    expect(second.outputPath).toBe(result.outputPath);
+  });
+
+  it("rejects incomplete deferred metadata without writing the pack", async () => {
+    const pack = await buildBudgetedDeferredPack();
+    const { pendingContextManifest: _pending, ...withoutPending } = pack;
+
+    await expect(
+      writeContextPack(withoutPending, {
+        cwd: workDir,
+        agentName: "claude-code",
+        outputDir: outDir,
+      }),
+    ).rejects.toMatchObject({ code: "CONTEXT_INVALID" });
+    expect(await exists(join(outDir, `${pack.taskId}.md`))).toBe(false);
+
+    const { deferredContext: _metadata, ...withoutMetadata } = pack;
+    await expect(
+      writeContextPack(withoutMetadata, {
+        cwd: workDir,
+        agentName: "claude-code",
+        outputDir: outDir,
+      }),
+    ).rejects.toMatchObject({ code: "CONTEXT_INVALID" });
+    expect(await exists(join(outDir, `${pack.taskId}.md`))).toBe(false);
+  });
+
+  it("rejects deferred metadata that does not match the pending artifact", async () => {
+    const pack = await buildBudgetedDeferredPack();
+    await expect(
+      writeContextPack(
+        {
+          ...pack,
+          deferredContext: {
+            ...pack.deferredContext!,
+            sections: [{ name: "rules", bytes: 1 }],
+          },
+        },
+        { cwd: workDir, agentName: "claude-code", outputDir: outDir },
+      ),
+    ).rejects.toMatchObject({ code: "CONTEXT_INVALID" });
+    expect(await exists(join(outDir, `${pack.taskId}.md`))).toBe(false);
+  });
+
+  it("rejects a budgeted pack whose content omits the manifest reference", async () => {
+    const pack = await buildBudgetedDeferredPack();
+    await expect(
+      writeContextPack(
+        {
+          ...pack,
+          content: pack.content.replace(pack.deferredContext!.manifest_ref, "context:sha256:" + "0".repeat(64)),
+        },
+        { cwd: workDir, agentName: "claude-code", outputDir: outDir },
+      ),
+    ).rejects.toMatchObject({ code: "CONTEXT_INVALID" });
+    expect(await exists(join(outDir, `${pack.taskId}.md`))).toBe(false);
+  });
+
+  it("does not write a pack when deferred artifact materialization fails", async () => {
+    const pack = await buildBudgetedDeferredPack();
+    const writeError = new Error("disk full");
+    (writeError as NodeJS.ErrnoException).code = "ENOSPC";
+    __setAtomicWriteFailAfterOpenForTests(() => writeError);
+
+    await expect(
+      writeContextPack(pack, { cwd: workDir, agentName: "claude-code", outputDir: outDir }),
+    ).rejects.toMatchObject({ code: "CONTEXT_WRITE_FAILED" });
+    expect(await exists(join(outDir, `${pack.taskId}.md`))).toBe(false);
+  });
+
+  it("keeps the verified artifact when the later pack output path is refused", async () => {
+    const pack = await buildBudgetedDeferredPack();
+    await mkdir(join(workDir, ".context"), { recursive: true });
+    await symlink(outDir, join(workDir, ".context", "blocked"));
+
+    await expect(
+      writeContextPack(pack, {
+        cwd: workDir,
+        agentName: "claude-code",
+        outputDir: ".context/blocked",
+      }),
+    ).rejects.toMatchObject({ code: expect.any(String) });
+
+    expect(await exists(artifactPath(pack.deferredContext!.manifest_ref))).toBe(true);
+    expect(await exists(join(outDir, `${pack.taskId}.md`))).toBe(false);
   });
 });
 

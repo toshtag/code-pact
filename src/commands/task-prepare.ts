@@ -8,7 +8,6 @@ import {
   type RecommendResult,
 } from "../core/recommend/index.ts";
 import { buildContextPack, writeContextPack } from "../core/pack/index.ts";
-import { storeContextManifestArtifact } from "../core/context-deferral/context-store.ts";
 import type { DeferredContextProjection } from "../core/context-deferral/deferred-section.ts";
 import { resolveProfileContextOutputPath } from "../core/pack/context-output-path.ts";
 import {
@@ -445,16 +444,15 @@ export async function runTaskPrepare(
       };
     }
   } else {
-    if (pack.pendingContextManifest && pack.deferredContext) {
-      await storeContextManifestArtifact(cwd, pack.pendingContextManifest);
+    const written = await writeContextPack(pack, { cwd, agentName });
+    contextPackPath = written.outputPath;
+    if (pack.deferredContext) {
       deferredContext = {
         ...pack.deferredContext,
         persisted: true,
         retrieve_command: `code-pact context show ${pack.deferredContext.manifest_ref} --list --json`,
       };
     }
-    const written = await writeContextPack(pack, { cwd, agentName });
-    contextPackPath = written.outputPath;
   }
 
   // 10. Map state → next_action.

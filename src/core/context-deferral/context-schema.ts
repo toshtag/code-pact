@@ -17,12 +17,12 @@ export const ContextManifestSectionSchema = z.object({
   bytes: z.number().int().nonnegative(),
   content_sha256: z.string().regex(/^[0-9a-f]{64}$/),
   content: z.string(),
-});
+}).strict();
 
 export const ContextManifestSchema = z.object({
   schema_version: z.literal(1),
-  sections: z.array(ContextManifestSectionSchema),
-});
+  sections: z.array(ContextManifestSectionSchema).min(1),
+}).strict();
 
 export type ContextManifest = z.infer<typeof ContextManifestSchema>;
 export type ContextManifestSection = z.infer<

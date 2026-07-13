@@ -33,7 +33,14 @@ import type {
   DeferredContextMetadata,
   DeferredContextProjection,
 } from "../context-deferral/deferred-section.ts";
-import type { PendingContextManifestArtifact } from "../context-deferral/context-manifest.ts";
+import { deferredContextSectionLines } from "../context-deferral/deferred-section.ts";
+import {
+  validateContextManifestContent,
+  type PendingContextManifestArtifact,
+} from "../context-deferral/context-manifest.ts";
+import { parseContextRef } from "../context-deferral/context-ref.ts";
+import { contextError } from "../context-deferral/context-errors.ts";
+import { storeContextManifestArtifact } from "../context-deferral/context-store.ts";
 import {
   computeExplainSections,
   computeExplainExcluded,
@@ -126,6 +133,52 @@ export type WriteContextPackOptions = {
 export type WriteContextPackResult = {
   outputPath: string;
 };
+
+function assertDeferredPackMaterializationPair(
+  pack: ContextPackResult,
+): PendingContextManifestArtifact | null {
+  const metadata = pack.deferredContext;
+  const artifact = pack.pendingContextManifest;
+  if (!metadata && !artifact) return null;
+  if (!metadata || !artifact) {
+    throw contextError(
+      "CONTEXT_INVALID",
+      "context pack has incomplete deferred context materialization metadata",
+    );
+  }
+
+  const digest = parseContextRef(metadata.manifest_ref);
+  if (artifact.ref !== metadata.manifest_ref || artifact.digest !== digest) {
+    throw contextError(
+      "CONTEXT_INVALID",
+      "context pack deferred context reference does not match pending artifact",
+    );
+  }
+
+  const validated = validateContextManifestContent(artifact.content, artifact.digest);
+  const manifestSections = validated.manifest.sections.map(section => ({
+    name: section.name,
+    bytes: section.bytes,
+  }));
+  if (JSON.stringify(manifestSections) !== JSON.stringify(metadata.sections)) {
+    throw contextError(
+      "CONTEXT_INVALID",
+      "context pack deferred context sections do not match pending artifact",
+    );
+  }
+
+  const manifestLine = deferredContextSectionLines(metadata).find(line =>
+    line.startsWith("Manifest reference: "),
+  );
+  if (!manifestLine || !pack.content.split("\n").includes(manifestLine)) {
+    throw contextError(
+      "CONTEXT_INVALID",
+      "context pack content is missing its deferred context manifest reference",
+    );
+  }
+
+  return validated;
+}
 
 /**
  * Pure-ish context pack builder. Reads design files and renders the
@@ -343,6 +396,11 @@ export async function writeContextPack(
   opts: WriteContextPackOptions,
 ): Promise<WriteContextPackResult> {
   const { cwd, agentName, outputDir } = opts;
+  const pendingArtifact = assertDeferredPackMaterializationPair(pack);
+  if (pendingArtifact) {
+    await storeContextManifestArtifact(cwd, pendingArtifact);
+  }
+
   const profile = await loadAgentProfile(cwd, agentName);
   if (outputDir !== undefined) {
     // Explicit --output-dir: caller authority, not profile-derived.

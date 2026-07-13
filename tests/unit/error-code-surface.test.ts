@@ -97,6 +97,7 @@ const KNOWN_CODES: Record<
   CONTEXT_NOT_FOUND: "public",
   CONTEXT_PATH_UNSAFE: "public",
   CONTEXT_READ_FAILED: "public",
+  CONTEXT_WRITE_FAILED: "public",
   INVALID_CONTEXT_REF: "public",
   INVALID_EVIDENCE_REF: "public",
   INVALID_TASK_TRANSITION: "public",

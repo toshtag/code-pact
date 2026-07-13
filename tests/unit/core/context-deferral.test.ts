@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { buildContextManifest } from "../../../src/core/context-deferral/context-manifest.ts";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import {
+  buildContextManifest,
+  sha256Utf8,
+} from "../../../src/core/context-deferral/context-manifest.ts";
+import {
+  loadContextManifestArtifact,
+  storeContextManifestArtifact,
+} from "../../../src/core/context-deferral/context-store.ts";
+import { contextRefFromDigest } from "../../../src/core/context-deferral/context-ref.ts";
+import { canonicalJson } from "../../../src/core/content-addressed-store/canonical-json.ts";
+import { __setAtomicWriteFailAfterOpenForTests } from "../../../src/io/atomic-text.ts";
 import type { RenderedSection } from "../../../src/core/pack/formatters/markdown.ts";
 
 function section(name: string, body: string): RenderedSection {
@@ -10,6 +23,28 @@ function section(name: string, body: string): RenderedSection {
 }
 
 describe("context deferral manifest", () => {
+  async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
+    const dir = await mkdtemp(join(tmpdir(), "code-pact-context-deferral-"));
+    try {
+      await fn(dir);
+    } finally {
+      __setAtomicWriteFailAfterOpenForTests(null);
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  async function writeArtifactContent(dir: string, content: string): Promise<string> {
+    const digest = sha256Utf8(content);
+    const ref = contextRefFromDigest(digest);
+    await mkdir(join(dir, ".code-pact", "cache", "context"), { recursive: true });
+    await writeFile(
+      join(dir, ".code-pact", "cache", "context", `${digest}.json`),
+      content,
+      "utf8",
+    );
+    return ref;
+  }
+
   it("builds a deterministic content-addressed reference", () => {
     const first = buildContextManifest([
       section("completed_tasks", "## Completed Tasks\n- P1-T1"),
@@ -67,5 +102,148 @@ describe("context deferral manifest", () => {
     expect(() =>
       buildContextManifest([section("task_definition", "## Task Definition")]),
     ).toThrow();
+  });
+
+  it("rejects malformed, schema-invalid, and non-canonical artifacts", async () => {
+    await withTempDir(async dir => {
+      await expect(
+        loadContextManifestArtifact(dir, await writeArtifactContent(dir, "not json")),
+      ).rejects.toMatchObject({ code: "CONTEXT_INVALID" });
+
+      const unknownTopLevel = canonicalJson({
+        schema_version: 1,
+        sections: [
+          {
+            name: "rules",
+            bytes: 1,
+            content_sha256: sha256Utf8("x"),
+            content: "x",
+          },
+        ],
+        extra: true,
+      });
+      await expect(
+        loadContextManifestArtifact(
+          dir,
+          await writeArtifactContent(dir, unknownTopLevel),
+        ),
+      ).rejects.toMatchObject({ code: "CONTEXT_INVALID" });
+
+      const unknownSection = canonicalJson({
+        schema_version: 1,
+        sections: [
+          {
+            name: "rules",
+            bytes: 1,
+            content_sha256: sha256Utf8("x"),
+            content: "x",
+            extra: true,
+          },
+        ],
+      });
+      await expect(
+        loadContextManifestArtifact(dir, await writeArtifactContent(dir, unknownSection)),
+      ).rejects.toMatchObject({ code: "CONTEXT_INVALID" });
+
+      const emptySections = canonicalJson({ schema_version: 1, sections: [] });
+      await expect(
+        loadContextManifestArtifact(dir, await writeArtifactContent(dir, emptySections)),
+      ).rejects.toMatchObject({ code: "CONTEXT_INVALID" });
+
+      const nonCanonical = JSON.stringify(
+        {
+          schema_version: 1,
+          sections: [
+            {
+              name: "rules",
+              bytes: 1,
+              content_sha256: sha256Utf8("x"),
+              content: "x",
+            },
+          ],
+        },
+        null,
+        2,
+      );
+      await expect(
+        loadContextManifestArtifact(dir, await writeArtifactContent(dir, nonCanonical)),
+      ).rejects.toMatchObject({ code: "CONTEXT_INVALID" });
+    });
+  });
+
+  it("rejects byte-count, section-digest, manifest-digest, and conflict mismatches", async () => {
+    await withTempDir(async dir => {
+      const byteMismatch = canonicalJson({
+        schema_version: 1,
+        sections: [
+          {
+            name: "rules",
+            bytes: 2,
+            content_sha256: sha256Utf8("x"),
+            content: "x",
+          },
+        ],
+      });
+      await expect(
+        loadContextManifestArtifact(dir, await writeArtifactContent(dir, byteMismatch)),
+      ).rejects.toMatchObject({ code: "CONTEXT_INVALID" });
+
+      const sectionDigestMismatch = canonicalJson({
+        schema_version: 1,
+        sections: [
+          {
+            name: "rules",
+            bytes: 1,
+            content_sha256: sha256Utf8("y"),
+            content: "x",
+          },
+        ],
+      });
+      await expect(
+        loadContextManifestArtifact(
+          dir,
+          await writeArtifactContent(dir, sectionDigestMismatch),
+        ),
+      ).rejects.toMatchObject({ code: "CONTEXT_DIGEST_MISMATCH" });
+
+      const built = buildContextManifest([section("rules", "## Rules\nA")]);
+      await mkdir(join(dir, ".code-pact", "cache", "context"), { recursive: true });
+      await writeFile(
+        join(dir, ".code-pact", "cache", "context", `${built.artifact.digest}.json`),
+        buildContextManifest([section("rules", "## Rules\nB")]).artifact.content,
+        "utf8",
+      );
+      await expect(
+        loadContextManifestArtifact(dir, built.artifact.ref),
+      ).rejects.toMatchObject({ code: "CONTEXT_DIGEST_MISMATCH" });
+      await expect(
+        storeContextManifestArtifact(dir, built.artifact),
+      ).rejects.toMatchObject({ code: "CONTEXT_DIGEST_MISMATCH" });
+    });
+  });
+
+  it("fails closed on write failure and cache symlink authority failures", async () => {
+    await withTempDir(async dir => {
+      const writeError = new Error("disk full");
+      (writeError as NodeJS.ErrnoException).code = "ENOSPC";
+      __setAtomicWriteFailAfterOpenForTests(() => writeError);
+      await expect(
+        storeContextManifestArtifact(
+          dir,
+          buildContextManifest([section("rules", "## Rules\nA")]).artifact,
+        ),
+      ).rejects.toMatchObject({ code: "CONTEXT_WRITE_FAILED" });
+      __setAtomicWriteFailAfterOpenForTests(null);
+
+      await rm(join(dir, ".code-pact", "cache"), { recursive: true, force: true });
+      await mkdir(join(dir, ".code-pact"), { recursive: true });
+      await symlink(tmpdir(), join(dir, ".code-pact", "cache"));
+      await expect(
+        storeContextManifestArtifact(
+          dir,
+          buildContextManifest([section("rules", "## Rules\nB")]).artifact,
+        ),
+      ).rejects.toMatchObject({ code: "CONTEXT_PATH_UNSAFE" });
+    });
   });
 });
