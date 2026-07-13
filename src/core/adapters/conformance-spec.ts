@@ -190,4 +190,37 @@ export const RECOMMENDATION_CONSUMPTION_ANCHORS: ReadonlyArray<{
     id: "cannot_switch_model_fallback_present",
     anchors: ["cannot switch model"],
   },
+  {
+    id: "repair_policy_guidance_present",
+    anchors: [
+      "repairPolicy",
+      "maxRepairAttempts",
+      "command_failed",
+    ],
+  },
+  {
+    id: "bounded_repair_runtime_constraints_present",
+    anchors: [
+      "same_model_same_effort_same_context",
+      "failure_delta",
+    ],
+  },
+  {
+    id: "bounded_repair_stop_guidance_present",
+    anchors: [
+      "stopOnRepeatedFingerprint",
+      "use_allowed_escalation",
+    ],
+  },
+  {
+    id: "bounded_repair_nonretryable_guidance_present",
+    anchors: [
+      "timed_out",
+      "aborted",
+      "decision_required",
+      "unsafe_write",
+      "invalid_state",
+      "unknown",
+    ],
+  },
 ];

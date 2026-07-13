@@ -92,6 +92,8 @@ export function renderAgentContractSection(t: AdapterCommon): string[] {
     `### ${t.agentContract.failHeader}`,
     ``,
     t.agentContract.failBody,
+    ``,
+    t.agentContract.repairBody,
   ];
 }
 

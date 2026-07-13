@@ -113,7 +113,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: Propagate the bounded repair contract into generated adapter
       guidance and conformance checks.
     depends_on:

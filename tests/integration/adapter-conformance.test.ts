@@ -21,6 +21,7 @@ import {
   AGENT_CONTRACT_SECTION_HEADING as SHARED_SECTION_HEADING,
   DIAGNOSTIC_REQUIRED_SURFACES,
   LIFECYCLE_REQUIRED_SURFACES,
+  RECOMMENDATION_CONSUMPTION_ANCHORS,
   REQUIRED_FAILURE_GUIDANCE,
 } from "../../src/core/adapters/conformance-spec.ts";
 
@@ -306,6 +307,42 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
     // Every check should pass on a fresh install.
     const failed = result.checks.filter((c) => c.status === "fail");
     expect(failed).toEqual([]);
+  });
+
+  it("fresh instruction contains every recommendation consumption anchor", async () => {
+    await installAdapter(agent);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    const content = await readFile(join(dir, instruction!.path), "utf8");
+
+    for (const check of RECOMMENDATION_CONSUMPTION_ANCHORS) {
+      for (const anchor of check.anchors) {
+        expect(content, `${agent} ${check.id} missing ${anchor}`).toContain(anchor);
+      }
+    }
+  });
+
+  it("fails the bounded repair runtime check when its anchor is tampered", async () => {
+    await installAdapter(agent);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    const path = join(dir, instruction!.path);
+    const original = await readFile(path, "utf8");
+    const tampered = original.replace(
+      "same_model_same_effort_same_context",
+      "same_runtime_profile",
+    );
+    expect(tampered).not.toBe(original);
+    await writeFile(path, tampered, "utf8");
+
+    const result = await runAdapterConformance({ cwd: dir, agentName: agent });
+    const check = result.checks.find(
+      (c) => c.id === "bounded_repair_runtime_constraints_present",
+    );
+    expect(check?.status).toBe("fail");
+    expect((check?.details?.missing as string[]) ?? []).toContain(
+      "same_model_same_effort_same_context",
+    );
   });
 
   it("runAdapterConformance returns compliant: false when the agent contract section is removed", async () => {

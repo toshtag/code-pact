@@ -58,6 +58,10 @@ Activation rules:
 - **verification failure** — fix and re-run.
 - **adapter drift** — re-upgrade.
 - **missing context pack** — task prepare rebuilds it.
+- After a failure, read \`data.recommendation.repairPolicy\`. If \`mode\` is \`disabled\`, do not repair. If \`mode\` is \`bounded\`, use \`maxRepairAttempts\` for \`command_failed\` only.
+- Keep \`same_model_same_effort_same_context\` and use \`failure_delta\`.
+- Stop on \`stopOnRepeatedFingerprint\`; after exhaustion follow \`use_allowed_escalation\`.
+- Nonretryable kinds: \`timed_out\`, \`aborted\`, \`decision_required\`, \`unsafe_write\`, \`invalid_state\`, \`unknown\`.
 `;
 
 function sha256(content: string): string {
@@ -334,6 +338,57 @@ describe("runAdapterConformance — required failure guidance", () => {
     expect((guidanceCheck?.details?.missing as string[]) ?? []).toContain(
       "blocked dependency",
     );
+  });
+});
+
+describe("runAdapterConformance — bounded repair recommendation guidance", () => {
+  it("passes when every new bounded repair anchor set is present", async () => {
+    await setupAdapter(dir);
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+    for (const id of [
+      "repair_policy_guidance_present",
+      "bounded_repair_runtime_constraints_present",
+      "bounded_repair_stop_guidance_present",
+      "bounded_repair_nonretryable_guidance_present",
+    ]) {
+      const check = result.checks.find(c => c.id === id);
+      expect(check, `${id} present`).toBeDefined();
+      expect(check?.status, `${id} status`).toBe("pass");
+    }
+  });
+
+  it("fails the matching check when one bounded repair anchor is missing", async () => {
+    const body = VALID_CONTRACT_BODY.replace(
+      "same_model_same_effort_same_context",
+      "same runtime profile",
+    );
+    await setupAdapter(dir, { instructionContent: body });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    const check = result.checks.find(
+      c => c.id === "bounded_repair_runtime_constraints_present",
+    );
+    expect(check?.status).toBe("fail");
+    expect((check?.details?.missing as string[]) ?? []).toContain(
+      "same_model_same_effort_same_context",
+    );
+  });
+
+  it("keeps the new checks on the recommendation-consumption severity gate", async () => {
+    await setupAdapter(dir);
+    const below = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+    expect(
+      below.checks.find(c => c.id === "repair_policy_guidance_present")?.severity,
+    ).toBe("advisory");
   });
 });
 
