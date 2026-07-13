@@ -147,6 +147,11 @@ For the same git SHA and the same inputs:
   `task context` produces for the same task (`task context` builds and
   returns the content; `task prepare` and the low-level `pack` are the
   commands that write it to disk).
+- When an explicit context budget defers sections, `task context`, normal
+  `task prepare`, and `task prepare --dry-run` compute the same rendered
+  Markdown bytes and the same `context:sha256:<digest>` manifest reference for
+  the same task, agent, and resolved byte budget. Only normal `task prepare`
+  materializes the derived manifest and returns a non-null retrieval command.
 
 Where a command writes deterministic artifacts (context pack, adapter
 files), the same input produces the same on-disk bytes.
@@ -326,6 +331,15 @@ The verbs in detail:
   it is **not** auto-applied and never re-sizes the context pack on its own.
   To act on it, pass `--context-budget <profile>` to `task context` /
   `task prepare` explicitly; the `commands` dictionary does **not** echo it.
+  If the explicit budget produces `deferred_context`, first work from the
+  rendered pack and the section names already embedded in the result. Do not
+  fetch every deferred section up front. Fetch only when a concrete missing
+  section is necessary, only when `deferred_context.retrieve_command` is
+  non-null, and start with the listed command to inspect section names before
+  retrieving one section by name. When `retrieve_command` is null, do not infer
+  a cache path or construct a retrieval command yourself. Deferred content is
+  exact original section content, not a summary; the cache is derived and must
+  not be committed.
   `commands.verify` and `commands.complete` include `--json --detail agent`;
   use those strings verbatim so verification failures arrive as compact
   capsules instead of duplicated raw stdout/stderr.
