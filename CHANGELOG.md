@@ -13,6 +13,10 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Added
+
+- **Added a deterministic bounded repair recommendation contract.** `recommend` and `task prepare` now include `repairPolicy` on non-null recommendations, and generated adapter guidance documents one same-model, same-effort, same-context repair attempt for command failures only.
+
 ### Changed
 
 - **Made local and GitHub verification change-aware.** Added `scripts/verification-scope.mjs` and `pnpm verify:local` so agents and contributors run only checks relevant to the changed files. Required PR CI now classifies changes into `docs` and `standard` scopes and runs matching jobs, and Deep CI is maintainer-selectable via `workflow_dispatch`. Deep CI and `release:check` remain strict but are no longer required for ordinary local development.

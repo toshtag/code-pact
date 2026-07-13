@@ -77,6 +77,9 @@ import {
   projectVerifySummaryForAgent,
   stringifyBoundedAgentEnvelope,
 } from "../../core/evidence/failure-capsule.ts";
+import {
+  formatRepairPolicySummary,
+} from "../../core/recommend/repair-policy.ts";
 
 function wantsAgentDetail(argv: string[], globalJson: boolean): boolean {
   const detailIndex = argv.indexOf("--detail");
@@ -849,6 +852,9 @@ async function cmdTaskPrepare(
       if (result.recommendation) {
         lines.push(
           `Recommendation: tier=${result.recommendation.tier} model=${result.recommendation.modelId} effort=${result.recommendation.effort}`,
+        );
+        lines.push(
+          `Repair:         ${formatRepairPolicySummary(result.recommendation.repairPolicy)}`,
         );
       }
       if (result.blocked_by.length > 0) {

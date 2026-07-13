@@ -67,7 +67,7 @@ async function setupTask(project: Awaited<ReturnType<typeof createTempProject>>)
       risk: "low",
       context_size: "small",
       write_surface: "low",
-      verification_strength: "weak",
+      verification_strength: "strong",
       expected_duration: "short",
       status: "planned",
       description: "prepare-commands contract test task",
@@ -84,6 +84,24 @@ type Commands = {
   finalize: string;
   "record-done": string;
 };
+
+const BOUNDED_POLICY = {
+  mode: "bounded",
+  maxRepairAttempts: 1,
+  retryableFailureKinds: ["command_failed"],
+  nonRetryableFailureKinds: [
+    "timed_out",
+    "aborted",
+    "decision_required",
+    "unsafe_write",
+    "invalid_state",
+    "unknown",
+  ],
+  retryContext: "failure_delta",
+  firstRetry: "same_model_same_effort_same_context",
+  stopOnRepeatedFingerprint: true,
+  afterExhaustion: "use_allowed_escalation",
+} as const;
 
 function prepareCommands(
   project: Awaited<ReturnType<typeof createTempProject>>,
@@ -154,6 +172,33 @@ describe("task prepare — emitted commands are accepted by the CLI parser", () 
     expect(env.data.recommendation!.contextFit).toBeDefined();
     expect(env.data.recommendation!.contextFit!.recommendedProfile).toBe("tight");
     expect(env.data.recommendation!.contextFit!.recommendedBudgetBytes).toBe(30000);
+  });
+
+  it("P51 — recommendation carries repairPolicy and commands stay unchanged", () => {
+    const res = project.run([
+      "task", "prepare", "P1-T1", "--agent", "claude-code", "--json",
+    ]);
+    const env = expectJsonOk<{
+      recommendation: { repairPolicy: unknown } | null;
+      commands: Commands;
+    }>(res);
+
+    expect(env.data.recommendation).not.toBeNull();
+    expect(env.data.recommendation!.repairPolicy).toEqual(BOUNDED_POLICY);
+    expect(env.data.commands).toEqual({
+      context: "code-pact task context P1-T1 --agent claude-code",
+      start: "code-pact task start P1-T1 --agent claude-code",
+      verify: "code-pact verify --phase P1 --task P1-T1 --json --detail agent",
+      complete: "code-pact task complete P1-T1 --agent claude-code --json --detail agent",
+      finalize: "code-pact task finalize P1-T1 --write --json",
+      "record-done": 'code-pact task record-done P1-T1 --agent claude-code --evidence "<verification you ran>"',
+    });
+    for (const [name, command] of Object.entries(env.data.commands)) {
+      expect(name).not.toMatch(/repair|retry/i);
+      expect(command).not.toMatch(/repair|retry/i);
+    }
+    expect(env.data.commands.verify).toContain("--json --detail agent");
+    expect(env.data.commands.complete).toContain("--json --detail agent");
   });
 
   it("commands[\"record-done\"] is a correct template (P40): task record-done + --evidence placeholder", () => {

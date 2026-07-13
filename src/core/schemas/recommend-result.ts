@@ -81,6 +81,52 @@ export type StructuredReason = z.infer<typeof StructuredReason>;
 export const LifecycleMode = z.enum(["full_loop", "record_only", "decision_loop"]);
 export type LifecycleMode = z.infer<typeof LifecycleMode>;
 
+export const RepairDisabledReasonCode = z.enum([
+  "decision_loop",
+  "record_only",
+  "architecture",
+  "high_ambiguity",
+  "high_risk",
+  "high_write_surface",
+  "weak_verification",
+]);
+export type RepairDisabledReasonCode = z.infer<
+  typeof RepairDisabledReasonCode
+>;
+
+export const RepairPolicy = z.discriminatedUnion("mode", [
+  z
+    .object({
+      mode: z.literal("disabled"),
+      reasonCode: RepairDisabledReasonCode,
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal("bounded"),
+      maxRepairAttempts: z.literal(1),
+      retryableFailureKinds: z.tuple([
+        z.literal("command_failed"),
+      ]),
+      nonRetryableFailureKinds: z.tuple([
+        z.literal("timed_out"),
+        z.literal("aborted"),
+        z.literal("decision_required"),
+        z.literal("unsafe_write"),
+        z.literal("invalid_state"),
+        z.literal("unknown"),
+      ]),
+      retryContext: z.literal("failure_delta"),
+      firstRetry: z.literal(
+        "same_model_same_effort_same_context",
+      ),
+      stopOnRepeatedFingerprint: z.literal(true),
+      afterExhaustion: z.literal("use_allowed_escalation"),
+    })
+    .strict(),
+]);
+export type RepairPolicy = z.infer<typeof RepairPolicy>;
+
 // An optional, recommended standard context budget
 // profile, derived deterministically from existing task readiness fields. This
 // is a SUGGESTION the agent/user may apply via `--context-budget <profile>`; it
@@ -132,6 +178,7 @@ export const RecommendResultV2 = z
 
     // strictly additive
     lifecycleMode: LifecycleMode,
+    repairPolicy: RepairPolicy,
 
     // OPTIONAL strictly-additive. Absent on `recommendation: null`
     // early-return states and unaffected on existing V2 fixtures/consumers.

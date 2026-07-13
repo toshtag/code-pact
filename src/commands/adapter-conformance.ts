@@ -6,6 +6,8 @@ import {
   ADAPTER_CONTRACT_HARDENING_FROM_VERSION,
   AGENT_CONTRACT_AXIS_HEADINGS,
   AGENT_CONTRACT_SECTION_HEADING,
+  BOUNDED_REPAIR_GUIDANCE_ANCHORS,
+  BOUNDED_REPAIR_GUIDANCE_FROM_VERSION,
   CONTRACT_ANTIPATTERNS,
   DIAGNOSTIC_REQUIRED_SURFACES,
   LIFECYCLE_REQUIRED_SURFACES,
@@ -188,6 +190,21 @@ export function resolveConsumptionSeverity(
 ): ConformanceSeverity {
   if (!generatorVersion) return "advisory";
   return gteVersion(generatorVersion, RECOMMENDATION_CONSUMPTION_FROM_VERSION)
+    ? "required"
+    : "advisory";
+}
+
+/**
+ * Severity of the bounded-repair guidance checks. This is separate from the
+ * recommendation-consumption gate so adapters generated before P51 do not
+ * become non-compliant merely because a newer Code Pact knows about repair
+ * guidance anchors.
+ */
+export function resolveBoundedRepairSeverity(
+  generatorVersion: string | undefined,
+): ConformanceSeverity {
+  if (!generatorVersion) return "advisory";
+  return gteVersion(generatorVersion, BOUNDED_REPAIR_GUIDANCE_FROM_VERSION)
     ? "required"
     : "advisory";
 }
@@ -523,6 +540,30 @@ export async function runAdapterConformance(
           instructionEntry.path,
           { ...result.details, remediation },
           consumptionSeverity,
+        ),
+      );
+    }
+  }
+
+  // ----- bounded repair guidance -----
+  // Gated on the P51 release threshold. Older adapters may lack this section
+  // entirely; they receive advisory remediation rather than required failures.
+  const boundedRepairSeverity = resolveBoundedRepairSeverity(
+    manifest.generator_version,
+  );
+  for (const { id, anchors } of BOUNDED_REPAIR_GUIDANCE_ANCHORS) {
+    const result = checkConsumptionAnchors(instructionContent, anchors);
+    if (result.ok) {
+      checks.push(
+        pass(id, instructionEntry.path, result.details, boundedRepairSeverity),
+      );
+    } else {
+      checks.push(
+        fail(
+          id,
+          instructionEntry.path,
+          { ...result.details, remediation },
+          boundedRepairSeverity,
         ),
       );
     }

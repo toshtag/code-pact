@@ -26,6 +26,24 @@ const AGENT_PROFILE: AgentProfile = {
   },
 };
 
+const BOUNDED_POLICY = {
+  mode: "bounded",
+  maxRepairAttempts: 1,
+  retryableFailureKinds: ["command_failed"],
+  nonRetryableFailureKinds: [
+    "timed_out",
+    "aborted",
+    "decision_required",
+    "unsafe_write",
+    "invalid_state",
+    "unknown",
+  ],
+  retryContext: "failure_delta",
+  firstRetry: "same_model_same_effort_same_context",
+  stopOnRepeatedFingerprint: true,
+  afterExhaustion: "use_allowed_escalation",
+} as const;
+
 describe("resolveRecommendation — pure function", () => {
   it("returns a v2 envelope for a docs task (cheap_mechanical tier)", () => {
     const result = resolveRecommendation({
@@ -42,6 +60,10 @@ describe("resolveRecommendation — pure function", () => {
     expect(result.tier).toBe("cheap_mechanical");
     expect(result.modelId).toBe("claude-haiku-4-5");
     expect(result.effort).toBe("low");
+    expect(result.repairPolicy).toEqual({
+      mode: "disabled",
+      reasonCode: "record_only",
+    });
   });
 
   it("returns highest_reasoning for an architecture task", () => {
@@ -55,6 +77,10 @@ describe("resolveRecommendation — pure function", () => {
 
     expect(result.tier).toBe("highest_reasoning");
     expect(result.modelId).toBe("claude-opus-4-7");
+    expect(result.repairPolicy).toEqual({
+      mode: "disabled",
+      reasonCode: "architecture",
+    });
   });
 
   it("returns balanced_coding for a default feature task", () => {
@@ -68,6 +94,7 @@ describe("resolveRecommendation — pure function", () => {
 
     expect(result.tier).toBe("balanced_coding");
     expect(result.modelId).toBe("claude-sonnet-4-6");
+    expect(result.repairPolicy).toEqual(BOUNDED_POLICY);
   });
 
   it("falls back to the tier name when the agent profile lacks a model_map entry", () => {
@@ -97,6 +124,7 @@ describe("resolveRecommendation — pure function", () => {
     });
 
     expect(result.structuredReasons.length).toBeGreaterThan(0);
+    expect(result.repairPolicy).toEqual(BOUNDED_POLICY);
   });
 
   it("derives planningRequired=true for medium ambiguity", () => {
@@ -178,6 +206,81 @@ describe("resolveRecommendation — pure function", () => {
       }),
     ).not.toThrow();
   });
+
+  it("keeps existing recommendation axes stable while adding bounded repair", () => {
+    const result = resolveRecommendation({
+      phaseId: "P1",
+      taskId: "T1",
+      task: BASE_TASK,
+      agentName: "claude-code",
+      agentProfile: AGENT_PROFILE,
+    });
+
+    expect(result.tier).toBe("balanced_coding");
+    expect(result.effort).toBe("low");
+    expect(result.allowedEscalation).toEqual([
+      "increase_context",
+      "increase_effort",
+      "escalate_tier",
+      "ask_human",
+    ]);
+    expect(result.lifecycleMode).toBe("full_loop");
+    expect(result.contextFit).toEqual({
+      recommendedProfile: "tight",
+      recommendedBudgetBytes: 30000,
+      reason: "context_size=small -> tight; bytes from built-in fallback",
+    });
+    expect(result.repairPolicy).toEqual(BOUNDED_POLICY);
+  });
+
+  it("returns decision_loop repair-disabled for decision-loop tasks", () => {
+    const result = resolveRecommendation({
+      phaseId: "P1",
+      taskId: "T1",
+      task: BASE_TASK,
+      agentName: "claude-code",
+      agentProfile: AGENT_PROFILE,
+      decisionContext: { phaseRequiresDecision: true },
+    });
+
+    expect(result.lifecycleMode).toBe("decision_loop");
+    expect(result.repairPolicy).toEqual({
+      mode: "disabled",
+      reasonCode: "decision_loop",
+    });
+  });
+
+  it("returns record_only repair-disabled for record-only tasks", () => {
+    const result = resolveRecommendation({
+      phaseId: "P1",
+      taskId: "T1",
+      task: { ...BASE_TASK, type: "test" },
+      agentName: "claude-code",
+      agentProfile: AGENT_PROFILE,
+    });
+
+    expect(result.lifecycleMode).toBe("record_only");
+    expect(result.repairPolicy).toEqual({
+      mode: "disabled",
+      reasonCode: "record_only",
+    });
+  });
+
+  it("returns architecture repair-disabled after lifecycle eligibility", () => {
+    const result = resolveRecommendation({
+      phaseId: "P1",
+      taskId: "T1",
+      task: { ...BASE_TASK, type: "architecture" },
+      agentName: "claude-code",
+      agentProfile: AGENT_PROFILE,
+    });
+
+    expect(result.lifecycleMode).toBe("full_loop");
+    expect(result.repairPolicy).toEqual({
+      mode: "disabled",
+      reasonCode: "architecture",
+    });
+  });
 });
 
 describe("resolveRecommendation — envelope shape invariant", () => {
@@ -209,6 +312,8 @@ describe("resolveRecommendation — envelope shape invariant", () => {
       "preflight",
       "budgetProfile",
       "structuredReasons",
+      "lifecycleMode",
+      "repairPolicy",
     ] as const;
     for (const key of required) {
       expect(result).toHaveProperty(key);

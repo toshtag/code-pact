@@ -9,6 +9,7 @@ import {
   ContextProfile,
   VerificationProfile,
   ContextFitRecommendation,
+  RepairPolicy,
 } from "../../../src/core/schemas/recommend-result.ts";
 
 const VALID_PREFLIGHT: unknown = {
@@ -32,6 +33,24 @@ const VALID_BUDGET: unknown = {
   verificationCommands: "full",
 };
 
+const VALID_REPAIR_POLICY: unknown = {
+  mode: "bounded",
+  maxRepairAttempts: 1,
+  retryableFailureKinds: ["command_failed"],
+  nonRetryableFailureKinds: [
+    "timed_out",
+    "aborted",
+    "decision_required",
+    "unsafe_write",
+    "invalid_state",
+    "unknown",
+  ],
+  retryContext: "failure_delta",
+  firstRetry: "same_model_same_effort_same_context",
+  stopOnRepeatedFingerprint: true,
+  afterExhaustion: "use_allowed_escalation",
+};
+
 const VALID_RESULT: unknown = {
   phaseId: "P6",
   taskId: "P6-T1",
@@ -50,6 +69,7 @@ const VALID_RESULT: unknown = {
   budgetProfile: VALID_BUDGET,
   structuredReasons: [VALID_REASON],
   lifecycleMode: "full_loop",
+  repairPolicy: VALID_REPAIR_POLICY,
 };
 
 describe("RecommendResultV2 — happy path", () => {
@@ -94,6 +114,12 @@ describe("RecommendResultV2 — required fields", () => {
     expect(() =>
       RecommendResultV2.parse({ ...(VALID_RESULT as object), structuredReasons: [] }),
     ).toThrow();
+  });
+
+  it("rejects missing repairPolicy", () => {
+    const { repairPolicy, ...rest } = VALID_RESULT as Record<string, unknown>;
+    void repairPolicy;
+    expect(() => RecommendResultV2.parse(rest)).toThrow();
   });
 });
 
@@ -284,6 +310,21 @@ describe("RecommendResultV2 — optional contextFit (P48, additive)", () => {
         contextFit: { ...(VALID_CONTEXT_FIT as object), tokens: 1234 },
       }),
     ).toThrow();
+  });
+});
+
+describe("RepairPolicy — inner shape", () => {
+  it("accepts the bounded branch", () => {
+    const p = RepairPolicy.parse(VALID_REPAIR_POLICY);
+    expect(p.mode).toBe("bounded");
+  });
+
+  it("accepts the disabled branch", () => {
+    const p = RepairPolicy.parse({
+      mode: "disabled",
+      reasonCode: "architecture",
+    });
+    expect(p.mode).toBe("disabled");
   });
 });
 

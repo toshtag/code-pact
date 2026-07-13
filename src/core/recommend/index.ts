@@ -14,6 +14,9 @@ import { recommendPreflight } from "./preflight.ts";
 import { recommendTier, type TierRecommendation } from "./tier.ts";
 import { recommendLifecycleMode } from "./lifecycle.ts";
 import { recommendContextFit } from "./context-fit.ts";
+import {
+  recommendRepairPolicy,
+} from "./repair-policy.ts";
 
 export type ResolveRecommendationOptions = {
   phaseId: string;
@@ -115,6 +118,10 @@ export function resolveRecommendation(
 
   const rec: TierRecommendation = recommendTier(task);
   const modelId = agentProfile.model_map[rec.tier] ?? rec.tier;
+  const lifecycleMode = recommendLifecycleMode(
+    task,
+    decisionContext,
+  );
 
   const result: RecommendResult = {
     phaseId,
@@ -132,7 +139,11 @@ export function resolveRecommendation(
     preflight: recommendPreflight(task),
     budgetProfile: recommendBudgetProfile(task),
     structuredReasons: buildStructuredReasons(task, rec.tier),
-    lifecycleMode: recommendLifecycleMode(task, decisionContext),
+    lifecycleMode,
+    repairPolicy: recommendRepairPolicy(
+      task,
+      lifecycleMode,
+    ),
     // Additive, recommendation-only context budget. Reuses the already-
     // loaded agent profile's context_budget for the same-name byte override, so
     // no extra I/O. Never auto-applied; surfaced for the agent to act on.

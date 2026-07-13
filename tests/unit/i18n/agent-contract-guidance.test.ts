@@ -43,5 +43,47 @@ describe("agent contract failure guidance", () => {
       expect(failBody).not.toMatch(/verify --json --detail agent[\s\S]{0,160}COMMANDS_FAILED/);
       expect(failBody).not.toMatch(/verify --json --detail agent[\s\S]{0,160}DECISION_REQUIRED/);
     });
+
+    it(`${locale} documents bounded repair policy anchors`, () => {
+      const verifyBody = messages[locale].templates.adapterCommon.agentContract.verifyBody;
+      const repairBody = messages[locale].templates.adapterCommon.agentContract.repairBody;
+      const combined = `${verifyBody}\n${repairBody}`;
+
+      for (const anchor of [
+        "data.recommendation",
+        "data.recommendation.repairPolicy",
+        "data.repairPolicy",
+        "data.recommendation.allowedEscalation",
+        "data.allowedEscalation",
+        "repairPolicy",
+        "maxRepairAttempts",
+        "command_failed",
+        "same_model_same_effort_same_context",
+        "failure_delta",
+        "stopOnRepeatedFingerprint",
+        "use_allowed_escalation",
+        "timed_out",
+        "aborted",
+        "decision_required",
+        "unsafe_write",
+        "invalid_state",
+        "unknown",
+      ]) {
+        expect(repairBody).toContain(anchor);
+      }
+
+      expect(repairBody).not.toContain("retry until success");
+      expect(repairBody).not.toContain("increase context before retry");
+      expect(repairBody).not.toContain("escalate model before retry");
+      expect(repairBody).not.toContain("成功するまで繰り返す");
+      expect(repairBody).not.toContain("retry 前に context を増やす");
+      expect(repairBody).not.toContain("retry 前に model を上げる");
+      expect(combined).not.toContain(
+        "data.recommendation.repairPolicy` from the existing `task prepare` / `recommend` result",
+      );
+      expect(combined).not.toContain(
+        "既存の `task prepare` / `recommend` 結果にある `data.recommendation.repairPolicy`",
+      );
+    });
   }
 });

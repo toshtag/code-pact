@@ -85,6 +85,10 @@ export type TaskPrepareResult = {
   phase_id: string;
   agent: string;
   current_state: TaskCurrentState;
+  /**
+   * Null only for done/blocked/unmet-dependency early returns.
+   * A non-null recommendation includes lifecycleMode and repairPolicy.
+   */
   recommendation: RecommendResult | null;
   context_pack_path: string | null;
   context_pack_bytes: number;
