@@ -12,7 +12,10 @@ import { tmpdir } from "node:os";
 import { runTaskPrepare } from "../../../src/commands/task-prepare.ts";
 import { buildContextPack } from "../../../src/core/pack/index.ts";
 import { cmdTask } from "../../../src/cli/commands/task.ts";
-import { __setAtomicWriteFailAfterOpenForTests } from "../../../src/io/atomic-text.ts";
+import {
+  __setAtomicTempTokenForTests,
+  __setAtomicWriteFailAfterOpenForTests,
+} from "../../../src/io/atomic-text.ts";
 
 const ROADMAP_YAML = `phases:
   - id: P1
@@ -153,6 +156,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  __setAtomicTempTokenForTests(null);
   __setAtomicWriteFailAfterOpenForTests(null);
   vi.restoreAllMocks();
   if (dir) await rm(dir, { recursive: true, force: true });
@@ -789,6 +793,84 @@ describe("runTaskPrepare — budget enforcement (P24)", () => {
     expect(
       await fileExists(join(dir, ".context", "claude-code", "P1-T1.md")),
     ).toBe(false);
+  });
+
+  it("maps deferred artifact readback disappearance to CONTEXT_NOT_FOUND", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_YAML_DEFERRABLE });
+    await writeFile(
+      join(dir, "design", "constitution.md"),
+      `# Constitution\n${"contract text\n".repeat(400)}`,
+      "utf8",
+    );
+    const baseline = await buildContextPack({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      agentName: "claude-code",
+    });
+    const budgetBytes = baseline.totalBytes - 1000;
+    const budgeted = await buildContextPack({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      agentName: "claude-code",
+      budgetBytes,
+    });
+    const digest = budgeted.pendingContextManifest!.digest;
+    const contextDir = join(dir, ".code-pact", "cache", "context");
+    const token = "context-readback-missing";
+    await mkdir(contextDir, { recursive: true });
+    const tempPath = join(contextDir, `${digest}.json.tmp-${token}`);
+    await writeFile(tempPath, "pre-existing temp", "utf8");
+    __setAtomicTempTokenForTests(() => token);
+    const beforeProgress = await readProgress(dir);
+
+    let stdout = "";
+    let stderr = "";
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+      stdout += chunk.toString();
+      return true;
+    });
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
+      stderr += chunk.toString();
+      return true;
+    });
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const exit = await cmdTask(
+        [
+          "prepare",
+          "P1-T1",
+          "--agent",
+          "claude-code",
+          "--budget-bytes",
+          String(budgetBytes),
+          "--json",
+        ],
+        "en-US",
+        false,
+      );
+      expect(exit).toBe(1);
+    } finally {
+      process.chdir(originalCwd);
+    }
+
+    const parsed = JSON.parse(stdout) as {
+      ok: false;
+      error: { code: string };
+      data?: { system_code?: string };
+    };
+    expect(stderr).toBe("");
+    expect(parsed.error.code).toBe("CONTEXT_NOT_FOUND");
+    expect(parsed.error.code).not.toBe("INTERNAL_ERROR");
+    expect(parsed.data?.system_code).toBe("ENOENT");
+    expect(await readProgress(dir)).toBe(beforeProgress);
+    expect(
+      await fileExists(join(dir, ".context", "claude-code", "P1-T1.md")),
+    ).toBe(false);
+    expect(await fileExists(join(contextDir, `${digest}.json`))).toBe(false);
+    expect(await fileExists(tempPath)).toBe(true);
   });
 });
 

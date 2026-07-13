@@ -145,7 +145,7 @@ Do not hand-edit or commit `.code-pact/cache/context/`. Use `context show <ref> 
 | Code | Recovery |
 | ---- | -------- |
 | `INVALID_CONTEXT_REF` | The ref is malformed. Use the exact `retrieve_command` emitted by `task prepare`. |
-| `CONTEXT_NOT_FOUND` | The cache entry is absent, usually because local derived state was cleaned. Rerun `task prepare` with the same budget to recreate it. |
+| `CONTEXT_NOT_FOUND` | The cache entry is absent, usually because local derived state was cleaned or a competing cache mutation removed it before readback. Rerun `task prepare` with the same budget to recreate it. |
 | `CONTEXT_INVALID` | The artifact is corrupt, schema-invalid, not canonical, or has mismatched section metadata. Treat it as untrusted and rerun `task prepare`. |
 | `CONTEXT_DIGEST_MISMATCH` | The artifact bytes or section body no longer match the recorded digest. Treat the cache as untrusted and rerun `task prepare`. |
 | `CONTEXT_PATH_UNSAFE` | Context path resolution crossed a traversal, symlink, or authority boundary. Inspect `.code-pact/cache/context/` and remove the unsafe cache shape before retrying. |

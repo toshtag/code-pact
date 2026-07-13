@@ -125,6 +125,26 @@ describe("context show", () => {
     );
   });
 
+  it("keeps missing refs at exit 1 and malformed refs at exit 2", async () => {
+    const missingRef = contextRefFromDigest("0".repeat(64));
+    const missing = await cmdContext(["show", missingRef, "--json"], "en-US", false);
+    expect(missing).toBe(1);
+    expect(parseStdout<{ ok: false; error: { code: string } }>(stdout).error.code).toBe(
+      "CONTEXT_NOT_FOUND",
+    );
+
+    stdout = "";
+    const malformed = await cmdContext(
+      ["show", "context:sha256:not-a-digest", "--json"],
+      "en-US",
+      false,
+    );
+    expect(malformed).toBe(2);
+    expect(parseStdout<{ ok: false; error: { code: string } }>(stdout).error.code).toBe(
+      "INVALID_CONTEXT_REF",
+    );
+  });
+
   it("reports the underlying platform code for read failures", async () => {
     const digest = sha256Utf8("not used");
     const ref = contextRefFromDigest(digest);

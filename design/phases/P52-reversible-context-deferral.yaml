@@ -303,3 +303,37 @@ tasks:
       - tests/unit/commands/task-prepare.test.ts
       - tests/unit/commands/context-show.test.ts
       - tests/unit/error-code-surface.test.ts
+  - id: P52-T6
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: Map context artifact disappearance during task prepare readback to
+      the documented CONTEXT_NOT_FOUND exit-1 envelope instead of an internal
+      error, and add a deterministic regression test for the conflict path.
+    depends_on:
+      - P52-T5
+    reads:
+      - src/cli/commands/task.ts
+      - tests/unit/core/context-deferral.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/unit/commands/context-show.test.ts
+      - docs/troubleshooting.md
+      - CHANGELOG.md
+    writes:
+      - design/phases/P52-reversible-context-deferral.yaml
+      - src/cli/commands/task.ts
+      - tests/unit/core/context-deferral.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/unit/commands/context-show.test.ts
+      - docs/troubleshooting.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - tests/unit/core/context-deferral.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/unit/commands/context-show.test.ts
+      - docs/troubleshooting.md

@@ -12,7 +12,10 @@ import {
 } from "../../../src/core/context-deferral/context-store.ts";
 import { contextRefFromDigest } from "../../../src/core/context-deferral/context-ref.ts";
 import { canonicalJson } from "../../../src/core/content-addressed-store/canonical-json.ts";
-import { __setAtomicWriteFailAfterOpenForTests } from "../../../src/io/atomic-text.ts";
+import {
+  __setAtomicTempTokenForTests,
+  __setAtomicWriteFailAfterOpenForTests,
+} from "../../../src/io/atomic-text.ts";
 import type { RenderedSection } from "../../../src/core/pack/formatters/markdown.ts";
 
 function section(name: string, body: string): RenderedSection {
@@ -28,6 +31,7 @@ describe("context deferral manifest", () => {
     try {
       await fn(dir);
     } finally {
+      __setAtomicTempTokenForTests(null);
       __setAtomicWriteFailAfterOpenForTests(null);
       await rm(dir, { recursive: true, force: true });
     }
@@ -244,6 +248,30 @@ describe("context deferral manifest", () => {
           buildContextManifest([section("rules", "## Rules\nB")]).artifact,
         ),
       ).rejects.toMatchObject({ code: "CONTEXT_PATH_UNSAFE" });
+    });
+  });
+
+  it("returns CONTEXT_NOT_FOUND when exclusive-create conflict loses the artifact before readback", async () => {
+    await withTempDir(async dir => {
+      const built = buildContextManifest([section("rules", "## Rules\nA")]);
+      const token = "context-readback-missing";
+      await mkdir(join(dir, ".code-pact", "cache", "context"), { recursive: true });
+      await writeFile(
+        join(
+          dir,
+          ".code-pact",
+          "cache",
+          "context",
+          `${built.artifact.digest}.json.tmp-${token}`,
+        ),
+        "pre-existing temp",
+        "utf8",
+      );
+      __setAtomicTempTokenForTests(() => token);
+
+      await expect(
+        storeContextManifestArtifact(dir, built.artifact),
+      ).rejects.toMatchObject({ code: "CONTEXT_NOT_FOUND" });
     });
   });
 });

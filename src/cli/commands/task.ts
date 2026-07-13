@@ -311,6 +311,7 @@ function emitContextLikeError(
       };
       break;
     }
+    case "CONTEXT_NOT_FOUND":
     case "CONTEXT_INVALID":
     case "CONTEXT_DIGEST_MISMATCH":
     case "CONTEXT_PATH_UNSAFE":
