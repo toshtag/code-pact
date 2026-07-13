@@ -30,6 +30,7 @@ import {
   loadAgentContextBudget,
   loadAgentContextBudgetBestEffort,
 } from "../../core/context-fit/load-context-budget.ts";
+import { underlyingSystemCode } from "../../core/context-deferral/context-errors.ts";
 import { isStandardContextBudgetProfile } from "../../core/context-fit/budget-profiles.ts";
 import type { ContextBudgetProfiles } from "../../core/schemas/agent-profile.ts";
 import { runTaskComplete } from "../../commands/task-complete.ts";
@@ -236,8 +237,9 @@ function emitParseConfigError(
 /**
  * Shared error-to-envelope mapping for `task context` and `task prepare`
  * (same codes, same `m.task.context.*` messages, same top-level `data` for
- * AMBIGUOUS_PHASE_ID / CONTEXT_OVER_BUDGET). Unrecognized codes re-throw
- * (default) so a genuine bug surfaces as exit 3. Returns 2 after emitting.
+ * AMBIGUOUS_PHASE_ID / CONTEXT_OVER_BUDGET). Context cache operational
+ * failures exit 1; argument/configuration failures exit 2. Unrecognized codes
+ * re-throw (default) so a genuine bug surfaces as exit 3.
  */
 function emitContextLikeError(
   err: Error,
@@ -250,6 +252,7 @@ function emitContextLikeError(
   let msg: string;
   let outCode: string;
   let envelopeData: Record<string, unknown> | undefined;
+  let exitCode = 2;
   switch (code) {
     case "TASK_NOT_FOUND":
       msg = m.task.context.taskNotFound(taskId);
@@ -308,6 +311,19 @@ function emitContextLikeError(
       };
       break;
     }
+    case "CONTEXT_NOT_FOUND":
+    case "CONTEXT_INVALID":
+    case "CONTEXT_DIGEST_MISMATCH":
+    case "CONTEXT_PATH_UNSAFE":
+    case "CONTEXT_READ_FAILED":
+    case "CONTEXT_WRITE_FAILED": {
+      msg = err.message;
+      outCode = code;
+      exitCode = 1;
+      const systemCode = underlyingSystemCode(err);
+      if (systemCode !== undefined) envelopeData = { system_code: systemCode };
+      break;
+    }
     default:
       throw err;
   }
@@ -315,7 +331,7 @@ function emitContextLikeError(
   // convention, matching doctor / validate and the cli-contract recovery prose
   // `data.minimum_achievable_bytes`), not under `error.data`.
   emitError(json, outCode, msg, envelopeData !== undefined ? { data: envelopeData } : {});
-  return 2;
+  return exitCode;
 }
 
 // Resolve a context byte budget from the two mutually-exclusive flags
@@ -728,6 +744,13 @@ async function cmdTaskContext(
         char_count: pack.charCount,
         content: pack.content,
       };
+      if (pack.deferredContext) {
+        data.deferred_context = {
+          ...pack.deferredContext,
+          persisted: false,
+          retrieve_command: null,
+        };
+      }
       if (explain) {
         data.total_bytes = pack.totalBytes;
         data.context_pack_bytes = pack.totalBytes;
@@ -744,6 +767,7 @@ async function cmdTaskContext(
           data.final_bytes = em.finalBytes;
           if (em.budgetBytes !== undefined) data.budget_bytes = em.budgetBytes;
           data.saved_bytes = em.savedBytes;
+          data.deferred_bytes = em.deferredBytes;
           data.saved_ratio = em.savedRatio;
           data.minimum_achievable_bytes = em.minimumAchievableBytes;
           data.elided_sections = em.elidedSections.map((e) => ({

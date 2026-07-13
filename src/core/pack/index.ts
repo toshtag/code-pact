@@ -29,6 +29,18 @@ import {
   loadReadMatches,
 } from "./loaders.ts";
 import { applyBudgetElision } from "./budget.ts";
+import type {
+  DeferredContextMetadata,
+  DeferredContextProjection,
+} from "../context-deferral/deferred-section.ts";
+import { deferredContextSectionLines } from "../context-deferral/deferred-section.ts";
+import {
+  validateContextManifestContent,
+  type PendingContextManifestArtifact,
+} from "../context-deferral/context-manifest.ts";
+import { parseContextRef } from "../context-deferral/context-ref.ts";
+import { contextError } from "../context-deferral/context-errors.ts";
+import { storeContextManifestArtifact } from "../context-deferral/context-store.ts";
 import {
   computeExplainSections,
   computeExplainExcluded,
@@ -97,7 +109,20 @@ export type ContextPackResult = {
    * deterministic; computing them does not change `content`.
    */
   explainMetrics?: ContextExplainMetrics;
+  /**
+   * Present only when an explicit budget deferred one or more sections.
+   * This is public metadata only; it never includes deferred section content.
+   */
+  deferredContext?: DeferredContextMetadata;
+  /**
+   * Internal pending artifact for the caller that is allowed to materialize it
+   * (`task prepare` normal mode). `task context`, dry-run prepare, and
+   * buildContextPack itself must not write it.
+   */
+  pendingContextManifest?: PendingContextManifestArtifact;
 };
+
+export type { DeferredContextProjection };
 
 export type WriteContextPackOptions = {
   cwd: string;
@@ -108,6 +133,52 @@ export type WriteContextPackOptions = {
 export type WriteContextPackResult = {
   outputPath: string;
 };
+
+function assertDeferredPackMaterializationPair(
+  pack: ContextPackResult,
+): PendingContextManifestArtifact | null {
+  const metadata = pack.deferredContext;
+  const artifact = pack.pendingContextManifest;
+  if (!metadata && !artifact) return null;
+  if (!metadata || !artifact) {
+    throw contextError(
+      "CONTEXT_INVALID",
+      "context pack has incomplete deferred context materialization metadata",
+    );
+  }
+
+  const digest = parseContextRef(metadata.manifest_ref);
+  if (artifact.ref !== metadata.manifest_ref || artifact.digest !== digest) {
+    throw contextError(
+      "CONTEXT_INVALID",
+      "context pack deferred context reference does not match pending artifact",
+    );
+  }
+
+  const validated = validateContextManifestContent(artifact.content, artifact.digest);
+  const manifestSections = validated.manifest.sections.map(section => ({
+    name: section.name,
+    bytes: section.bytes,
+  }));
+  if (JSON.stringify(manifestSections) !== JSON.stringify(metadata.sections)) {
+    throw contextError(
+      "CONTEXT_INVALID",
+      "context pack deferred context sections do not match pending artifact",
+    );
+  }
+
+  const manifestLine = deferredContextSectionLines(metadata).find(line =>
+    line.startsWith("Manifest reference: "),
+  );
+  if (!manifestLine || !pack.content.split("\n").includes(manifestLine)) {
+    throw contextError(
+      "CONTEXT_INVALID",
+      "context pack content is missing its deferred context manifest reference",
+    );
+  }
+
+  return validated;
+}
 
 /**
  * Pure-ish context pack builder. Reads design files and renders the
@@ -233,6 +304,12 @@ export async function buildContextPack(
     includedRules: rules.map(r => r.filename),
     includedDecisions: decisions.map(d => d.filename),
     includedConstitution: constitution !== null,
+    ...(budgetResult.deferredContext
+      ? { deferredContext: budgetResult.deferredContext }
+      : {}),
+    ...(budgetResult.pendingContextManifest
+      ? { pendingContextManifest: budgetResult.pendingContextManifest }
+      : {}),
   };
 
   if (opts.explain === true) {
@@ -270,6 +347,7 @@ export async function buildContextPack(
       savedBytes,
       savedRatio: bm.naturalBytes === 0 ? 0 : savedBytes / bm.naturalBytes,
       minimumAchievableBytes: bm.minimumAchievableBytes,
+      deferredBytes: bm.deferredBytes,
       elidedSections: bm.elidedSections,
     };
 
@@ -318,6 +396,11 @@ export async function writeContextPack(
   opts: WriteContextPackOptions,
 ): Promise<WriteContextPackResult> {
   const { cwd, agentName, outputDir } = opts;
+  const pendingArtifact = assertDeferredPackMaterializationPair(pack);
+  if (pendingArtifact) {
+    await storeContextManifestArtifact(cwd, pendingArtifact);
+  }
+
   const profile = await loadAgentProfile(cwd, agentName);
   if (outputDir !== undefined) {
     // Explicit --output-dir: caller authority, not profile-derived.

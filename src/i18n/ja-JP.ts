@@ -16,6 +16,7 @@ export const messages = {
     "  pack       agent profile の context_dir に context pack ファイルを書き出し",
     "  verify     決定論的な完了条件を検証",
     "  evidence   参照から検証 evidence キャッシュを表示",
+    "  context    参照から deferred context を確認・取得",
     "  adapter    Agent 別のルールファイルを生成/更新",
     "  recommend  タスクに適したモデル tier を提案",
     "  doctor     プロジェクト構造の問題を報告 (人間向け)",

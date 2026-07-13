@@ -10,6 +10,7 @@ import { cliPath, ensureCliBuilt } from "../helpers/cli.ts";
 import { PHASE_SPEC_ORDER } from "../../src/cli/spec/phase.ts";
 import { PLAN_SPEC_ORDER } from "../../src/cli/spec/plan.ts";
 import { STATE_SPEC_ORDER } from "../../src/cli/spec/state.ts";
+import { CONTEXT_SPEC_ORDER } from "../../src/cli/spec/context.ts";
 
 beforeAll(() => {
   ensureCliBuilt();
@@ -25,7 +26,7 @@ function runCli(args: string[]) {
 }
 
 describe("cluster --help → usage, exit 0", () => {
-  for (const cluster of ["plan", "task", "phase", "decision", "state", "spec"]) {
+  for (const cluster of ["plan", "task", "phase", "decision", "state", "spec", "context"]) {
     it(`\`${cluster} --help\` prints usage on stdout, exit 0`, () => {
       const res = runCli([cluster, "--help"]);
       expect(res.status).toBe(0);
@@ -102,6 +103,7 @@ describe("cluster --help → usage, exit 0", () => {
     [["state", "archive-retention", "--help"], /Usage: code-pact state archive-retention/, /--keep-latest/],
     [["state", "archive-maintain", "--help"], /Usage: code-pact state archive-maintain/, /--keep-latest/],
     [["spec", "import", "--help"], /Usage: code-pact spec import/, /--suggest-from/],
+    [["context", "show", "--help"], /Usage: code-pact context show/, /--section/],
     // `plan import` is an alias for `phase import`; its --help routes to the
     // same rich entry (cmdPlan dispatch), so it must not be a stub.
     [["plan", "import", "--help"], /Usage: code-pact phase import/, /--scaffold-decisions/],
@@ -148,8 +150,11 @@ describe("cluster --help → usage, exit 0", () => {
     expect(parsed.error.code).toBe("CONFIG_ERROR");
   });
 
-  it("state unknown subcommand guidance lists valid subcommands from the spec order", () => {
-    const res = runCli(["--json", "state", "nope"]);
+  it.each([
+    ["state", STATE_SPEC_ORDER],
+    ["context", CONTEXT_SPEC_ORDER],
+  ] as const)("%s unknown subcommand guidance lists valid subcommands from the spec order", (cluster, subcommands) => {
+    const res = runCli(["--json", cluster, "nope"]);
     expect(res.status).toBe(2);
     const parsed = JSON.parse(res.stdout) as {
       ok: false;
@@ -157,7 +162,7 @@ describe("cluster --help → usage, exit 0", () => {
     };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(parsed.error.message).toContain("nope");
-    for (const subcommand of STATE_SPEC_ORDER) {
+    for (const subcommand of subcommands) {
       expect(parsed.error.message).toContain(subcommand);
     }
   });

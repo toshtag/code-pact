@@ -99,3 +99,7 @@ export {
   resolveProjectScaffoldReadPath,
   resolveProjectScaffoldWritePath,
 } from "./authorities/project-config-authority.ts";
+export {
+  resolveContextManifestReadPath,
+  resolveContextManifestWritePath,
+} from "./authorities/context-deferral-authority.ts";

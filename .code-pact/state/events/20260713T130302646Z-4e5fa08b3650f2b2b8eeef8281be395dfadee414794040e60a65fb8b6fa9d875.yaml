@@ -1,0 +1,11 @@
+task_id: P52-T6
+status: done
+at: 2026-07-13T13:03:02.646Z
+actor: agent
+agent: claude-code
+author: Pocket
+evidence:
+  - commands
+  - decision
+source: loop
+id: 4e5fa08b3650f2b2b8eeef8281be395dfadee414794040e60a65fb8b6fa9d875

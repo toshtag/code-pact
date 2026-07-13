@@ -61,7 +61,7 @@ export type ContextExplainExcluded = {
  *
  * These are an OBSERVABILITY layer over the budget path; they
  * never change the rendered `content`. The no-flag pack stays byte-identical,
- * and only an explicit `--budget-bytes` / `--context-budget` invocation elides
+ * and only an explicit `--budget-bytes` / `--context-budget` invocation defers
  * sections.
  */
 export type ContextExplainMetrics = {
@@ -73,6 +73,8 @@ export type ContextExplainMetrics = {
   budgetBytes?: number;
   /** `naturalBytes - finalBytes`; 0 when no section was elided. */
   savedBytes: number;
+  /** Sum of original deferred section content bytes; 0 when no section was deferred. */
+  deferredBytes: number;
   /** `savedBytes / naturalBytes`; 0 when `naturalBytes === 0`. */
   savedRatio: number;
   /**
