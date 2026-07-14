@@ -13,14 +13,20 @@ non_goals:
   - Keep lines only because they contain imperative keywords.
   - Delegate projection quality to a model.
 definition_of_done:
-  - Projection is enabled only on explicit budgeted context paths; default no-budget packs stay byte-identical.
+  - Projection is enabled only on explicit budgeted context paths; default
+    no-budget packs stay byte-identical.
   - "`task context --explain` does not enable projection by itself."
   - Read glob output can be grouped while the complete list remains retrievable.
-  - Read-glob and decision projections preserve an exact content reference for omitted original material.
-  - Completed task projection is excluded unless measurement proves a reduction beyond the current minimal rendering.
-  - Decision rendering prefers explicit implementation commitments when present and falls back to the original on parse failure.
-  - JSON projection is out of scope until a concrete context-pack JSON section exists.
-  - Projected output falls back to the original or normal rendering when it would be larger.
+  - Read-glob and decision projections preserve an exact content reference for
+    omitted original material.
+  - Completed task projection is excluded unless measurement proves a reduction
+    beyond the current minimal rendering.
+  - Decision rendering prefers explicit implementation commitments when present
+    and falls back to the original on parse failure.
+  - JSON projection is out of scope until a concrete context-pack JSON section
+    exists.
+  - Projected output falls back to the original or normal rendering when it
+    would be larger.
 verification:
   commands:
     - pnpm check:docs
@@ -36,11 +42,12 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
+    description: Define safe projection rules by content type and document the
+      non-summarization boundary.
     depends_on:
       - P52-T4
       - P53-T3
-    description: Define safe projection rules by content type and document the non-summarization boundary.
     reads:
       - src/core/pack/index.ts
       - src/core/pack/budget.ts
@@ -63,9 +70,10 @@ tasks:
     verification_strength: strong
     expected_duration: medium
     status: planned
+    description: Project large read glob results by directory while deferring the
+      complete file list.
     depends_on:
       - P54-T1
-    description: Project large read glob results by directory while deferring the complete file list.
     reads:
       - src/core/pack/index.ts
       - src/core/pack/budget.ts
@@ -95,9 +103,10 @@ tasks:
     verification_strength: strong
     expected_duration: medium
     status: planned
+    description: Project decision records through deterministic
+      implementation-commitment fields with original-content references.
     depends_on:
       - P54-T2
-    description: Project decision records through deterministic implementation-commitment fields with original-content references.
     reads:
       - src/core/pack/loaders.ts
       - src/core/pack/formatters/markdown.ts
@@ -123,10 +132,10 @@ tasks:
     verification_strength: strong
     expected_duration: short
     status: planned
+    description: Add fixed fixtures for projection bytes and deferred reference retrieval.
     depends_on:
       - P54-T2
       - P54-T3
-    description: Add fixed fixtures for projection bytes and deferred reference retrieval.
     reads:
       - tests/fixtures/**
       - tests/integration/task-context-budget.test.ts

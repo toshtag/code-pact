@@ -1856,8 +1856,8 @@ When a task declares **none** of the P10 fields, the pack body is byte-identical
 | `natural_bytes`            | integer | The **pre-budget** pack size: the bytes the no-budget builder would render for this task (after the existing deterministic relevance/readiness selection, before any budget-driven elision). Not a whole-repository size, not a token count.                                                                                                                                                                                                                       |
 | `final_bytes`              | integer | The post-budget pack size. **Equals `total_bytes` == `context_pack_bytes`.**                                                                                                                                                                                                                                                                                                                                                                                       |
 | `budget_bytes`             | integer | Present **only when a budget was applied** (via `--budget-bytes` or `--context-budget`); omitted otherwise. Equals the resolved byte budget (an agent same-name `context_budget` override is reflected here).                                                                                                                                                                                                                                                      |
-| `saved_bytes`              | integer | `natural_bytes - final_bytes` — the bytes removed by **budget-driven elision only**. `0` when no section was elided.                                                                                                                                                                                                                                                                                                                                               |
-| `deferred_bytes`           | integer | The UTF-8 bytes of original section content withheld by budget deferral and stored in the deferred context manifest. `0` when no section was deferred. This is not the same as `saved_bytes`: the final pack also contains Deferred Context guidance overhead.                                                                                                                                                                                                      |
+| `saved_bytes`              | integer | `natural_bytes - final_bytes` — the bytes removed by budget-driven projection and/or elision. `0` when the final pack is the natural pack.                                                                                                                                                                                                                                                                                                                         |
+| `deferred_bytes`           | integer | The UTF-8 bytes of original section content withheld from the inline pack and stored in the deferred context manifest. This includes both fully deferred sections and exact originals for projected sections. `0` when no original section content was stored in the manifest. This is not the same as `saved_bytes`: the final pack may contain projection text and Deferred Context guidance overhead.                                                               |
 | `saved_ratio`              | number  | `saved_bytes / natural_bytes` (a fraction in `[0, 1]`; `0` when `natural_bytes === 0`). The illustrative value below is rounded for readability — the field is the exact quotient.                                                                                                                                                                                                                                                                                 |
 | `minimum_achievable_bytes` | integer | The floor below which no budget can drive this task — the size after every budget-**eligible** section is elided, honoring the P28 conditional eligibility (`related_decisions` elidable only when `context_size: large`; `rules` only when `write_surface: high`). **This is the same floor the [`CONTEXT_OVER_BUDGET`](#--budget-bytes-n-v113-p24) error reports, computed by the same shared helper** — the success path and the error path can never disagree. |
 | `elided_sections[]`        | array   | Backward-compatible field name for the **budget-deferred** sections only, in actual deferral order — `{ "name": string, "bytes": number }`. Mirrors the `budget_reserved_for_later` subset of `excluded[]`. `[]` when no budget deferral occurred.                                                                                                                                                                                                                 |
@@ -1948,6 +1948,42 @@ Sections NOT in this list are **unelidable**: `header`, `phase_contract`, `task_
 
 The locked source of truth is `ELISION_ORDER` in [`src/core/pack/formatters/markdown.ts`](../src/core/pack/formatters/markdown.ts). Changing the order requires an RFC amendment.
 
+**Structural projection before full deferral.** When an explicit budget is
+resolved and the natural pack is larger than that budget, the builder may try
+deterministic structural projections before fully deferring sections. Projection
+is never enabled by no-budget commands, by `task context --explain` alone, or by
+a budgeted command whose natural pack already fits. Projection is also rejected
+when the projected section is not smaller than the original or when the full
+pack, including Deferred Context guidance and manifest reference, would not be
+smaller than the comparison pack.
+
+Projection is intentionally narrow:
+
+- `reads` may replace a large declared read surface with exact counts grouped by
+  each matched file's direct parent directory. Glob declaration order is
+  preserved, directory names are POSIX-formatted and lexicographically sorted,
+  root-level files are grouped under `./`, counts are exact, Git tracked files
+  remain the only match source, and file contents are not read.
+- `related_decisions` may be projected only for the `context_size: large`
+  all-decisions expansion. Accepted ADRs with an explicit `## Implementation
+  commitments` checkbox list can render only the filename and checkbox items,
+  preserving order, text, and checked state. Non-projectable related decisions
+  remain as full text in the same section. `declared_decisions` and ordinary
+  task-id matched related decisions are not projected.
+
+Projection is not a natural-language summary, code compression, semantic
+ranking, tokenizer pass, model call, or embedding operation. It does not apply
+to source code, constitution, rules, completed tasks, declared decisions, JSON
+output, or arbitrary prose.
+
+If projection alone does not meet the budget, the existing full-deferral pass
+continues in the locked order above. A section rendered in projected form is not
+then fully deferred in the same final plan; the equivalent full-deferral plan is
+chosen instead. When multiple successful plans exist, the chosen plan minimizes
+fully deferred section count first, then projected section count, then uses the
+fixed projection order (`reads`, then `related_decisions`) as the tie-breaker,
+and finally the smallest final byte count.
+
 **Deferred context reference.** When one or more sections are withheld for a
 budget, their exact content is represented by one manifest reference:
 `context:sha256:<64 lowercase hexadecimal characters>`. The reference is
@@ -1980,6 +2016,14 @@ Task id, phase id, agent name, timestamps, absolute paths, process ids, and
 hostnames are not part of the digest input. Identical deferred content produces
 the same reference; one pack uses at most one manifest reference.
 
+Projected sections use the same manifest. The inline pack keeps the projected
+section, and the manifest stores the exact original section body under the same
+section name (`reads` or `related_decisions`) exactly once. The retrieval command
+for a projected section is therefore the same as for a fully deferred section:
+`code-pact context show <ref> --section <name>`. The returned human output is
+the original section body byte-for-byte; it is not a summary and it does not add
+a trailing newline.
+
 **Deferred Context section.** When deferral occurs, the rendered Markdown gains
 exactly one synthetic section at a fixed position immediately after the Task
 Definition block:
@@ -2002,15 +2046,17 @@ persistence state, a conditional command, filesystem paths, or deferred section
 content. No-budget packs and budgeted packs that naturally fit without deferral
 do not include this section.
 
-**Budget accounting with deferral overhead.** The Deferred Context section is
-part of the budget. The algorithm withholds a candidate section, builds the
+**Budget accounting with projection and deferral overhead.** The Deferred
+Context section is part of the budget. For each candidate plan, the algorithm
+replaces projected sections, withholds fully deferred sections, builds the
 manifest and reference, renders the candidate pack with the Deferred Context
-section included, measures `Buffer.byteLength(content, "utf8")`, and accepts the
-candidate only when that measured `final_bytes` is `<= budget_bytes`. If the
-guidance overhead pushes the candidate over budget, the next eligible section is
-also deferred. If every eligible section has been deferred and the pack still
-exceeds the budget, `CONTEXT_OVER_BUDGET` reports the exact
-`minimum_achievable_bytes` including the final Deferred Context section.
+section included when a manifest reference is needed, measures
+`Buffer.byteLength(content, "utf8")`, and accepts the candidate only when that
+measured `final_bytes` is `<= budget_bytes`. If the guidance overhead pushes the
+candidate over budget, the next eligible full-deferral step is evaluated. If
+every eligible section has been deferred and the pack still exceeds the budget,
+`CONTEXT_OVER_BUDGET` reports the exact `minimum_achievable_bytes` including the
+final Deferred Context section.
 
 **`--explain --json` interaction.** When `--budget-bytes` triggers deferral AND `--explain --json` is set, every deferred section appears in `excluded[]` with `reason_code: budget_reserved_for_later` and a `details` block:
 
@@ -2056,7 +2102,7 @@ Sections excluded by the v1.11 inclusion policy (e.g. `not_declared_by_task` for
 
 Exit code 2. `data.minimum_achievable_bytes` tells the caller the floor for this task; re-running with `--budget-bytes <minimum_achievable_bytes>` succeeds and produces a pack of exactly that size.
 
-**Byte-identical default.** Without `--budget-bytes`, the rendered `content` is byte-for-byte identical to v1.12 (the existing [`tests/integration/pack-byte-identical.test.ts`](../tests/integration/pack-byte-identical.test.ts) lock test continues to apply). A budget that naturally fits without deferral is also byte-identical to the no-budget pack. The flag only opts in to deferral when the resolved byte cap requires it.
+**Byte-identical default.** Without `--budget-bytes`, the rendered `content` is byte-for-byte identical to v1.12 (the existing [`tests/integration/pack-byte-identical.test.ts`](../tests/integration/pack-byte-identical.test.ts) lock test continues to apply). A budget that naturally fits without projection or deferral is also byte-identical to the no-budget pack. The flag only opts in to structural projection or deferral when the resolved byte cap requires it.
 
 ### `--context-budget <profile>` (v1.30+, P47)
 

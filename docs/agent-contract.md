@@ -152,6 +152,15 @@ For the same git SHA and the same inputs:
   Markdown bytes and the same `context:sha256:<digest>` manifest reference for
   the same task, agent, and resolved byte budget. Only normal `task prepare`
   materializes the derived manifest and returns a non-null retrieval command.
+- When an explicit context budget would otherwise exceed the resolved byte cap,
+  the pack may first use deterministic structural projections for safe content
+  types before fully deferring sections. Projection is not summarization: read
+  glob matches can be replaced by exact parent-directory counts, and only
+  `context_size: large` related decisions can be reduced to accepted ADR
+  `Implementation commitments`. Declared decisions are never projected. The
+  exact original section remains available through the same context manifest
+  reference used for deferred sections. No-budget packs and budgeted packs that
+  naturally fit stay byte-identical to the unprojected form.
 
 Where a command writes deterministic artifacts (context pack, adapter
 files), the same input produces the same on-disk bytes.
@@ -338,15 +347,18 @@ The verbs in detail:
   contains the resolved `--budget-bytes <N>`, not the profile or recommended
   flag. Do not reconstruct, widen, or replace that resolved budget.
   If the applied budget produces `deferred_context`, first work from the
-  rendered pack and the section names already embedded in the result. Do not
-  fetch every deferred section up front. Fetch only when a concrete missing
-  section is necessary, only when `deferred_context.retrieve_command` is
-  non-null, and start with the listed command to inspect section names before
-  retrieving one section by name. The retrieval flow is `context show <ref>
-  --list --json` to choose a section, then `context show <ref> --section <name>`
-  for the exact body. When `retrieve_command` is null, do not infer a cache path
-  or construct a retrieval command yourself. Deferred content is exact original
-  section content, not a summary; the cache is derived and must not be committed.
+  rendered pack and the section names already embedded in the result. Budgeted
+  context may contain deterministic structural projections; use the projected
+  form first. Do not fetch every deferred or projected section up front. Fetch
+  only when a concrete missing detail is necessary, only when
+  `deferred_context.retrieve_command` is non-null, and start with the listed
+  command to inspect section names before retrieving one section by name. The
+  retrieval flow is `context show <ref> --list --json` to choose a section, then
+  `context show <ref> --section <name>` for the exact body. When
+  `retrieve_command` is null, do not infer a cache path or construct a
+  retrieval command yourself. Deferred and projected originals are exact
+  original section content, not summaries; the cache is derived and must not be
+  committed.
   `commands.verify` and `commands.complete` include `--json --detail agent`;
   use those strings verbatim so verification failures arrive as compact
   capsules instead of duplicated raw stdout/stderr.
