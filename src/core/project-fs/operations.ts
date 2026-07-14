@@ -102,6 +102,10 @@ export async function accessProjectPresence(
   await accessRaw(unbrand(path));
 }
 
+export async function statProjectPresence(path: ProjectPresencePath) {
+  return statRaw(unbrand(path));
+}
+
 export async function lstatOwned(path: OwnedReadPath) {
   return lstatRaw(unbrand(path));
 }

@@ -97,6 +97,49 @@ tasks:
 - **In `task context`:** the pack gains a `## Acceptance references` section with the path list only — no content excerpt.
 - **In `task finalize`:** each declared path is surfaced in `acceptance_refs_check[]` with whether it exists on disk (existence only; semantic validation of the file content is out of scope).
 
+## Regression evidence for bugfix tasks
+
+Regression evidence is not a new task field. Active bugfix tasks (`type: bugfix`
+with design status `planned` or `in_progress`) use the existing `writes` and
+`acceptance_refs` declarations:
+
+- New regression artifacts belong in `writes`.
+- Existing regression artifacts belong in `acceptance_refs`.
+
+`plan lint --include-quality` checks whether an active bugfix task declares at
+least one static regression artifact. Missing evidence is an advisory
+(`TASK_REGRESSION_EVIDENCE_MISSING`, `affects_exit: false`), not a hard gate;
+it stays advisory even under `--strict`. Done and cancelled tasks are skipped so
+historical plans do not become noisy.
+
+Accepted evidence paths are intentionally closed to these forms:
+
+- Filenames: `**/*.test.*`, `**/*.spec.*`, `**/*_test.*`, `**/test_*.*`
+- Directory-contained artifacts: `tests/**`, `test/**`, `__tests__/**`,
+  `spec/**`, `specs/**`, `fixtures/**`, `reproductions/**`, and the same
+  directory names at any nested level
+
+Paths are classified lexically as project-relative POSIX paths. A path with a
+leading slash, Windows drive prefix, backslash, `.` segment, `..` segment, empty
+segment, or NUL is not regression evidence. Classification is case-sensitive.
+Broad declarations such as `src/**` are not evidence just because they might
+match a test file on disk. A directory marker by itself is also not evidence:
+`tests` and `src/tests` do not qualify, while `tests/session.test.ts`,
+`tests/regression-case`, and `tests/**` do.
+
+`writes` is future-tense, so matching paths there are accepted without checking
+whether the file already exists. `acceptance_refs` is for existing evidence, so
+matching paths there count only when they currently resolve to a regular file
+inside the project and do not escape via an unsafe path or project-outside
+symlink. An existing directory such as `tests` or `fixtures/parser` is not an
+existing evidence artifact.
+
+This advisory does not read test, fixture, or reproduction content and does not
+prove that a test prevents the bug. A passing verification command, manual test,
+screenshot, log, comment, PR description, or Failure Capsule is not static
+regression evidence unless a qualifying path is declared in `writes` or
+`acceptance_refs`.
+
 ## Supported glob subset
 
 `reads` / `writes` use a minimal in-repo glob matcher. The supported subset is intentionally narrow because code-pact keeps the runtime dependency policy from [`CONTRIBUTING.md`](../../CONTRIBUTING.md#runtime-dependency-policy) (`yaml` + `zod` only):

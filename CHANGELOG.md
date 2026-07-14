@@ -13,6 +13,10 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Added
+
+- **Added bugfix regression evidence advisories.** `plan lint --include-quality` now warns when an active `type: bugfix` task declares no static test, fixture, or reproduction artifact in `writes` or `acceptance_refs`. Directory markers such as `tests` or `src/tests` do not count as evidence by themselves, and `acceptance_refs` evidence must resolve to an existing regular file. The diagnostic is advisory guidance (`affects_exit: false`) and remains non-blocking under `--strict`.
+
 ## [2.5.0] — 2026-07-14
 
 ### Added

@@ -3,25 +3,38 @@ name: Regression Evidence
 weight: 5
 confidence: medium
 risk: medium
-status: planned
+status: done
 objective: >
   Surface static advisory guidance for bugfix tasks to declare regression
   evidence such as tests, fixtures, or reproduction artifacts.
 non_goals:
   - Require every documentation or refactor task to add a new test.
-  - Treat a passing manual command as sufficient regression evidence for a bugfix.
-  - Store full command output inside progress events when an evidence reference exists.
+  - Treat a passing manual command as sufficient regression evidence for a
+    bugfix.
+  - Store full command output inside progress events when an evidence reference
+    exists.
   - Link runtime failure fingerprints to regression artifacts.
-  - Add structured completion evidence, task evidence commands, terminal repair summaries, or runtime regression artifacts.
+  - Add structured completion evidence, task evidence commands, terminal repair
+    summaries, or runtime regression artifacts.
 definition_of_done:
   - "The advisory applies only to tasks with `type: bugfix`."
-  - Static evidence exists only when `writes` names a test, fixture, or reproduction artifact, or when `acceptance_refs` names an existing test, fixture, or reproduction artifact.
-  - Path classification is closed to `**/*.test.*`, `**/*.spec.*`, `**/*_test.*`, `**/test_*.*`, `tests/**`, `test/**`, `__tests__/**`, `spec/**`, `specs/**`, `fixtures/**`, `reproductions/**`, `**/tests/**`, `**/test/**`, `**/__tests__/**`, `**/spec/**`, `**/specs/**`, `**/fixtures/**`, and `**/reproductions/**`.
-  - "`acceptance_refs` are for existing evidence files; new tests, fixtures, or reproduction artifacts belong in `writes`."
+  - Static evidence exists only when `writes` names a test, fixture, or
+    reproduction artifact, or when `acceptance_refs` names an existing test,
+    fixture, or reproduction artifact.
+  - Path classification is closed to `**/*.test.*`, `**/*.spec.*`,
+    `**/*_test.*`, `**/test_*.*`, `tests/**`, `test/**`, `__tests__/**`,
+    `spec/**`, `specs/**`, `fixtures/**`, `reproductions/**`, `**/tests/**`,
+    `**/test/**`, `**/__tests__/**`, `**/spec/**`, `**/specs/**`,
+    `**/fixtures/**`, and `**/reproductions/**`.
+  - "`acceptance_refs` are for existing evidence files; new tests, fixtures, or
+    reproduction artifacts belong in `writes`."
   - Bugfix completion guidance names accepted regression evidence forms.
-  - The advisory checks only static acceptance declarations and does not claim to prove that a test prevents a runtime failure.
-  - Missing regression evidence is surfaced as an advisory first, not a hard block.
-  - Agent guidance explains how to report evidence without duplicating large command output.
+  - The advisory checks only static acceptance declarations and does not claim
+    to prove that a test prevents a runtime failure.
+  - Missing regression evidence is surfaced as an advisory first, not a hard
+    block.
+  - Agent guidance explains how to report evidence without duplicating large
+    command output.
 verification:
   commands:
     - pnpm check:docs
@@ -37,10 +50,11 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
+    description: Define accepted static regression evidence declarations and
+      explicitly defer runtime fingerprint linkage.
     depends_on:
       - P54-T4
-    description: Define accepted static regression evidence declarations and explicitly defer runtime fingerprint linkage.
     reads:
       - docs/agent-contract.md
       - docs/cli-contract.md
@@ -61,10 +75,11 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
+    description: Surface a bugfix regression-evidence advisory through existing
+      quality linting.
     depends_on:
       - P57-T1
-    description: Surface a bugfix regression-evidence advisory through existing quality linting.
     reads:
       - src/core/plan/lint.ts
       - src/core/schemas/task.ts
@@ -86,10 +101,11 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
+    description: Document regression evidence examples in maintainer and
+      agent-facing guidance.
     depends_on:
       - P57-T2
-    description: Document regression evidence examples in maintainer and agent-facing guidance.
     reads:
       - docs/agent-contract.md
       - docs/maintainers/operations.md
@@ -102,3 +118,39 @@ tasks:
       - docs/agent-contract.md
       - docs/maintainers/operations.md
       - CHANGELOG.md
+  - id: P57-T4
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: small
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: Reject directory-only regression evidence declarations and require
+      existing acceptance references to resolve to regular files.
+    depends_on:
+      - P57-T3
+    reads:
+      - src/core/plan/lint.ts
+      - src/core/plan/checks/fs.ts
+      - src/core/project-fs/operations.ts
+      - src/core/project-fs/index.ts
+      - tests/unit/core/plan/lint.test.ts
+      - tests/integration/plan-lint.test.ts
+      - docs/concepts/task-readiness-fields.md
+      - docs/cli-contract.md
+      - CHANGELOG.md
+    writes:
+      - src/core/plan/lint.ts
+      - src/core/plan/checks/fs.ts
+      - src/core/project-fs/operations.ts
+      - src/core/project-fs/index.ts
+      - tests/unit/core/plan/lint.test.ts
+      - tests/integration/plan-lint.test.ts
+      - docs/concepts/task-readiness-fields.md
+      - docs/cli-contract.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - tests/unit/core/plan/lint.test.ts
+      - tests/integration/plan-lint.test.ts

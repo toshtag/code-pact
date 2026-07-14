@@ -383,6 +383,58 @@ The verbs in detail:
   does not run during this phase; it is invoked again only at the
   next verb boundary.
 
+- **Declare regression evidence for bugfixes.** When a task is
+  `type: bugfix`, prefer declaring one static regression artifact in
+  the plan before completion. New artifacts belong in `writes`:
+
+  ```yaml
+  writes:
+    - tests/session-expiry.test.ts
+  ```
+
+  Existing artifacts belong in `acceptance_refs`:
+
+  ```yaml
+  acceptance_refs:
+    - tests/session-expiry.test.ts
+  ```
+
+  Accepted evidence forms are tests, fixtures, and reproduction
+  artifacts. A passing command, manual test, screenshot, log, comment,
+  PR description, or Failure Capsule is useful context, but it is not a
+  static regression-evidence declaration by itself.
+
+  Examples that count:
+
+  ```yaml
+  writes:
+    - src/parser/reproductions/missing-token.md
+    - src/parser/__tests__/missing-token.test.ts
+  acceptance_refs:
+    - fixtures/parser/missing-token.json
+  ```
+
+  Examples that do not count:
+
+  ```yaml
+  writes:
+    - src/parser/**
+  acceptance_refs:
+    - docs/reproduction.md
+    - https://example.test/issue/123
+  ```
+
+  In the user-facing completion summary, list the path(s) briefly:
+
+  ```text
+  Regression evidence:
+  - tests/session-expiry.test.ts
+  ```
+
+  Do not paste full test logs, duplicate Failure Capsule stdout/stderr,
+  store evidence-cache bodies in progress events, or claim that the mere
+  presence of a test proves the bug can never recur.
+
 - **`verify --phase <p> --task <id>`** — run the task's deterministic
   checks (the declared verification commands **and** the
   `requires_decision` decision gate) without recording a progress event.
