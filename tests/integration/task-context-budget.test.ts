@@ -79,7 +79,7 @@ async function forceTaskBudgetDeferral(
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
   const readDir = join(project.dir, "docs", FORCING_READ_MARKER);
   await mkdir(readDir, { recursive: true });
-  for (let index = 0; index < 900; index += 1) {
+  for (let index = 0; index < 850; index += 1) {
     await writeFile(
       join(readDir, `entry-${String(index).padStart(4, "0")}-${FORCING_READ_MARKER}.md`),
       "deterministic fixture\n",

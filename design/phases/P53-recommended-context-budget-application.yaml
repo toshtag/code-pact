@@ -3,7 +3,7 @@ name: Recommended Context Budget Application
 weight: 6
 confidence: medium
 risk: medium
-status: in_progress
+status: done
 objective: >
   Allow task preparation to apply the deterministic recommended context budget
   explicitly after reversible context deferral makes omitted context
@@ -220,7 +220,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Remove unrelated global integration-test runtime changes and close P53
       with explicit cleanup and verification of stale derived context and
