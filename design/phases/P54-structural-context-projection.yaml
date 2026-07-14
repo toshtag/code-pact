@@ -3,7 +3,7 @@ name: Structural Context Projection
 weight: 7
 confidence: medium
 risk: medium
-status: planned
+status: done
 objective: >
   Add deterministic, content-type-aware context projections that reduce context
   size only where the structure is safe to preserve mechanically.
