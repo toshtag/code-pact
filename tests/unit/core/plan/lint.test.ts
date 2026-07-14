@@ -448,9 +448,12 @@ ${taskLines.map((l) => `    ${l}`).join("\n")}
 `;
   }
 
-  async function runBugfix(taskLines: string[] = []) {
+  async function runBugfix(
+    taskLines: string[] = [],
+    opts: { type?: string; status?: string } = {},
+  ) {
     await writeRoadmap(ROADMAP);
-    await writePhase("P1.yaml", bugfixPhase(taskLines));
+    await writePhase("P1.yaml", bugfixPhase(taskLines, opts));
     return runLint({ cwd, includeQuality: true });
   }
 
@@ -496,10 +499,16 @@ ${taskLines.map((l) => `    ${l}`).join("\n")}
   it("accepts new regression artifacts declared in writes without checking existence", async () => {
     for (const evidencePath of [
       "tests/session-expiry.test.ts",
+      "tests/regression-case",
+      "tests/**",
+      "src/core/tests/session",
       "src/foo.spec.tsx",
       "src/foo_test.py",
       "src/test_foo.rb",
+      "fixtures/case.json",
+      "src/fixtures/case.json",
       "src/**/fixtures/**",
+      "reproductions/case.md",
       "src/core/reproductions/session.md",
     ]) {
       const result = await runBugfix(["writes:", `  - ${evidencePath}`]);
@@ -507,17 +516,64 @@ ${taskLines.map((l) => `    ${l}`).join("\n")}
     }
   });
 
-  it("accepts existing regression artifacts from acceptance_refs", async () => {
-    await mkdir(join(cwd, "tests"), { recursive: true });
-    await writeFile(join(cwd, "tests", "session-expiry.test.ts"), "", "utf8");
+  it("does not accept evidence directory markers alone in writes", async () => {
+    for (const evidencePath of [
+      "tests",
+      "src/tests",
+      "test",
+      "src/test",
+      "__tests__",
+      "src/__tests__",
+      "spec",
+      "src/spec",
+      "specs",
+      "src/specs",
+      "fixtures",
+      "src/fixtures",
+      "reproductions",
+      "src/reproductions",
+    ]) {
+      const result = await runBugfix(["writes:", `  - ${evidencePath}`]);
+      expect(regressionIssues(result), evidencePath).toHaveLength(1);
+    }
+  });
 
-    const result = await runBugfix([
-      "writes:",
-      "  - src/session.ts",
-      "acceptance_refs:",
-      "  - tests/session-expiry.test.ts",
-    ]);
-    expect(regressionIssues(result)).toEqual([]);
+  it("accepts existing regular files from acceptance_refs", async () => {
+    for (const evidencePath of [
+      "tests/regression-case",
+      "tests/session.test.ts",
+      "fixtures/parser/case.json",
+      "reproductions/session-race.md",
+    ]) {
+      const fullPath = join(cwd, ...evidencePath.split("/"));
+      await mkdir(join(fullPath, ".."), { recursive: true });
+      await writeFile(fullPath, "", "utf8");
+
+      const result = await runBugfix([
+        "writes:",
+        "  - src/session.ts",
+        "acceptance_refs:",
+        `  - ${evidencePath}`,
+      ]);
+      expect(regressionIssues(result), evidencePath).toEqual([]);
+    }
+  });
+
+  it("does not accept existing directories from acceptance_refs", async () => {
+    for (const evidencePath of [
+      "tests",
+      "tests/unit",
+      "fixtures",
+      "fixtures/parser",
+      "reproductions",
+    ]) {
+      await mkdir(join(cwd, ...evidencePath.split("/")), { recursive: true });
+      const result = await runBugfix([
+        "acceptance_refs:",
+        `  - ${evidencePath}`,
+      ]);
+      expect(regressionIssues(result), evidencePath).toHaveLength(1);
+    }
   });
 
   it("does not accept missing acceptance_refs even when they look like evidence", async () => {
@@ -562,15 +618,25 @@ ${taskLines.map((l) => `    ${l}`).join("\n")}
   });
 
   it("skips non-bugfix, done, and cancelled tasks", async () => {
-    await writeRoadmap(ROADMAP);
-    await writePhase("P1.yaml", bugfixPhase([], { type: "feature" }));
-    expect(regressionIssues(await runLint({ cwd, includeQuality: true }))).toEqual([]);
-
-    await writePhase("P1.yaml", bugfixPhase([], { status: "done" }));
-    expect(regressionIssues(await runLint({ cwd, includeQuality: true }))).toEqual([]);
-
-    await writePhase("P1.yaml", bugfixPhase([], { status: "cancelled" }));
-    expect(regressionIssues(await runLint({ cwd, includeQuality: true }))).toEqual([]);
+    for (const opts of [
+      { type: "bugfix", status: "planned", expected: 1 },
+      { type: "bugfix", status: "in_progress", expected: 1 },
+      { type: "bugfix", status: "done", expected: 0 },
+      { type: "bugfix", status: "cancelled", expected: 0 },
+      { type: "feature", status: "planned", expected: 0 },
+      { type: "refactor", status: "planned", expected: 0 },
+      { type: "docs", status: "planned", expected: 0 },
+      { type: "test", status: "planned", expected: 0 },
+    ]) {
+      const result = await runBugfix([], {
+        type: opts.type,
+        status: opts.status,
+      });
+      expect(
+        regressionIssues(result),
+        `${opts.type}/${opts.status}`,
+      ).toHaveLength(opts.expected);
+    }
   });
 });
 

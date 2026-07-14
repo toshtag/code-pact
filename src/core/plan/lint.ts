@@ -22,7 +22,7 @@ import {
   detectTaskAcceptanceRefNotFound,
 } from "./checks.ts";
 import { loadProtectedPaths } from "../rules/protected-paths.ts";
-import { projectPathPresence } from "./checks/fs.ts";
+import { projectRegularFilePresence } from "./checks/fs.ts";
 import {
   makeDecisionResolver,
   classifyDecisionAdrs,
@@ -673,13 +673,24 @@ function matchesRegressionEvidenceFilename(filename: string): boolean {
   return /^test_.+\..+$/.test(filename);
 }
 
+function isUnderRegressionEvidenceDirectory(
+  segments: readonly string[],
+): boolean {
+  return segments.some(
+    (segment, index) =>
+      REGRESSION_EVIDENCE_DIRECTORIES.has(segment) &&
+      index < segments.length - 1,
+  );
+}
+
 function isRegressionEvidenceDeclaration(path: string): boolean {
   if (!isSafeRegressionEvidencePath(path)) return false;
   const segments = path.split("/");
-  if (segments.some((segment) => REGRESSION_EVIDENCE_DIRECTORIES.has(segment))) {
-    return true;
-  }
-  return matchesRegressionEvidenceFilename(segments[segments.length - 1] ?? "");
+  const filename = segments[segments.length - 1] ?? "";
+  return (
+    isUnderRegressionEvidenceDirectory(segments) ||
+    matchesRegressionEvidenceFilename(filename)
+  );
 }
 
 async function detectMissingBugfixRegressionEvidence(
@@ -699,7 +710,9 @@ async function detectMissingBugfixRegressionEvidence(
       let existingEvidence = false;
       for (const acceptanceRef of task.acceptance_refs ?? []) {
         if (!isRegressionEvidenceDeclaration(acceptanceRef)) continue;
-        if ((await projectPathPresence(cwd, acceptanceRef)) === "present") {
+        if (
+          (await projectRegularFilePresence(cwd, acceptanceRef)) === "present"
+        ) {
           existingEvidence = true;
           break;
         }

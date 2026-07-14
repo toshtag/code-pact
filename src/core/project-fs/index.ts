@@ -36,6 +36,7 @@ export {
   unlinkOwned,
   accessOwned,
   accessProjectPresence,
+  statProjectPresence,
   lstatOwned,
   lstatExplicitUser,
   lstatOwnedList,

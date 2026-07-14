@@ -262,7 +262,10 @@ tasks:
 describe("plan lint — TASK_REGRESSION_EVIDENCE_MISSING is advisory even under --strict (P57)", () => {
   const ROADMAP =
     `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`;
-  const BUGFIX_WITHOUT_EVIDENCE = `id: P1
+  function bugfixPhase(
+    taskLines: string[] = ["writes:", "  - src/session.ts"],
+  ): string {
+    return `id: P1
 name: P1
 weight: 10
 confidence: medium
@@ -285,24 +288,32 @@ tasks:
     expected_duration: short
     status: planned
     description: fixes a regression
-    writes:
-      - src/session.ts
+${taskLines.map((line) => `    ${line}`).join("\n")}
 `;
+  }
+
+  async function writeBugfixPlan(
+    taskLines: string[] = ["writes:", "  - src/session.ts"],
+  ): Promise<void> {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", bugfixPhase(taskLines));
+  }
+
+  function regressionIssue(parsed: LintJson) {
+    return parsed.data?.issues.find(
+      (i) => i.code === "TASK_REGRESSION_EVIDENCE_MISSING",
+    );
+  }
 
   it("fires only with --include-quality and never promotes to failure", async () => {
-    await writeRoadmap(ROADMAP);
-    await writePhase("P1.yaml", BUGFIX_WITHOUT_EVIDENCE);
+    await writeBugfixPlan();
 
     const off = parseLint(run(["plan", "lint", "--strict", "--json"]).stdout);
-    expect(
-      off.data?.issues.some((i) => i.code === "TASK_REGRESSION_EVIDENCE_MISSING"),
-    ).toBe(false);
+    expect(regressionIssue(off)).toBeUndefined();
 
     const res = run(["plan", "lint", "--include-quality", "--strict", "--json"]);
     const parsed = parseLint(res.stdout);
-    const issue = parsed.data?.issues.find(
-      (i) => i.code === "TASK_REGRESSION_EVIDENCE_MISSING",
-    );
+    const issue = regressionIssue(parsed);
 
     expect(res.code).toBe(0);
     expect(parsed.ok).toBe(true);
@@ -326,6 +337,55 @@ tasks:
           "docs/concepts/task-readiness-fields.md#regression-evidence-for-bugfix-tasks",
       },
     });
+  });
+
+  it("does not fire when writes names a regression artifact", async () => {
+    await writeBugfixPlan(["writes:", "  - tests/session.test.ts"]);
+    const parsed = parseLint(
+      run(["plan", "lint", "--include-quality", "--strict", "--json"]).stdout,
+    );
+    expect(regressionIssue(parsed)).toBeUndefined();
+  });
+
+  it("does not fire when acceptance_refs names an existing regular file", async () => {
+    await mkdir(join(tmpDir, "tests"), { recursive: true });
+    await writeFile(join(tmpDir, "tests", "regression-case"), "", "utf8");
+    await writeBugfixPlan([
+      "writes:",
+      "  - src/session.ts",
+      "acceptance_refs:",
+      "  - tests/regression-case",
+    ]);
+
+    const parsed = parseLint(
+      run(["plan", "lint", "--include-quality", "--strict", "--json"]).stdout,
+    );
+    expect(regressionIssue(parsed)).toBeUndefined();
+  });
+
+  it("still fires when acceptance_refs names an existing directory", async () => {
+    for (const ref of ["tests", "tests/unit"]) {
+      await mkdir(join(tmpDir, ...ref.split("/")), { recursive: true });
+      await writeBugfixPlan([
+        "writes:",
+        "  - src/session.ts",
+        "acceptance_refs:",
+        `  - ${ref}`,
+      ]);
+
+      const parsed = parseLint(
+        run(["plan", "lint", "--include-quality", "--strict", "--json"]).stdout,
+      );
+      expect(regressionIssue(parsed), ref).toBeDefined();
+    }
+  });
+
+  it("does not treat a passing verification command as evidence", async () => {
+    await writeBugfixPlan([]);
+    const parsed = parseLint(
+      run(["plan", "lint", "--include-quality", "--strict", "--json"]).stdout,
+    );
+    expect(regressionIssue(parsed)).toBeDefined();
   });
 });
 

@@ -115,20 +115,24 @@ historical plans do not become noisy.
 Accepted evidence paths are intentionally closed to these forms:
 
 - Filenames: `**/*.test.*`, `**/*.spec.*`, `**/*_test.*`, `**/test_*.*`
-- Directories: `tests/**`, `test/**`, `__tests__/**`, `spec/**`, `specs/**`,
-  `fixtures/**`, `reproductions/**`, and the same directory names at any nested
-  level
+- Directory-contained artifacts: `tests/**`, `test/**`, `__tests__/**`,
+  `spec/**`, `specs/**`, `fixtures/**`, `reproductions/**`, and the same
+  directory names at any nested level
 
 Paths are classified lexically as project-relative POSIX paths. A path with a
 leading slash, Windows drive prefix, backslash, `.` segment, `..` segment, empty
 segment, or NUL is not regression evidence. Classification is case-sensitive.
 Broad declarations such as `src/**` are not evidence just because they might
-match a test file on disk.
+match a test file on disk. A directory marker by itself is also not evidence:
+`tests` and `src/tests` do not qualify, while `tests/session.test.ts`,
+`tests/regression-case`, and `tests/**` do.
 
 `writes` is future-tense, so matching paths there are accepted without checking
 whether the file already exists. `acceptance_refs` is for existing evidence, so
-matching paths there count only when they currently exist inside the project and
-do not escape via an unsafe path or project-outside symlink.
+matching paths there count only when they currently resolve to a regular file
+inside the project and do not escape via an unsafe path or project-outside
+symlink. An existing directory such as `tests` or `fixtures/parser` is not an
+existing evidence artifact.
 
 This advisory does not read test, fixture, or reproduction content and does not
 prove that a test prevents the bug. A passing verification command, manual test,

@@ -1,6 +1,7 @@
 import {
   accessProjectPresence,
   existsProjectPresenceSync,
+  statProjectPresence,
 } from "../../project-fs/operations.ts";
 import {
   resolveProjectProbeReadPath,
@@ -46,6 +47,11 @@ export async function phaseFilePresence(
 }
 
 export type ProjectPathPresence = "present" | "absent" | "inaccessible";
+export type ProjectRegularFilePresence =
+  | "present"
+  | "absent"
+  | "not_file"
+  | "inaccessible";
 
 /**
  * Three-way presence for project-relative references. Unlike a lexical
@@ -66,6 +72,26 @@ export async function projectPathPresence(
   try {
     await accessProjectPresence(abs);
     return "present";
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "ENOENT"
+      ? "absent"
+      : "inaccessible";
+  }
+}
+
+export async function projectRegularFilePresence(
+  cwd: string,
+  relPath: string,
+): Promise<ProjectRegularFilePresence> {
+  let abs;
+  try {
+    abs = await resolveProjectProbeReadPath(cwd, relPath);
+  } catch {
+    return "inaccessible";
+  }
+  try {
+    const stats = await statProjectPresence(abs);
+    return stats.isFile() ? "present" : "not_file";
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === "ENOENT"
       ? "absent"
