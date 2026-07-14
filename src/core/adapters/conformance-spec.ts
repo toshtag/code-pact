@@ -255,3 +255,36 @@ export const BOUNDED_REPAIR_GUIDANCE_ANCHORS: ReadonlyArray<{
     ],
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Structural projection guidance
+//
+// P54 adds deterministic structural projections to budgeted context packs.
+// These anchors verify that generated instructions tell agents to consume the
+// projected form first and retrieve exact originals only for concrete missing
+// details. The threshold is independent from bounded repair guidance so older
+// 2.2-2.4 adapters do not become non-compliant merely because a newer Code Pact
+// knows about projection guidance.
+// ---------------------------------------------------------------------------
+
+/**
+ * Release that first ships projection-consumption guidance templates. These
+ * checks run at `required` for adapters whose manifest `generator_version` is
+ * semver >= this, and `advisory` below.
+ */
+export const STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION = "2.5.0";
+
+export const STRUCTURAL_PROJECTION_GUIDANCE_ANCHORS: ReadonlyArray<{
+  id: string;
+  anchors: ReadonlyArray<string>;
+}> = [
+  {
+    id: "structural_projection_guidance_present",
+    anchors: [
+      "deterministic structural projections",
+      "projected form first",
+      "specific missing detail",
+      "do not retrieve every projected section",
+    ],
+  },
+];

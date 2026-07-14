@@ -16,6 +16,8 @@ import {
   RECOMMENDATION_CONSUMPTION_ANCHORS,
   RECOMMENDATION_CONSUMPTION_FROM_VERSION,
   REQUIRED_FAILURE_GUIDANCE,
+  STRUCTURAL_PROJECTION_GUIDANCE_ANCHORS,
+  STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION,
 } from "../core/adapters/conformance-spec.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
@@ -205,6 +207,19 @@ export function resolveBoundedRepairSeverity(
 ): ConformanceSeverity {
   if (!generatorVersion) return "advisory";
   return gteVersion(generatorVersion, BOUNDED_REPAIR_GUIDANCE_FROM_VERSION)
+    ? "required"
+    : "advisory";
+}
+
+/**
+ * Severity of the structural-projection guidance checks. This is separate from
+ * the bounded-repair gate so adapters generated before P54 remain advisory.
+ */
+export function resolveStructuralProjectionSeverity(
+  generatorVersion: string | undefined,
+): ConformanceSeverity {
+  if (!generatorVersion) return "advisory";
+  return gteVersion(generatorVersion, STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION)
     ? "required"
     : "advisory";
 }
@@ -564,6 +579,30 @@ export async function runAdapterConformance(
           instructionEntry.path,
           { ...result.details, remediation },
           boundedRepairSeverity,
+        ),
+      );
+    }
+  }
+
+  // ----- structural projection guidance -----
+  // Gated on its own threshold. The guidance is about agent consumption of
+  // budgeted projected packs, not about adapter lifecycle mechanics.
+  const structuralProjectionSeverity = resolveStructuralProjectionSeverity(
+    manifest.generator_version,
+  );
+  for (const { id, anchors } of STRUCTURAL_PROJECTION_GUIDANCE_ANCHORS) {
+    const result = checkConsumptionAnchors(instructionContent, anchors);
+    if (result.ok) {
+      checks.push(
+        pass(id, instructionEntry.path, result.details, structuralProjectionSeverity),
+      );
+    } else {
+      checks.push(
+        fail(
+          id,
+          instructionEntry.path,
+          { ...result.details, remediation },
+          structuralProjectionSeverity,
         ),
       );
     }

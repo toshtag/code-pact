@@ -85,5 +85,19 @@ describe("agent contract failure guidance", () => {
         "既存の `task prepare` / `recommend` 結果にある `data.recommendation.repairPolicy`",
       );
     });
+
+    it(`${locale} documents structural projection consumption anchors`, () => {
+      const contextBody = messages[locale].templates.adapterCommon.agentContract
+        .contextCommandBody;
+
+      for (const anchor of [
+        "deterministic structural projections",
+        "projected form first",
+        "specific missing detail",
+        "do not retrieve every projected section",
+      ]) {
+        expect(contextBody).toContain(anchor);
+      }
+    });
   }
 });

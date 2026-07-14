@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   resolveBoundedRepairSeverity,
+  resolveStructuralProjectionSeverity,
   runAdapterConformance,
 } from "../../../src/commands/adapter-conformance.ts";
 import { runInit } from "../../../src/commands/init.ts";
@@ -17,6 +18,7 @@ import {
 } from "../../../src/core/adapters/manifest.ts";
 import {
   BOUNDED_REPAIR_GUIDANCE_FROM_VERSION,
+  STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION,
 } from "../../../src/core/adapters/conformance-spec.ts";
 
 const VALID_CONTRACT_BODY = `# Some Adapter
@@ -57,6 +59,7 @@ Activation rules:
 - check the audit
 - After \`task prepare --json\`, read \`data.recommendation\`. After \`recommend --json\`, read \`data\`. Let \`lifecycleMode\` pick the loop. When the runtime cannot switch model, report the limitation.
 - \`record_only\` is a lighter loop, not lighter verification — run verification, then \`task record-done\`.
+- Budgeted context may contain deterministic structural projections. Use the projected form first. Retrieve an exact original section only when a specific missing detail blocks the task; do not retrieve every projected section by default.
 
 ### How to handle failures
 
@@ -542,6 +545,92 @@ describe("runAdapterConformance — bounded repair recommendation guidance", () 
   it("gates bounded repair guidance on its own threshold", () => {
     expect(resolveBoundedRepairSeverity("2.1.0")).toBe("advisory");
     expect(resolveBoundedRepairSeverity("2.2.0")).toBe("required");
+  });
+});
+
+describe("runAdapterConformance — structural projection guidance", () => {
+  it("passes when projection guidance anchors are present", async () => {
+    await setupAdapter(dir);
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    const check = result.checks.find(
+      c => c.id === "structural_projection_guidance_present",
+    );
+    expect(check?.status).toBe("pass");
+  });
+
+  it("fails the projection guidance check when an anchor is missing", async () => {
+    const body = VALID_CONTRACT_BODY.replace(
+      "projected form first",
+      "compact form first",
+    );
+    await setupAdapter(dir, { instructionContent: body });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    const check = result.checks.find(
+      c => c.id === "structural_projection_guidance_present",
+    );
+    expect(check?.status).toBe("fail");
+    expect((check?.details?.missing as string[]) ?? []).toContain(
+      "projected form first",
+    );
+  });
+
+  it("keeps projection guidance advisory before the projection threshold", async () => {
+    const body = VALID_CONTRACT_BODY.replace(
+      "- Budgeted context may contain deterministic structural projections. Use the projected form first. Retrieve an exact original section only when a specific missing detail blocks the task; do not retrieve every projected section by default.\n",
+      "",
+    );
+    await setupAdapter(dir, {
+      instructionContent: body,
+      generatorVersion: "2.4.0",
+    });
+
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    const check = result.checks.find(
+      c => c.id === "structural_projection_guidance_present",
+    );
+    expect(check?.status).toBe("fail");
+    expect(check?.severity).toBe("advisory");
+    expect(result.compliant).toBe(true);
+  });
+
+  it("requires projection guidance at its own release threshold", async () => {
+    const body = VALID_CONTRACT_BODY.replace(
+      "- Budgeted context may contain deterministic structural projections. Use the projected form first. Retrieve an exact original section only when a specific missing detail blocks the task; do not retrieve every projected section by default.\n",
+      "",
+    );
+    await setupAdapter(dir, {
+      instructionContent: body,
+      generatorVersion: STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION,
+    });
+
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    const check = result.checks.find(
+      c => c.id === "structural_projection_guidance_present",
+    );
+    expect(check?.status).toBe("fail");
+    expect(check?.severity).toBe("required");
+    expect(result.compliant).toBe(false);
+  });
+
+  it("gates projection guidance on its own threshold", () => {
+    expect(resolveStructuralProjectionSeverity("2.4.0")).toBe("advisory");
+    expect(resolveStructuralProjectionSeverity("2.5.0")).toBe("required");
   });
 });
 

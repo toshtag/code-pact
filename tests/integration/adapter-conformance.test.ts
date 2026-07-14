@@ -25,6 +25,8 @@ import {
   LIFECYCLE_REQUIRED_SURFACES,
   RECOMMENDATION_CONSUMPTION_ANCHORS,
   REQUIRED_FAILURE_GUIDANCE,
+  STRUCTURAL_PROJECTION_GUIDANCE_ANCHORS,
+  STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION,
 } from "../../src/core/adapters/conformance-spec.ts";
 
 // ---------------------------------------------------------------------------
@@ -346,6 +348,19 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
     }
   });
 
+  it("fresh instruction contains every structural projection guidance anchor", async () => {
+    await installAdapter(agent);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    const content = await readFile(join(dir, instruction!.path), "utf8");
+
+    for (const check of STRUCTURAL_PROJECTION_GUIDANCE_ANCHORS) {
+      for (const anchor of check.anchors) {
+        expect(content, `${agent} ${check.id} missing ${anchor}`).toContain(anchor);
+      }
+    }
+  });
+
   it("fails the bounded repair runtime check when its anchor is tampered", async () => {
     await installAdapter(agent);
     const manifest = await readManifest(dir, agent);
@@ -393,6 +408,34 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
     expect(check?.severity).toBe("required");
     expect((check?.details?.missing as string[]) ?? []).toContain(
       "data.repairPolicy",
+    );
+    expect(result.compliant).toBe(false);
+  });
+
+  it("requires structural projection guidance at the P54 release threshold", async () => {
+    await installAdapter(agent, STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    const path = join(dir, instruction!.path);
+    const original = await readFile(path, "utf8");
+    const tampered = original.replace("projected form first", "compact form first");
+    expect(tampered).not.toBe(original);
+    await writeFile(path, tampered, "utf8");
+
+    const manifestPath = join(dir, ".code-pact", "adapters", `${agent}.manifest.yaml`);
+    const rawManifest = await readFile(manifestPath, "utf8");
+    const updatedManifest = rawManifest.replace(instruction!.sha256, sha256(tampered));
+    expect(updatedManifest).not.toBe(rawManifest);
+    await writeFile(manifestPath, updatedManifest, "utf8");
+
+    const result = await runAdapterConformance({ cwd: dir, agentName: agent });
+    const check = result.checks.find(
+      (c) => c.id === "structural_projection_guidance_present",
+    );
+    expect(check?.status).toBe("fail");
+    expect(check?.severity).toBe("required");
+    expect((check?.details?.missing as string[]) ?? []).toContain(
+      "projected form first",
     );
     expect(result.compliant).toBe(false);
   });
