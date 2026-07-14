@@ -100,7 +100,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: Project decision records through deterministic
       implementation-commitment fields with original-content references.
     depends_on:
@@ -110,12 +110,12 @@ tasks:
       - src/core/pack/formatters/markdown.ts
       - src/core/decisions/adr.ts
     writes:
+      - design/phases/P54-structural-context-projection.yaml
+      - src/core/pack/index.ts
       - src/core/pack/loaders.ts
       - src/core/pack/formatters/markdown.ts
-      - tests/unit/core/pack/loaders.test.ts
       - tests/unit/core/pack/loaders-decisions.test.ts
       - tests/unit/core/pack-core.test.ts
-      - tests/integration/pack-byte-identical.test.ts
     acceptance_refs:
       - tests/unit/core/pack/loaders.test.ts
       - tests/unit/core/pack/loaders-decisions.test.ts

@@ -34,6 +34,15 @@ export type RuleDoc = {
 export type DecisionDoc = {
   filename: string;
   body: string;
+  projection?: DecisionProjectionMetadata;
+};
+
+export type DecisionProjectionMetadata = {
+  accepted: true;
+  commitments: {
+    text: string;
+    done: boolean;
+  }[];
 };
 
 function decisionHeading(filename: string): string {
@@ -176,6 +185,74 @@ export function makeReadDirectoryCountsProjection(
   return {
     sectionName: "reads",
     kind: "read_directory_counts",
+    original,
+    projected,
+    originalBytes,
+    projectedBytes,
+  };
+}
+
+export function makeRelatedDecisionCommitmentsProjection(
+  decisions: readonly DecisionDoc[],
+  declaredDecisions: readonly DecisionDoc[] | undefined,
+  original: RenderedSection | undefined,
+): ContextProjectionCandidate | null {
+  if (!original || original.name !== "related_decisions") return null;
+  const declaredNames = new Set(
+    (declaredDecisions ?? []).map(decision => decision.filename),
+  );
+  const relatedDecisions = decisions.filter(
+    decision => !declaredNames.has(decision.filename),
+  );
+  const projectedDecisionCount = relatedDecisions.filter(
+    decision => decision.projection,
+  ).length;
+  if (relatedDecisions.length === 0 || projectedDecisionCount === 0) return null;
+
+  const projectionIntro =
+    "Accepted decisions with explicit implementation commitments are shown structurally. " +
+    "Exact original content is available through Deferred Context.";
+  const lines: string[] = [
+    `## Related Decisions`,
+    ``,
+    projectionIntro,
+  ];
+  for (const decision of relatedDecisions) {
+    lines.push(``, `### ${decisionHeading(decision.filename)}`, ``);
+    if (decision.projection) {
+      lines.push(`**Implementation commitments:**`, ``);
+      for (const item of decision.projection.commitments) {
+        lines.push(`- [${item.done ? "x" : " "}] ${item.text}`);
+      }
+    } else {
+      lines.push(decision.body.trim());
+    }
+  }
+  lines.push(``);
+
+  const originalBytes = renderedSectionBytes(original);
+  const projectedWithoutDetails: RenderedSection = {
+    name: "related_decisions",
+    lines,
+  };
+  const projectedBytes = renderedSectionBytes(projectedWithoutDetails);
+  if (projectedBytes >= originalBytes) return null;
+
+  const projected: RenderedSection = {
+    ...projectedWithoutDetails,
+    details: {
+      projection_kind: "decision_implementation_commitments",
+      original_bytes: originalBytes,
+      projected_bytes: projectedBytes,
+      saved_bytes: originalBytes - projectedBytes,
+      decision_count: relatedDecisions.length,
+      projected_decision_count: projectedDecisionCount,
+    },
+  };
+
+  return {
+    sectionName: "related_decisions",
+    kind: "decision_implementation_commitments",
     original,
     projected,
     originalBytes,

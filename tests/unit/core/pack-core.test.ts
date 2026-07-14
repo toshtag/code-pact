@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   buildContextPack,
   writeContextPack,
@@ -96,6 +97,113 @@ describe("buildContextPack — purity", () => {
         agentName: "claude-code",
       }),
     ).rejects.toMatchObject({ code: "TASK_NOT_FOUND" });
+  });
+});
+
+describe("buildContextPack — decision projection", () => {
+  let workDir: string;
+
+  beforeEach(async () => {
+    workDir = await mkdtemp(join(tmpdir(), "code-pact-pack-decision-proj-"));
+    await cp(fixtureDir, workDir, { recursive: true });
+    await rm(join(workDir, ".context"), { recursive: true, force: true });
+  });
+
+  afterEach(async () => {
+    await rm(workDir, { recursive: true, force: true });
+  });
+
+  async function updateP2Task(fields: Record<string, unknown>): Promise<void> {
+    const phasePath = join(workDir, "design", "phases", "P2-core.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const tasks = doc.tasks as Array<Record<string, unknown>>;
+    tasks[0] = { ...tasks[0], ...fields };
+    await writeFile(phasePath, stringifyYaml(doc), "utf8");
+  }
+
+  it("projects large related decisions while preserving declared decision bodies", async () => {
+    const relatedMarker = "RELATED-DECISION-BODY-MARKER";
+    const declaredMarker = "DECLARED-DECISION-BODY-MARKER";
+    await writeFile(
+      join(workDir, "design", "decisions", "zzz-related-projection.md"),
+      [
+        "# Related",
+        "",
+        "**Status:** accepted",
+        "",
+        "## Implementation commitments",
+        "",
+        "- [ ] Keep the public command stable",
+        "- [x] Add regression coverage",
+        "",
+        "## Detail",
+        "",
+        relatedMarker.repeat(500),
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(workDir, "design", "decisions", "declared-projection.md"),
+      [
+        "# Declared",
+        "",
+        "**Status:** accepted",
+        "",
+        "## Implementation commitments",
+        "",
+        "- [ ] This must not be projected",
+        "",
+        "## Detail",
+        "",
+        declaredMarker.repeat(200),
+        "",
+      ].join("\n"),
+    );
+    await updateP2Task({
+      context_size: "large",
+      decision_refs: ["design/decisions/declared-projection.md"],
+    });
+
+    const baseline = await buildContextPack({
+      cwd: workDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+      explain: true,
+    });
+    const budget = baseline.totalBytes - 1000;
+    const pack = await buildContextPack({
+      cwd: workDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+      explain: true,
+      budgetBytes: budget,
+    });
+
+    expect(pack.content).toContain(
+      "Accepted decisions with explicit implementation commitments",
+    );
+    expect(pack.content).toContain("- [ ] Keep the public command stable");
+    expect(pack.content).toContain("- [x] Add regression coverage");
+    expect(pack.content).not.toContain(relatedMarker);
+    expect(pack.content).toContain(declaredMarker);
+    expect(pack.explainMetrics?.elidedSections.map(section => section.name)).not.toContain(
+      "related_decisions",
+    );
+    const related = pack.sections?.find(section => section.name === "related_decisions");
+    expect(related?.details).toMatchObject({
+      projection_kind: "decision_implementation_commitments",
+      projected_decision_count: 1,
+    });
+    const storedOriginal = pack.pendingContextManifest?.manifest.sections.find(
+      section => section.name === "related_decisions",
+    );
+    expect(storedOriginal?.content).toContain(relatedMarker);
+    expect(storedOriginal?.content).not.toContain(declaredMarker);
   });
 });
 

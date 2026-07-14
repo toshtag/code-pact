@@ -11,6 +11,7 @@ import { resolvePhaseInRoadmap } from "../plan/resolve-phase.ts";
 import { loadPhase } from "../plan/load-phase.ts";
 import {
   makeReadDirectoryCountsProjection,
+  makeRelatedDecisionCommitmentsProjection,
   renderSections,
   type ContextProjectionCandidate,
   type DependsOnEntry,
@@ -302,6 +303,13 @@ export async function buildContextPack(
             readMatches,
             allRendered.find(section => section.name === "reads"),
           ),
+          isLarge
+            ? makeRelatedDecisionCommitmentsProjection(
+                decisions,
+                declaredDecisions,
+                allRendered.find(section => section.name === "related_decisions"),
+              )
+            : null,
         ].filter((candidate): candidate is ContextProjectionCandidate =>
           candidate !== null,
         )
