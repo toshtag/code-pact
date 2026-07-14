@@ -1,4 +1,4 @@
-id: P58A
+id: P59
 name: Local Loop Memory Hardening
 weight: 4
 confidence: high
@@ -36,7 +36,7 @@ verification:
     - pnpm test:unit
     - pnpm test:integration:smoke
 tasks:
-  - id: P58A-T1
+  - id: P59-T1
     type: bugfix
     ambiguity: medium
     risk: medium
@@ -55,7 +55,7 @@ tasks:
       - tests/unit/core/loop-memory.test.ts
     acceptance_refs:
       - tests/unit/core/loop-memory.test.ts
-  - id: P58A-T2
+  - id: P59-T2
     type: bugfix
     ambiguity: medium
     risk: medium
@@ -67,7 +67,7 @@ tasks:
     description: Harden retention apply and distinguish store failure from retention
       maintenance failure.
     depends_on:
-      - P58A-T1
+      - P59-T1
     reads:
       - src/core/loop-memory/**
       - src/commands/task-complete.ts
@@ -82,7 +82,7 @@ tasks:
     acceptance_refs:
       - tests/unit/commands/task-complete.test.ts
       - tests/unit/core/loop-memory.test.ts
-  - id: P58A-T3
+  - id: P59-T3
     type: bugfix
     ambiguity: medium
     risk: medium
@@ -94,7 +94,7 @@ tasks:
     description: Stabilize memory CLI operational failures, doctor ignore semantics,
       and root command discoverability.
     depends_on:
-      - P58A-T2
+      - P59-T2
     reads:
       - src/cli/**
       - src/commands/doctor.ts
@@ -116,7 +116,7 @@ tasks:
       - tests/unit/commands/doctor.test.ts
       - tests/unit/commands/memory.test.ts
       - tests/integration/json-stdout.test.ts
-  - id: P58A-T4
+  - id: P59-T4
     type: docs
     ambiguity: medium
     risk: medium
@@ -128,7 +128,7 @@ tasks:
     description: Reconcile ADR, public docs, changelog, and regression coverage with
       the hardened local-memory contract.
     depends_on:
-      - P58A-T3
+      - P59-T3
     reads:
       - design/decisions/P58-T1-local-bounded-loop-memory-rfc.md
       - docs/**
