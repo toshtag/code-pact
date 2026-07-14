@@ -257,6 +257,12 @@ export function checkLocalizedGuidanceAnchors(
     if (!best) return variant;
     return variant.missing.length < best.missing.length ? variant : best;
   }, undefined);
+  const selectedVariant =
+    variantDetails.find(variant => variant.id === matchedVariant) ?? bestVariant;
+  const anchors = dedupePreservingOrder([
+    ...commonAnchors,
+    ...(selectedVariant?.anchors ?? []),
+  ]);
   const missing =
     matchedVariant === null
       ? [...missingCommon, ...(bestVariant?.missing ?? [])]
@@ -265,6 +271,7 @@ export function checkLocalizedGuidanceAnchors(
   return {
     ok: missingCommon.length === 0 && matchedVariant !== null,
     details: {
+      anchors,
       common_anchors: [...commonAnchors],
       missing_common: missingCommon,
       matched_variant: matchedVariant,
@@ -272,6 +279,17 @@ export function checkLocalizedGuidanceAnchors(
       missing,
     },
   };
+}
+
+function dedupePreservingOrder(values: ReadonlyArray<string>): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const value of values) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    deduped.push(value);
+  }
+  return deduped;
 }
 
 /**

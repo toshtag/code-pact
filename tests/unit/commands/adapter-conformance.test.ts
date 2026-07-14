@@ -561,6 +561,10 @@ describe("runAdapterConformance — structural projection guidance", () => {
     );
     expect(english.ok).toBe(true);
     expect(english.details.matched_variant).toBe("en-US");
+    expect(english.details.anchors).toEqual([
+      ...check!.commonAnchors,
+      ...STRUCTURAL_PROJECTION_GUIDANCE_VARIANTS[0]!.anchors,
+    ]);
 
     const japanese = checkLocalizedGuidanceAnchors(
       `budget 付き context には決定論的な構造 projection が含まれる場合があります。まず projected form を使用してください。具体的な不足が作業を妨げ、かつ \`data.deferred_context.retrieve_command\` が non-null の場合だけ正確な原文 section を取得してください。\`null\` の場合は manifest reference から取得 command を組み立てないでください。`,
@@ -569,6 +573,10 @@ describe("runAdapterConformance — structural projection guidance", () => {
     );
     expect(japanese.ok).toBe(true);
     expect(japanese.details.matched_variant).toBe("ja-JP");
+    expect(japanese.details.anchors).toEqual([
+      ...check!.commonAnchors,
+      ...STRUCTURAL_PROJECTION_GUIDANCE_VARIANTS[1]!.anchors,
+    ]);
   });
 
   it("rejects incomplete or mixed structural projection variants", () => {
@@ -600,6 +608,15 @@ describe("runAdapterConformance — structural projection guidance", () => {
     expect((incompleteEnglish.details.missing as string[]) ?? []).toContain(
       "projected form first",
     );
+    expect(incompleteEnglish.details.anchors).toEqual([
+      ...check!.commonAnchors,
+      ...english!.anchors,
+    ]);
+    expect(
+      ((incompleteEnglish.details.missing as string[]) ?? []).every(anchor =>
+        ((incompleteEnglish.details.anchors as string[]) ?? []).includes(anchor),
+      ),
+    ).toBe(true);
 
     const mixed = checkLocalizedGuidanceAnchors(
       [
@@ -614,6 +631,33 @@ describe("runAdapterConformance — structural projection guidance", () => {
     );
     expect(mixed.ok).toBe(false);
     expect(mixed.details.matched_variant).toBeNull();
+    expect(
+      ((mixed.details.missing as string[]) ?? []).every(anchor =>
+        ((mixed.details.anchors as string[]) ?? []).includes(anchor),
+      ),
+    ).toBe(true);
+  });
+
+  it("uses deterministic fallback anchors for ties and empty variants", () => {
+    const tied = checkLocalizedGuidanceAnchors(
+      "shared",
+      ["shared"],
+      [
+        { id: "first", anchors: ["first-a", "first-b"] },
+        { id: "second", anchors: ["second-a", "second-b"] },
+      ],
+    );
+    expect(tied.ok).toBe(false);
+    expect(tied.details.matched_variant).toBeNull();
+    expect(tied.details.anchors).toEqual(["shared", "first-a", "first-b"]);
+    expect(tied.details.missing).toEqual(["first-a", "first-b"]);
+
+    const empty = checkLocalizedGuidanceAnchors("shared", ["shared"], []);
+    expect(empty.ok).toBe(false);
+    expect(empty.details.matched_variant).toBeNull();
+    expect(empty.details.variants).toEqual([]);
+    expect(empty.details.anchors).toEqual(["shared"]);
+    expect(empty.details.missing).toEqual([]);
   });
 
   it("passes when projection guidance anchors are present", async () => {
