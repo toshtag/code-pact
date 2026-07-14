@@ -90,13 +90,19 @@ describe("agent contract failure guidance", () => {
       const contextBody = messages[locale].templates.adapterCommon.agentContract
         .contextCommandBody;
 
-      for (const anchor of [
-        "deterministic structural projections",
-        "projected form first",
-        "specific missing detail",
-        "do not retrieve every projected section",
-      ]) {
-        expect(contextBody).toContain(anchor);
+      expect(contextBody).toContain("data.deferred_context.retrieve_command");
+      if (locale === "en-US") {
+        expect(contextBody).toContain("deterministic structural projections");
+        expect(contextBody).toContain("projected form first");
+        expect(contextBody).toContain("specific missing detail");
+        expect(contextBody).toContain(
+          "do not construct a retrieval command from the manifest reference",
+        );
+      } else {
+        expect(contextBody).toContain("決定論的な構造 projection");
+        expect(contextBody).toContain("まず projected form を使用");
+        expect(contextBody).toContain("具体的な不足");
+        expect(contextBody).toContain("manifest reference から取得 command を組み立てない");
       }
     });
   }

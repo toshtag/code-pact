@@ -1984,15 +1984,26 @@ fully deferred section count first, then projected section count, then uses the
 fixed projection order (`reads`, then `related_decisions`) as the tie-breaker,
 and finally the smallest final byte count.
 
-**Deferred context reference.** When one or more sections are withheld for a
-budget, their exact content is represented by one manifest reference:
+**Deferred context reference.** When one or more sections are projected or
+withheld for a budget, their exact original content is represented by one
+manifest reference:
 `context:sha256:<64 lowercase hexadecimal characters>`. The reference is
 opaque and never exposes a filesystem path. A materialized manifest is stored
 under `.code-pact/cache/context/<digest>.json`; `.code-pact/cache/` is derived
 state and must not be version-controlled.
 
 **Manifest schema.** The manifest is strict and content-addressed. It contains
-all sections withheld from one pack, in the order they were removed:
+exact original section forms represented outside the inline pack:
+
+1. projected-section originals in fixed projection order (`reads`, then
+   `related_decisions`);
+2. fully deferred sections in actual `ELISION_ORDER`.
+
+A section name appears at most once. Projected sections remain in the inline
+pack in projected form, while the manifest stores their exact pre-projection
+section bodies. Fully deferred sections are removed from the inline pack and
+stored in the same manifest. The schema version remains `1`, and one pack uses
+at most one manifest reference.
 
 ```json
 {
@@ -2014,7 +2025,7 @@ invalid, `bytes` must equal `Buffer.byteLength(content, "utf8")`, and
 reference is computed from the canonical serialization of the whole manifest.
 Task id, phase id, agent name, timestamps, absolute paths, process ids, and
 hostnames are not part of the digest input. Identical deferred content produces
-the same reference; one pack uses at most one manifest reference.
+the same reference.
 
 Projected sections use the same manifest. The inline pack keeps the projected
 section, and the manifest stores the exact original section body under the same
@@ -2024,9 +2035,10 @@ for a projected section is therefore the same as for a fully deferred section:
 the original section body byte-for-byte; it is not a summary and it does not add
 a trailing newline.
 
-**Deferred Context section.** When deferral occurs, the rendered Markdown gains
-exactly one synthetic section at a fixed position immediately after the Task
-Definition block:
+**Deferred Context section.** When deferral or projection stores exact original
+content in a manifest, the rendered Markdown gains exactly one synthetic section
+at a fixed position immediately after the Task Definition block. When no section
+is projected, the pure-deferral variant is:
 
 ```markdown
 ## Deferred Context
@@ -2041,10 +2053,27 @@ Manifest reference: `context:sha256:<digest>`
 Exact section content may be retrieved from the local derived context cache after materialization.
 ```
 
-The section text is fixed; it is not model-generated. It never includes runtime
-persistence state, a conditional command, filesystem paths, or deferred section
-content. No-budget packs and budgeted packs that naturally fit without deferral
-do not include this section.
+When at least one section is projected, the projection-aware variant is:
+
+```markdown
+## Deferred Context
+
+The exact original forms of the following projected or deferred sections are represented by this manifest:
+
+- reads — projected inline; exact original represented after materialization
+- constitution — deferred from the inline pack
+
+Manifest reference: `context:sha256:<digest>`
+
+Exact original section content may be retrieved from the local derived context cache after materialization.
+```
+
+Each variant has fixed deterministic text; neither is model-generated. The
+section never includes runtime persistence state, a conditional command,
+filesystem paths, or deferred section content. A reference being computed is
+separate from the manifest artifact being persisted. No-budget packs and
+budgeted packs that naturally fit without deferral or projection do not include
+this section.
 
 **Budget accounting with projection and deferral overhead.** The Deferred
 Context section is part of the budget. For each candidate plan, the algorithm

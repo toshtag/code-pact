@@ -284,7 +284,8 @@ export const STRUCTURAL_PROJECTION_GUIDANCE_ANCHORS: ReadonlyArray<{
       "deterministic structural projections",
       "projected form first",
       "specific missing detail",
-      "do not retrieve every projected section",
+      "data.deferred_context.retrieve_command",
+      "do not construct a retrieval command from the manifest reference",
     ],
   },
 ];

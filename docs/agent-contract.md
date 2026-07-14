@@ -158,9 +158,20 @@ For the same git SHA and the same inputs:
   glob matches can be replaced by exact parent-directory counts, and only
   `context_size: large` related decisions can be reduced to accepted ADR
   `Implementation commitments`. Declared decisions are never projected. The
-  exact original section remains available through the same context manifest
-  reference used for deferred sections. No-budget packs and budgeted packs that
-  naturally fit stay byte-identical to the unprojected form.
+  manifest reference is deterministic on read-only paths, but exact original
+  sections become retrievable only after a writing command materializes the
+  manifest. No-budget packs and budgeted packs that naturally fit stay
+  byte-identical to the unprojected form.
+
+| Path | Reference calculated | Artifact persisted | `retrieve_command` |
+|------|---------------------:|-------------------:|-------------------:|
+| `task context` | yes | no | `null` |
+| `task prepare --dry-run` | yes | no | `null` |
+| normal `task prepare` | yes | yes | non-null |
+| low-level writing `pack` | yes | yes when deferral occurs | command-surface dependent |
+
+Agents must not infer retrieval availability from the manifest reference alone.
+Use the returned `deferred_context.retrieve_command` when present.
 
 Where a command writes deterministic artifacts (context pack, adapter
 files), the same input produces the same on-disk bytes.

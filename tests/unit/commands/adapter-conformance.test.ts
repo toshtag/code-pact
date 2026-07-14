@@ -59,7 +59,7 @@ Activation rules:
 - check the audit
 - After \`task prepare --json\`, read \`data.recommendation\`. After \`recommend --json\`, read \`data\`. Let \`lifecycleMode\` pick the loop. When the runtime cannot switch model, report the limitation.
 - \`record_only\` is a lighter loop, not lighter verification — run verification, then \`task record-done\`.
-- Budgeted context may contain deterministic structural projections. Use the projected form first. Retrieve an exact original section only when a specific missing detail blocks the task; do not retrieve every projected section by default.
+- Budgeted context may contain deterministic structural projections. Use the projected form first. Retrieve an exact original section only when a specific missing detail blocks the task and \`data.deferred_context.retrieve_command\` is non-null; otherwise do not construct a retrieval command from the manifest reference.
 
 ### How to handle failures
 
@@ -584,7 +584,7 @@ describe("runAdapterConformance — structural projection guidance", () => {
 
   it("keeps projection guidance advisory before the projection threshold", async () => {
     const body = VALID_CONTRACT_BODY.replace(
-      "- Budgeted context may contain deterministic structural projections. Use the projected form first. Retrieve an exact original section only when a specific missing detail blocks the task; do not retrieve every projected section by default.\n",
+      "- Budgeted context may contain deterministic structural projections. Use the projected form first. Retrieve an exact original section only when a specific missing detail blocks the task and `data.deferred_context.retrieve_command` is non-null; otherwise do not construct a retrieval command from the manifest reference.\n",
       "",
     );
     await setupAdapter(dir, {
@@ -607,7 +607,7 @@ describe("runAdapterConformance — structural projection guidance", () => {
 
   it("requires projection guidance at its own release threshold", async () => {
     const body = VALID_CONTRACT_BODY.replace(
-      "- Budgeted context may contain deterministic structural projections. Use the projected form first. Retrieve an exact original section only when a specific missing detail blocks the task; do not retrieve every projected section by default.\n",
+      "- Budgeted context may contain deterministic structural projections. Use the projected form first. Retrieve an exact original section only when a specific missing detail blocks the task and `data.deferred_context.retrieve_command` is non-null; otherwise do not construct a retrieval command from the manifest reference.\n",
       "",
     );
     await setupAdapter(dir, {

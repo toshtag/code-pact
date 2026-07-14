@@ -20,6 +20,7 @@ identifiers. Starting with v1.0.0, stable releases use plain
 ### Fixed
 
 - **Hardened projection planning and guidance.** Projection plans are now evaluated against the same full-deferral stage before selection, projected read-directory ordering is locale independent, and generated agent guidance plus Deferred Context wording distinguish projected inline sections from fully deferred sections.
+- **Completed projection contract coverage.** The public contract now documents projection manifest ordering and materialization semantics, and generated agent guidance avoids constructing retrieval commands when no persisted context artifact is available.
 
 ## [2.4.0] — 2026-07-14
 
