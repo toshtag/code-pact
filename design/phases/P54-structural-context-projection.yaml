@@ -81,7 +81,6 @@ tasks:
       - src/core/glob.ts
       - src/core/pack/formatters/markdown.ts
     writes:
-      - design/phases/P54-structural-context-projection.yaml
       - src/core/pack/index.ts
       - src/core/pack/budget.ts
       - src/core/pack/formatters/markdown.ts
@@ -110,7 +109,6 @@ tasks:
       - src/core/pack/formatters/markdown.ts
       - src/core/decisions/adr.ts
     writes:
-      - design/phases/P54-structural-context-projection.yaml
       - src/core/pack/index.ts
       - src/core/pack/loaders.ts
       - src/core/pack/formatters/markdown.ts
@@ -138,7 +136,6 @@ tasks:
       - tests/fixtures/**
       - tests/integration/task-context-budget.test.ts
     writes:
-      - design/phases/P54-structural-context-projection.yaml
       - tests/fixtures/context-projection/**
       - tests/integration/task-context-budget.test.ts
       - tests/unit/core/pack-core.test.ts
