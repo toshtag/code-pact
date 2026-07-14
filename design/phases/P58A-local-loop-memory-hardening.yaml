@@ -3,7 +3,7 @@ name: Local Loop Memory Hardening
 weight: 4
 confidence: high
 risk: medium
-status: planned
+status: done
 objective: >
   Harden the local loop-memory cache introduced by P58 so scanning, retention,
   warnings, doctor checks, and CLI failures are bounded, accurate, and stable
