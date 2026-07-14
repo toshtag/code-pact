@@ -3,7 +3,7 @@ name: Structural Context Projection
 weight: 7
 confidence: medium
 risk: medium
-status: done
+status: in_progress
 objective: >
   Add deterministic, content-type-aware context projections that reduce context
   size only where the structure is safe to preserve mechanically.
@@ -142,3 +142,52 @@ tasks:
     acceptance_refs:
       - tests/integration/task-context-budget.test.ts
       - tests/unit/core/pack-core.test.ts
+  - id: P54-T5
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: >
+      Correct projection-plan comparison, make directory ordering locale
+      independent, and complete projection-aware agent guidance.
+    depends_on:
+      - P54-T4
+    reads:
+      - src/core/pack/budget.ts
+      - src/core/pack/formatters/markdown.ts
+      - src/core/context-deferral/deferred-section.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - src/core/adapters/conformance-spec.ts
+      - tests/unit/core/pack/budget.test.ts
+      - tests/unit/core/pack/loaders.test.ts
+      - tests/integration/task-context-budget.test.ts
+      - tests/unit/i18n/agent-contract-guidance.test.ts
+      - tests/unit/commands/adapter-conformance.test.ts
+      - tests/integration/adapter-conformance.test.ts
+      - CHANGELOG.md
+    writes:
+      - src/core/pack/budget.ts
+      - src/core/pack/formatters/markdown.ts
+      - src/core/context-deferral/deferred-section.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - src/core/adapters/conformance-spec.ts
+      - tests/unit/core/pack/budget.test.ts
+      - tests/unit/core/pack/loaders.test.ts
+      - tests/integration/task-context-budget.test.ts
+      - tests/unit/i18n/agent-contract-guidance.test.ts
+      - tests/unit/commands/adapter-conformance.test.ts
+      - tests/integration/adapter-conformance.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - tests/unit/core/pack/budget.test.ts
+      - tests/unit/core/pack/loaders.test.ts
+      - tests/integration/task-context-budget.test.ts
+      - tests/unit/i18n/agent-contract-guidance.test.ts
+      - tests/unit/commands/adapter-conformance.test.ts
+      - tests/integration/adapter-conformance.test.ts
