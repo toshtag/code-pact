@@ -6,7 +6,12 @@ import {
   buildContextPack,
   ContextOverBudgetError,
 } from "../../../../src/core/pack/index.ts";
-import { ELISION_ORDER } from "../../../../src/core/pack/formatters/markdown.ts";
+import { applyBudgetElision } from "../../../../src/core/pack/budget.ts";
+import {
+  ELISION_ORDER,
+  type ContextProjectionCandidate,
+  type RenderedSection,
+} from "../../../../src/core/pack/formatters/markdown.ts";
 
 const fixtureDir = new URL(
   "../../../../tests/fixtures/project-a",
@@ -60,6 +65,35 @@ async function sectionBytesByName(
   });
   const section = (pack.sections ?? []).find((s) => s.name === name);
   return section ? section.bytes : null;
+}
+
+function syntheticSection(name: string, marker: string, repeat: number): RenderedSection {
+  return {
+    name,
+    lines: [`## ${name}`, marker.repeat(repeat), ""],
+  };
+}
+
+function bytes(section: RenderedSection): number {
+  return Buffer.byteLength(section.lines.join("\n"), "utf8");
+}
+
+function projectionCandidate(
+  sectionName: "reads" | "related_decisions",
+  original: RenderedSection,
+  projected: RenderedSection,
+): ContextProjectionCandidate {
+  return {
+    sectionName,
+    kind:
+      sectionName === "reads"
+        ? "read_directory_counts"
+        : "decision_implementation_commitments",
+    original,
+    projected,
+    originalBytes: bytes(original),
+    projectedBytes: bytes(projected),
+  };
 }
 
 describe("buildContextPack — budget enforcement (P24)", () => {
@@ -518,6 +552,9 @@ describe("buildContextPack — explain metrics (P49)", () => {
 
     expect(pack.totalBytes).toBeLessThanOrEqual(budget);
     expect(pack.content).toContain("## Deferred Context");
+    expect(pack.content).toContain(
+      "The following sections were withheld to satisfy the context byte budget:",
+    );
     expect(pack.deferredContext).toBeDefined();
     expect(pack.deferredContext!.manifest_ref).toMatch(
       /^context:sha256:[0-9a-f]{64}$/,
@@ -635,5 +672,210 @@ describe("buildContextPack — explain metrics (P49)", () => {
     // write_surface: high makes `rules` (the all-rules expansion) elidable, so
     // the floor drops; at write_surface: medium the applies-to subset stays.
     expect(highFloor).toBeLessThan(mediumFloor);
+  });
+});
+
+describe("applyBudgetElision — structural projection planning (P54)", () => {
+  it("keeps evaluating a projection that becomes beneficial after shared deferral overhead", () => {
+    const readsOriginal = syntheticSection("reads", "r", 1100);
+    const readsProjected = syntheticSection("reads", "p", 940);
+    const rendered: RenderedSection[] = [
+      syntheticSection("header", "h", 40),
+      syntheticSection("task_definition", "t", 40),
+      syntheticSection("completed_tasks", "c", 520),
+      syntheticSection("constitution", "k", 520),
+      readsOriginal,
+      syntheticSection("verification_commands", "v", 40),
+    ];
+    const candidate = projectionCandidate("reads", readsOriginal, readsProjected);
+    const eligibility = { isLarge: false, isLargeWriteSurface: false };
+    const natural = applyBudgetElision(rendered, undefined, eligibility).metrics
+      .naturalBytes;
+
+    let chosen:
+      | { budget: number; result: ReturnType<typeof applyBudgetElision> }
+      | undefined;
+    for (let budget = 1; budget < natural; budget += 1) {
+      try {
+        const result = applyBudgetElision(rendered, budget, eligibility, [candidate]);
+        if (
+          result.elidedNames.length === 1 &&
+          result.elidedNames[0] === "completed_tasks" &&
+          result.pendingContextManifest?.manifest.sections.some(
+            section => section.name === "reads",
+          )
+        ) {
+          chosen = { budget, result };
+          break;
+        }
+      } catch {
+        // Keep scanning for the narrow budget window this regression exercises.
+      }
+    }
+
+    expect(chosen, "precondition: regression budget exists").toBeDefined();
+    expect(chosen!.result.metrics.finalBytes).toBeLessThanOrEqual(chosen!.budget);
+    expect(chosen!.result.elidedNames).toEqual(["completed_tasks"]);
+    expect(chosen!.result.sections.some(section => section.name === "reads")).toBe(true);
+    expect(chosen!.result.pendingContextManifest?.manifest.sections.map(section => section.name))
+      .toEqual(["reads", "completed_tasks"]);
+    expect(chosen!.result.metrics.elidedSections.map(section => section.name))
+      .not.toContain("reads");
+    expect(chosen!.result.metrics.deferredBytes).toBe(
+      chosen!.result.pendingContextManifest!.manifest.sections.reduce(
+        (sum, section) => sum + section.bytes,
+        0,
+      ),
+    );
+    const content = chosen!.result.sections.flatMap(section => section.lines).join("\n");
+    expect(content.match(/Manifest reference:/g)).toHaveLength(1);
+    expect(content).toContain("- reads — projected inline; exact original represented after materialization");
+    expect(content).toContain("- completed_tasks — deferred from the inline pack");
+
+    const noProjection = applyBudgetElision(rendered, chosen!.budget, eligibility);
+    expect(noProjection.elidedNames).toEqual(["completed_tasks", "constitution"]);
+  });
+
+  it("does not add a second projection when one projection reaches the same elision count", () => {
+    const readsOriginal = syntheticSection("reads", "r", 1500);
+    const readsProjected = syntheticSection("reads", "p", 100);
+    const relatedOriginal = syntheticSection("related_decisions", "d", 1500);
+    const relatedProjected = syntheticSection("related_decisions", "q", 100);
+    const rendered: RenderedSection[] = [
+      syntheticSection("header", "h", 40),
+      syntheticSection("task_definition", "t", 40),
+      readsOriginal,
+      relatedOriginal,
+      syntheticSection("verification_commands", "v", 40),
+    ];
+    const candidates = [
+      projectionCandidate("reads", readsOriginal, readsProjected),
+      projectionCandidate("related_decisions", relatedOriginal, relatedProjected),
+    ];
+    const eligibility = { isLarge: true, isLargeWriteSurface: false };
+    const natural = applyBudgetElision(rendered, undefined, eligibility).metrics
+      .naturalBytes;
+    const budget = natural - 800;
+
+    const result = applyBudgetElision(rendered, budget, eligibility, candidates);
+
+    expect(result.elidedNames).toEqual([]);
+    expect(result.metrics.finalBytes).toBeLessThanOrEqual(budget);
+    expect(result.pendingContextManifest?.manifest.sections.map(section => section.name))
+      .toEqual(["reads"]);
+    const content = result.sections.flatMap(section => section.lines).join("\n");
+    expect(content).toContain("d".repeat(1500));
+    expect(content).not.toContain("r".repeat(1500));
+  });
+
+  it("selects both projections when only the combined projected plan avoids full deferral", () => {
+    const readsOriginal = syntheticSection("reads", "r", 3000);
+    const readsProjected = syntheticSection("reads", "p", 1200);
+    const relatedOriginal = syntheticSection("related_decisions", "d", 3000);
+    const relatedProjected = syntheticSection("related_decisions", "q", 1200);
+    const rendered: RenderedSection[] = [
+      syntheticSection("header", "h", 40),
+      syntheticSection("task_definition", "t", 40),
+      readsOriginal,
+      relatedOriginal,
+      syntheticSection("verification_commands", "v", 40),
+    ];
+    const candidates = [
+      projectionCandidate("reads", readsOriginal, readsProjected),
+      projectionCandidate("related_decisions", relatedOriginal, relatedProjected),
+    ];
+    const eligibility = { isLarge: true, isLargeWriteSurface: false };
+    const budget = 4713;
+
+    const result = applyBudgetElision(rendered, budget, eligibility, candidates);
+    const readsOnly = applyBudgetElision(rendered, budget, eligibility, [
+      candidates[0]!,
+    ]);
+    const relatedOnly = applyBudgetElision(rendered, budget, eligibility, [
+      candidates[1]!,
+    ]);
+
+    expect(result.elidedNames).toEqual([]);
+    expect(result.metrics.finalBytes).toBeLessThanOrEqual(budget);
+    expect(result.pendingContextManifest?.manifest.sections.map(section => section.name))
+      .toEqual(["reads", "related_decisions"]);
+    expect(readsOnly.elidedNames.length).toBeGreaterThan(0);
+    expect(relatedOnly.elidedNames.length).toBeGreaterThan(0);
+
+    const content = result.sections.flatMap(section => section.lines).join("\n");
+    expect(content.match(/Manifest reference:/g)).toHaveLength(1);
+    expect(content).toContain("p".repeat(1200));
+    expect(content).toContain("q".repeat(1200));
+    expect(content).not.toContain("r".repeat(3000));
+    expect(content).not.toContain("d".repeat(3000));
+  });
+
+  it("rejects projections that are never smaller than the same-stage comparison plan", () => {
+    const readsOriginal = syntheticSection("reads", "r", 1100);
+    const readsProjected = syntheticSection("reads", "p", 1080);
+    const rendered: RenderedSection[] = [
+      syntheticSection("header", "h", 40),
+      syntheticSection("task_definition", "t", 40),
+      syntheticSection("completed_tasks", "c", 520),
+      syntheticSection("constitution", "k", 520),
+      readsOriginal,
+      syntheticSection("verification_commands", "v", 40),
+    ];
+    const candidate = projectionCandidate("reads", readsOriginal, readsProjected);
+    const eligibility = { isLarge: false, isLargeWriteSurface: false };
+    const budget = 2368;
+
+    expect(candidate.projectedBytes).toBeLessThan(candidate.originalBytes);
+    const result = applyBudgetElision(rendered, budget, eligibility, [candidate]);
+
+    expect(result.elidedNames).toEqual(["completed_tasks"]);
+    expect(result.pendingContextManifest?.manifest.sections.map(section => section.name))
+      .toEqual(["completed_tasks"]);
+    expect(result.sections.some(section => section.details?.projection_kind)).toBe(false);
+    expect(result.sections.flatMap(section => section.lines).join("\n"))
+      .toContain("r".repeat(1100));
+  });
+
+  it("orders mixed projected originals before fully deferred sections in one manifest", () => {
+    const readsOriginal = syntheticSection("reads", "r", 3000);
+    const readsProjected = syntheticSection("reads", "p", 1200);
+    const relatedOriginal = syntheticSection("related_decisions", "d", 3000);
+    const relatedProjected = syntheticSection("related_decisions", "q", 1200);
+    const rendered: RenderedSection[] = [
+      syntheticSection("header", "h", 40),
+      syntheticSection("task_definition", "t", 40),
+      syntheticSection("completed_tasks", "c", 900),
+      relatedOriginal,
+      syntheticSection("constitution", "k", 900),
+      readsOriginal,
+      syntheticSection("verification_commands", "v", 40),
+    ];
+    const candidates = [
+      projectionCandidate("reads", readsOriginal, readsProjected),
+      projectionCandidate("related_decisions", relatedOriginal, relatedProjected),
+    ];
+    const eligibility = { isLarge: false, isLargeWriteSurface: false };
+    const budget = 4052;
+
+    const result = applyBudgetElision(rendered, budget, eligibility, candidates);
+    const manifestSections = result.pendingContextManifest!.manifest.sections;
+
+    expect(result.elidedNames).toEqual(["completed_tasks", "constitution"]);
+    expect(manifestSections.map(section => section.name)).toEqual([
+      "reads",
+      "related_decisions",
+      "completed_tasks",
+      "constitution",
+    ]);
+    expect(new Set(manifestSections.map(section => section.name)).size)
+      .toBe(manifestSections.length);
+    expect(result.metrics.deferredBytes).toBe(
+      manifestSections.reduce((sum, section) => sum + section.bytes, 0),
+    );
+    expect(result.metrics.finalBytes).toBeLessThanOrEqual(budget);
+    expect(result.metrics.naturalBytes - result.metrics.finalBytes)
+      .toBeGreaterThan(0);
+    expect(result.metrics.elidedSections.map(section => section.name))
+      .toEqual(["completed_tasks", "constitution"]);
   });
 });

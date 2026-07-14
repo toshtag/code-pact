@@ -145,13 +145,33 @@ For the same git SHA and the same inputs:
   `minimum_achievable_bytes` is the same floor `CONTEXT_OVER_BUDGET` reports.
 - `task prepare` writes the same context pack bytes that
   `task context` produces for the same task (`task context` builds and
-  returns the content; `task prepare` and the low-level `pack` are the
-  commands that write it to disk).
+  returns the content; `task prepare` writes it to disk).
 - When an explicit context budget defers sections, `task context`, normal
   `task prepare`, and `task prepare --dry-run` compute the same rendered
   Markdown bytes and the same `context:sha256:<digest>` manifest reference for
   the same task, agent, and resolved byte budget. Only normal `task prepare`
   materializes the derived manifest and returns a non-null retrieval command.
+- When an explicit context budget would otherwise exceed the resolved byte cap,
+  the pack may first use deterministic structural projections for safe content
+  types before fully deferring sections. Projection is not summarization: read
+  glob matches can be replaced by exact parent-directory counts, and only
+  `context_size: large` related decisions can be reduced to accepted ADR
+  `Implementation commitments`. Declared decisions are never projected. The
+  manifest reference is deterministic on read-only paths, but exact original
+  sections become retrievable only after a writing command materializes the
+  manifest. No-budget packs and budgeted packs that naturally fit stay
+  byte-identical to the unprojected form.
+
+| Path | Reference calculated | Artifact persisted | `retrieve_command` |
+|------|---------------------:|-------------------:|-------------------:|
+| `task context` | yes | no | `null` |
+| `task prepare --dry-run` | yes | no | `null` |
+| normal `task prepare` | yes | yes | non-null |
+
+Agents must not infer retrieval availability from the manifest reference alone.
+Use the returned `deferred_context.retrieve_command` when present.
+The current public `pack` CLI writes an unbudgeted context pack and exposes no
+context-budget option, so it does not enter the deferred-context manifest flow.
 
 Where a command writes deterministic artifacts (context pack, adapter
 files), the same input produces the same on-disk bytes.
@@ -338,15 +358,18 @@ The verbs in detail:
   contains the resolved `--budget-bytes <N>`, not the profile or recommended
   flag. Do not reconstruct, widen, or replace that resolved budget.
   If the applied budget produces `deferred_context`, first work from the
-  rendered pack and the section names already embedded in the result. Do not
-  fetch every deferred section up front. Fetch only when a concrete missing
-  section is necessary, only when `deferred_context.retrieve_command` is
-  non-null, and start with the listed command to inspect section names before
-  retrieving one section by name. The retrieval flow is `context show <ref>
-  --list --json` to choose a section, then `context show <ref> --section <name>`
-  for the exact body. When `retrieve_command` is null, do not infer a cache path
-  or construct a retrieval command yourself. Deferred content is exact original
-  section content, not a summary; the cache is derived and must not be committed.
+  rendered pack and the section names already embedded in the result. Budgeted
+  context may contain deterministic structural projections; use the projected
+  form first. Do not fetch every deferred or projected section up front. Fetch
+  only when a concrete missing detail is necessary, only when
+  `deferred_context.retrieve_command` is non-null, and start with the listed
+  command to inspect section names before retrieving one section by name. The
+  retrieval flow is `context show <ref> --list --json` to choose a section, then
+  `context show <ref> --section <name>` for the exact body. When
+  `retrieve_command` is null, do not infer a cache path or construct a
+  retrieval command yourself. Deferred and projected originals are exact
+  original section content, not summaries; the cache is derived and must not be
+  committed.
   `commands.verify` and `commands.complete` include `--json --detail agent`;
   use those strings verbatim so verification failures arrive as compact
   capsules instead of duplicated raw stdout/stderr.

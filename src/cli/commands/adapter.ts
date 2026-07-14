@@ -254,13 +254,43 @@ async function cmdAdapterConformance(
       process.stdout.write(`  ${status}  ${c.id}${file}\n`);
       if (c.status === "fail" && c.details) {
         for (const [k, v] of Object.entries(c.details)) {
-          const v_str = Array.isArray(v) ? v.join(", ") : String(v);
-          process.stdout.write(`         ${k}: ${v_str}\n`);
+          process.stdout.write(
+            `         ${k}: ${formatConformanceDetail(v)}\n`,
+          );
         }
       }
     }
   }
   return result.compliant ? 0 : 1;
+}
+
+function formatConformanceDetail(value: unknown): string {
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  if (Array.isArray(value)) {
+    return value.every(isScalarConformanceDetail)
+      ? value.map(item => String(item)).join(", ")
+      : compactJson(value);
+  }
+  return isScalarConformanceDetail(value) ? String(value) : compactJson(value);
+}
+
+function isScalarConformanceDetail(
+  value: unknown,
+): value is string | number | boolean {
+  return (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  );
+}
+
+function compactJson(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function adapterTransactionErrorData(err: Error): Record<string, unknown> {

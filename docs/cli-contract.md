@@ -1718,6 +1718,52 @@ Conformance is intentionally narrower than `adapter doctor` — it inspects only
         "file": "CLAUDE.md"
       },
       {
+        "id": "structural_projection_guidance_present",
+        "status": "pass",
+        "severity": "advisory",
+        "file": "CLAUDE.md",
+        "details": {
+          "anchors": [
+            "data.deferred_context.retrieve_command",
+            "deterministic structural projections",
+            "projected form first",
+            "specific missing detail",
+            "do not construct a retrieval command from the manifest reference"
+          ],
+          "common_anchors": ["data.deferred_context.retrieve_command"],
+          "missing_common": [],
+          "matched_variant": "en-US",
+          "variants": [
+            {
+              "id": "en-US",
+              "anchors": [
+                "deterministic structural projections",
+                "projected form first",
+                "specific missing detail",
+                "do not construct a retrieval command from the manifest reference"
+              ],
+              "missing": []
+            },
+            {
+              "id": "ja-JP",
+              "anchors": [
+                "決定論的な構造 projection",
+                "まず projected form を使用",
+                "具体的な不足",
+                "manifest reference から取得 command を組み立てない"
+              ],
+              "missing": [
+                "決定論的な構造 projection",
+                "まず projected form を使用",
+                "具体的な不足",
+                "manifest reference から取得 command を組み立てない"
+              ]
+            }
+          ],
+          "missing": []
+        }
+      },
+      {
         "id": "file_checksum_match",
         "status": "pass",
         "severity": "required",
@@ -1728,7 +1774,7 @@ Conformance is intentionally narrower than `adapter doctor` — it inspects only
 }
 ```
 
-Every check object carries a `severity` (`required` | `advisory`). The hardening, recommendation-consumption, and bounded-repair checks show `advisory` above because this example's manifest `generator_version` predates their thresholds; on an adapter generated at or after a group's threshold, that group's checks are `required`.
+Every check object carries a `severity` (`required` | `advisory`). The hardening, recommendation-consumption, bounded-repair, and structural-projection checks show `advisory` above because this example's manifest `generator_version` predates their thresholds; on an adapter generated at or after a group's threshold, that group's checks are `required`.
 
 #### Checks
 
@@ -1753,6 +1799,7 @@ Every check object carries a `severity` (`required` | `advisory`). The hardening
 | `bounded_repair_runtime_constraints_present` | The guidance requires the same model, effort, and context and uses the failure delta for the bounded attempt.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `bounded_repair_stop_guidance_present` | The guidance documents repeated-fingerprint stopping and allowed escalation after exhaustion.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `bounded_repair_nonretryable_guidance_present` | The guidance documents the closed nonretryable failure-kind list.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `structural_projection_guidance_present` | The guidance contains every common structural-projection anchor plus one complete locale variant (`en-US` or `ja-JP`). Incomplete combinations across multiple locales do not pass. The guidance must tell agents to use the projected form first, retrieve exact originals only for a concrete missing detail, and not construct a retrieval command from the manifest reference when `data.deferred_context.retrieve_command` is not non-null.                                                                                                                                                                                                                                                                                                           |
 | `file_checksum_match`                | One per manifest file: the on-disk LF-normalised UTF-8 sha256 equals the manifest's recorded value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `adapter_file_path_unowned`          | A manifest entry (the `role: instruction` file, or any `files[]` entry) names a path this adapter could not have generated, that resolves through a symlink, or whose declared role disagrees with the path's only legitimate static role. The target is NOT read — no `actual_sha256` and no contract-heading inspection are produced — so a forged manifest cannot turn conformance into a file-content/SHA oracle on arbitrary local files (e.g. `.env`). Read authority is the NARROW built-in path set (`ownedPathRoles`) with a matching declared role, NOT the broad create namespace — so a victim's hand-authored `.claude/skills/private.md` is refused too, and a role-swap (e.g. `CLAUDE.md` with `role: skill`) is `unowned` before any filesystem access. Always `required` severity (fail-closed). |
 | `file_checksum_skipped_unverifiable` | A manifest entry names a dynamically-generated skill in the shared `.claude/skills/` namespace (matches the role-scoped `createPathGlobsByRole` for role=skill but not the narrow read-authority set `ownedPathRoles`) and is not recorded as `ownership: handed_off`. Its name is attacker-influenceable, so read-ownership cannot be proven: the file is NOT read or checksummed. `advisory` severity. To regenerate, move or delete the file, then run `adapter upgrade <agent> --write`.                                                                                                                                                                                                                                                                              |
@@ -1782,6 +1829,11 @@ The bounded-repair checks
 `bounded_repair_nonretryable_guidance_present`) use
 `BOUNDED_REPAIR_GUIDANCE_FROM_VERSION`.
 
+The structural-projection guidance check
+(`structural_projection_guidance_present`) uses
+`STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION`. Missing guidance is advisory for
+`generator_version < 2.5.0`, and required for `generator_version >= 2.5.0`.
+
 For each group, adapters generated below the group's threshold, or with a
 missing or unparseable `generator_version`, report missing anchors as
 `advisory`. Adapters generated at or above the threshold report them as
@@ -1790,6 +1842,22 @@ older generated adapters non-compliant before those adapters are regenerated.
 
 Dynamic read-authority checks that cannot prove a safe byte read remain
 always advisory. All other checks are required.
+
+#### Structural projection details
+
+`structural_projection_guidance_present.details` is stable in JSON output:
+
+- `anchors`: the flattened anchor list used for the selected comparison. On
+  pass this is the common anchors plus the matched locale variant. On failure it
+  is the common anchors plus the locale variant with the fewest missing anchors;
+  ties use declaration order.
+- `common_anchors`: language-independent anchors that every locale must contain.
+- `missing_common`: common anchors absent from the instruction file.
+- `matched_variant`: `"en-US"`, `"ja-JP"`, or `null`.
+- `variants[]`: one entry per locale variant, each with `id`, required
+  `anchors`, and that variant's `missing` anchors.
+- `missing`: the deterministic remediation list used by human-readable output;
+  it is always a subset of `anchors`.
 
 `adapter conformance` and `adapter doctor` share the module `src/core/adapters/conformance-spec.ts`, but they consume different parts of it and check different things. `adapter conformance` is the only caller that reads the `lifecycle_required` / `diagnostic_required` surface lists and the `REQUIRED_FAILURE_GUIDANCE` keywords (the `required_cli_surface_mentions` and `required_failure_guidance` checks above). `adapter doctor`'s `ADAPTER_CONTRACT_DRIFT` check consumes only the heading constants from the same module (`AGENT_CONTRACT_SECTION_HEADING` and `AGENT_CONTRACT_AXIS_HEADINGS`) — it asserts the `## Agent contract` section and its three axis sub-headings are present, not that the required CLI surface or failure guidance is mentioned. So the shared module guarantees the two callers agree on the contract's _headings_; the required-surface and failure-guidance checks are `adapter conformance`-only.
 
@@ -1856,8 +1924,8 @@ When a task declares **none** of the P10 fields, the pack body is byte-identical
 | `natural_bytes`            | integer | The **pre-budget** pack size: the bytes the no-budget builder would render for this task (after the existing deterministic relevance/readiness selection, before any budget-driven elision). Not a whole-repository size, not a token count.                                                                                                                                                                                                                       |
 | `final_bytes`              | integer | The post-budget pack size. **Equals `total_bytes` == `context_pack_bytes`.**                                                                                                                                                                                                                                                                                                                                                                                       |
 | `budget_bytes`             | integer | Present **only when a budget was applied** (via `--budget-bytes` or `--context-budget`); omitted otherwise. Equals the resolved byte budget (an agent same-name `context_budget` override is reflected here).                                                                                                                                                                                                                                                      |
-| `saved_bytes`              | integer | `natural_bytes - final_bytes` — the bytes removed by **budget-driven elision only**. `0` when no section was elided.                                                                                                                                                                                                                                                                                                                                               |
-| `deferred_bytes`           | integer | The UTF-8 bytes of original section content withheld by budget deferral and stored in the deferred context manifest. `0` when no section was deferred. This is not the same as `saved_bytes`: the final pack also contains Deferred Context guidance overhead.                                                                                                                                                                                                      |
+| `saved_bytes`              | integer | `natural_bytes - final_bytes` — the bytes removed by budget-driven projection and/or elision. `0` when the final pack is the natural pack.                                                                                                                                                                                                                                                                                                                         |
+| `deferred_bytes`           | integer | The UTF-8 bytes of original section content withheld from the inline pack and stored in the deferred context manifest. This includes both fully deferred sections and exact originals for projected sections. `0` when no original section content was stored in the manifest. This is not the same as `saved_bytes`: the final pack may contain projection text and Deferred Context guidance overhead.                                                               |
 | `saved_ratio`              | number  | `saved_bytes / natural_bytes` (a fraction in `[0, 1]`; `0` when `natural_bytes === 0`). The illustrative value below is rounded for readability — the field is the exact quotient.                                                                                                                                                                                                                                                                                 |
 | `minimum_achievable_bytes` | integer | The floor below which no budget can drive this task — the size after every budget-**eligible** section is elided, honoring the P28 conditional eligibility (`related_decisions` elidable only when `context_size: large`; `rules` only when `write_surface: high`). **This is the same floor the [`CONTEXT_OVER_BUDGET`](#--budget-bytes-n-v113-p24) error reports, computed by the same shared helper** — the success path and the error path can never disagree. |
 | `elided_sections[]`        | array   | Backward-compatible field name for the **budget-deferred** sections only, in actual deferral order — `{ "name": string, "bytes": number }`. Mirrors the `budget_reserved_for_later` subset of `excluded[]`. `[]` when no budget deferral occurred.                                                                                                                                                                                                                 |
@@ -1948,15 +2016,62 @@ Sections NOT in this list are **unelidable**: `header`, `phase_contract`, `task_
 
 The locked source of truth is `ELISION_ORDER` in [`src/core/pack/formatters/markdown.ts`](../src/core/pack/formatters/markdown.ts). Changing the order requires an RFC amendment.
 
-**Deferred context reference.** When one or more sections are withheld for a
-budget, their exact content is represented by one manifest reference:
+**Structural projection before full deferral.** When an explicit budget is
+resolved and the natural pack is larger than that budget, the builder may try
+deterministic structural projections before fully deferring sections. Projection
+is never enabled by no-budget commands, by `task context --explain` alone, or by
+a budgeted command whose natural pack already fits. Projection is also rejected
+when the projected section is not smaller than the original or when the full
+pack, including Deferred Context guidance and manifest reference, would not be
+smaller than the comparison pack.
+
+Projection is intentionally narrow:
+
+- `reads` may replace a large declared read surface with exact counts grouped by
+  each matched file's direct parent directory. Glob declaration order is
+  preserved, directory names are POSIX-formatted and lexicographically sorted,
+  root-level files are grouped under `./`, counts are exact, Git tracked files
+  remain the only match source, and file contents are not read.
+- `related_decisions` may be projected only for the `context_size: large`
+  all-decisions expansion. Accepted ADRs with an explicit `## Implementation
+  commitments` checkbox list can render only the filename and checkbox items,
+  preserving order, text, and checked state. Non-projectable related decisions
+  remain as full text in the same section. `declared_decisions` and ordinary
+  task-id matched related decisions are not projected.
+
+Projection is not a natural-language summary, code compression, semantic
+ranking, tokenizer pass, model call, or embedding operation. It does not apply
+to source code, constitution, rules, completed tasks, declared decisions, JSON
+output, or arbitrary prose.
+
+If projection alone does not meet the budget, the existing full-deferral pass
+continues in the locked order above. A section rendered in projected form is not
+then fully deferred in the same final plan; the equivalent full-deferral plan is
+chosen instead. When multiple successful plans exist, the chosen plan minimizes
+fully deferred section count first, then projected section count, then uses the
+fixed projection order (`reads`, then `related_decisions`) as the tie-breaker,
+and finally the smallest final byte count.
+
+**Deferred context reference.** When one or more sections are projected or
+withheld for a budget, their exact original content is represented by one
+manifest reference:
 `context:sha256:<64 lowercase hexadecimal characters>`. The reference is
 opaque and never exposes a filesystem path. A materialized manifest is stored
 under `.code-pact/cache/context/<digest>.json`; `.code-pact/cache/` is derived
 state and must not be version-controlled.
 
 **Manifest schema.** The manifest is strict and content-addressed. It contains
-all sections withheld from one pack, in the order they were removed:
+exact original section forms represented outside the inline pack:
+
+1. projected-section originals in fixed projection order (`reads`, then
+   `related_decisions`);
+2. fully deferred sections in actual `ELISION_ORDER`.
+
+A section name appears at most once. Projected sections remain in the inline
+pack in projected form, while the manifest stores their exact pre-projection
+section bodies. Fully deferred sections are removed from the inline pack and
+stored in the same manifest. The schema version remains `1`, and one pack uses
+at most one manifest reference.
 
 ```json
 {
@@ -1978,11 +2093,20 @@ invalid, `bytes` must equal `Buffer.byteLength(content, "utf8")`, and
 reference is computed from the canonical serialization of the whole manifest.
 Task id, phase id, agent name, timestamps, absolute paths, process ids, and
 hostnames are not part of the digest input. Identical deferred content produces
-the same reference; one pack uses at most one manifest reference.
+the same reference.
 
-**Deferred Context section.** When deferral occurs, the rendered Markdown gains
-exactly one synthetic section at a fixed position immediately after the Task
-Definition block:
+Projected sections use the same manifest. The inline pack keeps the projected
+section, and the manifest stores the exact original section body under the same
+section name (`reads` or `related_decisions`) exactly once. The retrieval command
+for a projected section is therefore the same as for a fully deferred section:
+`code-pact context show <ref> --section <name>`. The returned human output is
+the original section body byte-for-byte; it is not a summary and it does not add
+a trailing newline.
+
+**Deferred Context section.** When deferral or projection stores exact original
+content in a manifest, the rendered Markdown gains exactly one synthetic section
+at a fixed position immediately after the Task Definition block. When no section
+is projected, the pure-deferral variant is:
 
 ```markdown
 ## Deferred Context
@@ -1997,20 +2121,39 @@ Manifest reference: `context:sha256:<digest>`
 Exact section content may be retrieved from the local derived context cache after materialization.
 ```
 
-The section text is fixed; it is not model-generated. It never includes runtime
-persistence state, a conditional command, filesystem paths, or deferred section
-content. No-budget packs and budgeted packs that naturally fit without deferral
-do not include this section.
+When at least one section is projected, the projection-aware variant is:
 
-**Budget accounting with deferral overhead.** The Deferred Context section is
-part of the budget. The algorithm withholds a candidate section, builds the
+```markdown
+## Deferred Context
+
+The exact original forms of the following projected or deferred sections are represented by this manifest:
+
+- reads — projected inline; exact original represented after materialization
+- constitution — deferred from the inline pack
+
+Manifest reference: `context:sha256:<digest>`
+
+Exact original section content may be retrieved from the local derived context cache after materialization.
+```
+
+Each variant has fixed deterministic text; neither is model-generated. The
+section never includes runtime persistence state, a conditional command,
+filesystem paths, or deferred section content. A reference being computed is
+separate from the manifest artifact being persisted. No-budget packs and
+budgeted packs that naturally fit without deferral or projection do not include
+this section.
+
+**Budget accounting with projection and deferral overhead.** The Deferred
+Context section is part of the budget. For each candidate plan, the algorithm
+replaces projected sections, withholds fully deferred sections, builds the
 manifest and reference, renders the candidate pack with the Deferred Context
-section included, measures `Buffer.byteLength(content, "utf8")`, and accepts the
-candidate only when that measured `final_bytes` is `<= budget_bytes`. If the
-guidance overhead pushes the candidate over budget, the next eligible section is
-also deferred. If every eligible section has been deferred and the pack still
-exceeds the budget, `CONTEXT_OVER_BUDGET` reports the exact
-`minimum_achievable_bytes` including the final Deferred Context section.
+section included when a manifest reference is needed, measures
+`Buffer.byteLength(content, "utf8")`, and accepts the candidate only when that
+measured `final_bytes` is `<= budget_bytes`. If the guidance overhead pushes the
+candidate over budget, the next eligible full-deferral step is evaluated. If
+every eligible section has been deferred and the pack still exceeds the budget,
+`CONTEXT_OVER_BUDGET` reports the exact `minimum_achievable_bytes` including the
+final Deferred Context section.
 
 **`--explain --json` interaction.** When `--budget-bytes` triggers deferral AND `--explain --json` is set, every deferred section appears in `excluded[]` with `reason_code: budget_reserved_for_later` and a `details` block:
 
@@ -2056,7 +2199,7 @@ Sections excluded by the v1.11 inclusion policy (e.g. `not_declared_by_task` for
 
 Exit code 2. `data.minimum_achievable_bytes` tells the caller the floor for this task; re-running with `--budget-bytes <minimum_achievable_bytes>` succeeds and produces a pack of exactly that size.
 
-**Byte-identical default.** Without `--budget-bytes`, the rendered `content` is byte-for-byte identical to v1.12 (the existing [`tests/integration/pack-byte-identical.test.ts`](../tests/integration/pack-byte-identical.test.ts) lock test continues to apply). A budget that naturally fits without deferral is also byte-identical to the no-budget pack. The flag only opts in to deferral when the resolved byte cap requires it.
+**Byte-identical default.** Without `--budget-bytes`, the rendered `content` is byte-for-byte identical to v1.12 (the existing [`tests/integration/pack-byte-identical.test.ts`](../tests/integration/pack-byte-identical.test.ts) lock test continues to apply). A budget that naturally fits without projection or deferral is also byte-identical to the no-budget pack. The flag only opts in to structural projection or deferral when the resolved byte cap requires it.
 
 ### `--context-budget <profile>` (v1.30+, P47)
 
@@ -2102,6 +2245,10 @@ In recommended mode, `profiles` may be omitted. If present, it must be non-empty
 **Resolution.** A standard name (`tight` / `balanced` / `wide`) resolves to its built-in byte value even with **no** agent profile in play, so the ergonomic name is usable without forcing `--agent`. An agent profile only _overrides_ the byte value, or supplies a custom name. An unknown profile name fails with `CONFIG_ERROR` (exit 2), naming the missing profile and the agent.
 
 **Mutual exclusion.** On `task context`, `--context-budget` and `--budget-bytes` are mutually exclusive; supplying both is `CONFIG_ERROR` (exit 2). On `task prepare`, three budget modes are mutually exclusive: `--budget-bytes`, `--context-budget`, and `--recommended-context-budget`. `task context`, `pack`, `recommend`, `verify`, and `task complete` do not accept `--recommended-context-budget`.
+
+The current public `pack` CLI has no `--budget-bytes`, `--context-budget`, or
+`--recommended-context-budget` option. It writes an unbudgeted context pack and
+does not create a deferred-context manifest through the public CLI.
 
 ```json
 {

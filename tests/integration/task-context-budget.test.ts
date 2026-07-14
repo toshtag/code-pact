@@ -63,6 +63,23 @@ async function setupTask(
 }
 
 const FORCING_READ_MARKER = "p53-forcing-read-marker";
+const contextProjectionFixtureDir = new URL(
+  "../fixtures/context-projection/",
+  import.meta.url,
+).pathname;
+
+function extractMarkdownSection(
+  content: string,
+  heading: string,
+  nextHeading?: string,
+): string {
+  const start = content.indexOf(heading);
+  expect(start, `section heading ${heading}`).toBeGreaterThanOrEqual(0);
+  const next = nextHeading
+    ? content.indexOf(`\n${nextHeading}`, start + heading.length)
+    : content.indexOf("\n## ", start + heading.length);
+  return next === -1 ? content.slice(start) : content.slice(start, next);
+}
 
 async function forceTaskBudgetDeferral(
   project: Awaited<ReturnType<typeof createTempProject>>,
@@ -100,6 +117,49 @@ async function forceTaskBudgetDeferral(
       );
     }
   }
+}
+
+async function forceDecisionProjection(
+  project: Awaited<ReturnType<typeof createTempProject>>,
+): Promise<{ relatedMarker: string; declaredMarker: string }> {
+  const relatedMarker = "RELATED-DECISION-BODY-MARKER-関連";
+  const declaredMarker = "DECLARED-DECISION-BODY-MARKER";
+  const phasePath = join(project.dir, "design", "phases", "P1-foundation.yaml");
+  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
+  const tasks = doc.tasks as Array<Record<string, unknown>>;
+  tasks[0] = {
+    ...tasks[0],
+    context_size: "large",
+    decision_refs: ["design/decisions/declared-projection.md"],
+  };
+  await writeFile(phasePath, stringifyYaml(doc), "utf8");
+  await mkdir(join(project.dir, "design", "decisions"), { recursive: true });
+
+  const relatedFixture = await readFile(
+    join(contextProjectionFixtureDir, "large-accepted-decisions", "related.md"),
+    "utf8",
+  );
+  const declaredFixture = await readFile(
+    join(contextProjectionFixtureDir, "large-accepted-decisions", "declared.md"),
+    "utf8",
+  );
+  await writeFile(
+    join(project.dir, "design", "decisions", "zzz-related-projection.md"),
+    relatedFixture.replace(
+      "RELATED-DECISION-BODY-MARKER",
+      relatedMarker.repeat(500),
+    ),
+    "utf8",
+  );
+  await writeFile(
+    join(project.dir, "design", "decisions", "declared-projection.md"),
+    declaredFixture.replace(
+      "DECLARED-DECISION-BODY-MARKER",
+      declaredMarker.repeat(100),
+    ),
+    "utf8",
+  );
+  return { relatedMarker, declaredMarker };
 }
 
 function commandArgs(command: string): string[] {
@@ -254,6 +314,13 @@ describe("task prepare --context-budget (P47)", () => {
 
   it("--recommended-context-budget emits a command that reproduces the written pack", async () => {
     await forceTaskBudgetDeferral(project);
+    const unbudgeted = expectJsonOk<{ content: string }>(
+      project.run(["task", "context", "P1-T1", "--agent", "claude-code", "--json"]),
+    );
+    const originalReadsSection = extractMarkdownSection(
+      unbudgeted.data.content,
+      "## Declared read surface",
+    );
     const env = expectJsonOk<{
       recommendation: {
         contextFit: {
@@ -293,8 +360,41 @@ describe("task prepare --context-budget (P47)", () => {
     expect(env.data.deferred_context).toMatchObject({ persisted: true });
 
     const preparedContent = await readFile(env.data.context_pack_path, "utf8");
-    expect(preparedContent).not.toContain(FORCING_READ_MARKER);
+    const expectedReadProjection = await readFile(
+      join(
+        contextProjectionFixtureDir,
+        "large-read-list",
+        "expected-projected-snippet.md",
+      ),
+      "utf8",
+    );
+    expect(preparedContent).toContain(expectedReadProjection.trim());
+    expect(preparedContent).not.toContain(`entry-0000-${FORCING_READ_MARKER}.md`);
     expect(preparedContent).toContain(env.data.deferred_context.manifest_ref);
+    expect(preparedContent).toContain(
+      "- reads — projected inline; exact original represented after materialization",
+    );
+    expect(preparedContent).not.toContain(
+      "The following sections were withheld to satisfy the context byte budget:",
+    );
+
+    const listed = expectJsonOk<{
+      sections: Array<{ name: string; bytes: number; content_sha256: string }>;
+    }>(
+      project.run([
+        "context", "show", env.data.deferred_context.manifest_ref,
+        "--list", "--json",
+      ]),
+    );
+    expect(listed.data.sections.map(section => section.name)).toContain("reads");
+    const originalReads = project.run([
+      "context", "show", env.data.deferred_context.manifest_ref,
+      "--section", "reads",
+    ]);
+    expect(originalReads.code).toBe(0);
+    expect(originalReads.stdout).toBe(originalReadsSection);
+    expect(originalReads.stdout).toContain(`entry-0000-${FORCING_READ_MARKER}.md`);
+    expect(originalReads.stdout).not.toContain("matches across 1 directory");
 
     const contextCommand = env.data.commands.context;
     expect(contextCommand).toBeDefined();
@@ -307,6 +407,103 @@ describe("task prepare --context-budget (P47)", () => {
       manifest_ref: env.data.deferred_context.manifest_ref,
       persisted: false,
     });
+  });
+
+  it("budgeted explain reports projected read byte details", async () => {
+    await forceTaskBudgetDeferral(project);
+    const env = expectJsonOk<{
+      content: string;
+      deferred_context: { manifest_ref: string; persisted: boolean };
+      sections: Array<{ name: string; bytes: number; details?: Record<string, unknown> }>;
+      deferred_bytes: number;
+      elided_sections: Array<{ name: string; bytes: number }>;
+    }>(
+      project.run([
+        "task", "context", "P1-T1", "--agent", "claude-code",
+        "--budget-bytes", "60000", "--explain", "--json",
+      ]),
+    );
+
+    expect(env.data.content).toContain("matches across 1 directory");
+    expect(env.data.content).not.toContain(`entry-0000-${FORCING_READ_MARKER}.md`);
+    expect(env.data.deferred_context).toMatchObject({ persisted: false });
+    const reads = env.data.sections.find(section => section.name === "reads");
+    expect(reads?.details).toMatchObject({
+      projection_kind: "read_directory_counts",
+      glob_count: 1,
+      match_count: 850,
+      directory_count: 1,
+    });
+    expect(reads?.details?.saved_bytes).toBe(
+      Number(reads?.details?.original_bytes) -
+        Number(reads?.details?.projected_bytes),
+    );
+    expect(reads?.bytes).toBe(reads?.details?.projected_bytes);
+    expect(env.data.elided_sections.map(section => section.name)).not.toContain("reads");
+    expect(env.data.deferred_bytes).toBe(Number(reads?.details?.original_bytes));
+  });
+
+  it("retrieves projected related decisions byte-for-byte from a materialized manifest", async () => {
+    const { relatedMarker, declaredMarker } = await forceDecisionProjection(project);
+    const unbudgeted = await runTaskContext({
+      cwd: project.dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+    const originalRelatedSection = extractMarkdownSection(
+      unbudgeted.content,
+      "## Related Decisions",
+      "## Verification Commands",
+    );
+    const budget = String(unbudgeted.totalBytes - 1000);
+
+    const env = expectJsonOk<{
+      context_pack_path: string;
+      deferred_context: {
+        manifest_ref: string;
+        persisted: boolean;
+        retrieve_command: string | null;
+      };
+    }>(
+      project.run([
+        "task", "prepare", "P1-T1", "--agent", "claude-code",
+        "--budget-bytes", budget, "--json",
+      ]),
+    );
+
+    expect(env.data.deferred_context).toMatchObject({
+      persisted: true,
+      retrieve_command: expect.stringContaining("context show"),
+    });
+    const projectedContent = await readFile(env.data.context_pack_path, "utf8");
+    expect(projectedContent).toContain(
+      "Accepted decisions with explicit implementation commitments",
+    );
+    expect(projectedContent).not.toContain(relatedMarker);
+    expect(projectedContent).toContain(declaredMarker);
+
+    const listed = expectJsonOk<{
+      sections: Array<{ name: string; bytes: number; content?: string }>;
+    }>(
+      project.run([
+        "context", "show", env.data.deferred_context.manifest_ref,
+        "--list", "--json",
+      ]),
+    );
+    const relatedListing = listed.data.sections.find(
+      section => section.name === "related_decisions",
+    );
+    expect(relatedListing).toBeDefined();
+    expect(relatedListing).not.toHaveProperty("content");
+
+    const retrieved = project.run([
+      "context", "show", env.data.deferred_context.manifest_ref,
+      "--section", "related_decisions",
+    ]);
+    expect(retrieved.code).toBe(0);
+    expect(retrieved.stdout).toBe(originalRelatedSection);
+    expect(retrieved.stdout).toContain(relatedMarker);
+    expect(retrieved.stdout).not.toContain(declaredMarker);
   });
 
   it.each([
@@ -755,7 +952,8 @@ describe("task prepare agent-profile recommended application mode (P53)", () => 
     expect(manualDirect.content).toBe(direct.content);
     expect(manualDirect.deferredContext).toBeUndefined();
     expect(explicit.data.deferred_context).toMatchObject({ persisted: false });
-    expect(explicit.data.content).not.toContain(FORCING_READ_MARKER);
+    expect(explicit.data.content).toContain(`- \`docs/${FORCING_READ_MARKER}/**\``);
+    expect(explicit.data.content).not.toContain(`entry-0000-${FORCING_READ_MARKER}.md`);
     expect(explicit.data.content).not.toBe(direct.content);
     expect(prepared.data.applied_context_budget).toEqual({
       source: "recommended_agent_profile",

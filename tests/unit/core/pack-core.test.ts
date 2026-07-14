@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   buildContextPack,
   writeContextPack,
@@ -20,6 +21,10 @@ import { loadContextManifestArtifact } from "../../../src/core/context-deferral/
 import { __setAtomicWriteFailAfterOpenForTests } from "../../../src/io/atomic-text.ts";
 
 const fixtureDir = new URL("../../../tests/fixtures/project-a", import.meta.url).pathname;
+const contextProjectionFixtureDir = new URL(
+  "../../../tests/fixtures/context-projection/",
+  import.meta.url,
+).pathname;
 
 async function exists(p: string): Promise<boolean> {
   try {
@@ -96,6 +101,101 @@ describe("buildContextPack — purity", () => {
         agentName: "claude-code",
       }),
     ).rejects.toMatchObject({ code: "TASK_NOT_FOUND" });
+  });
+});
+
+describe("buildContextPack — decision projection", () => {
+  let workDir: string;
+
+  beforeEach(async () => {
+    workDir = await mkdtemp(join(tmpdir(), "code-pact-pack-decision-proj-"));
+    await cp(fixtureDir, workDir, { recursive: true });
+    await rm(join(workDir, ".context"), { recursive: true, force: true });
+  });
+
+  afterEach(async () => {
+    await rm(workDir, { recursive: true, force: true });
+  });
+
+  async function updateP2Task(fields: Record<string, unknown>): Promise<void> {
+    const phasePath = join(workDir, "design", "phases", "P2-core.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const tasks = doc.tasks as Array<Record<string, unknown>>;
+    tasks[0] = { ...tasks[0], ...fields };
+    await writeFile(phasePath, stringifyYaml(doc), "utf8");
+  }
+
+  it("projects large related decisions while preserving declared decision bodies", async () => {
+    const relatedMarker = "RELATED-DECISION-BODY-MARKER";
+    const declaredMarker = "DECLARED-DECISION-BODY-MARKER";
+    const relatedFixture = await readFile(
+      join(contextProjectionFixtureDir, "large-accepted-decisions", "related.md"),
+      "utf8",
+    );
+    const declaredFixture = await readFile(
+      join(contextProjectionFixtureDir, "large-accepted-decisions", "declared.md"),
+      "utf8",
+    );
+    const expectedProjection = await readFile(
+      join(
+        contextProjectionFixtureDir,
+        "large-accepted-decisions",
+        "expected-projected-snippet.md",
+      ),
+      "utf8",
+    );
+    await writeFile(
+      join(workDir, "design", "decisions", "zzz-related-projection.md"),
+      relatedFixture.replace(relatedMarker, relatedMarker.repeat(500)),
+    );
+    await writeFile(
+      join(workDir, "design", "decisions", "declared-projection.md"),
+      declaredFixture.replace(declaredMarker, declaredMarker.repeat(200)),
+    );
+    await updateP2Task({
+      context_size: "large",
+      decision_refs: ["design/decisions/declared-projection.md"],
+    });
+
+    const baseline = await buildContextPack({
+      cwd: workDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+      explain: true,
+    });
+    const budget = baseline.totalBytes - 1000;
+    const pack = await buildContextPack({
+      cwd: workDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+      explain: true,
+      budgetBytes: budget,
+    });
+
+    expect(pack.content).toContain(
+      "Accepted decisions with explicit implementation commitments",
+    );
+    expect(pack.content).toContain(expectedProjection.trim());
+    expect(pack.content).not.toContain(relatedMarker);
+    expect(pack.content).toContain(declaredMarker);
+    expect(pack.explainMetrics?.elidedSections.map(section => section.name)).not.toContain(
+      "related_decisions",
+    );
+    const related = pack.sections?.find(section => section.name === "related_decisions");
+    expect(related?.details).toMatchObject({
+      projection_kind: "decision_implementation_commitments",
+      projected_decision_count: 1,
+    });
+    const storedOriginal = pack.pendingContextManifest?.manifest.sections.find(
+      section => section.name === "related_decisions",
+    );
+    expect(storedOriginal?.content).toContain(relatedMarker);
+    expect(storedOriginal?.content).not.toContain(declaredMarker);
   });
 });
 

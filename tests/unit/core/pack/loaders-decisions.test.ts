@@ -50,3 +50,62 @@ describe("loadDecisions — non-decision exclusion", () => {
     ]);
   });
 });
+
+describe("loadDecisions — projection metadata", () => {
+  it("adds metadata only for accepted ADRs with explicit commitment checkboxes", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "accepted.md"),
+      [
+        "---",
+        "status: accepted",
+        "---",
+        "# Accepted",
+        "",
+        "## Implementation commitments",
+        "",
+        "- [ ] Preserve the old path",
+        "- [x] Add the new path",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(cwd, "design", "decisions", "proposed.md"),
+      [
+        "# Proposed",
+        "",
+        "**Status:** proposed",
+        "",
+        "## Implementation commitments",
+        "",
+        "- [ ] Not accepted",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(cwd, "design", "decisions", "prose-only.md"),
+      [
+        "# Prose",
+        "",
+        "**Status:** accepted",
+        "",
+        "## Implementation commitments",
+        "",
+        "No checkboxes here.",
+        "",
+      ].join("\n"),
+    );
+
+    const docs = await loadDecisions(cwd, "P1-T1", true);
+    const byName = new Map(docs.map(doc => [doc.filename, doc]));
+
+    expect(byName.get("design/decisions/accepted.md")?.projection).toEqual({
+      accepted: true,
+      commitments: [
+        { text: "Preserve the old path", done: false },
+        { text: "Add the new path", done: true },
+      ],
+    });
+    expect(byName.get("design/decisions/proposed.md")?.projection).toBeUndefined();
+    expect(byName.get("design/decisions/prose-only.md")?.projection).toBeUndefined();
+  });
+});

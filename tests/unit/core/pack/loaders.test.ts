@@ -5,6 +5,11 @@ import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { loadReadMatches } from "../../../../src/core/pack/loaders.ts";
+import {
+  makeReadDirectoryCountsProjection,
+  type ReadGlobMatches,
+  type RenderedSection,
+} from "../../../../src/core/pack/formatters/markdown.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -60,5 +65,112 @@ describe("loadReadMatches", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+function renderedReadsSection(entries: readonly ReadGlobMatches[]): RenderedSection {
+  const lines = ["## Declared read surface", ""];
+  for (const entry of entries) {
+    lines.push(`- \`${entry.glob}\``);
+    if (entry.matches.length === 0) {
+      lines.push("  - _(no current matches on disk)_");
+    } else {
+      for (const match of entry.matches) lines.push(`  - \`${match}\``);
+    }
+  }
+  lines.push("");
+  return { name: "reads", lines };
+}
+
+describe("makeReadDirectoryCountsProjection", () => {
+  it("groups matches by direct parent directory with deterministic counts", () => {
+    const entries: ReadGlobMatches[] = [
+      {
+        glob: "**/*.ts",
+        matches: [
+          "README.ts",
+          ...Array.from({ length: 20 }, (_, index) =>
+            `src/core/file-${String(index).padStart(2, "0")}.ts`
+          ),
+          ...Array.from({ length: 15 }, (_, index) =>
+            `src/file-${String(index).padStart(2, "0")}.ts`
+          ),
+          ...Array.from({ length: 10 }, (_, index) =>
+            `tests/unit/file-${String(index).padStart(2, "0")}.ts`
+          ),
+        ],
+      },
+    ];
+
+    const projection = makeReadDirectoryCountsProjection(
+      entries,
+      renderedReadsSection(entries),
+    );
+
+    expect(projection).not.toBeNull();
+    expect(projection!.kind).toBe("read_directory_counts");
+    expect(projection!.projected.lines).toEqual([
+      "## Declared read surface",
+      "",
+      "This is a deterministic parent-directory count projection.",
+      "The exact original file list is represented by Deferred Context and can be retrieved after materialization.",
+      "",
+      "- `**/*.ts`",
+      "  - 46 matches across 4 directories",
+      "  - `./` — 1 file",
+      "  - `src/` — 15 files",
+      "  - `src/core/` — 20 files",
+      "  - `tests/unit/` — 10 files",
+      "",
+    ]);
+    expect(projection!.projected.details).toMatchObject({
+      projection_kind: "read_directory_counts",
+      glob_count: 1,
+      match_count: 46,
+      directory_count: 4,
+      saved_bytes: projection!.originalBytes - projection!.projectedBytes,
+    });
+  });
+
+  it("falls back when the projected section is not smaller", () => {
+    const entries: ReadGlobMatches[] = [
+      { glob: "src/a.ts", matches: ["src/a.ts"] },
+    ];
+    expect(
+      makeReadDirectoryCountsProjection(entries, renderedReadsSection(entries)),
+    ).toBeNull();
+  });
+
+  it("orders projected directories by locale-independent code-unit order", () => {
+    const dirs = ["A", "Z", "a", "z", "ä", "日本語", "_"];
+    const entries: ReadGlobMatches[] = [
+      {
+        glob: "**/*",
+        matches: dirs.flatMap(dir =>
+          Array.from({ length: 20 }, (_, index) =>
+            `${dir}/file-${String(index).padStart(2, "0")}.ts`
+          )
+        ),
+      },
+    ];
+
+    const projection = makeReadDirectoryCountsProjection(
+      entries,
+      renderedReadsSection(entries),
+    );
+
+    expect(projection).not.toBeNull();
+    const directoryLines = projection!.projected.lines.filter(line =>
+      line.includes(" — 20 files")
+    );
+    expect(directoryLines).toEqual([
+      "  - `A/` — 20 files",
+      "  - `Z/` — 20 files",
+      "  - `_/` — 20 files",
+      "  - `a/` — 20 files",
+      "  - `z/` — 20 files",
+      "  - `ä/` — 20 files",
+      "  - `日本語/` — 20 files",
+    ]);
   });
 });

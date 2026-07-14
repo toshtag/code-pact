@@ -14,11 +14,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInit } from "../../src/commands/init.ts";
+import { runAdapterInstall } from "../../src/commands/adapter-install.ts";
 import {
   computeContentHash,
   readManifest,
   writeManifest,
 } from "../../src/core/adapters/manifest.ts";
+import { STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION } from "../../src/core/adapters/conformance-spec.ts";
 import { ADAPTER_SPEC_ORDER } from "../../src/cli/spec/adapter.ts";
 import { cliPath, ensureCliBuilt } from "../helpers/cli.ts";
 
@@ -81,6 +83,60 @@ describe("adapter list — CLI", () => {
     expect(res.stderr).toContain("claude-code");
     expect(res.stderr).toContain("enabled");
     expect(res.stderr).toContain("experimental"); // cursor or gemini-cli
+  });
+});
+
+describe("adapter conformance — CLI", () => {
+  it("human failure output renders locale variant details as compact JSON", async () => {
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      generatorVersionOverride: STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION,
+    });
+    const manifest = await readManifest(dir, "claude-code");
+    const instruction = manifest!.files.find(file => file.role === "instruction");
+    const instructionPath = join(dir, instruction!.path);
+    const original = await readFile(instructionPath, "utf8");
+    const tampered = original.replace(
+      "projected form first",
+      "compact form first",
+    );
+    expect(tampered).not.toBe(original);
+    await writeFile(instructionPath, tampered, "utf8");
+    await writeManifest(dir, "claude-code", {
+      ...manifest!,
+      files: manifest!.files.map(file =>
+        file.path === instruction!.path
+          ? { ...file, sha256: computeContentHash(tampered) }
+          : file,
+      ),
+    });
+
+    const res = runCli(["adapter", "conformance", "claude-code"]);
+
+    expect(res.status).toBe(1);
+    expect(res.stdout).toContain("structural_projection_guidance_present");
+    expect(res.stdout).toContain("matched_variant: null");
+    expect(res.stdout).toContain("missing:");
+    expect(res.stdout).toContain("variants:");
+    expect(res.stdout).not.toContain("[object Object]");
+
+    const variantsLine = res.stdout
+      .split("\n")
+      .find(line => line.includes("variants:"));
+    expect(variantsLine).toBeDefined();
+    const variantsJson = variantsLine!
+      .slice(variantsLine!.indexOf("variants:") + "variants:".length)
+      .trim();
+    const variants = JSON.parse(variantsJson) as Array<{
+      id: string;
+      missing: string[];
+    }>;
+    expect(variants.find(variant => variant.id === "en-US")?.missing).toContain(
+      "projected form first",
+    );
   });
 });
 

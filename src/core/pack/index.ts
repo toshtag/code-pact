@@ -9,7 +9,13 @@ import { join, isAbsolute } from "node:path";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { resolvePhaseInRoadmap } from "../plan/resolve-phase.ts";
 import { loadPhase } from "../plan/load-phase.ts";
-import { renderSections, type DependsOnEntry } from "./formatters/markdown.ts";
+import {
+  makeReadDirectoryCountsProjection,
+  makeRelatedDecisionCommitmentsProjection,
+  renderSections,
+  type ContextProjectionCandidate,
+  type DependsOnEntry,
+} from "./formatters/markdown.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
 import { resolveProfileContextOutputPath } from "./context-output-path.ts";
 import {
@@ -286,14 +292,42 @@ export async function buildContextPack(
       : {}),
   });
 
+  const naturalBytes = Buffer.byteLength(
+    allRendered.flatMap(section => section.lines).join("\n"),
+    "utf8",
+  );
+  const projectionCandidates: ContextProjectionCandidate[] =
+    opts.budgetBytes !== undefined && naturalBytes > opts.budgetBytes
+      ? [
+          makeReadDirectoryCountsProjection(
+            readMatches,
+            allRendered.find(section => section.name === "reads"),
+          ),
+          isLarge
+            ? makeRelatedDecisionCommitmentsProjection(
+                decisions,
+                declaredDecisions,
+                allRendered.find(section => section.name === "related_decisions"),
+              )
+            : null,
+        ].filter((candidate): candidate is ContextProjectionCandidate =>
+          candidate !== null,
+        )
+      : [];
+
   // Budget enforcement. When `budgetBytes` is set, elide sections
   // in `ELISION_ORDER` until the pack falls within budget; throw
   // `ContextOverBudgetError` if maximal elision still cannot meet it.
   // The no-budget path is byte-identical.
-  const budgetResult = applyBudgetElision(allRendered, opts.budgetBytes, {
-    isLarge,
-    isLargeWriteSurface,
-  });
+  const budgetResult = applyBudgetElision(
+    allRendered,
+    opts.budgetBytes,
+    {
+      isLarge,
+      isLargeWriteSurface,
+    },
+    projectionCandidates,
+  );
   const renderedSections = budgetResult.sections;
   const elidedNames = budgetResult.elidedNames;
   const elidedSectionsBytes = budgetResult.elidedBytes;

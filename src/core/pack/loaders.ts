@@ -19,9 +19,15 @@ import { Phase } from "../schemas/phase.ts";
 import { AgentProfile } from "../schemas/agent-profile.ts";
 import { type ProgressEvent } from "../schemas/progress-event.ts";
 import { parseFrontMatter } from "./front-matter.ts";
-import { readLiveDecisionDir, readLiveDecisionFile } from "../decisions/adr.ts";
+import {
+  classifyAdr,
+  parseAdrCommitments,
+  readLiveDecisionDir,
+  readLiveDecisionFile,
+} from "../decisions/adr.ts";
 import {
   type DecisionDoc,
+  type DecisionProjectionMetadata,
   type ReadGlobMatches,
   type RuleDoc,
 } from "./formatters/markdown.ts";
@@ -114,6 +120,28 @@ export async function loadRules(
 }
 
 // allDecisions=true returns every decision file (used for context_size: large)
+function decisionProjectionMetadata(
+  raw: string,
+): DecisionProjectionMetadata | undefined {
+  try {
+    const { acceptance } = classifyAdr(raw);
+    const commitments = parseAdrCommitments(raw);
+    if (
+      acceptance !== "accepted" ||
+      !commitments.hasSection ||
+      commitments.items.length === 0
+    ) {
+      return undefined;
+    }
+    return {
+      accepted: true,
+      commitments: commitments.items,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export async function loadDecisions(
   cwd: string,
   taskId: string,
@@ -149,7 +177,12 @@ export async function loadDecisions(
       continue; // unexpected read error — skip, same as before (optional source)
     }
     const { body } = parseFrontMatter(raw);
-    docs.push({ filename: entry, body });
+    const projection = decisionProjectionMetadata(raw);
+    docs.push({
+      filename: entry,
+      body,
+      ...(projection ? { projection } : {}),
+    });
   }
   return docs;
 }
@@ -216,7 +249,12 @@ export async function loadDeclaredDecisions(
       continue; // unexpected read error — skip (optional source)
     }
     const { body } = parseFrontMatter(raw);
-    docs.push({ filename: ref, body });
+    const projection = decisionProjectionMetadata(raw);
+    docs.push({
+      filename: ref,
+      body,
+      ...(projection ? { projection } : {}),
+    });
   }
   return docs;
 }

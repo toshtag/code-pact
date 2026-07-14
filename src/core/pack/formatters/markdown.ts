@@ -34,6 +34,15 @@ export type RuleDoc = {
 export type DecisionDoc = {
   filename: string;
   body: string;
+  projection?: DecisionProjectionMetadata;
+};
+
+export type DecisionProjectionMetadata = {
+  accepted: true;
+  commitments: {
+    text: string;
+    done: boolean;
+  }[];
 };
 
 function decisionHeading(filename: string): string {
@@ -62,6 +71,10 @@ export type ReadGlobMatches = {
   matches: string[];
 };
 
+export type ContextProjectionKind =
+  | "read_directory_counts"
+  | "decision_implementation_commitments";
+
 /**
  * Internal intermediate representation produced by `renderSections`.
  *
@@ -85,6 +98,177 @@ export type RenderedSection = {
   /** Lines that will be joined by `"\n"`. */
   lines: string[];
 };
+
+export type ContextProjectionCandidate = {
+  sectionName: "reads" | "related_decisions";
+  kind: ContextProjectionKind;
+  original: RenderedSection;
+  projected: RenderedSection;
+  originalBytes: number;
+  projectedBytes: number;
+};
+
+function renderedSectionBytes(section: RenderedSection): number {
+  return Buffer.byteLength(section.lines.join("\n"), "utf8");
+}
+
+function parentDirectory(path: string): string {
+  const lastSlash = path.lastIndexOf("/");
+  if (lastSlash === -1) return "./";
+  if (lastSlash === 0) return "/";
+  return `${path.slice(0, lastSlash)}/`;
+}
+
+function compareStablePath(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function groupReadMatchesByDirectory(matches: readonly string[]): Map<string, number> {
+  const uniqueMatches = [...new Set(matches)];
+  const groups = new Map<string, number>();
+  for (const match of uniqueMatches) {
+    const dir = parentDirectory(match);
+    groups.set(dir, (groups.get(dir) ?? 0) + 1);
+  }
+  return new Map([...groups.entries()].sort(([a], [b]) => compareStablePath(a, b)));
+}
+
+export function makeReadDirectoryCountsProjection(
+  readMatches: readonly ReadGlobMatches[],
+  original: RenderedSection | undefined,
+): ContextProjectionCandidate | null {
+  if (!original || original.name !== "reads" || readMatches.length === 0) {
+    return null;
+  }
+
+  const lines: string[] = [
+    `## Declared read surface`,
+    ``,
+    `This is a deterministic parent-directory count projection.`,
+    `The exact original file list is represented by Deferred Context and can be retrieved after materialization.`,
+    ``,
+  ];
+  let totalMatches = 0;
+  const allDirectories = new Set<string>();
+  for (const entry of readMatches) {
+    lines.push(`- \`${entry.glob}\``);
+    if (entry.matches.length === 0) {
+      lines.push(`  - _(no current matches on disk)_`);
+      continue;
+    }
+
+    const grouped = groupReadMatchesByDirectory(entry.matches);
+    const matchCount = [...grouped.values()].reduce((sum, count) => sum + count, 0);
+    if (matchCount !== new Set(entry.matches).size) return null;
+    totalMatches += matchCount;
+    for (const dir of grouped.keys()) allDirectories.add(dir);
+    lines.push(
+      `  - ${matchCount} ${matchCount === 1 ? "match" : "matches"} across ${grouped.size} ${grouped.size === 1 ? "directory" : "directories"}`,
+    );
+    for (const [dir, count] of grouped) {
+      lines.push(`  - \`${dir}\` — ${count} ${count === 1 ? "file" : "files"}`);
+    }
+  }
+  lines.push(``);
+
+  const originalBytes = renderedSectionBytes(original);
+  const projectedWithoutDetails: RenderedSection = {
+    name: "reads",
+    lines,
+  };
+  const projectedBytes = renderedSectionBytes(projectedWithoutDetails);
+  if (projectedBytes >= originalBytes) return null;
+
+  const projected: RenderedSection = {
+    ...projectedWithoutDetails,
+    details: {
+      projection_kind: "read_directory_counts",
+      original_bytes: originalBytes,
+      projected_bytes: projectedBytes,
+      saved_bytes: originalBytes - projectedBytes,
+      glob_count: readMatches.length,
+      match_count: totalMatches,
+      directory_count: allDirectories.size,
+    },
+  };
+
+  return {
+    sectionName: "reads",
+    kind: "read_directory_counts",
+    original,
+    projected,
+    originalBytes,
+    projectedBytes,
+  };
+}
+
+export function makeRelatedDecisionCommitmentsProjection(
+  decisions: readonly DecisionDoc[],
+  declaredDecisions: readonly DecisionDoc[] | undefined,
+  original: RenderedSection | undefined,
+): ContextProjectionCandidate | null {
+  if (!original || original.name !== "related_decisions") return null;
+  const declaredNames = new Set(
+    (declaredDecisions ?? []).map(decision => decision.filename),
+  );
+  const relatedDecisions = decisions.filter(
+    decision => !declaredNames.has(decision.filename),
+  );
+  const projectedDecisionCount = relatedDecisions.filter(
+    decision => decision.projection,
+  ).length;
+  if (relatedDecisions.length === 0 || projectedDecisionCount === 0) return null;
+
+  const projectionIntro =
+    "Accepted decisions with explicit implementation commitments are shown structurally. " +
+    "The exact original content is represented by Deferred Context and can be retrieved after materialization.";
+  const lines: string[] = [
+    `## Related Decisions`,
+    ``,
+    projectionIntro,
+  ];
+  for (const decision of relatedDecisions) {
+    lines.push(``, `### ${decisionHeading(decision.filename)}`, ``);
+    if (decision.projection) {
+      lines.push(`**Implementation commitments:**`, ``);
+      for (const item of decision.projection.commitments) {
+        lines.push(`- [${item.done ? "x" : " "}] ${item.text}`);
+      }
+    } else {
+      lines.push(decision.body.trim());
+    }
+  }
+  lines.push(``);
+
+  const originalBytes = renderedSectionBytes(original);
+  const projectedWithoutDetails: RenderedSection = {
+    name: "related_decisions",
+    lines,
+  };
+  const projectedBytes = renderedSectionBytes(projectedWithoutDetails);
+  if (projectedBytes >= originalBytes) return null;
+
+  const projected: RenderedSection = {
+    ...projectedWithoutDetails,
+    details: {
+      projection_kind: "decision_implementation_commitments",
+      original_bytes: originalBytes,
+      projected_bytes: projectedBytes,
+      saved_bytes: originalBytes - projectedBytes,
+      decision_count: relatedDecisions.length,
+      projected_decision_count: projectedDecisionCount,
+    },
+  };
+
+  return {
+    sectionName: "related_decisions",
+    kind: "decision_implementation_commitments",
+    original,
+    projected,
+    originalBytes,
+    projectedBytes,
+  };
+}
 
 /**
  * Build the structured sections that compose the rendered context

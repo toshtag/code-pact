@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { messages } from "../../../src/i18n/index.ts";
+import {
+  STRUCTURAL_PROJECTION_GUIDANCE_COMMON_ANCHORS,
+  STRUCTURAL_PROJECTION_GUIDANCE_VARIANTS,
+} from "../../../src/core/adapters/conformance-spec.ts";
 
 describe("agent contract failure guidance", () => {
   for (const locale of ["en-US", "ja-JP"] as const) {
@@ -84,6 +88,22 @@ describe("agent contract failure guidance", () => {
       expect(combined).not.toContain(
         "既存の `task prepare` / `recommend` 結果にある `data.recommendation.repairPolicy`",
       );
+    });
+
+    it(`${locale} documents structural projection consumption anchors`, () => {
+      const contextBody = messages[locale].templates.adapterCommon.agentContract
+        .contextCommandBody;
+
+      for (const anchor of STRUCTURAL_PROJECTION_GUIDANCE_COMMON_ANCHORS) {
+        expect(contextBody).toContain(anchor);
+      }
+      const variant = STRUCTURAL_PROJECTION_GUIDANCE_VARIANTS.find(
+        candidate => candidate.id === locale,
+      );
+      expect(variant).toBeDefined();
+      for (const anchor of variant!.anchors) {
+        expect(contextBody).toContain(anchor);
+      }
     });
   }
 });

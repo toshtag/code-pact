@@ -497,7 +497,7 @@ export const messages = {
         intro:
           "The canonical code-pact workflow has three axes. A conforming agent honors all three. See [`docs/cli-contract.md`](https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md) for the full envelope reference.",
         contextCommandBody:
-          "Use `data.commands.context` exactly as returned by `task prepare`. Do not reconstruct, widen, or replace the resolved context budget.",
+          "Use `data.commands.context` exactly as returned by `task prepare`. Do not reconstruct, widen, or replace the resolved context budget. Budgeted context may contain deterministic structural projections. Use the projected form first. Retrieve an exact original section only when a specific missing detail blocks the task and `data.deferred_context.retrieve_command` is non-null; otherwise do not construct a retrieval command from the manifest reference.",
         whenBody: [
           "Bootstrap once (CI-friendly, all non-interactive):",
           "",

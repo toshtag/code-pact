@@ -16,6 +16,8 @@ import {
   RECOMMENDATION_CONSUMPTION_ANCHORS,
   RECOMMENDATION_CONSUMPTION_FROM_VERSION,
   REQUIRED_FAILURE_GUIDANCE,
+  STRUCTURAL_PROJECTION_GUIDANCE_ANCHORS,
+  STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION,
 } from "../core/adapters/conformance-spec.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
@@ -209,6 +211,19 @@ export function resolveBoundedRepairSeverity(
     : "advisory";
 }
 
+/**
+ * Severity of the structural-projection guidance checks. This is separate from
+ * the bounded-repair gate so adapters generated before P54 remain advisory.
+ */
+export function resolveStructuralProjectionSeverity(
+  generatorVersion: string | undefined,
+): ConformanceSeverity {
+  if (!generatorVersion) return "advisory";
+  return gteVersion(generatorVersion, STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION)
+    ? "required"
+    : "advisory";
+}
+
 /** Every `anchor` substring is present in the instruction body. */
 export function checkConsumptionAnchors(
   content: string,
@@ -219,6 +234,62 @@ export function checkConsumptionAnchors(
     ok: missing.length === 0,
     details: { anchors: [...anchors], missing },
   };
+}
+
+export function checkLocalizedGuidanceAnchors(
+  content: string,
+  commonAnchors: ReadonlyArray<string>,
+  variants: ReadonlyArray<{ id: string; anchors: ReadonlyArray<string> }>,
+): HardeningCheckResult {
+  const missingCommon = commonAnchors.filter(a => !content.includes(a));
+  const variantDetails = variants.map(variant => ({
+    id: variant.id,
+    anchors: [...variant.anchors],
+    missing: variant.anchors.filter(anchor => !content.includes(anchor)),
+  }));
+  const matchedVariant =
+    missingCommon.length === 0
+      ? variantDetails.find(variant => variant.missing.length === 0)?.id ?? null
+      : null;
+  const bestVariant = variantDetails.reduce<
+    (typeof variantDetails)[number] | undefined
+  >((best, variant) => {
+    if (!best) return variant;
+    return variant.missing.length < best.missing.length ? variant : best;
+  }, undefined);
+  const selectedVariant =
+    variantDetails.find(variant => variant.id === matchedVariant) ?? bestVariant;
+  const anchors = dedupePreservingOrder([
+    ...commonAnchors,
+    ...(selectedVariant?.anchors ?? []),
+  ]);
+  const missing =
+    matchedVariant === null
+      ? [...missingCommon, ...(bestVariant?.missing ?? [])]
+      : missingCommon;
+
+  return {
+    ok: missingCommon.length === 0 && matchedVariant !== null,
+    details: {
+      anchors,
+      common_anchors: [...commonAnchors],
+      missing_common: missingCommon,
+      matched_variant: matchedVariant,
+      variants: variantDetails,
+      missing,
+    },
+  };
+}
+
+function dedupePreservingOrder(values: ReadonlyArray<string>): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const value of values) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    deduped.push(value);
+  }
+  return deduped;
 }
 
 /**
@@ -564,6 +635,43 @@ export async function runAdapterConformance(
           instructionEntry.path,
           { ...result.details, remediation },
           boundedRepairSeverity,
+        ),
+      );
+    }
+  }
+
+  // ----- structural projection guidance -----
+  // Gated on its own threshold. The guidance is about agent consumption of
+  // budgeted projected packs, not about adapter lifecycle mechanics.
+  const structuralProjectionSeverity = resolveStructuralProjectionSeverity(
+    manifest.generator_version,
+  );
+  for (const {
+    id,
+    commonAnchors,
+    variants,
+  } of STRUCTURAL_PROJECTION_GUIDANCE_ANCHORS) {
+    const result = checkLocalizedGuidanceAnchors(
+      instructionContent,
+      commonAnchors,
+      variants,
+    );
+    if (result.ok) {
+      checks.push(
+        pass(
+          id,
+          instructionEntry.path,
+          result.details,
+          structuralProjectionSeverity,
+        ),
+      );
+    } else {
+      checks.push(
+        fail(
+          id,
+          instructionEntry.path,
+          { ...result.details, remediation },
+          structuralProjectionSeverity,
         ),
       );
     }

@@ -521,7 +521,7 @@ export const messages = {
         intro:
           "code-pact の正規ワークフローには 3 つの軸があります。準拠するエージェントは 3 軸すべてを尊重します。完全な envelope 仕様は [`docs/cli-contract.md`](https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md) を参照してください。",
         contextCommandBody:
-          "`task prepare` が返した `data.commands.context` をそのまま使ってください。解決済み context budget を再構築したり、広げたり、置き換えたりしないでください。",
+          "`task prepare` が返した `data.commands.context` をそのまま使ってください。解決済み context budget を再構築したり、広げたり、置き換えたりしないでください。budget 付き context には決定論的な構造 projection が含まれる場合があります。まず projected form を使用してください。具体的な不足が作業を妨げ、かつ `data.deferred_context.retrieve_command` が non-null の場合だけ正確な原文 section を取得してください。`null` の場合は manifest reference から取得 command を組み立てないでください。",
         whenBody: [
           "プロジェクト初期化（CI / 非対話可）:",
           "",
