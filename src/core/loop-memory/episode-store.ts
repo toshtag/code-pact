@@ -2,6 +2,7 @@ import { atomicCreateTextExclusive } from "../../io/atomic-text.ts";
 import {
   listOwnedDirents,
   readOwnedText,
+  statOwned,
   unlinkOwned,
 } from "../project-fs/index.ts";
 import {
@@ -18,6 +19,7 @@ import {
 import {
   parseLoopMemoryEpisode,
   safeParseLoopMemoryEpisode,
+  MAX_EPISODE_BYTES,
   type LoopMemoryEpisode,
 } from "./episode-schema.ts";
 import { loopMemoryConflict, loopMemoryInvalid } from "./memory-errors.ts";
@@ -31,7 +33,14 @@ export type StoredLoopMemoryEpisode = {
 
 export type CorruptLoopMemoryEpisode = {
   filename: string;
-  reason: "invalid_filename" | "read_failed" | "invalid_json" | "schema_invalid";
+  reason:
+    | "invalid_filename"
+    | "read_failed"
+    | "oversized"
+    | "invalid_json"
+    | "schema_invalid"
+    | "identity_mismatch";
+  bytes?: number;
   system_code?: string;
 };
 
@@ -89,6 +98,11 @@ export async function scanLoopMemoryEpisodes(cwd: string): Promise<LoopMemorySca
     let raw: string;
     try {
       const readPath = await resolveLoopMemoryEpisodeReadPath(cwd, filename);
+      const stats = await statOwned(readPath);
+      if (stats.size > MAX_EPISODE_BYTES) {
+        corrupt.push({ filename, reason: "oversized", bytes: stats.size });
+        continue;
+      }
       raw = await readOwnedText(readPath);
     } catch (error) {
       corrupt.push({
@@ -118,6 +132,10 @@ export async function scanLoopMemoryEpisodes(cwd: string): Promise<LoopMemorySca
       corrupt.push({ filename, reason: "schema_invalid" });
       continue;
     }
+    if (loopMemoryEpisodeFilename(parsed.data) !== filename) {
+      corrupt.push({ filename, reason: "identity_mismatch" });
+      continue;
+    }
 
     episodes.push({
       filename,
@@ -136,9 +154,15 @@ export function compareStoredEpisodes(
   a: StoredLoopMemoryEpisode,
   b: StoredLoopMemoryEpisode,
 ): number {
-  const recorded = a.episode.recorded_at.localeCompare(b.episode.recorded_at);
+  const recorded = asciiCompare(a.episode.recorded_at, b.episode.recorded_at);
   if (recorded !== 0) return recorded;
-  return a.filename.localeCompare(b.filename);
+  return asciiCompare(a.filename, b.filename);
+}
+
+function asciiCompare(a: string, b: string): number {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
 }
 
 export async function deleteStoredLoopMemoryEpisode(

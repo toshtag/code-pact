@@ -15,6 +15,7 @@ export type LoopMemoryStatus = {
   over_task_limit_count: number;
   over_fingerprint_limit_count: number;
   corrupt_count: number;
+  corrupt_bytes: number;
 };
 
 function minMaxRecordedAt(episodes: StoredLoopMemoryEpisode[]): {
@@ -61,5 +62,6 @@ export async function loopMemoryStatus(
     over_task_limit_count: removeByReason.get("over_task_limit") ?? 0,
     over_fingerprint_limit_count: removeByReason.get("over_fingerprint_limit") ?? 0,
     corrupt_count: scan.corrupt.length,
+    corrupt_bytes: scan.corrupt.reduce((sum, episode) => sum + (episode.bytes ?? 0), 0),
   };
 }

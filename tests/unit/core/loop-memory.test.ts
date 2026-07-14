@@ -24,6 +24,7 @@ import {
   parseLoopMemoryEpisode,
 } from "../../../src/core/loop-memory/episode-schema.ts";
 import {
+  loopMemoryEpisodeFilename,
   utcBasicTimestamp,
 } from "../../../src/core/loop-memory/episode-id.ts";
 import {
@@ -75,7 +76,6 @@ function episode(
       failure_fingerprint: `sha256:${"a".repeat(64)}`,
       failed_check: "commands",
       failed_command: "pnpm test:unit",
-      evidence_ref: `evidence:sha256:${"b".repeat(64)}`,
     },
   };
   return {
@@ -145,7 +145,7 @@ describe("loop memory episode schema", () => {
     ).toThrow();
   });
 
-  it("rejects oversized commands, absolute paths, and oversized episodes", () => {
+  it("rejects oversized commands, absolute paths, evidence_ref, and oversized episodes", () => {
     expect(() =>
       LoopMemoryEpisodeSchema.parse(
         episode({ verification: { failed_command: "x".repeat(513) } }),
@@ -156,17 +156,48 @@ describe("loop memory episode schema", () => {
         episode({ verification: { failed_command: "node /tmp/outside.js" } }),
       ),
     ).toThrow();
+    for (const command of [
+      "--config=/tmp/config.json",
+      'node "/tmp/script.js"',
+      "--path=C:\\work\\file.ts",
+      "--path=C:/work/file.ts",
+      "\\\\server\\share\\file",
+      "//server/share/file",
+    ]) {
+      expect(() =>
+        LoopMemoryEpisodeSchema.parse(
+          episode({ verification: { failed_command: command } }),
+        ),
+      ).toThrow();
+    }
+    expect(() =>
+      LoopMemoryEpisodeSchema.parse({
+        ...episode(),
+        verification: {
+          ...episode().verification,
+          evidence_ref: `evidence:sha256:${"b".repeat(64)}`,
+        },
+      }),
+    ).toThrow();
 
     const huge = episode({
       verification: {
         failed_command: "x".repeat(512),
         failed_check: "y".repeat(128),
         failure_fingerprint: `sha256:${"c".repeat(64)}`,
-        evidence_ref: `evidence:sha256:${"d".repeat(64)}`,
       },
       task: { task_id: "T".repeat(MAX_EPISODE_BYTES) },
     });
     expect(() => parseLoopMemoryEpisode(huge)).toThrow(/exceeds/);
+  });
+
+  it("accepts only canonical UTC recorded_at timestamps", () => {
+    expect(LoopMemoryEpisodeSchema.parse(episode({}, "2026-07-14T12:01:02.345Z")).recorded_at).toBe(
+      "2026-07-14T12:01:02.345Z",
+    );
+    expect(() =>
+      LoopMemoryEpisodeSchema.parse(episode({}, "2026-07-14T12:01:02.345+09:00")),
+    ).toThrow();
   });
 });
 
@@ -198,9 +229,13 @@ describe("loop memory store", () => {
     );
   });
 
-  it("isolates malformed, non-canonical, and unsafe files during scan", async () => {
+  it("isolates malformed, oversized, non-canonical, identity-mismatched, and unsafe files during scan", async () => {
     const stored = await storeLoopMemoryEpisode(dir, episode());
     await writeRawEpisode("not-an-episode.json", "{}");
+    await writeRawEpisode(
+      `${utcBasicTimestamp(new Date("2026-07-14T12:01:02.346Z"))}-aaaaaaaaaaaaaaaa.json`,
+      "{".padEnd(MAX_EPISODE_BYTES + 1, "x"),
+    );
     await writeRawEpisode(
       `${utcBasicTimestamp(new Date("2026-07-14T12:01:03.345Z"))}-1111111111111111.json`,
       "{bad",
@@ -209,14 +244,42 @@ describe("loop memory store", () => {
       `${utcBasicTimestamp(new Date("2026-07-14T12:01:04.345Z"))}-2222222222222222.json`,
       JSON.stringify(episode({}, "2026-07-14T12:01:04.345Z")),
     );
+    await writeRawEpisode(
+      `${utcBasicTimestamp(new Date("2026-07-14T12:01:05.345Z"))}-3333333333333333.json`,
+      canonicalJson(episode({}, "2026-07-14T12:01:05.345Z")),
+    );
 
     const scan = await scanLoopMemoryEpisodes(dir);
     expect(scan.episodes.map(e => e.filename)).toEqual([stored.filename]);
     expect(scan.corrupt.map(c => c.reason).sort()).toEqual([
+      "identity_mismatch",
       "invalid_filename",
       "invalid_json",
+      "oversized",
       "schema_invalid",
     ]);
+    expect(scan.corrupt.find(c => c.reason === "oversized")?.bytes).toBeGreaterThan(
+      MAX_EPISODE_BYTES,
+    );
+  });
+
+  it("treats a valid episode renamed to another valid filename as identity mismatch", async () => {
+    const source = episode({}, "2026-07-14T12:01:05.345Z");
+    await writeRawEpisode(
+      `${utcBasicTimestamp(new Date("2026-07-14T12:01:05.345Z"))}-3333333333333333.json`,
+      canonicalJson(source),
+    );
+
+    const scan = await scanLoopMemoryEpisodes(dir);
+
+    expect(scan.episodes).toHaveLength(0);
+    expect(scan.corrupt).toEqual([
+      {
+        filename: `${utcBasicTimestamp(new Date("2026-07-14T12:01:05.345Z"))}-3333333333333333.json`,
+        reason: "identity_mismatch",
+      },
+    ]);
+    expect(loopMemoryEpisodeFilename(source)).not.toBe(scan.corrupt[0]!.filename);
   });
 
   it("rejects cache root and episode directory symlinks before writing outside project", async () => {

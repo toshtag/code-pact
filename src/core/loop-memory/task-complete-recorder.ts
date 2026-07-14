@@ -13,6 +13,7 @@ import {
 import { storeLoopMemoryEpisode } from "./episode-store.ts";
 import { planLoopMemoryRetention, applyLoopMemoryRetention } from "./retention.ts";
 import { scanLoopMemoryEpisodes } from "./episode-store.ts";
+import { containsAbsolutePathLike } from "./path-safety.ts";
 
 export type LoopMemoryWarning = {
   code: "LOCAL_MEMORY_WRITE_SKIPPED";
@@ -38,14 +39,10 @@ function utf8Bytes(value: string): number {
   return Buffer.byteLength(value, "utf8");
 }
 
-function containsAbsolutePath(value: string): boolean {
-  return /(^|\s)\/[^\s]+/.test(value) || /(^|\s)[A-Za-z]:[\\/][^\s]+/.test(value);
-}
-
 function safeBounded(value: string | undefined, maxBytes: number): string | undefined {
   if (value === undefined) return undefined;
   if (utf8Bytes(value) > maxBytes) return undefined;
-  if (containsAbsolutePath(value)) return undefined;
+  if (containsAbsolutePathLike(value)) return undefined;
   return value;
 }
 

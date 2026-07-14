@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { canonicalJson } from "../content-addressed-store/canonical-json.ts";
-import { EVIDENCE_REF_PATTERN } from "../evidence/evidence-ref.ts";
 import { loopMemoryInvalid } from "./memory-errors.ts";
+import { containsAbsolutePathLike } from "./path-safety.ts";
 
 export const MAX_EPISODE_BYTES = 8 * 1024;
 export const MAX_FAILED_COMMAND_BYTES = 512;
@@ -36,10 +36,6 @@ function utf8Bytes(value: string): number {
   return Buffer.byteLength(value, "utf8");
 }
 
-function containsAbsolutePath(value: string): boolean {
-  return /(^|\s)\/[^\s]+/.test(value) || /(^|\s)[A-Za-z]:[\\/][^\s]+/.test(value);
-}
-
 function boundedString(maxBytes: number) {
   return z.string().superRefine((value, ctx) => {
     if (utf8Bytes(value) > maxBytes) {
@@ -48,7 +44,7 @@ function boundedString(maxBytes: number) {
         message: `string exceeds ${maxBytes} UTF-8 bytes`,
       });
     }
-    if (containsAbsolutePath(value)) {
+    if (containsAbsolutePathLike(value)) {
       ctx.addIssue({
         code: "custom",
         message: "absolute paths are not allowed in loop-memory episodes",
@@ -63,14 +59,12 @@ const Verification = z.strictObject({
   failure_fingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/).optional(),
   failed_check: boundedString(MAX_FAILED_CHECK_BYTES).optional(),
   failed_command: boundedString(MAX_FAILED_COMMAND_BYTES).optional(),
-  evidence_ref: z.string().regex(EVIDENCE_REF_PATTERN).optional(),
 }).superRefine((value, ctx) => {
   const failureFields = [
     "failure_kind",
     "failure_fingerprint",
     "failed_check",
     "failed_command",
-    "evidence_ref",
   ] as const;
 
   if (value.ok) {
@@ -94,7 +88,10 @@ const Verification = z.strictObject({
 
 export const LoopMemoryEpisodeSchema = z.strictObject({
   schema_version: z.literal(1),
-  recorded_at: z.string().datetime({ offset: true }),
+  recorded_at: z.string().regex(
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+    "recorded_at must be Date.prototype.toISOString() UTC format",
+  ),
   kind: z.enum(["verification_failed", "verification_passed"]),
   task: z.strictObject({
     phase_id: z.string().min(1),

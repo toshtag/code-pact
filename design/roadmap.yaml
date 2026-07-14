@@ -158,3 +158,6 @@ phases:
   - id: P55
     path: design/phases/P55-stable-core-task-delta.yaml
     weight: 7
+  - id: P58A
+    path: design/phases/P58A-local-loop-memory-hardening.yaml
+    weight: 4
