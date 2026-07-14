@@ -22,7 +22,6 @@ identifiers. Starting with v1.0.0, stable releases use plain
 ### Fixed
 
 - **Closed recommended context budget contract gaps.** `task prepare` now reuses the already validated agent profile for context-pack output, unsupported commands reject the prepare-only budget flag instead of ignoring it, and integration coverage executes the emitted context command to prove reproducibility.
-- **Kept recommended budget validation scoped.** Removed an unrelated integration-test runtime override and completed recommended-context-budget validation with regenerated local adapter output and stale derived-context cleanup.
 
 ## [2.3.0] — 2026-07-13
 
