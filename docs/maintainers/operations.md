@@ -373,6 +373,42 @@ code-pact plan analyze --json
 
 If any of the three fails, fix the underlying issue (or run `plan normalize --write`) before declaring a phase done.
 
+### Bugfix regression evidence (P57)
+
+When planning an active `type: bugfix` task, declare the regression artifact in
+the plan instead of relying on the verification command alone.
+
+Use `writes` for a new artifact the task will add or change:
+
+```yaml
+tasks:
+  - id: P9-T4
+    type: bugfix
+    writes:
+      - src/session.ts
+      - tests/session-expiry.test.ts
+```
+
+Use `acceptance_refs` for an existing artifact that already covers the
+regression:
+
+```yaml
+tasks:
+  - id: P9-T5
+    type: bugfix
+    writes:
+      - src/session.ts
+    acceptance_refs:
+      - tests/session-expiry.test.ts
+```
+
+`plan lint --include-quality --json` emits
+`TASK_REGRESSION_EVIDENCE_MISSING` when an active bugfix declares neither. The
+warning is advisory (`affects_exit: false`) and stays advisory under `--strict`.
+It is deliberately static: it checks path declarations only, does not inspect
+test quality, and does not treat manual tests, screenshots, logs, PR prose, or a
+passing verification command as regression evidence.
+
 ### Release prep uses strict-clean dogfood checks (v1.5.1+ guidance)
 
 `plan lint --strict` promotes every warning to exit-relevant — including `TASK_WRITES_PROTECTED_PATH` advisories. As of v1.5.1, this repo's dogfood corpus is expected to be strict-clean; completed historical meta-design tasks do not keep protected design YAML writes declared solely to prove the advisory exists.

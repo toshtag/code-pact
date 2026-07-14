@@ -402,8 +402,29 @@ The verbs in detail:
   Accepted evidence forms are tests, fixtures, and reproduction
   artifacts. A passing command, manual test, screenshot, log, comment,
   PR description, or Failure Capsule is useful context, but it is not a
-  static regression-evidence declaration by itself. In the user-facing
-  completion summary, list the path(s) briefly:
+  static regression-evidence declaration by itself.
+
+  Examples that count:
+
+  ```yaml
+  writes:
+    - src/parser/reproductions/missing-token.md
+    - src/parser/__tests__/missing-token.test.ts
+  acceptance_refs:
+    - fixtures/parser/missing-token.json
+  ```
+
+  Examples that do not count:
+
+  ```yaml
+  writes:
+    - src/parser/**
+  acceptance_refs:
+    - docs/reproduction.md
+    - https://example.test/issue/123
+  ```
+
+  In the user-facing completion summary, list the path(s) briefly:
 
   ```text
   Regression evidence:

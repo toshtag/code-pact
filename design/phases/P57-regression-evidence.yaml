@@ -101,7 +101,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: Document regression evidence examples in maintainer and
       agent-facing guidance.
     depends_on:
