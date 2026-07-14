@@ -63,6 +63,10 @@ async function setupTask(
 }
 
 const FORCING_READ_MARKER = "p53-forcing-read-marker";
+const contextProjectionFixtureDir = new URL(
+  "../fixtures/context-projection/",
+  import.meta.url,
+).pathname;
 
 async function forceTaskBudgetDeferral(
   project: Awaited<ReturnType<typeof createTempProject>>,
@@ -293,8 +297,15 @@ describe("task prepare --context-budget (P47)", () => {
     expect(env.data.deferred_context).toMatchObject({ persisted: true });
 
     const preparedContent = await readFile(env.data.context_pack_path, "utf8");
-    expect(preparedContent).toContain(`- \`docs/${FORCING_READ_MARKER}/**\``);
-    expect(preparedContent).toContain("matches across 1 directory");
+    const expectedReadProjection = await readFile(
+      join(
+        contextProjectionFixtureDir,
+        "large-read-list",
+        "expected-projected-snippet.md",
+      ),
+      "utf8",
+    );
+    expect(preparedContent).toContain(expectedReadProjection.trim());
     expect(preparedContent).not.toContain(`entry-0000-${FORCING_READ_MARKER}.md`);
     expect(preparedContent).toContain(env.data.deferred_context.manifest_ref);
 

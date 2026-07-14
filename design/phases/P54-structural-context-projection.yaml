@@ -129,7 +129,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: Add fixed fixtures for projection bytes and deferred reference retrieval.
     depends_on:
       - P54-T2
@@ -138,6 +138,7 @@ tasks:
       - tests/fixtures/**
       - tests/integration/task-context-budget.test.ts
     writes:
+      - design/phases/P54-structural-context-projection.yaml
       - tests/fixtures/context-projection/**
       - tests/integration/task-context-budget.test.ts
       - tests/unit/core/pack-core.test.ts

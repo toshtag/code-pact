@@ -21,6 +21,10 @@ import { loadContextManifestArtifact } from "../../../src/core/context-deferral/
 import { __setAtomicWriteFailAfterOpenForTests } from "../../../src/io/atomic-text.ts";
 
 const fixtureDir = new URL("../../../tests/fixtures/project-a", import.meta.url).pathname;
+const contextProjectionFixtureDir = new URL(
+  "../../../tests/fixtures/context-projection/",
+  import.meta.url,
+).pathname;
 
 async function exists(p: string): Promise<boolean> {
   try {
@@ -127,40 +131,29 @@ describe("buildContextPack — decision projection", () => {
   it("projects large related decisions while preserving declared decision bodies", async () => {
     const relatedMarker = "RELATED-DECISION-BODY-MARKER";
     const declaredMarker = "DECLARED-DECISION-BODY-MARKER";
+    const relatedFixture = await readFile(
+      join(contextProjectionFixtureDir, "large-accepted-decisions", "related.md"),
+      "utf8",
+    );
+    const declaredFixture = await readFile(
+      join(contextProjectionFixtureDir, "large-accepted-decisions", "declared.md"),
+      "utf8",
+    );
+    const expectedProjection = await readFile(
+      join(
+        contextProjectionFixtureDir,
+        "large-accepted-decisions",
+        "expected-projected-snippet.md",
+      ),
+      "utf8",
+    );
     await writeFile(
       join(workDir, "design", "decisions", "zzz-related-projection.md"),
-      [
-        "# Related",
-        "",
-        "**Status:** accepted",
-        "",
-        "## Implementation commitments",
-        "",
-        "- [ ] Keep the public command stable",
-        "- [x] Add regression coverage",
-        "",
-        "## Detail",
-        "",
-        relatedMarker.repeat(500),
-        "",
-      ].join("\n"),
+      relatedFixture.replace(relatedMarker, relatedMarker.repeat(500)),
     );
     await writeFile(
       join(workDir, "design", "decisions", "declared-projection.md"),
-      [
-        "# Declared",
-        "",
-        "**Status:** accepted",
-        "",
-        "## Implementation commitments",
-        "",
-        "- [ ] This must not be projected",
-        "",
-        "## Detail",
-        "",
-        declaredMarker.repeat(200),
-        "",
-      ].join("\n"),
+      declaredFixture.replace(declaredMarker, declaredMarker.repeat(200)),
     );
     await updateP2Task({
       context_size: "large",
@@ -187,8 +180,7 @@ describe("buildContextPack — decision projection", () => {
     expect(pack.content).toContain(
       "Accepted decisions with explicit implementation commitments",
     );
-    expect(pack.content).toContain("- [ ] Keep the public command stable");
-    expect(pack.content).toContain("- [x] Add regression coverage");
+    expect(pack.content).toContain(expectedProjection.trim());
     expect(pack.content).not.toContain(relatedMarker);
     expect(pack.content).toContain(declaredMarker);
     expect(pack.explainMetrics?.elidedSections.map(section => section.name)).not.toContain(
