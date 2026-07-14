@@ -3,7 +3,7 @@ name: Structural Context Projection
 weight: 7
 confidence: medium
 risk: medium
-status: in_progress
+status: done
 objective: >
   Add deterministic, content-type-aware context projections that reduce context
   size only where the structure is safe to preserve mechanically.
@@ -150,7 +150,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       Correct projection-plan comparison, make directory ordering locale
       independent, and complete projection-aware agent guidance.
@@ -160,9 +160,12 @@ tasks:
       - src/core/pack/budget.ts
       - src/core/pack/formatters/markdown.ts
       - src/core/context-deferral/deferred-section.ts
+      - design/phases/P54-structural-context-projection.yaml
       - src/i18n/en-US.ts
       - src/i18n/ja-JP.ts
+      - src/commands/adapter-conformance.ts
       - src/core/adapters/conformance-spec.ts
+      - tests/fixtures/context-projection/large-read-list/expected-projected-snippet.md
       - tests/unit/core/pack/budget.test.ts
       - tests/unit/core/pack/loaders.test.ts
       - tests/integration/task-context-budget.test.ts
@@ -171,12 +174,15 @@ tasks:
       - tests/integration/adapter-conformance.test.ts
       - CHANGELOG.md
     writes:
+      - design/phases/P54-structural-context-projection.yaml
       - src/core/pack/budget.ts
       - src/core/pack/formatters/markdown.ts
       - src/core/context-deferral/deferred-section.ts
       - src/i18n/en-US.ts
       - src/i18n/ja-JP.ts
+      - src/commands/adapter-conformance.ts
       - src/core/adapters/conformance-spec.ts
+      - tests/fixtures/context-projection/large-read-list/expected-projected-snippet.md
       - tests/unit/core/pack/budget.test.ts
       - tests/unit/core/pack/loaders.test.ts
       - tests/integration/task-context-budget.test.ts
