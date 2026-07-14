@@ -3,7 +3,7 @@ name: Regression Evidence
 weight: 5
 confidence: medium
 risk: medium
-status: planned
+status: done
 objective: >
   Surface static advisory guidance for bugfix tasks to declare regression
   evidence such as tests, fixtures, or reproduction artifacts.
