@@ -3,7 +3,7 @@ name: Regression Evidence
 weight: 5
 confidence: medium
 risk: medium
-status: in_progress
+status: done
 objective: >
   Surface static advisory guidance for bugfix tasks to declare regression
   evidence such as tests, fixtures, or reproduction artifacts.
@@ -126,9 +126,9 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
-    description: Reject directory-only regression evidence declarations and
-      require existing acceptance references to resolve to regular files.
+    status: done
+    description: Reject directory-only regression evidence declarations and require
+      existing acceptance references to resolve to regular files.
     depends_on:
       - P57-T3
     reads:
