@@ -731,6 +731,61 @@ describe("runTaskPrepare — task resolution errors", () => {
 });
 
 describe("runTaskPrepare — budget enforcement (P24)", () => {
+  it("normal prepare writes to the validated custom profile context_dir", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      AGENT_PROFILE_YAML.replace(
+        "context_dir: .context/claude-code",
+        "context_dir: .context/custom-prepare",
+      ),
+      "utf8",
+    );
+
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+
+    expect(result.context_pack_path).toBe(
+      join(dir, ".context", "custom-prepare", "P1-T1.md"),
+    );
+    expect(await fileExists(result.context_pack_path!)).toBe(true);
+    expect(await fileExists(join(dir, ".context", "claude-code", "P1-T1.md"))).toBe(
+      false,
+    );
+  });
+
+  it("normal recommended prepare writes to the same custom profile context_dir", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      `${AGENT_PROFILE_YAML.replace(
+        "context_dir: .context/claude-code",
+        "context_dir: .context/custom-recommended",
+      )}context_budget:\n  application_mode: recommended\n`,
+      "utf8",
+    );
+
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+
+    expect(result.applied_context_budget).toMatchObject({
+      source: "recommended_agent_profile",
+    });
+    expect(result.context_pack_path).toBe(
+      join(dir, ".context", "custom-recommended", "P1-T1.md"),
+    );
+    expect(await fileExists(result.context_pack_path!)).toBe(true);
+    expect(await fileExists(join(dir, ".context", "claude-code", "P1-T1.md"))).toBe(
+      false,
+    );
+  });
+
   it("respects --budget-bytes and returns post-elision context_pack_bytes", async () => {
     await setupProject(dir);
     const baseline = await runTaskPrepare({

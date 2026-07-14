@@ -442,7 +442,11 @@ export async function runTaskPrepare(
       };
     }
   } else {
-    const written = await writeContextPack(pack, { cwd, agentName });
+    const written = await writeContextPack(pack, {
+      cwd,
+      agentName,
+      profileContextDir: agentProfile.context_dir,
+    });
     contextPackPath = written.outputPath;
     if (pack.deferredContext) {
       deferredContext = {

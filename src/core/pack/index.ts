@@ -127,7 +127,14 @@ export type { DeferredContextProjection };
 export type WriteContextPackOptions = {
   cwd: string;
   agentName: string;
+  /** Explicit caller-selected output directory, e.g. `pack --output-dir`. */
   outputDir?: string;
+  /**
+   * Already validated profile-derived context directory. When provided,
+   * `writeContextPack` does not reload the agent profile and still resolves the
+   * final path through the `.context/**` authority boundary.
+   */
+  profileContextDir?: string;
 };
 
 export type WriteContextPackResult = {
@@ -395,13 +402,20 @@ export async function writeContextPack(
   pack: ContextPackResult,
   opts: WriteContextPackOptions,
 ): Promise<WriteContextPackResult> {
-  const { cwd, agentName, outputDir } = opts;
+  const { cwd, agentName, outputDir, profileContextDir } = opts;
+  if (outputDir !== undefined && profileContextDir !== undefined) {
+    const err = new Error(
+      "writeContextPack: outputDir and profileContextDir are mutually exclusive.",
+    );
+    (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw err;
+  }
+
   const pendingArtifact = assertDeferredPackMaterializationPair(pack);
   if (pendingArtifact) {
     await storeContextManifestArtifact(cwd, pendingArtifact);
   }
 
-  const profile = await loadAgentProfile(cwd, agentName);
   if (outputDir !== undefined) {
     // Explicit --output-dir: caller authority, not profile-derived.
     // Absolute paths are used as-is (explicit user choice, e.g. /tmp).
@@ -424,9 +438,11 @@ export async function writeContextPack(
   } else {
     // Profile-derived: constrained to .context/** + symlink-free resolution
     // on the FULL path (directory + filename).
+    const contextDir =
+      profileContextDir ?? (await loadAgentProfile(cwd, agentName))?.context_dir;
     const outputPath: OwnedWritePath = await resolveProfileContextOutputPath(
       cwd,
-      profile?.context_dir ?? `.context/${agentName}`,
+      contextDir ?? `.context/${agentName}`,
       pack.taskId,
     );
     await atomicWriteText(outputPath, pack.content);

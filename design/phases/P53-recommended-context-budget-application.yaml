@@ -3,7 +3,7 @@ name: Recommended Context Budget Application
 weight: 6
 confidence: medium
 risk: medium
-status: in_progress
+status: done
 objective: >
   Allow task preparation to apply the deterministic recommended context budget
   explicitly after reversible context deferral makes omitted context
@@ -176,7 +176,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Close the remaining recommended-context-budget contract gaps by reusing
       the already validated agent profile on the task-prepare write path,

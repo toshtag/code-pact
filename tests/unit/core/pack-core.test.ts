@@ -232,6 +232,72 @@ describe("writeContextPack — side effects", () => {
     expect(result.outputPath).toContain(join(".context", "custom"));
   });
 
+  it("uses a caller-provided profileContextDir without reloading the profile", async () => {
+    await rm(join(workDir, ".code-pact", "agent-profiles", "custom-agent.yaml"), {
+      force: true,
+    });
+    const pack = await buildContextPack({
+      cwd: workDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "custom-agent",
+    });
+
+    const result = await writeContextPack(pack, {
+      cwd: workDir,
+      agentName: "custom-agent",
+      profileContextDir: ".context/reused",
+    });
+
+    expect(result.outputPath).toBe(
+      join(workDir, ".context", "reused", "P2-E1-T1.md"),
+    );
+    expect(await readFile(result.outputPath, "utf8")).toBe(pack.content);
+    expect(await exists(join(workDir, ".context", "custom-agent"))).toBe(false);
+  });
+
+  it("prefers profileContextDir over a changed or invalid on-disk profile", async () => {
+    await mkdir(join(workDir, ".code-pact", "agent-profiles"), { recursive: true });
+    await writeFile(
+      join(workDir, ".code-pact", "agent-profiles", "custom-agent.yaml"),
+      `name: custom-agent\ninstruction_filename: /etc/passwd\ncontext_dir: .context/changed\nmodel_map: {}\n`,
+      "utf8",
+    );
+    const pack = await buildContextPack({
+      cwd: workDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "custom-agent",
+    });
+
+    const result = await writeContextPack(pack, {
+      cwd: workDir,
+      agentName: "custom-agent",
+      profileContextDir: ".context/validated",
+    });
+
+    expect(result.outputPath).toBe(
+      join(workDir, ".context", "validated", "P2-E1-T1.md"),
+    );
+    expect(await exists(join(workDir, ".context", "changed"))).toBe(false);
+  });
+
+  it("rejects outputDir and profileContextDir together before writing artifacts", async () => {
+    const pack = await buildBudgetedDeferredPack();
+
+    await expect(
+      writeContextPack(pack, {
+        cwd: workDir,
+        agentName: "claude-code",
+        outputDir: outDir,
+        profileContextDir: ".context/reused",
+      }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+
+    expect(await exists(artifactPath(pack.deferredContext!.manifest_ref))).toBe(false);
+    expect(await exists(join(outDir, `${pack.taskId}.md`))).toBe(false);
+  });
+
   it("materializes deferred artifacts before writing a budgeted pack directly", async () => {
     const pack = await buildBudgetedDeferredPack();
 

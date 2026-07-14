@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 
 export const repoRoot = resolve(fileURLToPath(import.meta.url), "../../..");
 export const cliPath = join(repoRoot, "dist", "cli.js");
+const cliRuntime = process.versions.bun ? "node" : process.execPath;
 
 export type RunResult = { code: number; stdout: string; stderr: string };
 
@@ -64,11 +65,12 @@ export function run(
       ? (envOrOpts as { env?: NodeJS.ProcessEnv; input?: string })
       : { env: envOrOpts as NodeJS.ProcessEnv | undefined };
 
-  const res = spawnSync(process.execPath, [cliPath, ...args], {
+  const res = spawnSync(cliRuntime, [cliPath, ...args], {
     cwd,
     encoding: "utf8",
     env: opts.env ? { ...process.env, ...opts.env } : process.env,
     input: opts.input,
+    maxBuffer: 10 * 1024 * 1024,
   });
   return {
     code: res.status ?? -1,

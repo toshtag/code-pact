@@ -17,6 +17,10 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 - **Added explicit recommended context budget application.** `task prepare` can now apply the same deterministic `recommendation.contextFit` budget via `--recommended-context-budget`, or through agent-profile opt-in with `context_budget.application_mode: recommended`. Applied budgets are reported as `applied_context_budget`, `commands.context` uses resolved `--budget-bytes <N>` for reproducibility, and no-flag legacy/manual profiles remain unbudgeted.
 
+### Fixed
+
+- **Closed recommended context budget contract gaps.** `task prepare` now reuses the already validated agent profile for context-pack output, unsupported commands reject the prepare-only budget flag instead of ignoring it, and integration coverage executes the emitted context command to prove reproducibility.
+
 ## [2.3.0] — 2026-07-13
 
 ### Added
