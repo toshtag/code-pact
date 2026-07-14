@@ -3806,6 +3806,16 @@ digest conflict and fails closed.
 
 **Committed vs ignored.** Everything `code-pact` writes under `.code-pact/` is _shared, version-controlled_ state **except** the machine-local / derived paths: `.code-pact/locks/` (advisory locks — pid/hostname) and `.code-pact/cache/` (reserved, derived). `init` adds exactly those two (plus `/.local/` and `/.context/`) to `.gitignore`; `project.yaml`, `agent-profiles/`, `model-profiles/`, `state/baselines/`, and the progress ledger are committed. **Adapter manifests are conditional:** commit `.code-pact/adapters/<agent>.manifest.yaml` **only together with** the adapter-owned generated files it lists (e.g. `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/skills/*`, `.cursor/**`) — a committed manifest whose managed files are absent fails `adapter doctor` with `ADAPTER_FILE_MISSING` on a clean checkout. A repo that treats adapter output as regenerated/ignored (as code-pact's own repo does) ignores the manifest too. (The progress ledger is **per-event files under `state/events/`** — collaboration-safe-state RFC, B1. The legacy single `state/progress.yaml`, if present, is still read and merged but no longer written. Both forms are committable; only the per-event form is merge-safe, so commit `state/events/**`.)
 
+**Local loop memory.** `.code-pact/cache/loop-memory/` is part of the ignored
+cache surface, not the shared control plane. It stores bounded, schema-validated
+task-loop episodes for later advisory use. It must not contain prompts,
+responses, model reasoning, source, diffs, stdout, stderr, or conversation
+content. It must not affect verification, decision gates, write audit, progress
+ledger writes, Evidence, Context artifacts, Failure Capsules, or normal
+successful CLI output. Removing the cache must leave the lifecycle behavior
+unchanged. P58 records episodes only; `task prepare`, `task context`, and
+`recommend` do not read loop memory or inject it into context.
+
 **An over-broad ignore defeats this policy — and `doctor` catches it.** `init` _merges_ its narrow entries into an existing `.gitignore` and **never deletes a user's lines**, so a pre-existing blanket `/.code-pact/` (or `.code-pact/`) rule — or a file-scoped one like `state/events/*.yaml` — survives and overrides them: the affected shared state is then silently never committed, and a teammate or clean checkout misses whatever is ignored (project config, profiles, baselines, or the ledger). **Only when the ledger itself is ignored** does the `CONTROL_PLANE_BRANCH_NOT_DRIVEN` CI gate _also_ skip (it has no tracked ledger to read). `init` surfaces this as a warning, and `doctor` reports it authoritatively as `CONTROL_PLANE_GITIGNORED` — it asks `git check-ignore --no-index` for a representative **file** in each shared area (`project.yaml`, `agent-profiles/`, `model-profiles/`, `state/baselines/`, `state/events/`), so a file-scoped rule is caught and negation re-includes are honoured. Neither edits your `.gitignore`; narrow the rule yourself — keep only `/.code-pact/locks/` and `/.code-pact/cache/` (plus `/.local/`, `/.context/`) ignored.
 
 ### Author attribution (Collaboration UX RFC, D1)
