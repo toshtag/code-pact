@@ -81,7 +81,11 @@ type LintJson = {
       severity: string;
       message: string;
       affects_exit?: boolean;
+      file?: string;
+      phase_id?: string;
+      task_id?: string;
       details?: Record<string, unknown>;
+      recovery?: Record<string, unknown>;
     }>;
   };
 };
@@ -252,6 +256,76 @@ tasks:
     // ...but it never promotes to a failure, even under --strict.
     expect(res.code).toBe(0);
     expect(parsed.ok).toBe(true);
+  });
+});
+
+describe("plan lint — TASK_REGRESSION_EVIDENCE_MISSING is advisory even under --strict (P57)", () => {
+  const ROADMAP =
+    `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`;
+  const BUGFIX_WITHOUT_EVIDENCE = `id: P1
+name: P1
+weight: 10
+confidence: medium
+risk: low
+status: planned
+objective: An objective long enough
+definition_of_done:
+  - DoD long enough to read
+verification:
+  commands:
+    - pnpm test
+tasks:
+  - id: P1-T1
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: fixes a regression
+    writes:
+      - src/session.ts
+`;
+
+  it("fires only with --include-quality and never promotes to failure", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", BUGFIX_WITHOUT_EVIDENCE);
+
+    const off = parseLint(run(["plan", "lint", "--strict", "--json"]).stdout);
+    expect(
+      off.data?.issues.some((i) => i.code === "TASK_REGRESSION_EVIDENCE_MISSING"),
+    ).toBe(false);
+
+    const res = run(["plan", "lint", "--include-quality", "--strict", "--json"]);
+    const parsed = parseLint(res.stdout);
+    const issue = parsed.data?.issues.find(
+      (i) => i.code === "TASK_REGRESSION_EVIDENCE_MISSING",
+    );
+
+    expect(res.code).toBe(0);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data?.advisories).toBe(1);
+    expect(issue).toMatchObject({
+      severity: "warning",
+      affects_exit: false,
+      file: "design/phases/P1.yaml",
+      phase_id: "P1",
+      task_id: "P1-T1",
+      details: {
+        accepted_sources: ["writes", "acceptance_refs"],
+        accepted_forms: ["test", "fixture", "reproduction"],
+        acceptance_refs_must_exist: true,
+      },
+      recovery: {
+        manual_action:
+          "Add a new test, fixture, or reproduction path to writes, or add an existing artifact path to acceptance_refs.",
+        confirm: "code-pact plan lint --include-quality --json",
+        reference:
+          "docs/concepts/task-readiness-fields.md#regression-evidence-for-bugfix-tasks",
+      },
+    });
   });
 });
 

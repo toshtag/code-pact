@@ -22,6 +22,7 @@ import {
   detectTaskAcceptanceRefNotFound,
 } from "./checks.ts";
 import { loadProtectedPaths } from "../rules/protected-paths.ts";
+import { projectPathPresence } from "./checks/fs.ts";
 import {
   makeDecisionResolver,
   classifyDecisionAdrs,
@@ -48,6 +49,15 @@ import type { ProgressEvent } from "../schemas/progress-event.ts";
 const WEAK_DOD_PATTERN = /\b(TODO|FIXME|tbd)\b/i;
 const WEAK_DOD_MIN_CHARS = 10;
 const PLACEHOLDER_VERIFICATION_PATTERN = /^\s*(echo|true|noop)\b/i;
+const REGRESSION_EVIDENCE_DIRECTORIES = new Set([
+  "tests",
+  "test",
+  "__tests__",
+  "spec",
+  "specs",
+  "fixtures",
+  "reproductions",
+]);
 
 // ADR_ACCEPTED_BODY_THIN fires only when an accepted ADR's substantive
 // body is below this AND the body has zero h2 headings. Calibrated against the
@@ -68,7 +78,8 @@ export type LintOptions = {
   /**
    * When true, runs opt-in quality/readiness advisories (WEAK_DOD,
    * PLACEHOLDER_VERIFICATION, TASK_DECISION_UNRESOLVED, PHASE_CONFIDENCE_LOW,
-   * TASK_DESCRIPTION_MISSING, and the Context Fit advisories
+   * TASK_DESCRIPTION_MISSING, TASK_REGRESSION_EVIDENCE_MISSING, and the
+   * Context Fit advisories
    * TASK_CONTEXT_PACK_LARGE, TASK_CONTEXT_BUDGET_UNACHIEVABLE,
    * TASK_DECLARED_DECISION_LARGE, TASK_READS_MATCH_TOO_MANY). Off by default so
    * the base lint stays lean; all of these advisories are `affects_exit:
@@ -170,6 +181,9 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
     issues.push(...(await detectAdrCommitmentsEmpty(opts.cwd, phases)));
     issues.push(...detectLowConfidencePhase(phases));
     issues.push(...detectMissingTaskDescription(phases));
+    issues.push(
+      ...(await detectMissingBugfixRegressionEvidence(opts.cwd, phases)),
+    );
     // Context Fit advisories. All `affects_exit: false`; they
     // reuse the explain metrics (natural / minimum-achievable floor) and
     // the budget mapping, read decision files, and expand reads globs —
@@ -635,6 +649,84 @@ function detectMissingTaskDescription(phases: PhaseEntry[]): PlanIssue[] {
           path: "description",
         });
       }
+    }
+  }
+  return issues;
+}
+
+function isSafeRegressionEvidencePath(path: string): boolean {
+  if (path.length === 0) return false;
+  if (path.includes("\0")) return false;
+  if (path.startsWith("/")) return false;
+  if (/^[A-Za-z]:/.test(path)) return false;
+  if (path.includes("\\")) return false;
+  const segments = path.split("/");
+  return segments.every((segment) =>
+    segment.length > 0 && segment !== "." && segment !== ".."
+  );
+}
+
+function matchesRegressionEvidenceFilename(filename: string): boolean {
+  if (/^.+\.test\..+$/.test(filename)) return true;
+  if (/^.+\.spec\..+$/.test(filename)) return true;
+  if (/^.+_test\..+$/.test(filename)) return true;
+  return /^test_.+\..+$/.test(filename);
+}
+
+function isRegressionEvidenceDeclaration(path: string): boolean {
+  if (!isSafeRegressionEvidencePath(path)) return false;
+  const segments = path.split("/");
+  if (segments.some((segment) => REGRESSION_EVIDENCE_DIRECTORIES.has(segment))) {
+    return true;
+  }
+  return matchesRegressionEvidenceFilename(segments[segments.length - 1] ?? "");
+}
+
+async function detectMissingBugfixRegressionEvidence(
+  cwd: string,
+  phases: PhaseEntry[],
+): Promise<PlanIssue[]> {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    for (const task of phase.tasks ?? []) {
+      if (task.type !== "bugfix") continue;
+      if (task.status !== "planned" && task.status !== "in_progress") continue;
+
+      const declaredNewEvidence =
+        task.writes?.some(isRegressionEvidenceDeclaration) === true;
+      if (declaredNewEvidence) continue;
+
+      let existingEvidence = false;
+      for (const acceptanceRef of task.acceptance_refs ?? []) {
+        if (!isRegressionEvidenceDeclaration(acceptanceRef)) continue;
+        if ((await projectPathPresence(cwd, acceptanceRef)) === "present") {
+          existingEvidence = true;
+          break;
+        }
+      }
+      if (existingEvidence) continue;
+
+      issues.push({
+        code: "TASK_REGRESSION_EVIDENCE_MISSING",
+        severity: "warning",
+        affects_exit: false,
+        message: `Task "${task.id}" is a bugfix but declares no static regression evidence. Add a new test, fixture, or reproduction artifact to writes, or reference an existing one from acceptance_refs.`,
+        file: ref.path,
+        phase_id: phase.id,
+        task_id: task.id,
+        details: {
+          accepted_sources: ["writes", "acceptance_refs"],
+          accepted_forms: ["test", "fixture", "reproduction"],
+          acceptance_refs_must_exist: true,
+        },
+        recovery: {
+          manual_action:
+            "Add a new test, fixture, or reproduction path to writes, or add an existing artifact path to acceptance_refs.",
+          confirm: "code-pact plan lint --include-quality --json",
+          reference:
+            "docs/concepts/task-readiness-fields.md#regression-evidence-for-bugfix-tasks",
+        },
+      });
     }
   }
   return issues;

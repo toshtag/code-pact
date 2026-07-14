@@ -75,7 +75,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: Surface a bugfix regression-evidence advisory through existing
       quality linting.
     depends_on:

@@ -199,6 +199,8 @@ const KNOWN_CODES: Record<
   TASK_CONTEXT_BUDGET_UNACHIEVABLE: "plan",
   TASK_DECLARED_DECISION_LARGE: "plan",
   TASK_READS_MATCH_TOO_MANY: "plan",
+  // P57 — active bugfix tasks should declare static regression evidence.
+  TASK_REGRESSION_EVIDENCE_MISSING: "plan",
 
   // Plan diagnostics added in P10 — Task Readiness Schema. All emitted
   // by `plan lint` against the new optional task fields declared in

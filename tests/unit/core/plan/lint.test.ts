@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runLint, detectAdrAcceptedBodyThin } from "../../../../src/core/plan/lint.ts";
@@ -410,6 +410,167 @@ ${taskLines.map((l) => `    ${l}`).join("\n")}
     expect(codes).not.toContain("TASK_DECISION_UNRESOLVED");
     expect(codes).not.toContain("PHASE_CONFIDENCE_LOW");
     expect(codes).not.toContain("TASK_DESCRIPTION_MISSING");
+  });
+});
+
+describe("runLint — bugfix regression evidence advisory (P57)", () => {
+  const ROADMAP =
+    `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`;
+
+  function bugfixPhase(
+    taskLines: string[] = [],
+    opts: { type?: string; status?: string } = {},
+  ): string {
+    return `id: P1
+name: P1
+weight: 10
+confidence: medium
+risk: low
+status: planned
+objective: An objective long enough
+definition_of_done:
+  - DoD that is clearly long enough to read
+verification:
+  commands:
+    - pnpm test
+tasks:
+  - id: P1-T1
+    type: ${opts.type ?? "bugfix"}
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: ${opts.status ?? "planned"}
+    description: Fixes the regression
+${taskLines.map((l) => `    ${l}`).join("\n")}
+`;
+  }
+
+  async function runBugfix(taskLines: string[] = []) {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", bugfixPhase(taskLines));
+    return runLint({ cwd, includeQuality: true });
+  }
+
+  function regressionIssues(result: Awaited<ReturnType<typeof runLint>>) {
+    return result.issues.filter(
+      (i) => i.code === "TASK_REGRESSION_EVIDENCE_MISSING",
+    );
+  }
+
+  it("does not run without --include-quality", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", bugfixPhase());
+    const result = await runLint({ cwd });
+    expect(regressionIssues(result)).toEqual([]);
+  });
+
+  it("emits one advisory for an active bugfix with no static evidence", async () => {
+    const result = await runBugfix(["writes:", "  - src/session.ts"]);
+    const issues = regressionIssues(result);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({
+      severity: "warning",
+      affects_exit: false,
+      file: "design/phases/P1.yaml",
+      phase_id: "P1",
+      task_id: "P1-T1",
+      details: {
+        accepted_sources: ["writes", "acceptance_refs"],
+        accepted_forms: ["test", "fixture", "reproduction"],
+        acceptance_refs_must_exist: true,
+      },
+      recovery: {
+        manual_action:
+          "Add a new test, fixture, or reproduction path to writes, or add an existing artifact path to acceptance_refs.",
+        confirm: "code-pact plan lint --include-quality --json",
+        reference:
+          "docs/concepts/task-readiness-fields.md#regression-evidence-for-bugfix-tasks",
+      },
+    });
+    expect(issues[0]?.path).toBeUndefined();
+  });
+
+  it("accepts new regression artifacts declared in writes without checking existence", async () => {
+    for (const evidencePath of [
+      "tests/session-expiry.test.ts",
+      "src/foo.spec.tsx",
+      "src/foo_test.py",
+      "src/test_foo.rb",
+      "src/**/fixtures/**",
+      "src/core/reproductions/session.md",
+    ]) {
+      const result = await runBugfix(["writes:", `  - ${evidencePath}`]);
+      expect(regressionIssues(result), evidencePath).toEqual([]);
+    }
+  });
+
+  it("accepts existing regression artifacts from acceptance_refs", async () => {
+    await mkdir(join(cwd, "tests"), { recursive: true });
+    await writeFile(join(cwd, "tests", "session-expiry.test.ts"), "", "utf8");
+
+    const result = await runBugfix([
+      "writes:",
+      "  - src/session.ts",
+      "acceptance_refs:",
+      "  - tests/session-expiry.test.ts",
+    ]);
+    expect(regressionIssues(result)).toEqual([]);
+  });
+
+  it("does not accept missing acceptance_refs even when they look like evidence", async () => {
+    const result = await runBugfix([
+      "acceptance_refs:",
+      "  - tests/missing-regression.test.ts",
+    ]);
+    expect(regressionIssues(result)).toHaveLength(1);
+  });
+
+  it("does not accept project-outside symlinks from acceptance_refs", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-"));
+    try {
+      await writeFile(join(outside, "escape.test.ts"), "", "utf8");
+      await symlink(outside, join(cwd, "tests"));
+      const result = await runBugfix([
+        "acceptance_refs:",
+        "  - tests/escape.test.ts",
+      ]);
+      expect(regressionIssues(result)).toHaveLength(1);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("does not accept unsafe or non-evidence-looking declarations", async () => {
+    for (const evidencePath of [
+      "/tests/foo.test.ts",
+      "C:/tests/foo.test.ts",
+      String.raw`tests\foo.test.ts`,
+      "tests/../foo.test.ts",
+      "src/foo.testdata.ts",
+      "src/contest_result.ts",
+      "src/test-utils.ts",
+      "src/**",
+      "docs/reproduction.md",
+      "test-data/foo.ts",
+    ]) {
+      const result = await runBugfix(["writes:", `  - ${evidencePath}`]);
+      expect(regressionIssues(result), evidencePath).toHaveLength(1);
+    }
+  });
+
+  it("skips non-bugfix, done, and cancelled tasks", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", bugfixPhase([], { type: "feature" }));
+    expect(regressionIssues(await runLint({ cwd, includeQuality: true }))).toEqual([]);
+
+    await writePhase("P1.yaml", bugfixPhase([], { status: "done" }));
+    expect(regressionIssues(await runLint({ cwd, includeQuality: true }))).toEqual([]);
+
+    await writePhase("P1.yaml", bugfixPhase([], { status: "cancelled" }));
+    expect(regressionIssues(await runLint({ cwd, includeQuality: true }))).toEqual([]);
   });
 });
 
