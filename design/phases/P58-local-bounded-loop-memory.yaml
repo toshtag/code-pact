@@ -3,7 +3,7 @@ name: Local Bounded Loop Memory
 weight: 6
 confidence: medium
 risk: medium
-status: planned
+status: done
 objective: >
   Record bounded, local task-loop episodes under the ignored cache so later
   phases can reduce repeated failure investigation without changing context
