@@ -13,6 +13,8 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [2.4.0] — 2026-07-14
+
 ### Added
 
 - **Added explicit recommended context budget application.** `task prepare` can now apply the same deterministic `recommendation.contextFit` budget via `--recommended-context-budget`, or through agent-profile opt-in with `context_budget.application_mode: recommended`. Applied budgets are reported as `applied_context_budget`, `commands.context` uses resolved `--budget-bytes <N>` for reproducibility, and no-flag legacy/manual profiles remain unbudgeted.
