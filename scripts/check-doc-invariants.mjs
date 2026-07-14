@@ -336,6 +336,23 @@ for (const rel of ["docs/getting-started.md"]) {
   }
 }
 
+// 13. Locale-safe structural projection conformance is a public JSON contract.
+//     Keep the adapter-conformance CLI docs synchronized with the check id,
+//     release gate, and details shape that agents/users consume.
+{
+  const CLI_CONTRACT = "docs/cli-contract.md";
+  const body = read(CLI_CONTRACT);
+  for (const anchor of [
+    "structural_projection_guidance_present",
+    "STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION",
+    "matched_variant",
+  ]) {
+    if (!body.includes(anchor)) {
+      fail(CLI_CONTRACT, `adapter conformance docs must mention \`${anchor}\``);
+    }
+  }
+}
+
 if (problems.length > 0) {
   console.error(`check-doc-invariants: ${problems.length} issue(s):`);
   for (const p of problems) console.error(`  - ${p}`);

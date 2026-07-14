@@ -1718,6 +1718,52 @@ Conformance is intentionally narrower than `adapter doctor` — it inspects only
         "file": "CLAUDE.md"
       },
       {
+        "id": "structural_projection_guidance_present",
+        "status": "pass",
+        "severity": "advisory",
+        "file": "CLAUDE.md",
+        "details": {
+          "anchors": [
+            "data.deferred_context.retrieve_command",
+            "deterministic structural projections",
+            "projected form first",
+            "specific missing detail",
+            "do not construct a retrieval command from the manifest reference"
+          ],
+          "common_anchors": ["data.deferred_context.retrieve_command"],
+          "missing_common": [],
+          "matched_variant": "en-US",
+          "variants": [
+            {
+              "id": "en-US",
+              "anchors": [
+                "deterministic structural projections",
+                "projected form first",
+                "specific missing detail",
+                "do not construct a retrieval command from the manifest reference"
+              ],
+              "missing": []
+            },
+            {
+              "id": "ja-JP",
+              "anchors": [
+                "決定論的な構造 projection",
+                "まず projected form を使用",
+                "具体的な不足",
+                "manifest reference から取得 command を組み立てない"
+              ],
+              "missing": [
+                "決定論的な構造 projection",
+                "まず projected form を使用",
+                "具体的な不足",
+                "manifest reference から取得 command を組み立てない"
+              ]
+            }
+          ],
+          "missing": []
+        }
+      },
+      {
         "id": "file_checksum_match",
         "status": "pass",
         "severity": "required",
@@ -1728,7 +1774,7 @@ Conformance is intentionally narrower than `adapter doctor` — it inspects only
 }
 ```
 
-Every check object carries a `severity` (`required` | `advisory`). The hardening, recommendation-consumption, and bounded-repair checks show `advisory` above because this example's manifest `generator_version` predates their thresholds; on an adapter generated at or after a group's threshold, that group's checks are `required`.
+Every check object carries a `severity` (`required` | `advisory`). The hardening, recommendation-consumption, bounded-repair, and structural-projection checks show `advisory` above because this example's manifest `generator_version` predates their thresholds; on an adapter generated at or after a group's threshold, that group's checks are `required`.
 
 #### Checks
 
@@ -1753,6 +1799,7 @@ Every check object carries a `severity` (`required` | `advisory`). The hardening
 | `bounded_repair_runtime_constraints_present` | The guidance requires the same model, effort, and context and uses the failure delta for the bounded attempt.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `bounded_repair_stop_guidance_present` | The guidance documents repeated-fingerprint stopping and allowed escalation after exhaustion.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `bounded_repair_nonretryable_guidance_present` | The guidance documents the closed nonretryable failure-kind list.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `structural_projection_guidance_present` | The guidance contains every common structural-projection anchor plus one complete locale variant (`en-US` or `ja-JP`). Incomplete combinations across multiple locales do not pass. The guidance must tell agents to use the projected form first, retrieve exact originals only for a concrete missing detail, and not construct a retrieval command from the manifest reference when `data.deferred_context.retrieve_command` is not non-null.                                                                                                                                                                                                                                                                                                           |
 | `file_checksum_match`                | One per manifest file: the on-disk LF-normalised UTF-8 sha256 equals the manifest's recorded value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `adapter_file_path_unowned`          | A manifest entry (the `role: instruction` file, or any `files[]` entry) names a path this adapter could not have generated, that resolves through a symlink, or whose declared role disagrees with the path's only legitimate static role. The target is NOT read — no `actual_sha256` and no contract-heading inspection are produced — so a forged manifest cannot turn conformance into a file-content/SHA oracle on arbitrary local files (e.g. `.env`). Read authority is the NARROW built-in path set (`ownedPathRoles`) with a matching declared role, NOT the broad create namespace — so a victim's hand-authored `.claude/skills/private.md` is refused too, and a role-swap (e.g. `CLAUDE.md` with `role: skill`) is `unowned` before any filesystem access. Always `required` severity (fail-closed). |
 | `file_checksum_skipped_unverifiable` | A manifest entry names a dynamically-generated skill in the shared `.claude/skills/` namespace (matches the role-scoped `createPathGlobsByRole` for role=skill but not the narrow read-authority set `ownedPathRoles`) and is not recorded as `ownership: handed_off`. Its name is attacker-influenceable, so read-ownership cannot be proven: the file is NOT read or checksummed. `advisory` severity. To regenerate, move or delete the file, then run `adapter upgrade <agent> --write`.                                                                                                                                                                                                                                                                              |
@@ -1782,6 +1829,11 @@ The bounded-repair checks
 `bounded_repair_nonretryable_guidance_present`) use
 `BOUNDED_REPAIR_GUIDANCE_FROM_VERSION`.
 
+The structural-projection guidance check
+(`structural_projection_guidance_present`) uses
+`STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION`. Missing guidance is advisory for
+`generator_version < 2.5.0`, and required for `generator_version >= 2.5.0`.
+
 For each group, adapters generated below the group's threshold, or with a
 missing or unparseable `generator_version`, report missing anchors as
 `advisory`. Adapters generated at or above the threshold report them as
@@ -1790,6 +1842,22 @@ older generated adapters non-compliant before those adapters are regenerated.
 
 Dynamic read-authority checks that cannot prove a safe byte read remain
 always advisory. All other checks are required.
+
+#### Structural projection details
+
+`structural_projection_guidance_present.details` is stable in JSON output:
+
+- `anchors`: the flattened anchor list used for the selected comparison. On
+  pass this is the common anchors plus the matched locale variant. On failure it
+  is the common anchors plus the locale variant with the fewest missing anchors;
+  ties use declaration order.
+- `common_anchors`: language-independent anchors that every locale must contain.
+- `missing_common`: common anchors absent from the instruction file.
+- `matched_variant`: `"en-US"`, `"ja-JP"`, or `null`.
+- `variants[]`: one entry per locale variant, each with `id`, required
+  `anchors`, and that variant's `missing` anchors.
+- `missing`: the deterministic remediation list used by human-readable output;
+  it is always a subset of `anchors`.
 
 `adapter conformance` and `adapter doctor` share the module `src/core/adapters/conformance-spec.ts`, but they consume different parts of it and check different things. `adapter conformance` is the only caller that reads the `lifecycle_required` / `diagnostic_required` surface lists and the `REQUIRED_FAILURE_GUIDANCE` keywords (the `required_cli_surface_mentions` and `required_failure_guidance` checks above). `adapter doctor`'s `ADAPTER_CONTRACT_DRIFT` check consumes only the heading constants from the same module (`AGENT_CONTRACT_SECTION_HEADING` and `AGENT_CONTRACT_AXIS_HEADINGS`) — it asserts the `## Agent contract` section and its three axis sub-headings are present, not that the required CLI surface or failure guidance is mentioned. So the shared module guarantees the two callers agree on the contract's _headings_; the required-surface and failure-guidance checks are `adapter conformance`-only.
 
