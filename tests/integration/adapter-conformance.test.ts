@@ -13,6 +13,7 @@ import { AdapterManifest } from "../../src/core/schemas/adapter-manifest.ts";
 import { AgentProfile } from "../../src/core/schemas/agent-profile.ts";
 import { adapterRegistry } from "../../src/core/adapters/index.ts";
 import { assertSafeRelativePath } from "../../src/core/adapters/file-state.ts";
+import type { Locale } from "../../src/i18n/index.ts";
 // P21-T5: single source of truth for the agent contract surface.
 // `adapter doctor`'s contract drift check and the `adapter conformance`
 // command both import the same constants from this module.
@@ -96,10 +97,11 @@ function sha256(content: string): string {
 async function installAdapter(
   agent: (typeof STABLE_AGENTS)[number],
   generatorVersionOverride = "0.9.0-alpha.0",
+  locale: Locale = "en-US",
 ) {
   await runInit({
     cwd: dir,
-    locale: "en-US",
+    locale,
     agents: [agent],
     force: false,
     json: false,
@@ -108,7 +110,7 @@ async function installAdapter(
     cwd: dir,
     agentName: agent,
     force: false,
-    locale: "en-US",
+    locale,
     generatorVersionOverride,
   });
 }
@@ -355,11 +357,33 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
     const content = await readFile(join(dir, instruction!.path), "utf8");
 
     for (const check of STRUCTURAL_PROJECTION_GUIDANCE_ANCHORS) {
-      for (const anchor of check.anchors) {
+      const english = check.variants.find((variant) => variant.id === "en-US");
+      expect(english).toBeDefined();
+      for (const anchor of [...check.commonAnchors, ...english!.anchors]) {
         expect(content, `${agent} ${check.id} missing ${anchor}`).toContain(anchor);
       }
     }
   });
+
+  it.each(["en-US", "ja-JP"] as const)(
+    "fresh %s instruction satisfies required structural projection conformance",
+    async (locale) => {
+      await installAdapter(
+        agent,
+        STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION,
+        locale,
+      );
+
+      const result = await runAdapterConformance({ cwd: dir, agentName: agent });
+      const check = result.checks.find(
+        (c) => c.id === "structural_projection_guidance_present",
+      );
+      expect(check?.status).toBe("pass");
+      expect(check?.severity).toBe("required");
+      expect(check?.details?.matched_variant).toBe(locale);
+      expect(result.compliant).toBe(true);
+    },
+  );
 
   it("fails the bounded repair runtime check when its anchor is tampered", async () => {
     await installAdapter(agent);
@@ -437,6 +461,52 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
     expect((check?.details?.missing as string[]) ?? []).toContain(
       "projected form first",
     );
+    expect(result.compliant).toBe(false);
+  });
+
+  it("requires a complete Japanese structural projection guidance variant", async () => {
+    await installAdapter(
+      agent,
+      STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION,
+      "ja-JP",
+    );
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    const path = join(dir, instruction!.path);
+    const original = await readFile(path, "utf8");
+    const tampered = original.replace(
+      "まず projected form を使用",
+      "まず compact form を使用",
+    );
+    expect(tampered).not.toBe(original);
+    await writeFile(path, tampered, "utf8");
+
+    const manifestPath = join(
+      dir,
+      ".code-pact",
+      "adapters",
+      `${agent}.manifest.yaml`,
+    );
+    const rawManifest = await readFile(manifestPath, "utf8");
+    const updatedManifest = rawManifest.replace(
+      instruction!.sha256,
+      sha256(tampered),
+    );
+    expect(updatedManifest).not.toBe(rawManifest);
+    await writeFile(manifestPath, updatedManifest, "utf8");
+
+    const result = await runAdapterConformance({ cwd: dir, agentName: agent });
+    const check = result.checks.find(
+      (c) => c.id === "structural_projection_guidance_present",
+    );
+    const japaneseVariant = ((check?.details?.variants as Array<{
+      id: string;
+      missing: string[];
+    }>) ?? []).find((variant) => variant.id === "ja-JP");
+    expect(check?.status).toBe("fail");
+    expect(check?.severity).toBe("required");
+    expect(check?.details?.matched_variant).toBeNull();
+    expect(japaneseVariant?.missing).toContain("まず projected form を使用");
     expect(result.compliant).toBe(false);
   });
 

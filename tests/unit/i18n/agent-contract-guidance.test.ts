@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { messages } from "../../../src/i18n/index.ts";
+import {
+  STRUCTURAL_PROJECTION_GUIDANCE_COMMON_ANCHORS,
+  STRUCTURAL_PROJECTION_GUIDANCE_VARIANTS,
+} from "../../../src/core/adapters/conformance-spec.ts";
 
 describe("agent contract failure guidance", () => {
   for (const locale of ["en-US", "ja-JP"] as const) {
@@ -90,19 +94,15 @@ describe("agent contract failure guidance", () => {
       const contextBody = messages[locale].templates.adapterCommon.agentContract
         .contextCommandBody;
 
-      expect(contextBody).toContain("data.deferred_context.retrieve_command");
-      if (locale === "en-US") {
-        expect(contextBody).toContain("deterministic structural projections");
-        expect(contextBody).toContain("projected form first");
-        expect(contextBody).toContain("specific missing detail");
-        expect(contextBody).toContain(
-          "do not construct a retrieval command from the manifest reference",
-        );
-      } else {
-        expect(contextBody).toContain("決定論的な構造 projection");
-        expect(contextBody).toContain("まず projected form を使用");
-        expect(contextBody).toContain("具体的な不足");
-        expect(contextBody).toContain("manifest reference から取得 command を組み立てない");
+      for (const anchor of STRUCTURAL_PROJECTION_GUIDANCE_COMMON_ANCHORS) {
+        expect(contextBody).toContain(anchor);
+      }
+      const variant = STRUCTURAL_PROJECTION_GUIDANCE_VARIANTS.find(
+        candidate => candidate.id === locale,
+      );
+      expect(variant).toBeDefined();
+      for (const anchor of variant!.anchors) {
+        expect(contextBody).toContain(anchor);
       }
     });
   }

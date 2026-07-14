@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  checkLocalizedGuidanceAnchors,
   resolveBoundedRepairSeverity,
   resolveStructuralProjectionSeverity,
   runAdapterConformance,
@@ -18,7 +19,9 @@ import {
 } from "../../../src/core/adapters/manifest.ts";
 import {
   BOUNDED_REPAIR_GUIDANCE_FROM_VERSION,
+  STRUCTURAL_PROJECTION_GUIDANCE_ANCHORS,
   STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION,
+  STRUCTURAL_PROJECTION_GUIDANCE_VARIANTS,
 } from "../../../src/core/adapters/conformance-spec.ts";
 
 const VALID_CONTRACT_BODY = `# Some Adapter
@@ -549,6 +552,70 @@ describe("runAdapterConformance — bounded repair recommendation guidance", () 
 });
 
 describe("runAdapterConformance — structural projection guidance", () => {
+  it("accepts a complete locale variant plus common anchors", () => {
+    const [check] = STRUCTURAL_PROJECTION_GUIDANCE_ANCHORS;
+    const english = checkLocalizedGuidanceAnchors(
+      VALID_CONTRACT_BODY,
+      check!.commonAnchors,
+      check!.variants,
+    );
+    expect(english.ok).toBe(true);
+    expect(english.details.matched_variant).toBe("en-US");
+
+    const japanese = checkLocalizedGuidanceAnchors(
+      `budget 付き context には決定論的な構造 projection が含まれる場合があります。まず projected form を使用してください。具体的な不足が作業を妨げ、かつ \`data.deferred_context.retrieve_command\` が non-null の場合だけ正確な原文 section を取得してください。\`null\` の場合は manifest reference から取得 command を組み立てないでください。`,
+      check!.commonAnchors,
+      check!.variants,
+    );
+    expect(japanese.ok).toBe(true);
+    expect(japanese.details.matched_variant).toBe("ja-JP");
+  });
+
+  it("rejects incomplete or mixed structural projection variants", () => {
+    const [check] = STRUCTURAL_PROJECTION_GUIDANCE_ANCHORS;
+    const [english, japanese] = STRUCTURAL_PROJECTION_GUIDANCE_VARIANTS;
+
+    const missingCommon = checkLocalizedGuidanceAnchors(
+      english!.anchors.join(" "),
+      check!.commonAnchors,
+      check!.variants,
+    );
+    expect(missingCommon.ok).toBe(false);
+    expect(missingCommon.details.missing_common).toEqual([
+      "data.deferred_context.retrieve_command",
+    ]);
+
+    const incompleteEnglish = checkLocalizedGuidanceAnchors(
+      [
+        "data.deferred_context.retrieve_command",
+        "deterministic structural projections",
+        "specific missing detail",
+        "do not construct a retrieval command from the manifest reference",
+      ].join(" "),
+      check!.commonAnchors,
+      check!.variants,
+    );
+    expect(incompleteEnglish.ok).toBe(false);
+    expect(incompleteEnglish.details.matched_variant).toBeNull();
+    expect((incompleteEnglish.details.missing as string[]) ?? []).toContain(
+      "projected form first",
+    );
+
+    const mixed = checkLocalizedGuidanceAnchors(
+      [
+        "data.deferred_context.retrieve_command",
+        "deterministic structural projections",
+        "まず projected form を使用",
+        "具体的な不足",
+        japanese!.anchors[3],
+      ].join(" "),
+      check!.commonAnchors,
+      check!.variants,
+    );
+    expect(mixed.ok).toBe(false);
+    expect(mixed.details.matched_variant).toBeNull();
+  });
+
   it("passes when projection guidance anchors are present", async () => {
     await setupAdapter(dir);
     const result = await runAdapterConformance({

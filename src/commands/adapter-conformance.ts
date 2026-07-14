@@ -236,6 +236,44 @@ export function checkConsumptionAnchors(
   };
 }
 
+export function checkLocalizedGuidanceAnchors(
+  content: string,
+  commonAnchors: ReadonlyArray<string>,
+  variants: ReadonlyArray<{ id: string; anchors: ReadonlyArray<string> }>,
+): HardeningCheckResult {
+  const missingCommon = commonAnchors.filter(a => !content.includes(a));
+  const variantDetails = variants.map(variant => ({
+    id: variant.id,
+    anchors: [...variant.anchors],
+    missing: variant.anchors.filter(anchor => !content.includes(anchor)),
+  }));
+  const matchedVariant =
+    missingCommon.length === 0
+      ? variantDetails.find(variant => variant.missing.length === 0)?.id ?? null
+      : null;
+  const bestVariant = variantDetails.reduce<
+    (typeof variantDetails)[number] | undefined
+  >((best, variant) => {
+    if (!best) return variant;
+    return variant.missing.length < best.missing.length ? variant : best;
+  }, undefined);
+  const missing =
+    matchedVariant === null
+      ? [...missingCommon, ...(bestVariant?.missing ?? [])]
+      : missingCommon;
+
+  return {
+    ok: missingCommon.length === 0 && matchedVariant !== null,
+    details: {
+      common_anchors: [...commonAnchors],
+      missing_common: missingCommon,
+      matched_variant: matchedVariant,
+      variants: variantDetails,
+      missing,
+    },
+  };
+}
+
 /**
  * Compliance is gated by REQUIRED checks only: a failing `advisory`
  * check is surfaced (with remediation) but does not break compliance.
@@ -590,11 +628,24 @@ export async function runAdapterConformance(
   const structuralProjectionSeverity = resolveStructuralProjectionSeverity(
     manifest.generator_version,
   );
-  for (const { id, anchors } of STRUCTURAL_PROJECTION_GUIDANCE_ANCHORS) {
-    const result = checkConsumptionAnchors(instructionContent, anchors);
+  for (const {
+    id,
+    commonAnchors,
+    variants,
+  } of STRUCTURAL_PROJECTION_GUIDANCE_ANCHORS) {
+    const result = checkLocalizedGuidanceAnchors(
+      instructionContent,
+      commonAnchors,
+      variants,
+    );
     if (result.ok) {
       checks.push(
-        pass(id, instructionEntry.path, result.details, structuralProjectionSeverity),
+        pass(
+          id,
+          instructionEntry.path,
+          result.details,
+          structuralProjectionSeverity,
+        ),
       );
     } else {
       checks.push(
