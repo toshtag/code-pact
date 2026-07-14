@@ -13,6 +13,14 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Added
+
+- **Added deterministic structural context projection.** Budgeted context packs can now project large read surfaces and large-context related decisions while retaining exact originals through the existing context manifest.
+
+### Fixed
+
+- **Hardened projection planning and guidance.** Projection plans are now evaluated against the same full-deferral stage before selection, projected read-directory ordering is locale independent, and generated agent guidance plus Deferred Context wording distinguish projected inline sections from fully deferred sections.
+
 ## [2.4.0] — 2026-07-14
 
 ### Added

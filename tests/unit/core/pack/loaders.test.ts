@@ -112,6 +112,9 @@ describe("makeReadDirectoryCountsProjection", () => {
     expect(projection!.projected.lines).toEqual([
       "## Declared read surface",
       "",
+      "This is a deterministic parent-directory count projection.",
+      "The exact original file list is represented by Deferred Context and can be retrieved after materialization.",
+      "",
       "- `**/*.ts`",
       "  - 46 matches across 4 directories",
       "  - `./` — 1 file",
@@ -136,5 +139,38 @@ describe("makeReadDirectoryCountsProjection", () => {
     expect(
       makeReadDirectoryCountsProjection(entries, renderedReadsSection(entries)),
     ).toBeNull();
+  });
+
+  it("orders projected directories by locale-independent code-unit order", () => {
+    const dirs = ["A", "Z", "a", "z", "ä", "日本語", "_"];
+    const entries: ReadGlobMatches[] = [
+      {
+        glob: "**/*",
+        matches: dirs.flatMap(dir =>
+          Array.from({ length: 20 }, (_, index) =>
+            `${dir}/file-${String(index).padStart(2, "0")}.ts`
+          )
+        ),
+      },
+    ];
+
+    const projection = makeReadDirectoryCountsProjection(
+      entries,
+      renderedReadsSection(entries),
+    );
+
+    expect(projection).not.toBeNull();
+    const directoryLines = projection!.projected.lines.filter(line =>
+      line.includes(" — 20 files")
+    );
+    expect(directoryLines).toEqual([
+      "  - `A/` — 20 files",
+      "  - `Z/` — 20 files",
+      "  - `_/` — 20 files",
+      "  - `a/` — 20 files",
+      "  - `z/` — 20 files",
+      "  - `ä/` — 20 files",
+      "  - `日本語/` — 20 files",
+    ]);
   });
 });

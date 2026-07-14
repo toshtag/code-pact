@@ -94,6 +94,7 @@ function sectionBytes(section: RenderedSection): number {
 function insertDeferredContextSection(
   sections: ReadonlyArray<RenderedSection>,
   metadata: DeferredContextMetadata,
+  projectedSections: ReadonlySet<ContextProjectionCandidate["sectionName"]> = new Set(),
 ): RenderedSection[] {
   const result = [...sections];
   const taskDefinitionIndex = result.findIndex(
@@ -101,7 +102,11 @@ function insertDeferredContextSection(
   );
   const insertAt =
     taskDefinitionIndex === -1 ? Math.min(1, result.length) : taskDefinitionIndex + 1;
-  result.splice(insertAt, 0, makeDeferredContextRenderedSection(metadata));
+  result.splice(
+    insertAt,
+    0,
+    makeDeferredContextRenderedSection(metadata, { projectedSections }),
+  );
   return result;
 }
 
@@ -200,6 +205,7 @@ function makeCandidatePlan(
   const withDeferredContext = insertDeferredContextSection(
     sections,
     manifest.metadata,
+    new Set(projectedNames),
   );
   return {
     sections: withDeferredContext,
@@ -217,53 +223,74 @@ function evaluateProjectionSubset(
   subset: ReadonlyArray<ContextProjectionCandidate>,
   eligibility: BudgetElisionEligibility,
   budgetBytes: number,
-  naturalBytes: number,
-): { success?: CandidatePlan; floor: CandidatePlan } | null {
+): { success?: CandidatePlan; floor: CandidatePlan } {
   const projectedNames = subset.map(candidate => candidate.sectionName);
   const projectedNameSet = new Set(projectedNames);
   const deferredOriginals = subset.map(candidate => candidate.original);
-  let surviving = applyProjectionSubset(rendered, subset);
+  let projectedSurviving = applyProjectionSubset(rendered, subset);
+  let comparisonSurviving = [...rendered];
   const elidedNames: string[] = [];
   const elidedBytes = new Map<string, number>();
 
-  const initial = makeCandidatePlan(
-    surviving,
-    elidedNames,
-    elidedBytes,
-    projectedNames,
-    deferredOriginals,
-  );
-  if (subset.length > 0 && initial.finalBytes >= naturalBytes) {
-    return null;
-  }
-  if (initial.finalBytes <= budgetBytes) {
-    return { success: initial, floor: initial };
+  const makeStagePlans = (
+    fullDeferredProjected: ReadonlyArray<RenderedSection>,
+    fullDeferredComparison: ReadonlyArray<RenderedSection>,
+  ): { projected: CandidatePlan; comparison: CandidatePlan } => ({
+    projected: makeCandidatePlan(
+      projectedSurviving,
+      [...elidedNames],
+      new Map(elidedBytes),
+      projectedNames,
+      [...deferredOriginals, ...fullDeferredProjected],
+    ),
+    comparison: makeCandidatePlan(
+      comparisonSurviving,
+      [...elidedNames],
+      new Map(elidedBytes),
+      [],
+      fullDeferredComparison,
+    ),
+  });
+
+  const projectionIsBeneficial = (
+    projected: CandidatePlan,
+    comparison: CandidatePlan,
+  ): boolean => subset.length === 0 || projected.finalBytes < comparison.finalBytes;
+
+  let fullDeferredProjected: RenderedSection[] = [];
+  let fullDeferredComparison: RenderedSection[] = [];
+  let stage = makeStagePlans(fullDeferredProjected, fullDeferredComparison);
+  let floor = stage.projected;
+  if (
+    stage.projected.finalBytes <= budgetBytes &&
+    projectionIsBeneficial(stage.projected, stage.comparison)
+  ) {
+    return { success: stage.projected, floor };
   }
 
-  let floor = initial;
-  const fullDeferredSections: RenderedSection[] = [];
   for (const name of eligibleElisionOrder(eligibility)) {
     if (projectedNameSet.has(name as ContextProjectionCandidate["sectionName"])) {
       continue;
     }
-    const idx = surviving.findIndex(section => section.name === name);
-    if (idx === -1) continue;
-    const deferred = surviving[idx]!;
-    fullDeferredSections.push(deferred);
-    elidedBytes.set(name, sectionBytes(deferred));
-    surviving = surviving.filter((_, i) => i !== idx);
+    const projectedIdx = projectedSurviving.findIndex(section => section.name === name);
+    const comparisonIdx = comparisonSurviving.findIndex(section => section.name === name);
+    if (projectedIdx === -1 || comparisonIdx === -1) continue;
+    const projectedDeferred = projectedSurviving[projectedIdx]!;
+    const comparisonDeferred = comparisonSurviving[comparisonIdx]!;
+    fullDeferredProjected = [...fullDeferredProjected, projectedDeferred];
+    fullDeferredComparison = [...fullDeferredComparison, comparisonDeferred];
+    elidedBytes.set(name, sectionBytes(comparisonDeferred));
+    projectedSurviving = projectedSurviving.filter((_, i) => i !== projectedIdx);
+    comparisonSurviving = comparisonSurviving.filter((_, i) => i !== comparisonIdx);
     elidedNames.push(name);
 
-    const candidate = makeCandidatePlan(
-      surviving,
-      [...elidedNames],
-      new Map(elidedBytes),
-      projectedNames,
-      [...deferredOriginals, ...fullDeferredSections],
-    );
-    floor = candidate;
-    if (candidate.finalBytes <= budgetBytes) {
-      return { success: candidate, floor };
+    stage = makeStagePlans(fullDeferredProjected, fullDeferredComparison);
+    floor = stage.projected;
+    if (
+      stage.projected.finalBytes <= budgetBytes &&
+      projectionIsBeneficial(stage.projected, stage.comparison)
+    ) {
+      return { success: stage.projected, floor };
     }
   }
 
@@ -363,18 +390,14 @@ export function applyBudgetElision(
         subset,
         eligibility,
         budgetBytes,
-        naturalBytes,
       ),
     )
-    .filter((plan): plan is { success?: CandidatePlan; floor: CandidatePlan } =>
-      plan !== null,
-    );
+    .filter((plan): plan is { success?: CandidatePlan; floor: CandidatePlan } => !!plan);
 
-  const floorPlan = evaluated
-    .map(plan => plan.floor)
-    .sort((a, b) => a.finalBytes - b.finalBytes)[0];
+  const noProjectionFloorPlan = evaluated.find(
+    plan => plan.floor.projectedNames.length === 0,
+  )?.floor;
   const minimumAchievableBytes =
-    floorPlan?.finalBytes ??
     computeMinimumAchievableBytesWithDeferral(rendered, eligibility);
 
   const successPlan = evaluated
@@ -402,7 +425,7 @@ export function applyBudgetElision(
   throw new ContextOverBudgetError(
     budgetBytes,
     minimumAchievableBytes,
-    (floorPlan?.sections ?? rendered)
+    (noProjectionFloorPlan?.sections ?? rendered)
       .map(section => section.name)
       .filter(name => name !== "deferred_context"),
   );

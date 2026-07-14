@@ -119,6 +119,10 @@ function parentDirectory(path: string): string {
   return `${path.slice(0, lastSlash)}/`;
 }
 
+function compareStablePath(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 function groupReadMatchesByDirectory(matches: readonly string[]): Map<string, number> {
   const uniqueMatches = [...new Set(matches)];
   const groups = new Map<string, number>();
@@ -126,7 +130,7 @@ function groupReadMatchesByDirectory(matches: readonly string[]): Map<string, nu
     const dir = parentDirectory(match);
     groups.set(dir, (groups.get(dir) ?? 0) + 1);
   }
-  return new Map([...groups.entries()].sort(([a], [b]) => a.localeCompare(b)));
+  return new Map([...groups.entries()].sort(([a], [b]) => compareStablePath(a, b)));
 }
 
 export function makeReadDirectoryCountsProjection(
@@ -137,7 +141,13 @@ export function makeReadDirectoryCountsProjection(
     return null;
   }
 
-  const lines: string[] = [`## Declared read surface`, ``];
+  const lines: string[] = [
+    `## Declared read surface`,
+    ``,
+    `This is a deterministic parent-directory count projection.`,
+    `The exact original file list is represented by Deferred Context and can be retrieved after materialization.`,
+    ``,
+  ];
   let totalMatches = 0;
   const allDirectories = new Set<string>();
   for (const entry of readMatches) {
@@ -211,7 +221,7 @@ export function makeRelatedDecisionCommitmentsProjection(
 
   const projectionIntro =
     "Accepted decisions with explicit implementation commitments are shown structurally. " +
-    "Exact original content is available through Deferred Context.";
+    "The exact original content is represented by Deferred Context and can be retrieved after materialization.";
   const lines: string[] = [
     `## Related Decisions`,
     ``,

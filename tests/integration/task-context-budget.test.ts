@@ -68,6 +68,13 @@ const contextProjectionFixtureDir = new URL(
   import.meta.url,
 ).pathname;
 
+function extractMarkdownSection(content: string, heading: string): string {
+  const start = content.indexOf(heading);
+  expect(start, `section heading ${heading}`).toBeGreaterThanOrEqual(0);
+  const next = content.indexOf("\n## ", start + heading.length);
+  return next === -1 ? content.slice(start) : content.slice(start, next);
+}
+
 async function forceTaskBudgetDeferral(
   project: Awaited<ReturnType<typeof createTempProject>>,
 ): Promise<void> {
@@ -258,6 +265,13 @@ describe("task prepare --context-budget (P47)", () => {
 
   it("--recommended-context-budget emits a command that reproduces the written pack", async () => {
     await forceTaskBudgetDeferral(project);
+    const unbudgeted = expectJsonOk<{ content: string }>(
+      project.run(["task", "context", "P1-T1", "--agent", "claude-code", "--json"]),
+    );
+    const originalReadsSection = extractMarkdownSection(
+      unbudgeted.data.content,
+      "## Declared read surface",
+    );
     const env = expectJsonOk<{
       recommendation: {
         contextFit: {
@@ -308,6 +322,12 @@ describe("task prepare --context-budget (P47)", () => {
     expect(preparedContent).toContain(expectedReadProjection.trim());
     expect(preparedContent).not.toContain(`entry-0000-${FORCING_READ_MARKER}.md`);
     expect(preparedContent).toContain(env.data.deferred_context.manifest_ref);
+    expect(preparedContent).toContain(
+      "- reads — projected inline; exact original represented after materialization",
+    );
+    expect(preparedContent).not.toContain(
+      "The following sections were withheld to satisfy the context byte budget:",
+    );
 
     const listed = expectJsonOk<{
       sections: Array<{ name: string; bytes: number; content_sha256: string }>;
@@ -323,6 +343,7 @@ describe("task prepare --context-budget (P47)", () => {
       "--section", "reads",
     ]);
     expect(originalReads.code).toBe(0);
+    expect(originalReads.stdout).toBe(originalReadsSection);
     expect(originalReads.stdout).toContain(`entry-0000-${FORCING_READ_MARKER}.md`);
     expect(originalReads.stdout).not.toContain("matches across 1 directory");
 
