@@ -1,0 +1,146 @@
+import { z } from "zod";
+import { canonicalJson } from "../content-addressed-store/canonical-json.ts";
+import { EVIDENCE_REF_PATTERN } from "../evidence/evidence-ref.ts";
+import { loopMemoryInvalid } from "./memory-errors.ts";
+
+export const MAX_EPISODE_BYTES = 8 * 1024;
+export const MAX_FAILED_COMMAND_BYTES = 512;
+export const MAX_FAILED_CHECK_BYTES = 128;
+
+const FAILURE_KINDS = [
+  "command_failed",
+  "timed_out",
+  "aborted",
+  "decision_required",
+  "unsafe_write",
+  "invalid_state",
+  "unknown",
+] as const;
+
+const LOOP_TASK_TYPES = [
+  "feature",
+  "bugfix",
+  "refactor",
+  "test",
+  "docs",
+  "chore",
+  "architecture",
+  "security",
+  "mechanical_refactor",
+  "other",
+] as const;
+
+const LIFECYCLE_MODES = ["full_loop", "record_only", "decision_loop"] as const;
+
+function utf8Bytes(value: string): number {
+  return Buffer.byteLength(value, "utf8");
+}
+
+function containsAbsolutePath(value: string): boolean {
+  return /(^|\s)\/[^\s]+/.test(value) || /(^|\s)[A-Za-z]:[\\/][^\s]+/.test(value);
+}
+
+function boundedString(maxBytes: number) {
+  return z.string().superRefine((value, ctx) => {
+    if (utf8Bytes(value) > maxBytes) {
+      ctx.addIssue({
+        code: "custom",
+        message: `string exceeds ${maxBytes} UTF-8 bytes`,
+      });
+    }
+    if (containsAbsolutePath(value)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "absolute paths are not allowed in loop-memory episodes",
+      });
+    }
+  });
+}
+
+const Verification = z.strictObject({
+  ok: z.boolean(),
+  failure_kind: z.enum(FAILURE_KINDS).optional(),
+  failure_fingerprint: z.string().regex(/^sha256:[0-9a-f]{64}$/).optional(),
+  failed_check: boundedString(MAX_FAILED_CHECK_BYTES).optional(),
+  failed_command: boundedString(MAX_FAILED_COMMAND_BYTES).optional(),
+  evidence_ref: z.string().regex(EVIDENCE_REF_PATTERN).optional(),
+}).superRefine((value, ctx) => {
+  const failureFields = [
+    "failure_kind",
+    "failure_fingerprint",
+    "failed_check",
+    "failed_command",
+    "evidence_ref",
+  ] as const;
+
+  if (value.ok) {
+    for (const field of failureFields) {
+      if (value[field] !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: [field],
+          message: "success episodes must not include failure fields",
+        });
+      }
+    }
+  } else if (value.failure_kind === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["failure_kind"],
+      message: "failure episodes require failure_kind",
+    });
+  }
+});
+
+export const LoopMemoryEpisodeSchema = z.strictObject({
+  schema_version: z.literal(1),
+  recorded_at: z.string().datetime({ offset: true }),
+  kind: z.enum(["verification_failed", "verification_passed"]),
+  task: z.strictObject({
+    phase_id: z.string().min(1),
+    task_id: z.string().min(1),
+    task_type: z.enum(LOOP_TASK_TYPES),
+  }),
+  execution: z.strictObject({
+    lifecycle_mode: z.enum(LIFECYCLE_MODES),
+    repair_mode: z.enum(["bounded", "disabled"]),
+  }),
+  verification: Verification,
+}).superRefine((value, ctx) => {
+  if (value.kind === "verification_passed" && !value.verification.ok) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["kind"],
+      message: "verification_passed episodes require verification.ok=true",
+    });
+  }
+  if (value.kind === "verification_failed" && value.verification.ok) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["kind"],
+      message: "verification_failed episodes require verification.ok=false",
+    });
+  }
+});
+
+export type LoopMemoryEpisode = z.infer<typeof LoopMemoryEpisodeSchema>;
+export type LoopMemoryFailureKind = z.infer<typeof Verification>["failure_kind"];
+
+export function parseLoopMemoryEpisode(input: unknown): LoopMemoryEpisode {
+  const parsed = LoopMemoryEpisodeSchema.parse(input);
+  const bytes = utf8Bytes(canonicalJson(parsed));
+  if (bytes > MAX_EPISODE_BYTES) {
+    throw loopMemoryInvalid(`loop-memory episode exceeds ${MAX_EPISODE_BYTES} bytes`);
+  }
+  return parsed;
+}
+
+export function safeParseLoopMemoryEpisode(input: unknown):
+  | { success: true; data: LoopMemoryEpisode }
+  | { success: false; error: unknown } {
+  try {
+    return { success: true, data: parseLoopMemoryEpisode(input) };
+  } catch (error) {
+    return { success: false, error };
+  }
+}

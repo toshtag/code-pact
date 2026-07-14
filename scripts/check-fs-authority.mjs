@@ -383,6 +383,8 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveRoadmapReadPath", "owned_read"],
       ["resolveProjectConfigReadPath", "owned_read"],
       ["resolveEvidenceReadPath", "owned_read"],
+      ["resolveLoopMemoryEpisodeReadPath", "owned_read"],
+      ["resolveLoopMemoryEpisodesDirectoryReadPath", "owned_read"],
       ["resolveModelProfileReadPath", "owned_read"],
       ["resolveModelProfileDirectoryReadPath", "owned_read"],
       ["resolveProgressReadPath", "owned_read"],
@@ -405,11 +407,13 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveAgentProfileWritePath", "owned_write"],
       ["resolveProjectConfigWritePath", "owned_write"],
       ["resolveEvidenceWritePath", "owned_write"],
+      ["resolveLoopMemoryEpisodeWritePath", "owned_write"],
       ["resolveGitignoreWritePath", "owned_write"],
       // Delete resolvers
       ["resolveDecisionDeletePath", "owned_delete"],
       ["resolvePhaseDeletePath", "owned_delete"],
       ["resolveProgressDeletePath", "owned_delete"],
+      ["resolveLoopMemoryEpisodeDeletePath", "owned_delete"],
     ]),
   ],
   // index.ts re-exports all authority resolvers from authority-resolvers.ts
@@ -426,6 +430,8 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveProjectConfigReadPath", "owned_read"],
       ["resolveEvidenceReadPath", "owned_read"],
       ["resolveContextManifestReadPath", "owned_read"],
+      ["resolveLoopMemoryEpisodeReadPath", "owned_read"],
+      ["resolveLoopMemoryEpisodesDirectoryReadPath", "owned_read"],
       ["resolveModelProfileReadPath", "owned_read"],
       ["resolveModelProfileDirectoryReadPath", "owned_read"],
       ["resolveProgressReadPath", "owned_read"],
@@ -449,11 +455,13 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveProjectConfigWritePath", "owned_write"],
       ["resolveEvidenceWritePath", "owned_write"],
       ["resolveContextManifestWritePath", "owned_write"],
+      ["resolveLoopMemoryEpisodeWritePath", "owned_write"],
       ["resolveGitignoreWritePath", "owned_write"],
       // Delete resolvers
       ["resolveDecisionDeletePath", "owned_delete"],
       ["resolvePhaseDeletePath", "owned_delete"],
       ["resolveProgressDeletePath", "owned_delete"],
+      ["resolveLoopMemoryEpisodeDeletePath", "owned_delete"],
       ["resolveProjectScaffoldReadPath", "owned_read"],
       ["resolveProjectScaffoldWritePath", "owned_write"],
     ]),
@@ -554,6 +562,21 @@ const AUTHORITY_EXPORTS = new Map([
     new Map([
       ["resolveContextManifestReadPath", "owned_read"],
       ["resolveContextManifestWritePath", "owned_write"],
+    ]),
+  ],
+  [
+    join(
+      "src",
+      "core",
+      "project-fs",
+      "authorities",
+      "loop-memory-authority.ts",
+    ),
+    new Map([
+      ["resolveLoopMemoryEpisodeReadPath", "owned_read"],
+      ["resolveLoopMemoryEpisodesDirectoryReadPath", "owned_read"],
+      ["resolveLoopMemoryEpisodeWritePath", "owned_write"],
+      ["resolveLoopMemoryEpisodeDeletePath", "owned_delete"],
     ]),
   ],
   [
@@ -720,6 +743,7 @@ const BRAND_CONSTRUCTOR_IMPORT_ALLOWLIST = new Set([
   ),
   join("src", "core", "project-fs", "authorities", "normalize-authority.ts"),
   join("src", "core", "project-fs", "authorities", "prune-authority.ts"),
+  join("src", "core", "project-fs", "authorities", "loop-memory-authority.ts"),
   join(
     "src",
     "core",

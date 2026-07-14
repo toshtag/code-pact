@@ -104,3 +104,9 @@ export {
   resolveContextManifestReadPath,
   resolveContextManifestWritePath,
 } from "./authorities/context-deferral-authority.ts";
+export {
+  resolveLoopMemoryEpisodeDeletePath,
+  resolveLoopMemoryEpisodeReadPath,
+  resolveLoopMemoryEpisodeWritePath,
+  resolveLoopMemoryEpisodesDirectoryReadPath,
+} from "./authorities/loop-memory-authority.ts";
