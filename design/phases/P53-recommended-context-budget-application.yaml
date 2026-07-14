@@ -3,7 +3,7 @@ name: Recommended Context Budget Application
 weight: 6
 confidence: medium
 risk: medium
-status: done
+status: in_progress
 objective: >
   Allow task preparation to apply the deterministic recommended context budget
   explicitly after reversible context deferral makes omitted context
@@ -168,3 +168,47 @@ tasks:
       - docs/agent-contract.md
       - docs/cli-contract.md
       - CHANGELOG.md
+  - id: P53-T4
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: >
+      Close the remaining recommended-context-budget contract gaps by reusing
+      the already validated agent profile on the task-prepare write path,
+      rejecting the prepare-only flag on unsupported commands, and proving
+      emitted-command reproducibility with forcing integration fixtures.
+    depends_on:
+      - P53-T3
+    reads:
+      - src/commands/task-prepare.ts
+      - src/core/pack/index.ts
+      - src/cli.ts
+      - src/core/context-fit/applied-context-budget.ts
+      - tests/unit/core/pack-core.test.ts
+      - tests/unit/core/context-output-namespace.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/integration/task-context-budget.test.ts
+      - tests/helpers/cli.ts
+      - CHANGELOG.md
+    writes:
+      - src/commands/task-prepare.ts
+      - src/core/pack/index.ts
+      - src/cli.ts
+      - tests/unit/core/context-fit/applied-context-budget.test.ts
+      - tests/unit/core/pack-core.test.ts
+      - tests/unit/core/context-output-namespace.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/integration/task-context-budget.test.ts
+      - tests/helpers/cli.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - tests/unit/core/context-fit/applied-context-budget.test.ts
+      - tests/unit/core/pack-core.test.ts
+      - tests/unit/core/context-output-namespace.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/integration/task-context-budget.test.ts
