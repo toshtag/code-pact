@@ -1,9 +1,0 @@
-task_id: P5-T5
-status: done
-at: 2026-05-18T13:58:42.443Z
-actor: agent
-agent: claude-code
-evidence:
-  - commands
-  - decision
-id: aea0445641660972171abd98c3d43e537633e50ee13e844a6a405ff0e49e0ff1
