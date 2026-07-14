@@ -293,8 +293,27 @@ describe("task prepare --context-budget (P47)", () => {
     expect(env.data.deferred_context).toMatchObject({ persisted: true });
 
     const preparedContent = await readFile(env.data.context_pack_path, "utf8");
-    expect(preparedContent).not.toContain(FORCING_READ_MARKER);
+    expect(preparedContent).toContain(`- \`docs/${FORCING_READ_MARKER}/**\``);
+    expect(preparedContent).toContain("matches across 1 directory");
+    expect(preparedContent).not.toContain(`entry-0000-${FORCING_READ_MARKER}.md`);
     expect(preparedContent).toContain(env.data.deferred_context.manifest_ref);
+
+    const listed = expectJsonOk<{
+      sections: Array<{ name: string; bytes: number; content_sha256: string }>;
+    }>(
+      project.run([
+        "context", "show", env.data.deferred_context.manifest_ref,
+        "--list", "--json",
+      ]),
+    );
+    expect(listed.data.sections.map(section => section.name)).toContain("reads");
+    const originalReads = project.run([
+      "context", "show", env.data.deferred_context.manifest_ref,
+      "--section", "reads",
+    ]);
+    expect(originalReads.code).toBe(0);
+    expect(originalReads.stdout).toContain(`entry-0000-${FORCING_READ_MARKER}.md`);
+    expect(originalReads.stdout).not.toContain("matches across 1 directory");
 
     const contextCommand = env.data.commands.context;
     expect(contextCommand).toBeDefined();
@@ -307,6 +326,40 @@ describe("task prepare --context-budget (P47)", () => {
       manifest_ref: env.data.deferred_context.manifest_ref,
       persisted: false,
     });
+  });
+
+  it("budgeted explain reports projected read byte details", async () => {
+    await forceTaskBudgetDeferral(project);
+    const env = expectJsonOk<{
+      content: string;
+      deferred_context: { manifest_ref: string; persisted: boolean };
+      sections: Array<{ name: string; bytes: number; details?: Record<string, unknown> }>;
+      deferred_bytes: number;
+      elided_sections: Array<{ name: string; bytes: number }>;
+    }>(
+      project.run([
+        "task", "context", "P1-T1", "--agent", "claude-code",
+        "--budget-bytes", "60000", "--explain", "--json",
+      ]),
+    );
+
+    expect(env.data.content).toContain("matches across 1 directory");
+    expect(env.data.content).not.toContain(`entry-0000-${FORCING_READ_MARKER}.md`);
+    expect(env.data.deferred_context).toMatchObject({ persisted: false });
+    const reads = env.data.sections.find(section => section.name === "reads");
+    expect(reads?.details).toMatchObject({
+      projection_kind: "read_directory_counts",
+      glob_count: 1,
+      match_count: 850,
+      directory_count: 1,
+    });
+    expect(reads?.details?.saved_bytes).toBe(
+      Number(reads?.details?.original_bytes) -
+        Number(reads?.details?.projected_bytes),
+    );
+    expect(reads?.bytes).toBe(reads?.details?.projected_bytes);
+    expect(env.data.elided_sections.map(section => section.name)).not.toContain("reads");
+    expect(env.data.deferred_bytes).toBe(Number(reads?.details?.original_bytes));
   });
 
   it.each([
@@ -755,7 +808,8 @@ describe("task prepare agent-profile recommended application mode (P53)", () => 
     expect(manualDirect.content).toBe(direct.content);
     expect(manualDirect.deferredContext).toBeUndefined();
     expect(explicit.data.deferred_context).toMatchObject({ persisted: false });
-    expect(explicit.data.content).not.toContain(FORCING_READ_MARKER);
+    expect(explicit.data.content).toContain(`- \`docs/${FORCING_READ_MARKER}/**\``);
+    expect(explicit.data.content).not.toContain(`entry-0000-${FORCING_READ_MARKER}.md`);
     expect(explicit.data.content).not.toBe(direct.content);
     expect(prepared.data.applied_context_budget).toEqual({
       source: "recommended_agent_profile",

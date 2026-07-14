@@ -7,6 +7,7 @@
 
 import {
   ELISION_ORDER,
+  type ContextProjectionCandidate,
   type RenderedSection,
 } from "./formatters/markdown.ts";
 import {
@@ -73,6 +74,11 @@ export type BudgetElisionEligibility = {
   isLargeWriteSurface: boolean;
 };
 
+const PROJECTION_ORDER = [
+  "reads",
+  "related_decisions",
+] as const satisfies ReadonlyArray<ContextProjectionCandidate["sectionName"]>;
+
 function computeRenderedBytes(sections: ReadonlyArray<RenderedSection>): number {
   if (sections.length === 0) return 0;
   return Buffer.byteLength(
@@ -130,10 +136,169 @@ function computeMinimumAchievableBytesWithDeferral(
   );
 }
 
+function candidateProjectionSubsets(
+  candidates: ReadonlyArray<ContextProjectionCandidate>,
+): ContextProjectionCandidate[][] {
+  const byName = new Map(
+    candidates.map(candidate => [candidate.sectionName, candidate]),
+  );
+  const ordered = PROJECTION_ORDER.flatMap(name => {
+    const candidate = byName.get(name);
+    return candidate ? [candidate] : [];
+  });
+  const subsets: ContextProjectionCandidate[][] = [[]];
+  for (const candidate of ordered) {
+    const current = [...subsets];
+    for (const subset of current) {
+      subsets.push([...subset, candidate]);
+    }
+  }
+  return subsets;
+}
+
+function applyProjectionSubset(
+  rendered: ReadonlyArray<RenderedSection>,
+  subset: ReadonlyArray<ContextProjectionCandidate>,
+): RenderedSection[] {
+  if (subset.length === 0) return [...rendered];
+  const byName = new Map(
+    subset.map(candidate => [candidate.sectionName, candidate]),
+  );
+  return rendered.map(section =>
+    byName.get(section.name as "reads" | "related_decisions")?.projected ??
+    section,
+  );
+}
+
+type CandidatePlan = {
+  sections: RenderedSection[];
+  elidedNames: string[];
+  elidedBytes: Map<string, number>;
+  projectedNames: ContextProjectionCandidate["sectionName"][];
+  finalBytes: number;
+  deferredContext?: DeferredContextMetadata;
+  pendingContextManifest?: PendingContextManifestArtifact;
+};
+
+function makeCandidatePlan(
+  sections: RenderedSection[],
+  elidedNames: string[],
+  elidedBytes: Map<string, number>,
+  projectedNames: ContextProjectionCandidate["sectionName"][],
+  manifestSections: ReadonlyArray<RenderedSection>,
+): CandidatePlan {
+  if (manifestSections.length === 0) {
+    return {
+      sections,
+      elidedNames,
+      elidedBytes,
+      projectedNames,
+      finalBytes: computeRenderedBytes(sections),
+    };
+  }
+  const manifest = buildContextManifest(manifestSections);
+  const withDeferredContext = insertDeferredContextSection(
+    sections,
+    manifest.metadata,
+  );
+  return {
+    sections: withDeferredContext,
+    elidedNames,
+    elidedBytes,
+    projectedNames,
+    finalBytes: computeRenderedBytes(withDeferredContext),
+    deferredContext: manifest.metadata,
+    pendingContextManifest: manifest.artifact,
+  };
+}
+
+function evaluateProjectionSubset(
+  rendered: ReadonlyArray<RenderedSection>,
+  subset: ReadonlyArray<ContextProjectionCandidate>,
+  eligibility: BudgetElisionEligibility,
+  budgetBytes: number,
+  naturalBytes: number,
+): { success?: CandidatePlan; floor: CandidatePlan } | null {
+  const projectedNames = subset.map(candidate => candidate.sectionName);
+  const projectedNameSet = new Set(projectedNames);
+  const deferredOriginals = subset.map(candidate => candidate.original);
+  let surviving = applyProjectionSubset(rendered, subset);
+  const elidedNames: string[] = [];
+  const elidedBytes = new Map<string, number>();
+
+  const initial = makeCandidatePlan(
+    surviving,
+    elidedNames,
+    elidedBytes,
+    projectedNames,
+    deferredOriginals,
+  );
+  if (subset.length > 0 && initial.finalBytes >= naturalBytes) {
+    return null;
+  }
+  if (initial.finalBytes <= budgetBytes) {
+    return { success: initial, floor: initial };
+  }
+
+  let floor = initial;
+  const fullDeferredSections: RenderedSection[] = [];
+  for (const name of eligibleElisionOrder(eligibility)) {
+    if (projectedNameSet.has(name as ContextProjectionCandidate["sectionName"])) {
+      continue;
+    }
+    const idx = surviving.findIndex(section => section.name === name);
+    if (idx === -1) continue;
+    const deferred = surviving[idx]!;
+    fullDeferredSections.push(deferred);
+    elidedBytes.set(name, sectionBytes(deferred));
+    surviving = surviving.filter((_, i) => i !== idx);
+    elidedNames.push(name);
+
+    const candidate = makeCandidatePlan(
+      surviving,
+      [...elidedNames],
+      new Map(elidedBytes),
+      projectedNames,
+      [...deferredOriginals, ...fullDeferredSections],
+    );
+    floor = candidate;
+    if (candidate.finalBytes <= budgetBytes) {
+      return { success: candidate, floor };
+    }
+  }
+
+  return { floor };
+}
+
+function projectionTieBreak(
+  names: ReadonlyArray<ContextProjectionCandidate["sectionName"]>,
+): number[] {
+  return names.map(name => PROJECTION_ORDER.indexOf(name));
+}
+
+function compareCandidatePlans(a: CandidatePlan, b: CandidatePlan): number {
+  if (a.elidedNames.length !== b.elidedNames.length) {
+    return a.elidedNames.length - b.elidedNames.length;
+  }
+  if (a.projectedNames.length !== b.projectedNames.length) {
+    return a.projectedNames.length - b.projectedNames.length;
+  }
+  const aProjectionOrder = projectionTieBreak(a.projectedNames);
+  const bProjectionOrder = projectionTieBreak(b.projectedNames);
+  const maxLength = Math.max(aProjectionOrder.length, bProjectionOrder.length);
+  for (let i = 0; i < maxLength; i += 1) {
+    const left = aProjectionOrder[i] ?? Number.POSITIVE_INFINITY;
+    const right = bProjectionOrder[i] ?? Number.POSITIVE_INFINITY;
+    if (left !== right) return left - right;
+  }
+  return a.finalBytes - b.finalBytes;
+}
+
 export function applyBudgetElision(
   rendered: ReadonlyArray<RenderedSection>,
   budgetBytes: number | undefined,
   eligibility: BudgetElisionEligibility,
+  projectionCandidates: ReadonlyArray<ContextProjectionCandidate> = [],
 ): BudgetElisionResult {
   // Byte facts that hold regardless of which return path we take. The floor is
   // derived from the shared helper so the success and CONTEXT_OVER_BUDGET paths
@@ -178,47 +343,58 @@ export function applyBudgetElision(
     );
   }
 
-  let surviving = [...rendered];
-  const deferredSections: RenderedSection[] = [];
-  const elidedNames: string[] = [];
-  const elidedBytes = new Map<string, number>();
-
-  if (computeRenderedBytes(surviving) <= budgetBytes) {
+  if (naturalBytes <= budgetBytes) {
     return makeResult(
-      surviving,
-      elidedNames,
-      elidedBytes,
+      [...rendered],
+      [],
+      new Map(),
       computeMinimumAchievableBytesWithDeferral(rendered, eligibility),
       0,
     );
   }
 
-  const minimumAchievableBytes = computeMinimumAchievableBytesWithDeferral(
-    rendered,
-    eligibility,
+  const viableProjectionCandidates = projectionCandidates.filter(
+    candidate => candidate.projectedBytes < candidate.originalBytes,
   );
+  const evaluated = candidateProjectionSubsets(viableProjectionCandidates)
+    .map(subset =>
+      evaluateProjectionSubset(
+        rendered,
+        subset,
+        eligibility,
+        budgetBytes,
+        naturalBytes,
+      ),
+    )
+    .filter((plan): plan is { success?: CandidatePlan; floor: CandidatePlan } =>
+      plan !== null,
+    );
 
-  for (const name of eligibleElisionOrder(eligibility)) {
-    const idx = surviving.findIndex((s) => s.name === name);
-    if (idx === -1) continue;
-    const deferred = surviving[idx]!;
-    deferredSections.push(deferred);
-    elidedBytes.set(name, sectionBytes(deferred));
-    surviving = surviving.filter((_, i) => i !== idx);
-    elidedNames.push(name);
-    const manifest = buildContextManifest(deferredSections);
-    const candidate = insertDeferredContextSection(surviving, manifest.metadata);
-    if (computeRenderedBytes(candidate) <= budgetBytes) {
-      return makeResult(
-        candidate,
-        elidedNames,
-        elidedBytes,
-        minimumAchievableBytes,
-        manifest.deferredBytes,
-        manifest.metadata,
-        manifest.artifact,
-      );
-    }
+  const floorPlan = evaluated
+    .map(plan => plan.floor)
+    .sort((a, b) => a.finalBytes - b.finalBytes)[0];
+  const minimumAchievableBytes =
+    floorPlan?.finalBytes ??
+    computeMinimumAchievableBytesWithDeferral(rendered, eligibility);
+
+  const successPlan = evaluated
+    .flatMap(plan => (plan.success ? [plan.success] : []))
+    .sort(compareCandidatePlans)[0];
+
+  if (successPlan) {
+    const manifest = successPlan.pendingContextManifest;
+    const deferredBytes = manifest
+      ? manifest.manifest.sections.reduce((sum, section) => sum + section.bytes, 0)
+      : 0;
+    return makeResult(
+      successPlan.sections,
+      successPlan.elidedNames,
+      successPlan.elidedBytes,
+      minimumAchievableBytes,
+      deferredBytes,
+      successPlan.deferredContext,
+      successPlan.pendingContextManifest,
+    );
   }
 
   // Maximal deferral performed; still over budget. The reported floor comes
@@ -226,6 +402,8 @@ export function applyBudgetElision(
   throw new ContextOverBudgetError(
     budgetBytes,
     minimumAchievableBytes,
-    surviving.map((s) => s.name),
+    (floorPlan?.sections ?? rendered)
+      .map(section => section.name)
+      .filter(name => name !== "deferred_context"),
   );
 }

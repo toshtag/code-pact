@@ -69,7 +69,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: Project large read glob results by directory while deferring the
       complete file list.
     depends_on:
@@ -81,13 +81,11 @@ tasks:
       - src/core/glob.ts
       - src/core/pack/formatters/markdown.ts
     writes:
+      - design/phases/P54-structural-context-projection.yaml
       - src/core/pack/index.ts
       - src/core/pack/budget.ts
-      - src/core/pack/loaders.ts
       - src/core/pack/formatters/markdown.ts
       - tests/unit/core/pack/loaders.test.ts
-      - tests/unit/core/glob.test.ts
-      - tests/integration/pack-byte-identical.test.ts
       - tests/integration/task-context-budget.test.ts
     acceptance_refs:
       - tests/unit/core/pack/loaders.test.ts

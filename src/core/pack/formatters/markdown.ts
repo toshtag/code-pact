@@ -62,6 +62,10 @@ export type ReadGlobMatches = {
   matches: string[];
 };
 
+export type ContextProjectionKind =
+  | "read_directory_counts"
+  | "decision_implementation_commitments";
+
 /**
  * Internal intermediate representation produced by `renderSections`.
  *
@@ -85,6 +89,99 @@ export type RenderedSection = {
   /** Lines that will be joined by `"\n"`. */
   lines: string[];
 };
+
+export type ContextProjectionCandidate = {
+  sectionName: "reads" | "related_decisions";
+  kind: ContextProjectionKind;
+  original: RenderedSection;
+  projected: RenderedSection;
+  originalBytes: number;
+  projectedBytes: number;
+};
+
+function renderedSectionBytes(section: RenderedSection): number {
+  return Buffer.byteLength(section.lines.join("\n"), "utf8");
+}
+
+function parentDirectory(path: string): string {
+  const lastSlash = path.lastIndexOf("/");
+  if (lastSlash === -1) return "./";
+  if (lastSlash === 0) return "/";
+  return `${path.slice(0, lastSlash)}/`;
+}
+
+function groupReadMatchesByDirectory(matches: readonly string[]): Map<string, number> {
+  const uniqueMatches = [...new Set(matches)];
+  const groups = new Map<string, number>();
+  for (const match of uniqueMatches) {
+    const dir = parentDirectory(match);
+    groups.set(dir, (groups.get(dir) ?? 0) + 1);
+  }
+  return new Map([...groups.entries()].sort(([a], [b]) => a.localeCompare(b)));
+}
+
+export function makeReadDirectoryCountsProjection(
+  readMatches: readonly ReadGlobMatches[],
+  original: RenderedSection | undefined,
+): ContextProjectionCandidate | null {
+  if (!original || original.name !== "reads" || readMatches.length === 0) {
+    return null;
+  }
+
+  const lines: string[] = [`## Declared read surface`, ``];
+  let totalMatches = 0;
+  const allDirectories = new Set<string>();
+  for (const entry of readMatches) {
+    lines.push(`- \`${entry.glob}\``);
+    if (entry.matches.length === 0) {
+      lines.push(`  - _(no current matches on disk)_`);
+      continue;
+    }
+
+    const grouped = groupReadMatchesByDirectory(entry.matches);
+    const matchCount = [...grouped.values()].reduce((sum, count) => sum + count, 0);
+    if (matchCount !== new Set(entry.matches).size) return null;
+    totalMatches += matchCount;
+    for (const dir of grouped.keys()) allDirectories.add(dir);
+    lines.push(
+      `  - ${matchCount} ${matchCount === 1 ? "match" : "matches"} across ${grouped.size} ${grouped.size === 1 ? "directory" : "directories"}`,
+    );
+    for (const [dir, count] of grouped) {
+      lines.push(`  - \`${dir}\` — ${count} ${count === 1 ? "file" : "files"}`);
+    }
+  }
+  lines.push(``);
+
+  const originalBytes = renderedSectionBytes(original);
+  const projectedWithoutDetails: RenderedSection = {
+    name: "reads",
+    lines,
+  };
+  const projectedBytes = renderedSectionBytes(projectedWithoutDetails);
+  if (projectedBytes >= originalBytes) return null;
+
+  const projected: RenderedSection = {
+    ...projectedWithoutDetails,
+    details: {
+      projection_kind: "read_directory_counts",
+      original_bytes: originalBytes,
+      projected_bytes: projectedBytes,
+      saved_bytes: originalBytes - projectedBytes,
+      glob_count: readMatches.length,
+      match_count: totalMatches,
+      directory_count: allDirectories.size,
+    },
+  };
+
+  return {
+    sectionName: "reads",
+    kind: "read_directory_counts",
+    original,
+    projected,
+    originalBytes,
+    projectedBytes,
+  };
+}
 
 /**
  * Build the structured sections that compose the rendered context
