@@ -113,6 +113,10 @@ finalize`** — the state-machine transitions. `start` records
 - **`code-pact verify`** — runs the declared verification
   commands for a task without recording an event. Used to
   pre-flight a `task complete`.
+- **`code-pact memory status` / `memory prune`** — local,
+  disposable loop-memory cache maintenance. These commands
+  report aggregates and apply bounded retention only; memory is
+  never a correctness source and is not injected into context.
 - **`code-pact phase reconcile`** — phase-level reconciliation
   of task statuses against progress events; writes phase YAML
   status updates when run with `--write`.

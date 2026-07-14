@@ -124,7 +124,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: Reconcile ADR, public docs, changelog, and regression coverage with
       the hardened local-memory contract.
     depends_on:
@@ -142,7 +142,6 @@ tasks:
       - docs/maintainers/operations.md
       - docs/troubleshooting.md
       - CHANGELOG.md
-      - tests/integration/**
       - tests/unit/**
     acceptance_refs:
       - design/decisions/P58-T1-local-bounded-loop-memory-rfc.md

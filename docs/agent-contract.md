@@ -190,6 +190,11 @@ added to the context pack. If the cache is absent or corrupt, the normal
 lifecycle still runs from the design files, progress ledger, and verification
 commands.
 
+Episode files are bounded to 8 KiB, validated against their filename identity,
+and use UTC `Date.prototype.toISOString()` timestamps. Corrupt, oversized, or
+identity-mismatched cache files are reported as local cache problems; they are
+not promoted into agent context and are not deleted by `doctor`.
+
 ### Progress is an append-only event log
 
 The progress ledger is an append-only event log — code-pact never edits a past

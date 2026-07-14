@@ -708,6 +708,24 @@ code-pact memory prune --write --json
 `memory prune` is dry-run unless `--write` is present. `doctor` never deletes
 cache files and never runs `git rm`; it only reports what must be fixed.
 
+`memory status` may count corrupt local cache files. That includes oversized
+files, invalid JSON, schema-invalid episodes, and files whose name does not
+match the canonical episode payload. These files are ignored by retention
+planning and future recall layers; remove them manually only after confirming
+they are local cache, not shared project state.
+
+`task complete` can return two advisory warning codes without changing the
+verification result or exit code:
+
+| Code | Meaning |
+| --- | --- |
+| `LOCAL_MEMORY_WRITE_SKIPPED` | The episode was not recorded. |
+| `LOCAL_MEMORY_PRUNE_SKIPPED` | The episode was recorded, but best-effort retention maintenance did not complete. |
+
+`memory` operational errors use stable exit-1 JSON codes under `--json`:
+`MEMORY_PATH_UNSAFE`, `MEMORY_READ_FAILED`, `MEMORY_PRUNE_CONFLICT`, and
+`MEMORY_PRUNE_FAILED`.
+
 ## Id collisions & mismatches (collaboration)
 
 These are the **clean-but-wrong merge** class: two contributors on separate

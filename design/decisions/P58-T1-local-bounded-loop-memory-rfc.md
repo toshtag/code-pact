@@ -60,11 +60,16 @@ P58 records only compact structured fields that `task complete` already knows:
 - lifecycle mode and repair mode
 - verification pass/fail kind
 - failed check or bounded command name when available
-- failure fingerprint and Evidence reference when already produced
+- failure fingerprint when available
 - recording timestamp
 
 It does not infer missing fields. If `task complete` cannot determine a value
 from its existing flow, the episode omits it.
+
+Episode schema v1 does not store an Evidence reference. `task complete` records
+the memory episode before the agent-detail Evidence projection is generated on
+failure, and generating Evidence only for memory would add a new side effect.
+Evidence integration is deferred to a later schema version if it becomes useful.
 
 ## Retention
 
@@ -77,9 +82,11 @@ Retention is hard-coded at introduction:
 - at most 8 episodes per task
 - at most 4 episodes per failure fingerprint
 
-Corrupt or unsafe files are reported, not silently deleted. Explicit prune
-commands may delete only validated candidate files and must fail closed if file
-identity changes between plan and apply.
+Corrupt, oversized, identity-mismatched, or unsafe files are reported, not
+silently deleted. Explicit prune commands may delete only validated candidate
+files. `memory prune --write` preflights the whole batch, deletes nothing on a
+preflight conflict, treats concurrent post-preflight deletion as idempotent, and
+reports the actual post-write scan.
 
 ## Non-Goals
 
@@ -95,18 +102,23 @@ identity changes between plan and apply.
 
 ## Implementation Commitments
 
-- [ ] T2: add the strict episode schema, canonical serialization, filesystem
+- [x] T2: add the strict episode schema, canonical serialization, filesystem
   authority, atomic create path, scanning, status calculation, and retention
   plan/apply behavior.
-- [ ] T3: record success and failure episodes from `task complete` only, after
-  verification and Evidence/Failure Capsule handling have produced their normal
-  result.
-- [ ] T3: memory write failures are non-fatal and do not change the task
-  completion source-of-truth result, progress event contract, or exit code.
-- [ ] T4: add `memory status` and dry-run-by-default `memory prune`.
-- [ ] T4: add doctor checks for tracked loop-memory files and unsafe memory
+- [x] P58A: reject oversized files before body read, require filename/content
+  identity, require UTC `toISOString()` timestamps, and omit unsafe command
+  strings containing absolute paths.
+- [x] T3: record success and failure episodes from `task complete` only, after
+  verification has produced its normal result. Failure Capsule and Evidence
+  output remain independent of loop memory.
+- [x] P58A: memory write failures and retention maintenance failures are
+  non-fatal, accurately distinguished, and do not change the task completion
+  source-of-truth result, progress event contract, or exit code.
+- [x] T4: add `memory status` and dry-run-by-default `memory prune`.
+- [x] T4: add doctor checks for tracked loop-memory files and unsafe memory
   roots, without automatic deletion.
-- [ ] T4: keep normal successful `task complete` output free of memory metadata.
+- [x] P58A: use Git's ignore semantics for the cache ignore doctor check.
+- [x] T4: keep normal successful `task complete` output free of memory metadata.
 
 ## References
 

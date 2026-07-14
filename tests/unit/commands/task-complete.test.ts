@@ -612,6 +612,9 @@ describe("runTaskComplete — bounded verification and cancellation", () => {
       }),
     ).rejects.toMatchObject({ code: "VERIFICATION_FAILED" });
     expect((await loadMergedProgress(dir)).log.events).toHaveLength(0);
+    const memory = await scanLoopMemoryEpisodes(dir);
+    expect(memory.episodes).toHaveLength(1);
+    expect(memory.episodes[0]!.episode.verification.failure_kind).toBe("timed_out");
   }, 10_000);
 
   it("rejects an already-aborted operation without recording an event", async () => {
@@ -628,6 +631,7 @@ describe("runTaskComplete — bounded verification and cancellation", () => {
       }),
     ).rejects.toMatchObject({ code: "ABORTED" });
     expect((await loadMergedProgress(dir)).log.events).toHaveLength(0);
+    expect((await scanLoopMemoryEpisodes(dir)).episodes).toHaveLength(0);
   });
 
   it("honours cancellation immediately before the event-write commit point", async () => {

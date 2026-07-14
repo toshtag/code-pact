@@ -432,6 +432,11 @@ episodes from `task complete` so later local work can avoid repeating the same
 investigation, but it is not part of the progress ledger, context packs,
 Evidence artifacts, or CI source of truth.
 
+Each episode file is capped at 8 KiB and must match its filename identity.
+Corrupt, oversized, identity-mismatched, or unsafe files are counted as corrupt
+local cache entries; `doctor` and `memory status` report them, but neither
+deletes them automatically.
+
 Inspect only aggregates:
 
 ```sh
@@ -444,6 +449,11 @@ Prune is dry-run by default:
 code-pact memory prune --json
 code-pact memory prune --write --json
 ```
+
+`memory prune --write` preflights every retention candidate before deleting
+anything. A preflight conflict deletes nothing; a file deleted by another local
+process after preflight is treated as an idempotent skip. The reported `after`
+state is a fresh post-write scan.
 
 Keep `/.code-pact/cache/` in `.gitignore`. If `doctor` reports
 `LOOP_MEMORY_CACHE_NOT_GITIGNORED`, `LOOP_MEMORY_TRACKED`, or

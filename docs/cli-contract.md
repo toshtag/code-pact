@@ -3842,8 +3842,11 @@ responses, model reasoning, source, diffs, stdout, stderr, or conversation
 content. It must not affect verification, decision gates, write audit, progress
 ledger writes, Evidence, Context artifacts, Failure Capsules, or normal
 successful CLI output. Removing the cache must leave the lifecycle behavior
-unchanged. P58 records episodes only; `task prepare`, `task context`, and
-`recommend` do not read loop memory or inject it into context.
+unchanged. Episode schema v1 does not store Evidence references. Oversized,
+corrupt, or filename/content identity-mismatched files are not normal episodes
+and are not retention candidates. P58 records episodes only; `task prepare`,
+`task context`, and `recommend` do not read loop memory or inject it into
+context.
 
 **An over-broad ignore defeats this policy — and `doctor` catches it.** `init` _merges_ its narrow entries into an existing `.gitignore` and **never deletes a user's lines**, so a pre-existing blanket `/.code-pact/` (or `.code-pact/`) rule — or a file-scoped one like `state/events/*.yaml` — survives and overrides them: the affected shared state is then silently never committed, and a teammate or clean checkout misses whatever is ignored (project config, profiles, baselines, or the ledger). **Only when the ledger itself is ignored** does the `CONTROL_PLANE_BRANCH_NOT_DRIVEN` CI gate _also_ skip (it has no tracked ledger to read). `init` surfaces this as a warning, and `doctor` reports it authoritatively as `CONTROL_PLANE_GITIGNORED` — it asks `git check-ignore --no-index` for a representative **file** in each shared area (`project.yaml`, `agent-profiles/`, `model-profiles/`, `state/baselines/`, `state/events/`), so a file-scoped rule is caught and negation re-includes are honoured. Neither edits your `.gitignore`; narrow the rule yourself — keep only `/.code-pact/locks/` and `/.code-pact/cache/` (plus `/.local/`, `/.context/`) ignored.
 
