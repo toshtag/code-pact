@@ -102,6 +102,7 @@ const KNOWN_CODES: Record<
   INVALID_EVIDENCE_REF: "public",
   INVALID_TASK_TRANSITION: "public",
   LOCK_HELD: "public",
+  LOCAL_MEMORY_WRITE_SKIPPED: "public",
   MANIFEST_NOT_FOUND: "public",
   PHASE_NOT_FOUND: "public",
   // design-docs-ephemeral step 7 PR-B1: the `phase archive` destructive verb.

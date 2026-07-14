@@ -1088,6 +1088,7 @@ async function cmdTaskComplete(
           detail === "agent"
             ? projectVerifySummaryForAgent(result.verify)
             : projectVerifyForPublicJson(result.verify),
+        ...(result.warnings !== undefined ? { warnings: result.warnings } : {}),
       };
       if (detail === "agent") {
         process.stdout.write(stringifyBoundedAgentEnvelope({ ok: true, data }));
@@ -1141,6 +1142,8 @@ async function cmdTaskComplete(
     if (code === "VERIFICATION_FAILED") {
       const checks =
         (error as NodeJS.ErrnoException & { checks?: FailureCheckLike[] }).checks ?? [];
+      const warnings =
+        (error as NodeJS.ErrnoException & { warnings?: unknown[] }).warnings ?? undefined;
       const summary = buildFailureSummaryFromChecks(checks, taskId);
       const wasAborted = checks.some(
         check => (check as FailureCheckLike & { aborted?: boolean }).aborted === true,
@@ -1197,6 +1200,7 @@ async function cmdTaskComplete(
                 task_id: taskId,
                 ...(await projectVerifyForAgent(process.cwd(), verifyResult)),
                 suggested_next_command: summary.suggested_next_command,
+                ...(warnings !== undefined ? { warnings } : {}),
                 ...(wasAborted ? { aborted: true } : {}),
               },
             }),
@@ -1212,6 +1216,7 @@ async function cmdTaskComplete(
                 failed_checks: summary.failed_checks,
                 first_failure: summary.first_failure,
                 suggested_next_command: summary.suggested_next_command,
+                ...(warnings !== undefined ? { warnings } : {}),
                 ...(wasAborted ? { aborted: true } : {}),
               },
             })}\n`,

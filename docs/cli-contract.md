@@ -256,6 +256,15 @@ top-level codes (it also matches `cause_code:` literals). See [`verify`](#verify
 | `DECISION_REQUIRED` (v1.27+ as a cause code) | `error.cause_code` on a `task complete` `VERIFICATION_FAILED` envelope (exit 1) | The decision gate is unresolved (a `requires_decision` task with no accepted ADR). `error.message` names that an accepted ADR is required **and embeds the gate's reason** (e.g. `… requires an accepted ADR before completion: No accepted ADR found for "P1-T1". …`). There is **no** full `DecisionRequiredData` block here — that richer envelope only appears on `task record-done`, where `DECISION_REQUIRED` is the top-level `error.code` at exit 2 (see the [Public codes](#public-codes-top-level-error-envelopes) `DECISION_REQUIRED` row) |
 | `ABORTED` | `error.cause_code` on `verify` or `task complete` `VERIFICATION_FAILED` (exit 1) | The CLI received cancellation through its `AbortSignal` (including the first `SIGINT` or `SIGTERM`). The active verification process tree is terminated and no `task complete` progress event is written before the event-write commit point. Re-run only when the caller intends the operation to proceed. |
 
+### Public warning codes
+
+These appear in additive `warnings[]` entries, not in `error.code`, and never
+change the command exit code.
+
+| Code | Appears on | Meaning |
+| --- | --- | --- |
+| `LOCAL_MEMORY_WRITE_SKIPPED` | `task complete` success or verification-failure JSON only when local loop-memory recording failed | The task completion source of truth is unchanged, but the local `.code-pact/cache/loop-memory/` episode was not recorded. The warning has `affects_exit: false`; rerun only if the local advisory memory matters. |
+
 ### Plan diagnostic codes
 
 Issue-level codes emitted by diagnostic surfaces — `plan lint`, `plan analyze`, and selected shared `doctor` checks (e.g. the id-conflict diagnostics) — inside `data.issues[]`. Carry severity `error` or `warning`. The id-conflict diagnostics (`DUPLICATE_PHASE_ID` / `DUPLICATE_TASK_ID`) also carry `details.colliding_files` (a `string[]` of the colliding phase-file paths; `DUPLICATE_TASK_ID` adds `details.colliding_phases`) so an agent can read the collision pair without parsing the prose `message` — `issue.file` is single-valued (the second occurrence).
