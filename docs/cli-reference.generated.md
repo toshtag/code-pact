@@ -55,6 +55,42 @@ code-pact evidence show evidence:sha256:0123456789abcdef0123456789abcdef01234567
 code-pact evidence show evidence:sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef --stream stderr
 ```
 
+## Memory commands
+
+### `memory status`
+
+`code-pact memory status [options]`
+
+Report aggregate status for local bounded loop-memory episodes.
+Does not print episode bodies, commands, fingerprints, or file paths. Read-only — never records a progress event.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact memory status
+code-pact memory status --json
+```
+
+### `memory prune`
+
+`code-pact memory prune [options]`
+
+Plan or apply retention pruning for local bounded loop-memory episodes.
+Dry-run by default; --write deletes only validated retention candidates.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--write` | — | Apply the prune plan. Default is dry-run. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact memory prune
+code-pact memory prune --json
+code-pact memory prune --write --json
+```
+
 ## Context commands
 
 ### `context show`

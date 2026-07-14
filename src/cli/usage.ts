@@ -7,6 +7,7 @@ import { renderLeafHelp } from "./spec/render.ts";
 import { ADAPTER_SPECS, ADAPTER_SPEC_ORDER } from "./spec/adapter.ts";
 import { DECISION_SPECS, DECISION_SPEC_ORDER } from "./spec/decision.ts";
 import { EVIDENCE_SPECS, EVIDENCE_SPEC_ORDER } from "./spec/evidence.ts";
+import { MEMORY_SPECS, MEMORY_SPEC_ORDER } from "./spec/memory.ts";
 import { CONTEXT_SPECS, CONTEXT_SPEC_ORDER } from "./spec/context.ts";
 import { PHASE_SPECS, PHASE_SPEC_ORDER } from "./spec/phase.ts";
 import { PLAN_SPECS, PLAN_SPEC_ORDER } from "./spec/plan.ts";
@@ -22,6 +23,7 @@ const CLUSTER_SUBCOMMANDS: Record<string, string> = {
   adapter: ADAPTER_SPEC_ORDER.join(" | "),
   decision: DECISION_SPEC_ORDER.join(" | "),
   evidence: EVIDENCE_SPEC_ORDER.join(" | "),
+  memory: MEMORY_SPEC_ORDER.join(" | "),
   context: CONTEXT_SPEC_ORDER.join(" | "),
   state: STATE_SPEC_ORDER.join(" | "),
   spec: SPEC_SPEC_ORDER.join(" | "),
@@ -136,6 +138,10 @@ const LEAF_USAGE: Record<string, () => string> = {
   "task runbook": () => renderLeafHelp(TASK_SPECS.runbook!),
 
   "evidence show": () => renderLeafHelp(EVIDENCE_SPECS.show),
+
+  "memory status": () => renderLeafHelp(MEMORY_SPECS.status),
+
+  "memory prune": () => renderLeafHelp(MEMORY_SPECS.prune),
 
   "context show": () => renderLeafHelp(CONTEXT_SPECS.show),
 

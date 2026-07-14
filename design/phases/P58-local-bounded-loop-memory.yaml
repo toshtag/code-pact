@@ -127,7 +127,7 @@ tasks:
     write_surface: high
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: Add `memory status`, `memory prune`, doctor checks, generated CLI
       reference updates, and maintainer documentation.
     depends_on:
@@ -141,18 +141,24 @@ tasks:
       - docs/troubleshooting.md
       - CHANGELOG.md
     writes:
+      - src/cli.ts
       - src/cli/spec/**
       - src/cli/commands/**
+      - src/cli/spec/types.ts
+      - src/cli/usage.ts
       - src/commands/memory-status.ts
       - src/commands/memory-prune.ts
       - src/commands/doctor.ts
+      - scripts/gen-cli-reference.ts
+      - docs/cli-contract.md
       - docs/cli-reference.generated.md
       - docs/maintainers/operations.md
       - docs/troubleshooting.md
       - CHANGELOG.md
       - tests/unit/commands/doctor.test.ts
       - tests/unit/commands/memory*.test.ts
+      - tests/unit/error-code-surface.test.ts
       - tests/integration/json-stdout.test.ts
     acceptance_refs:
       - docs/cli-reference.generated.md
-      - tests/unit/commands/memory-status.test.ts
+      - tests/unit/commands/memory.test.ts

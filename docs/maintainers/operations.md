@@ -424,6 +424,33 @@ code-pact doctor --json
 
 Selective per-code promotion ("strict on everything EXCEPT `TASK_WRITES_PROTECTED_PATH`") is **not** supported in v1.5+; it remains a P15+ candidate. Until then, the binary `--strict` flag is your only lever.
 
+### Local loop-memory maintenance (v2.7+)
+
+Loop memory is derived, machine-local state under
+`.code-pact/cache/loop-memory/v1/episodes/`. It records bounded verification
+episodes from `task complete` so later local work can avoid repeating the same
+investigation, but it is not part of the progress ledger, context packs,
+Evidence artifacts, or CI source of truth.
+
+Inspect only aggregates:
+
+```sh
+code-pact memory status --json
+```
+
+Prune is dry-run by default:
+
+```sh
+code-pact memory prune --json
+code-pact memory prune --write --json
+```
+
+Keep `/.code-pact/cache/` in `.gitignore`. If `doctor` reports
+`LOOP_MEMORY_CACHE_NOT_GITIGNORED`, `LOOP_MEMORY_TRACKED`, or
+`LOOP_MEMORY_PATH_UNSAFE`, fix the local cache shape and re-run
+`code-pact doctor`. `doctor` reports these conditions only; it never deletes
+cache files or runs `git rm`.
+
 ### Tracking release prep with `phase runbook --across-phases` (v1.9+)
 
 When a release ships work from several in_progress phases (typical for a roadmap with cross-phase `depends_on` references), the aggregated runbook surfaces every phase still in scope in one shot:
