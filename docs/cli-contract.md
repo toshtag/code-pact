@@ -2072,11 +2072,12 @@ Exit code 2. `data.minimum_achievable_bytes` tells the caller the floor for this
 
 `wide` is **not** `full`: it is a generous byte-capped profile, not a promise that every pack fits without elision — a large task can still elide or hit `CONTEXT_OVER_BUDGET` at `wide`.
 
-**Agent-defined profiles.** An agent profile may declare an optional `context_budget` block that **overrides** a standard byte value or names additional custom profiles:
+**Agent-defined profiles.** An agent profile may declare an optional `context_budget` block. Omitted `application_mode` normalizes to `manual`, preserving legacy behavior:
 
 ```yaml
 context_budget:
-  default_profile: balanced # optional; validated, but NOT auto-applied in P47
+  application_mode: manual # optional; manual is the default
+  default_profile: balanced # optional; validated, but not auto-applied
   profiles:
     tight: { max_bytes: 30000 }
     balanced: { max_bytes: 60000 }
@@ -2084,11 +2085,23 @@ context_budget:
     review: { max_bytes: 45000 } # a custom profile
 ```
 
-`max_bytes` is a positive integer. A missing `context_budget` block is valid (backward compatible). `default_profile`, when present, must reference a declared profile — but it is **not** applied automatically to any command in P47; an invocation with no flag stays byte-identical to the no-flag default above. A malformed, explicitly-configured `context_budget` surfaces as `CONFIG_ERROR` when a `--context-budget` invocation needs to parse it.
+`max_bytes` is a positive integer. Manual mode requires a non-empty `profiles` map. A missing `context_budget` block is valid (backward compatible). `default_profile`, when present, must reference a declared profile, but it is **not** applied automatically to any command.
+
+Recommended application mode is an explicit `task prepare` opt-in:
+
+```yaml
+context_budget:
+  application_mode: recommended
+  profiles: # optional; same-name standard overrides only
+    tight: { max_bytes: 28000 }
+    balanced: { max_bytes: 56000 }
+```
+
+In recommended mode, `profiles` may be omitted. If present, it must be non-empty. `default_profile` still must reference a declared profile and is not used to choose the recommendation. Custom profile names are never selected by the recommendation; only a same-name standard override affects the recommended bytes. `context_budget: {}` is invalid because it normalizes to manual mode without required profiles. A malformed, explicitly-configured `context_budget` surfaces as `CONFIG_ERROR` when a command needs to parse it.
 
 **Resolution.** A standard name (`tight` / `balanced` / `wide`) resolves to its built-in byte value even with **no** agent profile in play, so the ergonomic name is usable without forcing `--agent`. An agent profile only _overrides_ the byte value, or supplies a custom name. An unknown profile name fails with `CONFIG_ERROR` (exit 2), naming the missing profile and the agent.
 
-**Mutual exclusion.** `--context-budget` and `--budget-bytes` are mutually exclusive; supplying both is `CONFIG_ERROR` (exit 2):
+**Mutual exclusion.** On `task context`, `--context-budget` and `--budget-bytes` are mutually exclusive; supplying both is `CONFIG_ERROR` (exit 2). On `task prepare`, three budget modes are mutually exclusive: `--budget-bytes`, `--context-budget`, and `--recommended-context-budget`. `task context`, `pack`, `recommend`, `verify`, and `task complete` do not accept `--recommended-context-budget`.
 
 ```json
 {
@@ -2100,7 +2113,7 @@ context_budget:
 }
 ```
 
-**`commands` dictionary.** Like `--budget-bytes`, `--context-budget` is per-invocation policy, not project state: the `task prepare` `commands` dictionary does **not** echo it.
+**`commands` dictionary.** Budget selection is per-invocation policy, not project state. When `task prepare` actually applies a budget, `commands.context` uses the resolved byte value (`--budget-bytes <N>`) so the emitted command reproduces the same deterministic context content even if profile config later changes. It never emits `--recommended-context-budget` and never emits `--context-budget`. When no budget is applied, `commands.context` stays the legacy unbudgeted command byte-for-byte.
 
 ## `task prepare` — single per-task entry point (v1.11+, P21)
 
@@ -2110,7 +2123,17 @@ The command MUST NOT record a progress event (the ledger is left unchanged) on a
 
 ### Flags
 
-The flag list, value types, and examples live in the generated [CLI reference § `task prepare`](cli-reference.generated.md). Contract notes on specific flags: `--agent` shares `task context`'s validation (`AGENT_NOT_FOUND` / `AGENT_NOT_ENABLED`); `--dry-run` returns `would_write_context_pack_path` instead of `context_pack_path`; `--budget-bytes <N>` (v1.13+, P24) elides sections in the priority order defined in [`task context --budget-bytes`](#--budget-bytes-n-v113-p24) and throws `CONTEXT_OVER_BUDGET` (exit 2) when unachievable, with no progress event recorded on the failure path (the progress-read-only invariant from P21-T3); `--context-budget <profile>` (v1.30+, P47) is the ergonomic alias for `--budget-bytes`, resolving a named profile to bytes before that same path (see [`task context --context-budget`](#--context-budget-profile-v130-p47)), mutually exclusive with `--budget-bytes`, and **not** echoed into the returned `commands` dictionary.
+The flag list, value types, and examples live in the generated [CLI reference § `task prepare`](cli-reference.generated.md). Contract notes on specific flags: `--agent` shares `task context`'s validation (`AGENT_NOT_FOUND` / `AGENT_NOT_ENABLED`); `--dry-run` returns `would_write_context_pack_path` instead of `context_pack_path`; `--budget-bytes <N>` (v1.13+, P24) elides sections in the priority order defined in [`task context --budget-bytes`](#--budget-bytes-n-v113-p24) and throws `CONTEXT_OVER_BUDGET` (exit 2) when unachievable, with no progress event recorded on the failure path (the progress-read-only invariant from P21-T3); `--context-budget <profile>` (v1.30+, P47) is the ergonomic alias for `--budget-bytes`, resolving a named profile to bytes before that same path (see [`task context --context-budget`](#--context-budget-profile-v130-p47)); `--recommended-context-budget` applies the deterministic `recommendation.contextFit` profile and bytes produced in the same call. The three budget flags are mutually exclusive.
+
+Budget resolution precedence on the pack-build path is fixed:
+
+1. `--budget-bytes <N>` → `applied_context_budget.source: "explicit_bytes"`.
+2. `--context-budget <profile>` → `source: "explicit_profile"`; `profile` may be custom, including `auto`.
+3. `--recommended-context-budget` → `source: "recommended_cli"`.
+4. No budget flag plus agent profile `context_budget.application_mode: recommended` → `source: "recommended_agent_profile"`.
+5. Otherwise → `source: "none"`.
+
+The string `auto` is not reserved. `--context-budget auto` resolves as an explicit profile name when the agent declares it; it never means recommended mode.
 
 ### JSON envelope
 
@@ -2124,6 +2147,11 @@ The flag list, value types, and examples live in the generated [CLI reference §
     "current_state": "planned",
     "recommendation": {
       /* full v2 RecommendResult, or null */
+    },
+    "applied_context_budget": {
+      "source": "recommended_cli",
+      "profile": "tight",
+      "budget_bytes": 30000
     },
     "context_pack_path": ".../<task-id>.md",
     "context_pack_bytes": 18422,
@@ -2162,6 +2190,16 @@ The flag list, value types, and examples live in the generated [CLI reference §
 
 - `would_write_context_pack_path` is present only in `--dry-run` mode when a pack would have been written.
 - `already_done` is present (always `true`) only when `current_state === "done"`.
+- `applied_context_budget` is present on the context-pack build path, including
+  `{ "source": "none" }` when no budget was applied. It is omitted entirely for
+  done, blocked, and unmet-dependency early returns because no recommendation,
+  budget resolution, pack build, or context artifact materialization occurs.
+  Closed sources are `none`, `explicit_bytes`, `explicit_profile`,
+  `recommended_cli`, and `recommended_agent_profile`. `none` has no `profile`
+  or `budget_bytes`; `explicit_bytes` has `budget_bytes` only;
+  `explicit_profile` has the requested profile name and resolved bytes; the two
+  recommended sources have a standard `tight` / `balanced` / `wide` profile and
+  bytes equal to `recommendation.contextFit.recommendedBudgetBytes`.
 - `deferred_context` (P52) is present only when an explicit budget caused at
   least one section to be withheld. It is additive metadata; it never contains
   deferred section content or a pending manifest payload. `manifest_ref` is the
@@ -3476,7 +3514,7 @@ failures are non-retryable.
 
 | Field        | Type                               | Trigger                                                                                                                                                                                                                                                                                                                                                                                                |
 | ------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `contextFit` | ContextFitRecommendation \| absent | A **recommended** standard context budget profile, derived deterministically from `context_size` / `ambiguity` / `write_surface`. **Optional and additive** — absent on `recommendation: null` early-return states and on existing V2 consumers. It is a _suggestion_, **not** auto-applied: re-sizing the pack stays explicit via [`--context-budget <profile>`](#--context-budget-profile-v130-p47). |
+| `contextFit` | ContextFitRecommendation \| absent | A **recommended** standard context budget profile, derived deterministically from `context_size` / `ambiguity` / `write_surface`. **Optional and additive** — absent on `recommendation: null` early-return states and on existing V2 consumers. In `recommend`, it is advisory only. `task prepare` may apply the already-produced recommendation only through `--recommended-context-budget` or explicit agent-profile `context_budget.application_mode: recommended`. |
 
 `contextFit` is distinct from `budgetProfile`: `budgetProfile` is a categorical tool-call / context-file / verification magnitude, while `contextFit` names a byte-valued _budget_ profile. Context Fit does not overload `budgetProfile`. No network, model, or tokenizer is consulted to compute it.
 

@@ -196,6 +196,28 @@ describe("context output namespace security", () => {
     ).rejects.toThrow();
   });
 
+  it("rejects .context symlinked to outside project with profileContextDir", async () => {
+    const outsideTarget = join(outsideDir, "evil");
+    await mkdir(outsideTarget, { recursive: true });
+    await rm(join(workDir, ".context"), { recursive: true, force: true });
+    await symlink(outsideTarget, join(workDir, ".context"));
+
+    const pack = await buildContextPack({
+      cwd: workDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "safe-agent",
+    });
+
+    await expect(
+      writeContextPack(pack, {
+        cwd: workDir,
+        agentName: "safe-agent",
+        profileContextDir: ".context/custom",
+      }),
+    ).rejects.toThrow();
+  });
+
   it("rejects final-component symlink at output path", async () => {
     await mkdir(join(workDir, ".code-pact", "agent-profiles"), {
       recursive: true,
@@ -222,6 +244,33 @@ describe("context output namespace security", () => {
 
     await expect(
       writeContextPack(pack, { cwd: workDir, agentName: "safe-agent" }),
+    ).rejects.toThrow();
+
+    expect(await readFile(outsideTarget, "utf8")).toBe("STOLEN");
+  });
+
+  it("rejects final-component symlink at output path with profileContextDir", async () => {
+    await mkdir(join(workDir, ".context", "custom"), { recursive: true });
+    const outsideTarget = join(outsideDir, "evil.md");
+    await writeFile(outsideTarget, "STOLEN", "utf8");
+    await symlink(
+      outsideTarget,
+      join(workDir, ".context", "custom", "P2-E1-T1.md"),
+    );
+
+    const pack = await buildContextPack({
+      cwd: workDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "safe-agent",
+    });
+
+    await expect(
+      writeContextPack(pack, {
+        cwd: workDir,
+        agentName: "safe-agent",
+        profileContextDir: ".context/custom",
+      }),
     ).rejects.toThrow();
 
     expect(await readFile(outsideTarget, "utf8")).toBe("STOLEN");

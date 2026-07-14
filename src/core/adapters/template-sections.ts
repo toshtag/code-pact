@@ -81,6 +81,8 @@ export function renderAgentContractSection(t: AdapterCommon): string[] {
     ``,
     t.agentContract.intro,
     ``,
+    t.agentContract.contextCommandBody,
+    ``,
     `### ${t.agentContract.whenHeader}`,
     ``,
     t.agentContract.whenBody,

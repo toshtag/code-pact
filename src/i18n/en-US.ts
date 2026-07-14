@@ -496,6 +496,8 @@ export const messages = {
         failHeader: "How to handle failures",
         intro:
           "The canonical code-pact workflow has three axes. A conforming agent honors all three. See [`docs/cli-contract.md`](https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md) for the full envelope reference.",
+        contextCommandBody:
+          "Use `data.commands.context` exactly as returned by `task prepare`. Do not reconstruct, widen, or replace the resolved context budget.",
         whenBody: [
           "Bootstrap once (CI-friendly, all non-interactive):",
           "",

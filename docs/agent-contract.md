@@ -327,11 +327,17 @@ The verbs in detail:
   stays with `verify` / `task complete`).
   The embedded `recommendation` carries (additively) an optional
   `contextFit` — a recommended standard context budget profile (`tight` /
-  `balanced` / `wide`), its byte value, and a reason. It is a **suggestion**:
-  it is **not** auto-applied and never re-sizes the context pack on its own.
-  To act on it, pass `--context-budget <profile>` to `task context` /
-  `task prepare` explicitly; the `commands` dictionary does **not** echo it.
-  If the explicit budget produces `deferred_context`, first work from the
+  `balanced` / `wide`), its byte value, and a reason. In `recommend`, it
+  remains advisory only. `task prepare` may apply that already-produced
+  recommendation only when the caller passes `--recommended-context-budget`
+  or the agent profile explicitly opts in with
+  `context_budget.application_mode: recommended`. Explicit CLI budget flags
+  (`--budget-bytes`, `--context-budget`, `--recommended-context-budget`) always
+  override the profile mode and are mutually exclusive. Use
+  `data.commands.context` exactly as returned; when a budget was applied it
+  contains the resolved `--budget-bytes <N>`, not the profile or recommended
+  flag. Do not reconstruct, widen, or replace that resolved budget.
+  If the applied budget produces `deferred_context`, first work from the
   rendered pack and the section names already embedded in the result. Do not
   fetch every deferred section up front. Fetch only when a concrete missing
   section is necessary, only when `deferred_context.retrieve_command` is

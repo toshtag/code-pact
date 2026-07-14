@@ -60,6 +60,11 @@ import { readProjectYamlStrictOrNull } from "./core/project-config-path.ts";
 const KNOWN_LOCALES: ReadonlySet<Locale> = new Set(["en-US", "ja-JP"]);
 const KNOWN_AGENTS: ReadonlySet<SupportedAgent> = new Set(SUPPORTED_AGENTS);
 
+function hasLongOption(argv: string[], name: string): boolean {
+  const flag = `--${name}`;
+  return argv.some(arg => arg === flag || arg.startsWith(`${flag}=`));
+}
+
 function wantsAgentDetail(argv: string[], globalJson: boolean): boolean {
   const detailIndex = argv.indexOf("--detail");
   return (
@@ -622,6 +627,16 @@ async function cmdRecommend(
   globalJson: boolean,
 ): Promise<number> {
   const m = messages[locale];
+  const json = globalJson || hasLongOption(argv, "json");
+  if (hasLongOption(argv, "recommended-context-budget")) {
+    emitError(
+      json,
+      "CONFIG_ERROR",
+      "recommend: --recommended-context-budget is only supported by task prepare.",
+    );
+    return 2;
+  }
+
   const { values } = parseArgs({
     args: argv,
     options: {
@@ -634,7 +649,6 @@ async function cmdRecommend(
     allowPositionals: false,
   });
 
-  const json = globalJson || values.json === true;
   const phaseId = values.phase as string | undefined;
   const taskId = values.task as string | undefined;
   const agentName = (values.agent as string | undefined) ?? "claude-code";
@@ -904,6 +918,16 @@ async function cmdPack(
   globalJson: boolean,
 ): Promise<number> {
   const m = messages[locale];
+  const json = globalJson || hasLongOption(argv, "json");
+  if (hasLongOption(argv, "recommended-context-budget")) {
+    emitError(
+      json,
+      "CONFIG_ERROR",
+      "pack: --recommended-context-budget is only supported by task prepare.",
+    );
+    return 2;
+  }
+
   const { values } = parseArgs({
     args: argv,
     options: {
@@ -916,7 +940,6 @@ async function cmdPack(
     allowPositionals: false,
   });
 
-  const json = globalJson || values.json === true;
   const phaseId = values.phase as string | undefined;
   const taskId = values.task as string | undefined;
   const agentName = (values.agent as string | undefined) ?? "claude-code";

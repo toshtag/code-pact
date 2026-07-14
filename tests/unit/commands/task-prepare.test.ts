@@ -341,6 +341,125 @@ describe("runTaskPrepare — P48 contextFit", () => {
     );
   });
 
+  it("reports source none on the no-budget build path", async () => {
+    await setupProject(dir);
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+    expect(result.applied_context_budget).toEqual({ source: "none" });
+    expect(result.commands.context).toBe(
+      "code-pact task context P1-T1 --agent claude-code",
+    );
+  });
+
+  it("applies the same recommended contextFit when recommended_cli is selected", async () => {
+    await setupProject(dir);
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      budgetSelection: { kind: "recommended_cli" },
+    });
+    expect(result.recommendation).not.toBeNull();
+    expect(result.applied_context_budget).toEqual({
+      source: "recommended_cli",
+      profile: result.recommendation!.contextFit!.recommendedProfile,
+      budget_bytes: result.recommendation!.contextFit!.recommendedBudgetBytes,
+    });
+    expect(result.commands.context).toBe(
+      `code-pact task context P1-T1 --agent claude-code --budget-bytes ${result.recommendation!.contextFit!.recommendedBudgetBytes}`,
+    );
+  });
+
+  it("keeps --context-budget auto as an explicit custom profile, not recommended mode", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      `${AGENT_PROFILE_YAML}context_budget:\n  profiles:\n    auto:\n      max_bytes: 45000\n`,
+      "utf8",
+    );
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      budgetSelection: { kind: "explicit_profile", profileName: "auto" },
+      dryRun: true,
+    });
+    expect(result.applied_context_budget).toEqual({
+      source: "explicit_profile",
+      profile: "auto",
+      budget_bytes: 45000,
+    });
+    expect(result.commands.context).toBe(
+      "code-pact task context P1-T1 --agent claude-code --budget-bytes 45000",
+    );
+  });
+
+  it("applies recommended_agent_profile when the agent profile opts in", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      `${AGENT_PROFILE_YAML}context_budget:\n  application_mode: recommended\n`,
+      "utf8",
+    );
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+    });
+    expect(result.recommendation).not.toBeNull();
+    expect(result.applied_context_budget).toEqual({
+      source: "recommended_agent_profile",
+      profile: result.recommendation!.contextFit!.recommendedProfile,
+      budget_bytes: result.recommendation!.contextFit!.recommendedBudgetBytes,
+    });
+  });
+
+  it("explicit CLI bytes override agent profile recommended mode", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      `${AGENT_PROFILE_YAML}context_budget:\n  application_mode: recommended\n`,
+      "utf8",
+    );
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+      budgetSelection: { kind: "explicit_bytes", budgetBytes: 45000 },
+    });
+    expect(result.applied_context_budget).toEqual({
+      source: "explicit_bytes",
+      budget_bytes: 45000,
+    });
+  });
+
+  it("recommended mode uses same-name standard overrides but not custom defaults", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      `${AGENT_PROFILE_YAML}context_budget:\n  application_mode: recommended\n  default_profile: custom\n  profiles:\n    tight:\n      max_bytes: 28000\n    custom:\n      max_bytes: 90000\n`,
+      "utf8",
+    );
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+    });
+    expect(result.recommendation!.contextFit?.recommendedProfile).toBe("tight");
+    expect(result.recommendation!.contextFit?.recommendedBudgetBytes).toBe(28000);
+    expect(result.applied_context_budget).toEqual({
+      source: "recommended_agent_profile",
+      profile: "tight",
+      budget_bytes: 28000,
+    });
+  });
+
   it("early-return done state stays unchanged — null recommendation, no contextFit", async () => {
     const progressWithDone = `events:
   - task_id: P1-T1
@@ -358,6 +477,7 @@ describe("runTaskPrepare — P48 contextFit", () => {
     expect(result.current_state).toBe("done");
     expect(result.recommendation).toBeNull();
     expect(result.context_pack_bytes).toBe(0);
+    expect(result.applied_context_budget).toBeUndefined();
   });
 });
 
@@ -438,6 +558,10 @@ describe("runTaskPrepare — done state early return", () => {
     expect(result.context_pack_path).toBeNull();
     expect(result.context_pack_bytes).toBe(0);
     expect(result.blocked_by).toEqual([]);
+    expect(result.applied_context_budget).toBeUndefined();
+    expect(result.commands.context).toBe(
+      "code-pact task context P1-T1 --agent claude-code",
+    );
   });
 });
 
@@ -469,6 +593,7 @@ describe("runTaskPrepare — blocked state early return", () => {
     expect(result.recommendation).toBeNull();
     expect(result.context_pack_path).toBeNull();
     expect(result.context_pack_bytes).toBe(0);
+    expect(result.applied_context_budget).toBeUndefined();
   });
 });
 
@@ -488,6 +613,7 @@ describe("runTaskPrepare — unmet dependencies", () => {
     expect(result.recommendation).toBeNull();
     expect(result.context_pack_path).toBeNull();
     expect(result.context_pack_bytes).toBe(0);
+    expect(result.applied_context_budget).toBeUndefined();
   });
 
   it("proceeds to start_task when all deps are done", async () => {
@@ -605,6 +731,61 @@ describe("runTaskPrepare — task resolution errors", () => {
 });
 
 describe("runTaskPrepare — budget enforcement (P24)", () => {
+  it("normal prepare writes to the validated custom profile context_dir", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      AGENT_PROFILE_YAML.replace(
+        "context_dir: .context/claude-code",
+        "context_dir: .context/custom-prepare",
+      ),
+      "utf8",
+    );
+
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+
+    expect(result.context_pack_path).toBe(
+      join(dir, ".context", "custom-prepare", "P1-T1.md"),
+    );
+    expect(await fileExists(result.context_pack_path!)).toBe(true);
+    expect(await fileExists(join(dir, ".context", "claude-code", "P1-T1.md"))).toBe(
+      false,
+    );
+  });
+
+  it("normal recommended prepare writes to the same custom profile context_dir", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      `${AGENT_PROFILE_YAML.replace(
+        "context_dir: .context/claude-code",
+        "context_dir: .context/custom-recommended",
+      )}context_budget:\n  application_mode: recommended\n`,
+      "utf8",
+    );
+
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+
+    expect(result.applied_context_budget).toMatchObject({
+      source: "recommended_agent_profile",
+    });
+    expect(result.context_pack_path).toBe(
+      join(dir, ".context", "custom-recommended", "P1-T1.md"),
+    );
+    expect(await fileExists(result.context_pack_path!)).toBe(true);
+    expect(await fileExists(join(dir, ".context", "claude-code", "P1-T1.md"))).toBe(
+      false,
+    );
+  });
+
   it("respects --budget-bytes and returns post-elision context_pack_bytes", async () => {
     await setupProject(dir);
     const baseline = await runTaskPrepare({
@@ -621,9 +802,19 @@ describe("runTaskPrepare — budget enforcement (P24)", () => {
       taskId: "P1-T1",
       agent: "claude-code",
       dryRun: true,
-      budgetBytes: baseline.context_pack_bytes + 10000,
+      budgetSelection: {
+        kind: "explicit_bytes",
+        budgetBytes: baseline.context_pack_bytes + 10000,
+      },
     });
     expect(result.context_pack_bytes).toBe(baseline.context_pack_bytes);
+    expect(result.applied_context_budget).toEqual({
+      source: "explicit_bytes",
+      budget_bytes: baseline.context_pack_bytes + 10000,
+    });
+    expect(result.commands.context).toBe(
+      `code-pact task context P1-T1 --agent claude-code --budget-bytes ${baseline.context_pack_bytes + 10000}`,
+    );
   });
 
   it("throws CONTEXT_OVER_BUDGET when budget is unachievable", async () => {
@@ -633,7 +824,7 @@ describe("runTaskPrepare — budget enforcement (P24)", () => {
         cwd: dir,
         taskId: "P1-T1",
         agent: "claude-code",
-        budgetBytes: 1,
+        budgetSelection: { kind: "explicit_bytes", budgetBytes: 1 },
       }),
     ).rejects.toMatchObject({ code: "CONTEXT_OVER_BUDGET" });
   });
@@ -648,7 +839,7 @@ describe("runTaskPrepare — budget enforcement (P24)", () => {
         cwd: dir,
         taskId: "P1-T1",
         agent: "claude-code",
-        budgetBytes: 1,
+        budgetSelection: { kind: "explicit_bytes", budgetBytes: 1 },
       });
     } catch (err) {
       threw = true;
@@ -678,7 +869,10 @@ describe("runTaskPrepare — budget enforcement (P24)", () => {
       cwd: dir,
       taskId: "P1-T1",
       agent: "claude-code",
-      budgetBytes: baseline.totalBytes - 1000,
+      budgetSelection: {
+        kind: "explicit_bytes",
+        budgetBytes: baseline.totalBytes - 1000,
+      },
     });
 
     expect(result.deferred_context).toMatchObject({
@@ -720,7 +914,10 @@ describe("runTaskPrepare — budget enforcement (P24)", () => {
       taskId: "P1-T1",
       agent: "claude-code",
       dryRun: true,
-      budgetBytes: baseline.totalBytes - 1000,
+      budgetSelection: {
+        kind: "explicit_bytes",
+        budgetBytes: baseline.totalBytes - 1000,
+      },
     });
 
     expect(result.deferred_context).toMatchObject({

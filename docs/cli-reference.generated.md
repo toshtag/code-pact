@@ -145,6 +145,7 @@ writes the context pack unless --dry-run is passed.
 | `--agent` | `<name>` | Agent name. Defaults to project default_agent. |
 | `--budget-bytes` | `<N>` | Cap the rendered context pack at N bytes. |
 | `--context-budget` | `<profile>` | Use a named context budget profile (tight, balanced, wide, or an agent-defined profile). Resolves to a byte budget. Mutually exclusive with --budget-bytes. |
+| `--recommended-context-budget` | — | Apply the deterministic context budget recommended in this same task prepare call. Mutually exclusive with --budget-bytes and --context-budget. |
 | `--dry-run` | — | Report the would-write pack path without writing it. |
 | `--json` | — | Emit JSON. |
 

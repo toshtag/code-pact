@@ -40,6 +40,7 @@ import {
   type DecisionRequiredData,
 } from "../../commands/task-record-done.ts";
 import { runTaskPrepare } from "../../commands/task-prepare.ts";
+import type { TaskPrepareBudgetSelection } from "../../core/context-fit/applied-context-budget.ts";
 import {
   runTaskFinalize,
   TaskFinalizeAuditStrictError,
@@ -395,6 +396,55 @@ function validateBudgetFlags(
     return { kind: "profile", profileName: profileRaw.trim() };
   }
   return { kind: "none" };
+}
+
+type ValidatedTaskPrepareBudget =
+  | { kind: "ok"; selection: TaskPrepareBudgetSelection }
+  | { kind: "error"; exitCode: number };
+
+function validateTaskPrepareBudgetFlags(
+  values: Record<string, unknown>,
+  json: boolean,
+): ValidatedTaskPrepareBudget {
+  const budgetRaw = values["budget-bytes"];
+  const profileRaw = values["context-budget"];
+  const hasBudgetBytes = typeof budgetRaw === "string";
+  const hasContextBudget = typeof profileRaw === "string";
+  const hasRecommended = values["recommended-context-budget"] === true;
+  const modeCount = [hasBudgetBytes, hasContextBudget, hasRecommended].filter(Boolean).length;
+
+  if (modeCount > 1) {
+    emitConfigError(
+      "task prepare: --budget-bytes, --context-budget, and --recommended-context-budget are mutually exclusive.",
+      json,
+    );
+    return { kind: "error", exitCode: 2 };
+  }
+
+  if (hasBudgetBytes) {
+    const n = Number.parseInt(budgetRaw, 10);
+    if (!Number.isInteger(n) || n <= 0 || String(n) !== budgetRaw.trim()) {
+      emitConfigError(
+        `task prepare: --budget-bytes requires a positive integer (got "${budgetRaw}").`,
+        json,
+      );
+      return { kind: "error", exitCode: 2 };
+    }
+    return { kind: "ok", selection: { kind: "explicit_bytes", budgetBytes: n } };
+  }
+
+  if (hasContextBudget) {
+    return {
+      kind: "ok",
+      selection: { kind: "explicit_profile", profileName: profileRaw.trim() },
+    };
+  }
+
+  if (hasRecommended) {
+    return { kind: "ok", selection: { kind: "recommended_cli" } };
+  }
+
+  return { kind: "ok", selection: { kind: "none" } };
 }
 
 /**
@@ -841,28 +891,23 @@ async function cmdTaskPrepare(
 
   const cwd = process.cwd();
 
-  // --budget-bytes / --context-budget mutual exclusion + integer form.
-  // Pure, no I/O; a bad combination emits CONFIG_ERROR and returns.
-  const budget = validateBudgetFlags("task prepare", values, json);
+  // --budget-bytes / --context-budget / --recommended-context-budget mutual
+  // exclusion + integer form. Pure, no I/O; a bad combination emits
+  // CONFIG_ERROR and returns before pack/profile reads.
+  const budget = validateTaskPrepareBudgetFlags(values, json);
   if (budget.kind === "error") return budget.exitCode;
 
   try {
-    // Resolution is DEFERRED behind a thunk so `task prepare`'s early-return
-    // states (done / blocked / unmet-deps) skip both the pack build and the
-    // profile read. The thunk runs only on the build path inside the runner;
-    // a ContextBudgetProfileError (code CONFIG_ERROR) or `code`-tagged agent
-    // error it throws there routes through this command's catch below.
-    // --context-budget stays per-invocation policy and is NOT echoed into the
-    // returned `commands` dictionary.
+    // Budget resolution is handled inside the runner on the pack-build path,
+    // after early returns and using the already-loaded agent profile and
+    // recommendation. The returned commands dictionary carries resolved bytes
+    // when a budget was actually applied.
     const result = await runTaskPrepare({
       cwd,
       taskId,
       agent,
       dryRun,
-      ...(budget.kind === "bytes" ? { budgetBytes: budget.budgetBytes } : {}),
-      ...(budget.kind === "profile"
-        ? { resolveBudgetBytes: () => resolveContextBudgetFlag(cwd, agent, budget.profileName) }
-        : {}),
+      budgetSelection: budget.selection,
     });
     if (json) {
       emitOk(result);

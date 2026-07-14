@@ -3,11 +3,11 @@
 // no model/provider knowledge, no file inspection — a total function over
 // a handful of categorical inputs.
 //
-// The recommendation is a SUGGESTION only. It is surfaced additively on
-// `recommend` / `task prepare` and is never auto-applied: applying a profile
-// stays explicit via `--context-budget <profile>`. The recommended bytes resolve
-// an agent-profile same-name override first, then the built-in fallback; the
-// recommended NAME is always one of the three standard profiles — custom
+// The recommendation stays pure and advisory in `recommend`. `task prepare`
+// may apply the already-produced recommendation only through an explicit CLI
+// request or an explicit agent-profile application mode. The recommended bytes
+// resolve an agent-profile same-name override first, then the built-in fallback;
+// the recommended NAME is always one of the three standard profiles — custom
 // agent-profile profile names are never emitted here.
 
 import {
