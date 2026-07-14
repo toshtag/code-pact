@@ -160,7 +160,6 @@ tasks:
       - src/core/pack/budget.ts
       - src/core/pack/formatters/markdown.ts
       - src/core/context-deferral/deferred-section.ts
-      - design/phases/P54-structural-context-projection.yaml
       - src/i18n/en-US.ts
       - src/i18n/ja-JP.ts
       - src/commands/adapter-conformance.ts
@@ -174,7 +173,6 @@ tasks:
       - tests/integration/adapter-conformance.test.ts
       - CHANGELOG.md
     writes:
-      - design/phases/P54-structural-context-projection.yaml
       - src/core/pack/budget.ts
       - src/core/pack/formatters/markdown.ts
       - src/core/context-deferral/deferred-section.ts
