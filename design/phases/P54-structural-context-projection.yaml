@@ -3,7 +3,7 @@ name: Structural Context Projection
 weight: 7
 confidence: medium
 risk: medium
-status: done
+status: in_progress
 objective: >
   Add deterministic, content-type-aware context projections that reduce context
   size only where the structure is safe to preserve mechanically.
@@ -195,3 +195,48 @@ tasks:
       - tests/unit/i18n/agent-contract-guidance.test.ts
       - tests/unit/commands/adapter-conformance.test.ts
       - tests/integration/adapter-conformance.test.ts
+  - id: P54-T6
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: >
+      Align the public projection and materialization contracts with the
+      implementation and complete missing projection regression coverage.
+    depends_on:
+      - P54-T5
+    reads:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+      - src/core/context-deferral/deferred-section.ts
+      - src/core/pack/budget.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - src/core/adapters/conformance-spec.ts
+      - src/commands/adapter-conformance.ts
+      - tests/unit/core/pack/budget.test.ts
+      - tests/unit/core/pack-core.test.ts
+      - tests/integration/task-context-budget.test.ts
+    writes:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - src/core/adapters/conformance-spec.ts
+      - tests/fixtures/context-projection/**
+      - tests/unit/core/pack/budget.test.ts
+      - tests/unit/core/pack-core.test.ts
+      - tests/integration/task-context-budget.test.ts
+      - tests/unit/i18n/agent-contract-guidance.test.ts
+      - tests/unit/commands/adapter-conformance.test.ts
+      - tests/integration/adapter-conformance.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+      - tests/unit/core/pack/budget.test.ts
+      - tests/integration/task-context-budget.test.ts
