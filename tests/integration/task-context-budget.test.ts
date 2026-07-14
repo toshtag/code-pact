@@ -68,10 +68,16 @@ const contextProjectionFixtureDir = new URL(
   import.meta.url,
 ).pathname;
 
-function extractMarkdownSection(content: string, heading: string): string {
+function extractMarkdownSection(
+  content: string,
+  heading: string,
+  nextHeading?: string,
+): string {
   const start = content.indexOf(heading);
   expect(start, `section heading ${heading}`).toBeGreaterThanOrEqual(0);
-  const next = content.indexOf("\n## ", start + heading.length);
+  const next = nextHeading
+    ? content.indexOf(`\n${nextHeading}`, start + heading.length)
+    : content.indexOf("\n## ", start + heading.length);
   return next === -1 ? content.slice(start) : content.slice(start, next);
 }
 
@@ -111,6 +117,49 @@ async function forceTaskBudgetDeferral(
       );
     }
   }
+}
+
+async function forceDecisionProjection(
+  project: Awaited<ReturnType<typeof createTempProject>>,
+): Promise<{ relatedMarker: string; declaredMarker: string }> {
+  const relatedMarker = "RELATED-DECISION-BODY-MARKER-関連";
+  const declaredMarker = "DECLARED-DECISION-BODY-MARKER";
+  const phasePath = join(project.dir, "design", "phases", "P1-foundation.yaml");
+  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
+  const tasks = doc.tasks as Array<Record<string, unknown>>;
+  tasks[0] = {
+    ...tasks[0],
+    context_size: "large",
+    decision_refs: ["design/decisions/declared-projection.md"],
+  };
+  await writeFile(phasePath, stringifyYaml(doc), "utf8");
+  await mkdir(join(project.dir, "design", "decisions"), { recursive: true });
+
+  const relatedFixture = await readFile(
+    join(contextProjectionFixtureDir, "large-accepted-decisions", "related.md"),
+    "utf8",
+  );
+  const declaredFixture = await readFile(
+    join(contextProjectionFixtureDir, "large-accepted-decisions", "declared.md"),
+    "utf8",
+  );
+  await writeFile(
+    join(project.dir, "design", "decisions", "zzz-related-projection.md"),
+    relatedFixture.replace(
+      "RELATED-DECISION-BODY-MARKER",
+      relatedMarker.repeat(500),
+    ),
+    "utf8",
+  );
+  await writeFile(
+    join(project.dir, "design", "decisions", "declared-projection.md"),
+    declaredFixture.replace(
+      "DECLARED-DECISION-BODY-MARKER",
+      declaredMarker.repeat(100),
+    ),
+    "utf8",
+  );
+  return { relatedMarker, declaredMarker };
 }
 
 function commandArgs(command: string): string[] {
@@ -392,6 +441,69 @@ describe("task prepare --context-budget (P47)", () => {
     expect(reads?.bytes).toBe(reads?.details?.projected_bytes);
     expect(env.data.elided_sections.map(section => section.name)).not.toContain("reads");
     expect(env.data.deferred_bytes).toBe(Number(reads?.details?.original_bytes));
+  });
+
+  it("retrieves projected related decisions byte-for-byte from a materialized manifest", async () => {
+    const { relatedMarker, declaredMarker } = await forceDecisionProjection(project);
+    const unbudgeted = await runTaskContext({
+      cwd: project.dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+    const originalRelatedSection = extractMarkdownSection(
+      unbudgeted.content,
+      "## Related Decisions",
+      "## Verification Commands",
+    );
+    const budget = String(unbudgeted.totalBytes - 1000);
+
+    const env = expectJsonOk<{
+      context_pack_path: string;
+      deferred_context: {
+        manifest_ref: string;
+        persisted: boolean;
+        retrieve_command: string | null;
+      };
+    }>(
+      project.run([
+        "task", "prepare", "P1-T1", "--agent", "claude-code",
+        "--budget-bytes", budget, "--json",
+      ]),
+    );
+
+    expect(env.data.deferred_context).toMatchObject({
+      persisted: true,
+      retrieve_command: expect.stringContaining("context show"),
+    });
+    const projectedContent = await readFile(env.data.context_pack_path, "utf8");
+    expect(projectedContent).toContain(
+      "Accepted decisions with explicit implementation commitments",
+    );
+    expect(projectedContent).not.toContain(relatedMarker);
+    expect(projectedContent).toContain(declaredMarker);
+
+    const listed = expectJsonOk<{
+      sections: Array<{ name: string; bytes: number; content?: string }>;
+    }>(
+      project.run([
+        "context", "show", env.data.deferred_context.manifest_ref,
+        "--list", "--json",
+      ]),
+    );
+    const relatedListing = listed.data.sections.find(
+      section => section.name === "related_decisions",
+    );
+    expect(relatedListing).toBeDefined();
+    expect(relatedListing).not.toHaveProperty("content");
+
+    const retrieved = project.run([
+      "context", "show", env.data.deferred_context.manifest_ref,
+      "--section", "related_decisions",
+    ]);
+    expect(retrieved.code).toBe(0);
+    expect(retrieved.stdout).toBe(originalRelatedSection);
+    expect(retrieved.stdout).toContain(relatedMarker);
+    expect(retrieved.stdout).not.toContain(declaredMarker);
   });
 
   it.each([
