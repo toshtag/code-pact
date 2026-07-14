@@ -3,7 +3,7 @@ name: Structural Context Projection
 weight: 7
 confidence: medium
 risk: medium
-status: in_progress
+status: done
 objective: >
   Add deterministic, content-type-aware context projections that reduce context
   size only where the structure is safe to preserve mechanically.
@@ -289,7 +289,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Complete the public and human-readable contracts for locale-safe
       structural-projection adapter conformance.
@@ -302,6 +302,7 @@ tasks:
       - docs/cli-contract.md
       - tests/unit/commands/adapter-conformance.test.ts
       - tests/integration/adapter-conformance.test.ts
+      - tests/integration/adapter-cli.test.ts
       - scripts/check-doc-invariants.mjs
       - CHANGELOG.md
     writes:
@@ -309,7 +310,7 @@ tasks:
       - src/cli/commands/adapter.ts
       - docs/cli-contract.md
       - tests/unit/commands/adapter-conformance.test.ts
-      - tests/integration/adapter-conformance.test.ts
+      - tests/integration/adapter-cli.test.ts
       - scripts/check-doc-invariants.mjs
       - CHANGELOG.md
     acceptance_refs:
