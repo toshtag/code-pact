@@ -2178,6 +2178,10 @@ In recommended mode, `profiles` may be omitted. If present, it must be non-empty
 
 **Mutual exclusion.** On `task context`, `--context-budget` and `--budget-bytes` are mutually exclusive; supplying both is `CONFIG_ERROR` (exit 2). On `task prepare`, three budget modes are mutually exclusive: `--budget-bytes`, `--context-budget`, and `--recommended-context-budget`. `task context`, `pack`, `recommend`, `verify`, and `task complete` do not accept `--recommended-context-budget`.
 
+The current public `pack` CLI has no `--budget-bytes`, `--context-budget`, or
+`--recommended-context-budget` option. It writes an unbudgeted context pack and
+does not create a deferred-context manifest through the public CLI.
+
 ```json
 {
   "ok": false,

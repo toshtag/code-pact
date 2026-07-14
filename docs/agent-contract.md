@@ -145,8 +145,7 @@ For the same git SHA and the same inputs:
   `minimum_achievable_bytes` is the same floor `CONTEXT_OVER_BUDGET` reports.
 - `task prepare` writes the same context pack bytes that
   `task context` produces for the same task (`task context` builds and
-  returns the content; `task prepare` and the low-level `pack` are the
-  commands that write it to disk).
+  returns the content; `task prepare` writes it to disk).
 - When an explicit context budget defers sections, `task context`, normal
   `task prepare`, and `task prepare --dry-run` compute the same rendered
   Markdown bytes and the same `context:sha256:<digest>` manifest reference for
@@ -168,10 +167,11 @@ For the same git SHA and the same inputs:
 | `task context` | yes | no | `null` |
 | `task prepare --dry-run` | yes | no | `null` |
 | normal `task prepare` | yes | yes | non-null |
-| low-level writing `pack` | yes | yes when deferral occurs | command-surface dependent |
 
 Agents must not infer retrieval availability from the manifest reference alone.
 Use the returned `deferred_context.retrieve_command` when present.
+The current public `pack` CLI writes an unbudgeted context pack and exposes no
+context-budget option, so it does not enter the deferred-context manifest flow.
 
 Where a command writes deterministic artifacts (context pack, adapter
 files), the same input produces the same on-disk bytes.
