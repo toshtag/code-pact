@@ -403,7 +403,7 @@ describe("bounded command process tree lifecycle", () => {
     if (process.platform !== "win32") await setupProject(dir, ["node tree-parent.mjs"]);
     const command = await runProcessTreeCommand({
       command: "node tree-parent.mjs",
-      timeoutMs: process.platform === "win32" ? 750 : 300,
+      timeoutMs: process.platform === "win32" ? 750 : 1_000,
     });
 
     expect(command).toMatchObject({ ok: false, timedOut: true, aborted: false });
