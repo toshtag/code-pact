@@ -6,6 +6,7 @@ import {
   readdir,
   rm,
   symlink,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
@@ -13,6 +14,7 @@ import { tmpdir } from "node:os";
 import { canonicalJson } from "../../../src/core/content-addressed-store/canonical-json.ts";
 import {
   LOOP_MEMORY_RETENTION_LIMITS,
+  __setAfterRetentionPreflightForTests,
   applyLoopMemoryRetention,
   planLoopMemoryRetention,
   pruneLoopMemoryEpisodes,
@@ -50,6 +52,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  __setAfterRetentionPreflightForTests(null);
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -391,6 +394,51 @@ describe("loop memory retention", () => {
     const after = await scanLoopMemoryEpisodes(dir);
     expect(after.episodes).toHaveLength(LOOP_MEMORY_RETENTION_LIMITS.maxEpisodes);
     expect(after.episodes.some(e => e.filename === protectedEpisode.filename)).toBe(true);
+  });
+
+  it("does not delete any candidate when retention preflight sees changed bytes", async () => {
+    const first = await storeLoopMemoryEpisode(
+      dir,
+      episode({}, "2026-01-01T00:00:00.000Z"),
+    );
+    const second = await storeLoopMemoryEpisode(
+      dir,
+      episode({ task: { task_id: "P58-T9" } }, "2026-01-01T00:00:01.000Z"),
+    );
+    const scan = await scanLoopMemoryEpisodes(dir);
+    const plan = planLoopMemoryRetention(scan.episodes, {
+      now: new Date("2026-07-14T12:00:00.000Z"),
+    });
+    await writeRawEpisode(second.filename, canonicalJson({
+      ...second.episode,
+      task: { ...second.episode.task, task_id: "P58-T10" },
+    }));
+
+    await expect(applyLoopMemoryRetention(dir, plan)).rejects.toMatchObject({
+      code: "MEMORY_PRUNE_CONFLICT",
+    });
+
+    const after = await scanLoopMemoryEpisodes(dir);
+    expect(after.episodes.map(e => e.filename)).toContain(first.filename);
+  });
+
+  it("treats concurrent deletion after retention preflight as idempotent", async () => {
+    const old = await storeLoopMemoryEpisode(
+      dir,
+      episode({}, "2026-01-01T00:00:00.000Z"),
+    );
+    const scan = await scanLoopMemoryEpisodes(dir);
+    const plan = planLoopMemoryRetention(scan.episodes, {
+      now: new Date("2026-07-14T12:00:00.000Z"),
+    });
+    __setAfterRetentionPreflightForTests(async () => {
+      await unlink(
+        join(dir, ".code-pact", "cache", "loop-memory", "v1", "episodes", old.filename),
+      );
+    });
+
+    await expect(applyLoopMemoryRetention(dir, plan)).resolves.toBeUndefined();
+    expect((await scanLoopMemoryEpisodes(dir)).episodes).toHaveLength(0);
   });
 
   it("dry-runs by default and reports status without episode bodies", async () => {

@@ -169,11 +169,28 @@ export async function deleteStoredLoopMemoryEpisode(
   cwd: string,
   episode: StoredLoopMemoryEpisode,
 ): Promise<void> {
-  const readPath = await resolveLoopMemoryEpisodeReadPath(cwd, episode.filename);
-  const current = await readOwnedText(readPath);
+  const current = await readCurrentStoredEpisodeBytes(cwd, episode);
+  if (current === undefined) return;
   if (current !== episode.raw) {
     throw loopMemoryInvalid("loop-memory episode changed before prune");
   }
   const deletePath = await resolveLoopMemoryEpisodeDeletePath(cwd, episode.filename);
-  await unlinkOwned(deletePath);
+  try {
+    await unlinkOwned(deletePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
+export async function readCurrentStoredEpisodeBytes(
+  cwd: string,
+  episode: StoredLoopMemoryEpisode,
+): Promise<string | undefined> {
+  try {
+    const readPath = await resolveLoopMemoryEpisodeReadPath(cwd, episode.filename);
+    return await readOwnedText(readPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
 }

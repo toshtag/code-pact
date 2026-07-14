@@ -6,7 +6,10 @@ import { tmpdir } from "node:os";
 import { runTaskComplete } from "../../../src/commands/task-complete.ts";
 import { loadMergedProgress } from "../../../src/core/progress/io.ts";
 import { scanLoopMemoryEpisodes } from "../../../src/core/loop-memory/episode-store.ts";
-import { __setLoopMemoryRecordFailureForTests } from "../../../src/core/loop-memory/task-complete-recorder.ts";
+import {
+  __setLoopMemoryPruneFailureForTests,
+  __setLoopMemoryRecordFailureForTests,
+} from "../../../src/core/loop-memory/task-complete-recorder.ts";
 
 // ---------------------------------------------------------------------------
 // Minimal project fixture — uses `echo ok` so verify's `commands` check
@@ -135,6 +138,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   __setLoopMemoryRecordFailureForTests(null);
+  __setLoopMemoryPruneFailureForTests(null);
   if (dir) await rm(dir, { recursive: true, force: true });
 });
 
@@ -429,6 +433,29 @@ describe("runTaskComplete — dry run", () => {
     ]);
     expect((await loadMergedProgress(dir)).log.events).toHaveLength(1);
     expect((await scanLoopMemoryEpisodes(dir)).episodes).toHaveLength(0);
+  });
+
+  it("reports retention maintenance failure separately after recording the episode", async () => {
+    await setupProject(dir);
+    __setLoopMemoryPruneFailureForTests(() => new Error("maintenance failed"));
+
+    const result = await runTaskComplete({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+
+    expect(result.kind).toBe("done");
+    if (result.kind !== "done") throw new Error("type narrow");
+    expect(result.warnings).toEqual([
+      {
+        code: "LOCAL_MEMORY_PRUNE_SKIPPED",
+        message: "The local loop-memory episode was recorded, but retention maintenance was skipped.",
+        affects_exit: false,
+      },
+    ]);
+    expect((await loadMergedProgress(dir)).log.events).toHaveLength(1);
+    expect((await scanLoopMemoryEpisodes(dir)).episodes).toHaveLength(1);
   });
 
   it("would_append carries author (dry-run preview matches what would be written)", async () => {

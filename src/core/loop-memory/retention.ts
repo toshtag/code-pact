@@ -1,9 +1,11 @@
 import {
   compareStoredEpisodes,
   deleteStoredLoopMemoryEpisode,
+  readCurrentStoredEpisodeBytes,
   scanLoopMemoryEpisodes,
   type StoredLoopMemoryEpisode,
 } from "./episode-store.ts";
+import { loopMemoryPruneConflict } from "./memory-errors.ts";
 
 export const LOOP_MEMORY_RETENTION_LIMITS = {
   maxEpisodes: 256,
@@ -30,6 +32,14 @@ export type LoopMemoryRetentionPlan = {
   keep: StoredLoopMemoryEpisode[];
   remove: LoopMemoryRetentionCandidate[];
 };
+
+let afterRetentionPreflightForTests: (() => void | Promise<void>) | null = null;
+
+export function __setAfterRetentionPreflightForTests(
+  hook: (() => void | Promise<void>) | null,
+): void {
+  afterRetentionPreflightForTests = hook;
+}
 
 function addCandidate(
   candidates: Map<string, LoopMemoryRetentionCandidate>,
@@ -131,6 +141,14 @@ export async function applyLoopMemoryRetention(
   plan: LoopMemoryRetentionPlan,
 ): Promise<void> {
   for (const candidate of plan.remove) {
+    const current = await readCurrentStoredEpisodeBytes(cwd, candidate.episode);
+    if (current === undefined || current !== candidate.episode.raw) {
+      throw loopMemoryPruneConflict("loop-memory retention candidate changed before prune");
+    }
+  }
+  if (afterRetentionPreflightForTests) await afterRetentionPreflightForTests();
+
+  for (const candidate of plan.remove) {
     await deleteStoredLoopMemoryEpisode(cwd, candidate.episode);
   }
 }
@@ -147,6 +165,18 @@ export async function pruneLoopMemoryEpisodes(
   const plan = planLoopMemoryRetention(scan.episodes, { now: opts.now });
   if (opts.write === true) {
     await applyLoopMemoryRetention(cwd, plan);
+    const afterScan = await scanLoopMemoryEpisodes(cwd);
+    return {
+      before: {
+        episode_count: scan.episodes.length,
+        total_bytes: scan.episodes.reduce((sum, episode) => sum + episode.bytes, 0),
+      },
+      remove: plan.remove,
+      after: {
+        episode_count: afterScan.episodes.length,
+        total_bytes: afterScan.episodes.reduce((sum, episode) => sum + episode.bytes, 0),
+      },
+    };
   }
   return {
     before: {

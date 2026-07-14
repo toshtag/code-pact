@@ -9,3 +9,9 @@ export function loopMemoryInvalid(message: string, cause?: unknown): Error {
 export function loopMemoryConflict(message: string): Error {
   return new Error(message);
 }
+
+export function loopMemoryPruneConflict(message: string): Error {
+  const error = new Error(message);
+  (error as NodeJS.ErrnoException).code = "MEMORY_PRUNE_CONFLICT";
+  return error;
+}

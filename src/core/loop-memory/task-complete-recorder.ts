@@ -16,8 +16,10 @@ import { scanLoopMemoryEpisodes } from "./episode-store.ts";
 import { containsAbsolutePathLike } from "./path-safety.ts";
 
 export type LoopMemoryWarning = {
-  code: "LOCAL_MEMORY_WRITE_SKIPPED";
-  message: "The local loop-memory episode was not recorded.";
+  code: "LOCAL_MEMORY_WRITE_SKIPPED" | "LOCAL_MEMORY_PRUNE_SKIPPED";
+  message:
+    | "The local loop-memory episode was not recorded."
+    | "The local loop-memory episode was recorded, but retention maintenance was skipped.";
   affects_exit: false;
 };
 
@@ -27,12 +29,25 @@ export const LOCAL_MEMORY_WRITE_SKIPPED_WARNING: LoopMemoryWarning = {
   affects_exit: false,
 };
 
+export const LOCAL_MEMORY_PRUNE_SKIPPED_WARNING: LoopMemoryWarning = {
+  code: "LOCAL_MEMORY_PRUNE_SKIPPED",
+  message: "The local loop-memory episode was recorded, but retention maintenance was skipped.",
+  affects_exit: false,
+};
+
 let recordFailureForTests: (() => Error) | null = null;
+let pruneFailureForTests: (() => Error) | null = null;
 
 export function __setLoopMemoryRecordFailureForTests(
   hook: (() => Error) | null,
 ): void {
   recordFailureForTests = hook;
+}
+
+export function __setLoopMemoryPruneFailureForTests(
+  hook: (() => Error) | null,
+): void {
+  pruneFailureForTests = hook;
 }
 
 function utf8Bytes(value: string): number {
@@ -147,12 +162,19 @@ export async function recordLoopMemoryEpisodeBestEffort(opts: {
   verify: VerifyResult;
   recordedAt: Date;
 }): Promise<LoopMemoryWarning | undefined> {
+  let stored: Awaited<ReturnType<typeof storeLoopMemoryEpisode>>;
   try {
     if (recordFailureForTests) throw recordFailureForTests();
-    const stored = await storeLoopMemoryEpisode(
+    stored = await storeLoopMemoryEpisode(
       opts.cwd,
       buildLoopMemoryEpisodeForTaskComplete(opts),
     );
+  } catch {
+    return LOCAL_MEMORY_WRITE_SKIPPED_WARNING;
+  }
+
+  try {
+    if (pruneFailureForTests) throw pruneFailureForTests();
     const scan = await scanLoopMemoryEpisodes(opts.cwd);
     const plan = planLoopMemoryRetention(scan.episodes, {
       now: opts.recordedAt,
@@ -161,6 +183,6 @@ export async function recordLoopMemoryEpisodeBestEffort(opts: {
     await applyLoopMemoryRetention(opts.cwd, plan);
     return undefined;
   } catch {
-    return LOCAL_MEMORY_WRITE_SKIPPED_WARNING;
+    return LOCAL_MEMORY_PRUNE_SKIPPED_WARNING;
   }
 }
