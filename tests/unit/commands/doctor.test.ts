@@ -1383,6 +1383,7 @@ describe("runDoctor — local loop-memory cache", () => {
     r.issues.find((i) => i.code === code);
 
   it("is silent for init's narrow local cache ignore", async () => {
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
     const result = await runDoctor(dir);
     expect(find(result, "LOOP_MEMORY_CACHE_NOT_GITIGNORED")).toBeUndefined();
     expect(find(result, "LOOP_MEMORY_TRACKED")).toBeUndefined();
@@ -1390,6 +1391,7 @@ describe("runDoctor — local loop-memory cache", () => {
   });
 
   it("warns when the cache root is not gitignored", async () => {
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
     await writeFile(join(dir, ".gitignore"), "/.local/\n", "utf8");
 
     const issue = find(await runDoctor(dir), "LOOP_MEMORY_CACHE_NOT_GITIGNORED");
@@ -1397,6 +1399,27 @@ describe("runDoctor — local loop-memory cache", () => {
     expect(issue).toBeDefined();
     expect(issue?.severity).toBe("warning");
     expect(issue?.recovery?.manual_action).toContain("/.code-pact/cache/");
+  });
+
+  it("uses git ignore semantics for blanket ignores and negations", async () => {
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/\n", "utf8");
+    expect(find(await runDoctor(dir), "LOOP_MEMORY_CACHE_NOT_GITIGNORED")).toBeUndefined();
+
+    await writeFile(
+      join(dir, ".gitignore"),
+      [
+        "/.code-pact/*",
+        "!/.code-pact/cache/",
+        "!/.code-pact/cache/loop-memory/",
+        "!/.code-pact/cache/loop-memory/v1/",
+        "!/.code-pact/cache/loop-memory/v1/episodes/",
+        "!/.code-pact/cache/loop-memory/v1/episodes/*.json",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    expect(find(await runDoctor(dir), "LOOP_MEMORY_CACHE_NOT_GITIGNORED")).toBeDefined();
   });
 
   it("warns when the loop-memory cache resolves through an unsafe symlink", async () => {

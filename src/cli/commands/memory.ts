@@ -7,6 +7,44 @@ import type { Locale } from "../../i18n/index.ts";
 import { formatMemoryStatus, runMemoryStatus } from "../../commands/memory-status.ts";
 import { formatMemoryPrune, runMemoryPrune } from "../../commands/memory-prune.ts";
 
+type MemoryOperation = "status" | "prune";
+
+function memoryError(
+  error: unknown,
+  operation: MemoryOperation,
+): {
+  code: "MEMORY_PATH_UNSAFE" | "MEMORY_READ_FAILED" | "MEMORY_PRUNE_CONFLICT" | "MEMORY_PRUNE_FAILED";
+  message: string;
+  data?: { system_code?: string };
+} {
+  const systemCode = (error as NodeJS.ErrnoException).code;
+  if (systemCode === "PATH_NOT_OWNED" || systemCode === "PATH_OUTSIDE_PROJECT") {
+    return {
+      code: "MEMORY_PATH_UNSAFE",
+      message: "Local loop-memory cache path is unsafe.",
+      data: { system_code: systemCode },
+    };
+  }
+  if (systemCode === "MEMORY_PRUNE_CONFLICT") {
+    return {
+      code: "MEMORY_PRUNE_CONFLICT",
+      message: "Local loop-memory retention candidates changed before prune.",
+    };
+  }
+  if (operation === "status") {
+    return {
+      code: "MEMORY_READ_FAILED",
+      message: "Local loop-memory cache could not be read.",
+      ...(systemCode !== undefined ? { data: { system_code: systemCode } } : {}),
+    };
+  }
+  return {
+    code: "MEMORY_PRUNE_FAILED",
+    message: "Local loop-memory cache could not be pruned.",
+    ...(systemCode !== undefined ? { data: { system_code: systemCode } } : {}),
+  };
+}
+
 export async function cmdMemory(
   argv: string[],
   _locale: Locale,
@@ -50,7 +88,14 @@ async function cmdMemoryStatus(
   }
 
   const json = globalJson || values.json === true;
-  const result = await runMemoryStatus(process.cwd());
+  let result;
+  try {
+    result = await runMemoryStatus(process.cwd());
+  } catch (error) {
+    const mapped = memoryError(error, "status");
+    emitError(json, mapped.code, mapped.message, { data: mapped.data });
+    return 1;
+  }
   if (json) {
     emitOk(result);
   } else {
@@ -77,9 +122,16 @@ async function cmdMemoryPrune(
   }
 
   const json = globalJson || values.json === true;
-  const result = await runMemoryPrune(process.cwd(), {
-    write: values.write === true,
-  });
+  let result;
+  try {
+    result = await runMemoryPrune(process.cwd(), {
+      write: values.write === true,
+    });
+  } catch (error) {
+    const mapped = memoryError(error, "prune");
+    emitError(json, mapped.code, mapped.message, { data: mapped.data });
+    return 1;
+  }
   if (json) {
     emitOk(result);
   } else {

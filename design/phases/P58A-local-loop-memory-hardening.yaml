@@ -90,7 +90,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: Stabilize memory CLI operational failures, doctor ignore semantics,
       and root command discoverability.
     depends_on:
@@ -106,14 +106,12 @@ tasks:
     writes:
       - src/cli/**
       - src/commands/doctor.ts
-      - src/commands/memory-status.ts
-      - src/commands/memory-prune.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
       - docs/cli-contract.md
-      - docs/cli-reference.generated.md
       - tests/unit/commands/doctor.test.ts
       - tests/unit/commands/memory.test.ts
       - tests/unit/error-code-surface.test.ts
-      - tests/integration/json-stdout.test.ts
     acceptance_refs:
       - tests/unit/commands/doctor.test.ts
       - tests/unit/commands/memory.test.ts

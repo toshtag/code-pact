@@ -1,20 +1,25 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { cmdMemory } from "../../../src/cli/commands/memory.ts";
 import { runMemoryPrune } from "../../../src/commands/memory-prune.ts";
 import { runMemoryStatus } from "../../../src/commands/memory-status.ts";
 import { storeLoopMemoryEpisode } from "../../../src/core/loop-memory/episode-store.ts";
 import type { LoopMemoryEpisode } from "../../../src/core/loop-memory/episode-schema.ts";
 
 let dir: string;
+let originalCwd: string;
 
 beforeEach(async () => {
+  originalCwd = process.cwd();
   dir = await mkdtemp(join(tmpdir(), "code-pact-memory-command-"));
   await mkdir(join(dir, ".code-pact"), { recursive: true });
 });
 
 afterEach(async () => {
+  process.chdir(originalCwd);
+  vi.restoreAllMocks();
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -72,5 +77,33 @@ describe("memory commands", () => {
     expect(write.write).toBe(true);
     expect(write.would_remove.episode_count).toBe(1);
     expect((await runMemoryStatus(dir)).episode_count).toBe(0);
+  });
+
+  it("emits JSON error envelopes for unsafe cache roots", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-memory-outside-"));
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+      writes.push(String(chunk));
+      return true;
+    });
+    try {
+      await rm(join(dir, ".code-pact", "cache"), { recursive: true, force: true });
+      await symlink(outside, join(dir, ".code-pact", "cache"));
+      process.chdir(dir);
+
+      const exit = await cmdMemory(["status", "--json"], "en-US", false);
+
+      expect(exit).toBe(1);
+      const envelope = JSON.parse(writes.join(""));
+      expect(envelope).toMatchObject({
+        ok: false,
+        error: {
+          code: "MEMORY_PATH_UNSAFE",
+          message: "Local loop-memory cache path is unsafe.",
+        },
+      });
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });

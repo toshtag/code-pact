@@ -83,7 +83,7 @@ import {
 import { CONSTITUTION_PLACEHOLDER_MARKERS } from "../core/constitution.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
 import { auditWrites, runGit } from "../core/audit/index.ts";
-import { gitIgnoredControlPlaneAreas } from "../core/control-plane-ignore.ts";
+import { gitIgnoredControlPlaneAreas, isGitRepo } from "../core/control-plane-ignore.ts";
 import { matchGlob, validateGlobSyntax } from "../core/glob.ts";
 import { inspectAgent, type AdapterDoctorIssue } from "./adapter-doctor.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
@@ -927,23 +927,14 @@ async function checkLoopMemoryHealth(
   cwd: string,
   issues: DoctorIssue[],
 ): Promise<void> {
-  let content: string | null = null;
-  try {
-    content = await readOwnedText(await resolveGitignoreReadPath(cwd));
-  } catch {
-    content = null;
-  }
-  const lines = content?.split("\n").map(line => line.trim()) ?? [];
-  const cacheIgnored = lines.some(
-    line =>
-      line === ".code-pact/cache" ||
-      line === ".code-pact/cache/" ||
-      line === "/.code-pact/cache" ||
-      line === "/.code-pact/cache/" ||
-      line.startsWith(".code-pact/cache/") ||
-      line.startsWith("/.code-pact/cache/"),
-  );
-  if (!cacheIgnored) {
+  const cacheProbe =
+    ".code-pact/cache/loop-memory/v1/episodes/19700101T000000000Z-0000000000000000.json";
+  const cacheIgnore = await runGit(cwd, [
+    "check-ignore",
+    "--no-index",
+    cacheProbe,
+  ]);
+  if ((await isGitRepo(cwd)) && !cacheIgnore.ok) {
     issues.push({
       code: "LOOP_MEMORY_CACHE_NOT_GITIGNORED",
       severity: "warning",
