@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "phase_id": "P54",
+  "phase_name": "Structural Context Projection",
+  "original_path": "design/phases/P54-structural-context-projection.yaml",
+  "phase_status": "done",
+  "weight": 7,
+  "snapshotted_at": "2026-07-14T07:12:33.376Z",
+  "source_sha256": "4346ddcbbe1ec5bd55ac63f9e1ea0ec3bc36665cc476ad95ae03f3117fed8281",
+  "path_sha256": "599316b9c0330ad7e031e2990a118108c374efadf1be9c9a49967645637d4a4e",
+  "tasks": [
+    {
+      "id": "P54-T1",
+      "status": "done",
+      "depends_on": [
+        "P52-T4",
+        "P53-T3"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "c50ee5e33df9e585fd7293345ebc720a59ca642aa962c7a97f22287d2b829672"
+        ]
+      }
+    },
+    {
+      "id": "P54-T2",
+      "status": "done",
+      "depends_on": [
+        "P54-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "aa9b939e151eb31c01e88b30c80376fbd20f28ee76056a629d97acef1e560ce6"
+        ]
+      }
+    },
+    {
+      "id": "P54-T3",
+      "status": "done",
+      "depends_on": [
+        "P54-T2"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "74e872a1420d7fd5fe42339a43988c9fd96036c971b7bfaebd3465b4db15031b"
+        ]
+      }
+    },
+    {
+      "id": "P54-T4",
+      "status": "done",
+      "depends_on": [
+        "P54-T2",
+        "P54-T3"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "a62fb8ad2459ab0397d99aeb2ac75c69092c933f41d96db7988604126abec899"
+        ]
+      }
+    },
+    {
+      "id": "P54-T5",
+      "status": "done",
+      "depends_on": [
+        "P54-T4"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "167b4babe4919e6132ae5dd25f12001b7afff220efc7da40cfaa68bb6566d4f4"
+        ]
+      }
+    },
+    {
+      "id": "P54-T6",
+      "status": "done",
+      "depends_on": [
+        "P54-T5"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "f8825f96d01ce4e5bc60a94abc6dbab97f079fee2d6ae374b5d8c7e33967b3a8"
+        ]
+      }
+    },
+    {
+      "id": "P54-T7",
+      "status": "done",
+      "depends_on": [
+        "P54-T6"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "8fd0a79da9302a240283b8d69bd12c086858a916b3e5f5f1a508fc3d2001d739"
+        ]
+      }
+    },
+    {
+      "id": "P54-T8",
+      "status": "done",
+      "depends_on": [
+        "P54-T7"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "003e23f7dfbc8b4ed93050c333de1cc61eb97226b7a781315c068715b7244f0f"
+        ]
+      }
+    }
+  ]
+}
