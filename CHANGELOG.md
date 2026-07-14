@@ -13,6 +13,8 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [2.5.0] — 2026-07-14
+
 ### Added
 
 - **Added deterministic structural context projection.** Budgeted context packs can now project large read surfaces and large-context related decisions while retaining exact originals through the existing context manifest.
