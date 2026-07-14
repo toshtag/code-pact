@@ -3,7 +3,7 @@ name: Recommended Context Budget Application
 weight: 6
 confidence: medium
 risk: medium
-status: done
+status: in_progress
 objective: >
   Allow task preparation to apply the deterministic recommended context budget
   explicitly after reversible context deferral makes omitted context
@@ -211,4 +211,32 @@ tasks:
       - tests/unit/core/pack-core.test.ts
       - tests/unit/core/context-output-namespace.test.ts
       - tests/unit/commands/task-prepare.test.ts
+      - tests/integration/task-context-budget.test.ts
+  - id: P53-T5
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: >
+      Remove unrelated global integration-test runtime changes and close P53
+      with explicit cleanup and verification of stale derived context and
+      generated adapter output.
+    depends_on:
+      - P53-T4
+    reads:
+      - tests/helpers/cli.ts
+      - tests/integration/task-context-budget.test.ts
+      - src/commands/doctor.ts
+      - src/commands/adapter-doctor.ts
+      - docs/troubleshooting.md
+      - CHANGELOG.md
+    writes:
+      - tests/helpers/cli.ts
+      - tests/integration/task-context-budget.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
       - tests/integration/task-context-budget.test.ts
