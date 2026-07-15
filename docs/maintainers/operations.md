@@ -433,9 +433,13 @@ investigation, but it is not part of the progress ledger, context packs,
 Evidence artifacts, or CI source of truth.
 
 Each episode file is capped at 8 KiB and must match its filename identity.
-Corrupt, oversized, identity-mismatched, or unsafe files are counted as corrupt
-local cache entries; `doctor` and `memory status` report them, but neither
-deletes them automatically.
+Corrupt, oversized, identity-mismatched, invalid-UTF-8, or nonregular entries
+(symlinks, directories, sockets, etc.) are counted as corrupt local cache
+entries; `doctor` and `memory status` report them, but neither deletes them
+automatically. `memory status` separates `corrupt_bytes` (bytes safely measured
+from corrupt regular files) from `corrupt_unmeasured_count` (entries whose bytes
+were not measured, such as symlinks or unreadable files), so `corrupt_bytes` is
+not complete cache disk usage.
 
 Inspect only aggregates:
 

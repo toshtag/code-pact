@@ -34,6 +34,7 @@ export type CorruptLoopMemoryEpisode = {
   filename: string;
   reason:
     | "invalid_filename"
+    | "non_regular"
     | "read_failed"
     | "oversized"
     | "invalid_utf8"
@@ -41,6 +42,7 @@ export type CorruptLoopMemoryEpisode = {
     | "schema_invalid"
     | "identity_mismatch";
   bytes?: number;
+  entry_kind?: "symlink" | "directory" | "other";
   system_code?: string;
 };
 
@@ -99,8 +101,15 @@ export async function scanLoopMemoryEpisodes(cwd: string): Promise<LoopMemorySca
   const corrupt: CorruptLoopMemoryEpisode[] = [];
 
   for (const dirent of dirents) {
-    if (!dirent.isFile()) continue;
     const filename = dirent.name;
+    if (!dirent.isFile()) {
+      corrupt.push({
+        filename,
+        reason: "non_regular",
+        entry_kind: entryKind(dirent),
+      });
+      continue;
+    }
     if (!isLoopMemoryEpisodeFilename(filename)) {
       corrupt.push({ filename, reason: "invalid_filename" });
       continue;
@@ -132,32 +141,33 @@ export async function scanLoopMemoryEpisodes(cwd: string): Promise<LoopMemorySca
     }
 
     let decoded: unknown;
+    const bytes = Buffer.byteLength(raw, "utf8");
     try {
       decoded = JSON.parse(raw);
     } catch {
-      corrupt.push({ filename, reason: "invalid_json" });
+      corrupt.push({ filename, reason: "invalid_json", bytes });
       continue;
     }
 
     const parsed = safeParseLoopMemoryEpisode(decoded);
     if (!parsed.success) {
-      corrupt.push({ filename, reason: "schema_invalid" });
+      corrupt.push({ filename, reason: "schema_invalid", bytes });
       continue;
     }
 
     const canonical = canonicalLoopMemoryEpisode(parsed.data);
     if (canonical !== raw) {
-      corrupt.push({ filename, reason: "schema_invalid" });
+      corrupt.push({ filename, reason: "schema_invalid", bytes });
       continue;
     }
     if (loopMemoryEpisodeFilename(parsed.data) !== filename) {
-      corrupt.push({ filename, reason: "identity_mismatch" });
+      corrupt.push({ filename, reason: "identity_mismatch", bytes });
       continue;
     }
 
     episodes.push({
       filename,
-      bytes: Buffer.byteLength(raw, "utf8"),
+      bytes,
       raw,
       episode: parsed.data,
     });
@@ -166,6 +176,12 @@ export async function scanLoopMemoryEpisodes(cwd: string): Promise<LoopMemorySca
   episodes.sort(compareStoredEpisodes);
   corrupt.sort((a, b) => a.filename.localeCompare(b.filename));
   return { episodes, corrupt };
+}
+
+function entryKind(dirent: import("node:fs").Dirent): "symlink" | "directory" | "other" {
+  if (dirent.isSymbolicLink()) return "symlink";
+  if (dirent.isDirectory()) return "directory";
+  return "other";
 }
 
 export function compareStoredEpisodes(

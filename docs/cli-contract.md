@@ -2624,12 +2624,18 @@ JSON output follows the same content boundary: default and `--list` responses om
 
 `code-pact memory status [--json]` reports aggregate counts for local bounded
 loop-memory episodes. It is read-only and does not print episode bodies,
-commands, fingerprints, or file paths.
+commands, fingerprints, or file paths. `corrupt_bytes` is the sum of corrupt
+entries whose bytes were safely measured after bounded reads; it is not total
+cache disk usage. `corrupt_unmeasured_count` reports corrupt entries whose bytes
+were not measured, such as invalid filenames, read failures, symlinks, and
+directories.
 
 `code-pact memory prune [--write] [--json]` plans retention pruning for the same
 local cache. It is dry-run by default; only `--write` deletes validated
-retention candidates. Pruning never changes the progress ledger, verification
-result, Evidence artifacts, Context artifacts, or task design status.
+retention candidates. Corrupt or nonregular entries are not retention
+candidates and are not followed, read, or deleted. Pruning never changes the
+progress ledger, verification result, Evidence artifacts, Context artifacts, or
+task design status.
 
 ## `task complete`
 

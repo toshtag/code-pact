@@ -72,7 +72,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: Surface nonregular and corrupt loop-memory cache entries with
       accurate known-byte and unmeasured-entry status reporting.
     depends_on:
@@ -86,14 +86,13 @@ tasks:
       - tests/unit/core/loop-memory.test.ts
       - tests/unit/commands/memory.test.ts
     writes:
+      - design/phases/P61-loop-memory-canonicality-and-corrupt-entry-visibility.yaml
       - src/core/loop-memory/**
-      - src/cli/commands/memory.ts
       - docs/cli-contract.md
       - docs/maintainers/operations.md
       - docs/troubleshooting.md
       - CHANGELOG.md
       - tests/unit/core/loop-memory.test.ts
-      - tests/unit/commands/memory.test.ts
     acceptance_refs:
       - tests/unit/core/loop-memory.test.ts
       - tests/unit/commands/memory.test.ts

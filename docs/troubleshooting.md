@@ -708,11 +708,14 @@ code-pact memory prune --write --json
 `memory prune` is dry-run unless `--write` is present. `doctor` never deletes
 cache files and never runs `git rm`; it only reports what must be fixed.
 
-`memory status` may count corrupt local cache files. That includes oversized
-files, invalid JSON, schema-invalid episodes, and files whose name does not
-match the canonical episode payload. These files are ignored by retention
-planning and future recall layers; remove them manually only after confirming
-they are local cache, not shared project state.
+`memory status` may count corrupt local cache entries. That includes oversized
+files, invalid UTF-8, invalid JSON, schema-invalid episodes, files whose name
+does not match the canonical episode payload, and nonregular entries such as
+symlinks or directories. These entries are ignored by retention planning and
+future recall layers; remove them manually only after confirming they are local
+cache, not shared project state. `corrupt_bytes` is only the safely measured
+subset; use `corrupt_unmeasured_count` to see how many corrupt entries were not
+measured.
 
 `task complete` can return two advisory warning codes without changing the
 verification result or exit code:

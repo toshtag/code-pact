@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   mkdir,
   mkdtemp,
+  lstat,
   readFile,
   readdir,
   rm,
@@ -393,6 +394,7 @@ describe("loop memory store", () => {
       {
         filename: `${utcBasicTimestamp(new Date("2026-07-14T12:01:05.345Z"))}-3333333333333333.json`,
         reason: "identity_mismatch",
+        bytes: Buffer.byteLength(canonicalJson(source), "utf8"),
       },
     ]);
     expect(loopMemoryEpisodeFilename(source)).not.toBe(scan.corrupt[0]!.filename);
@@ -427,6 +429,44 @@ describe("loop memory store", () => {
       await expect(readdir(outsideDir)).resolves.toEqual([]);
     } finally {
       await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports nonregular episode entries without following or reading them", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-loop-memory-target-"));
+    const target = join(outside, "target.json");
+    await writeFile(target, canonicalJson(episode()), "utf8");
+    const symlinkName = `${utcBasicTimestamp(new Date("2026-07-14T12:02:00.000Z"))}-aaaaaaaaaaaaaaaa.json`;
+    const directoryName = `${utcBasicTimestamp(new Date("2026-07-14T12:02:01.000Z"))}-bbbbbbbbbbbbbbbb.json`;
+    await mkdir(join(dir, ".code-pact", "cache", "loop-memory", "v1", "episodes"), {
+      recursive: true,
+    });
+    await symlink(
+      target,
+      join(dir, ".code-pact", "cache", "loop-memory", "v1", "episodes", symlinkName),
+    );
+    await mkdir(
+      join(dir, ".code-pact", "cache", "loop-memory", "v1", "episodes", directoryName),
+    );
+    try {
+      const scan = await scanLoopMemoryEpisodes(dir);
+
+      expect(scan.episodes).toHaveLength(0);
+      expect(scan.corrupt).toEqual([
+        {
+          filename: symlinkName,
+          reason: "non_regular",
+          entry_kind: "symlink",
+        },
+        {
+          filename: directoryName,
+          reason: "non_regular",
+          entry_kind: "directory",
+        },
+      ]);
+      expect(JSON.stringify(await loopMemoryStatus(dir))).not.toContain(target);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
     }
   });
 });
@@ -685,5 +725,85 @@ describe("loop memory retention", () => {
       now: new Date("2026-07-14T12:00:00.000Z"),
     });
     expect((await scanLoopMemoryEpisodes(dir)).episodes).toHaveLength(1);
+  });
+
+  it("reports known corrupt bytes and unmeasured corrupt entries separately", async () => {
+    const invalidJson = "{bad";
+    const schemaInvalid = canonicalJson({
+      ...episode({}, "2026-07-14T12:03:00.000Z"),
+      task: { ...episode().task, task_id: "../unsafe" },
+    });
+    const identitySource = canonicalJson(episode({}, "2026-07-14T12:03:01.000Z"));
+    const oversized = "{".padEnd(MAX_EPISODE_BYTES + 1, "x");
+    await writeRawEpisode("not-an-episode.json", "{}");
+    await writeRawEpisode(
+      `${utcBasicTimestamp(new Date("2026-07-14T12:03:00.000Z"))}-1111111111111111.json`,
+      schemaInvalid,
+    );
+    await writeRawEpisode(
+      `${utcBasicTimestamp(new Date("2026-07-14T12:03:01.000Z"))}-2222222222222222.json`,
+      identitySource,
+    );
+    await writeRawEpisode(
+      `${utcBasicTimestamp(new Date("2026-07-14T12:03:02.000Z"))}-3333333333333333.json`,
+      invalidJson,
+    );
+    await writeRawEpisode(
+      `${utcBasicTimestamp(new Date("2026-07-14T12:03:03.000Z"))}-4444444444444444.json`,
+      oversized,
+    );
+    const symlinkName = `${utcBasicTimestamp(new Date("2026-07-14T12:03:04.000Z"))}-5555555555555555.json`;
+    const target = join(dir, ".code-pact", "cache", "loop-memory", "v1", "target.json");
+    await writeFile(target, canonicalJson(episode()), "utf8");
+    await symlink(
+      target,
+      join(dir, ".code-pact", "cache", "loop-memory", "v1", "episodes", symlinkName),
+    );
+
+    const status = await loopMemoryStatus(dir, {
+      now: new Date("2026-07-14T12:00:00.000Z"),
+    });
+
+    expect(status.corrupt_count).toBe(6);
+    expect(status.corrupt_bytes).toBe(
+      Buffer.byteLength(schemaInvalid, "utf8") +
+        Buffer.byteLength(identitySource, "utf8") +
+        Buffer.byteLength(invalidJson, "utf8") +
+        Buffer.byteLength(oversized, "utf8"),
+    );
+    expect(status.corrupt_unmeasured_count).toBe(2);
+    expect(JSON.stringify(status)).not.toContain("target.json");
+    expect(JSON.stringify(status)).not.toContain("pnpm test:unit");
+  });
+
+  it("does not include corrupt nonregular entries in prune candidates or delete them", async () => {
+    await storeLoopMemoryEpisode(dir, episode({}, "2026-01-01T00:00:00.000Z"));
+    const symlinkName = `${utcBasicTimestamp(new Date("2026-07-14T12:04:00.000Z"))}-aaaaaaaaaaaaaaaa.json`;
+    const target = join(dir, ".code-pact", "cache", "loop-memory", "v1", "target.json");
+    await writeFile(target, canonicalJson(episode()), "utf8");
+    await symlink(
+      target,
+      join(dir, ".code-pact", "cache", "loop-memory", "v1", "episodes", symlinkName),
+    );
+
+    const dry = await pruneLoopMemoryEpisodes(dir, {
+      now: new Date("2026-07-14T12:00:00.000Z"),
+    });
+    expect(dry.remove).toHaveLength(1);
+
+    await pruneLoopMemoryEpisodes(dir, {
+      write: true,
+      now: new Date("2026-07-14T12:00:00.000Z"),
+    });
+    expect(
+      (
+        await lstat(
+          join(dir, ".code-pact", "cache", "loop-memory", "v1", "episodes", symlinkName),
+        )
+      ).isSymbolicLink(),
+    ).toBe(true);
+    const after = await scanLoopMemoryEpisodes(dir);
+    expect(after.episodes).toHaveLength(0);
+    expect(after.corrupt).toHaveLength(1);
   });
 });
