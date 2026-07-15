@@ -26,6 +26,7 @@ export type {
 
 export {
   readOwnedText,
+  readOwnedTextBounded,
   readExplicitUserText,
   statOwned,
   statExplicitUser,

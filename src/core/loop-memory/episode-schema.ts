@@ -53,6 +53,14 @@ function boundedString(maxBytes: number) {
   });
 }
 
+function isCanonicalUtcIsoTimestamp(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
+    return false;
+  }
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) && date.toISOString() === value;
+}
+
 const Verification = z.strictObject({
   ok: z.boolean(),
   failure_kind: z.enum(FAILURE_KINDS).optional(),
@@ -88,10 +96,9 @@ const Verification = z.strictObject({
 
 export const LoopMemoryEpisodeSchema = z.strictObject({
   schema_version: z.literal(1),
-  recorded_at: z.string().regex(
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
-    "recorded_at must be Date.prototype.toISOString() UTC format",
-  ),
+  recorded_at: z.string().refine(isCanonicalUtcIsoTimestamp, {
+    message: "recorded_at must be Date.prototype.toISOString() UTC format",
+  }),
   kind: z.enum(["verification_failed", "verification_passed"]),
   task: z.strictObject({
     phase_id: z.string().min(1),

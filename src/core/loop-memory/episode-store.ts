@@ -1,8 +1,7 @@
 import { atomicCreateTextExclusive } from "../../io/atomic-text.ts";
 import {
   listOwnedDirents,
-  readOwnedText,
-  statOwned,
+  readOwnedTextBounded,
   unlinkOwned,
 } from "../project-fs/index.ts";
 import {
@@ -63,7 +62,15 @@ export async function storeLoopMemoryEpisode(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     const readPath = await resolveLoopMemoryEpisodeReadPath(cwd, filename);
-    const existing = await readOwnedText(readPath);
+    let existing: string;
+    try {
+      existing = await readOwnedTextBounded(readPath, MAX_EPISODE_BYTES);
+    } catch (readError) {
+      if ((readError as NodeJS.ErrnoException).code === "OWNED_TEXT_TOO_LARGE") {
+        throw loopMemoryConflict("loop-memory episode filename collision");
+      }
+      throw readError;
+    }
     if (existing !== raw) {
       throw loopMemoryConflict("loop-memory episode filename collision");
     }
@@ -98,13 +105,16 @@ export async function scanLoopMemoryEpisodes(cwd: string): Promise<LoopMemorySca
     let raw: string;
     try {
       const readPath = await resolveLoopMemoryEpisodeReadPath(cwd, filename);
-      const stats = await statOwned(readPath);
-      if (stats.size > MAX_EPISODE_BYTES) {
-        corrupt.push({ filename, reason: "oversized", bytes: stats.size });
+      raw = await readOwnedTextBounded(readPath, MAX_EPISODE_BYTES);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "OWNED_TEXT_TOO_LARGE") {
+        corrupt.push({
+          filename,
+          reason: "oversized",
+          bytes: (error as NodeJS.ErrnoException & { bytes?: number }).bytes,
+        });
         continue;
       }
-      raw = await readOwnedText(readPath);
-    } catch (error) {
       corrupt.push({
         filename,
         reason: "read_failed",
@@ -188,7 +198,7 @@ export async function readCurrentStoredEpisodeBytes(
 ): Promise<string | undefined> {
   try {
     const readPath = await resolveLoopMemoryEpisodeReadPath(cwd, episode.filename);
-    return await readOwnedText(readPath);
+    return await readOwnedTextBounded(readPath, MAX_EPISODE_BYTES);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;

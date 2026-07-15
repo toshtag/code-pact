@@ -128,6 +128,59 @@ export async function readRegularOwnedText(path: string): Promise<string> {
   }
 }
 
+export async function readRegularOwnedTextBounded(
+  path: string,
+  maxBytes: number,
+): Promise<string> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+    throw new RangeError("maxBytes must be a non-negative safe integer");
+  }
+
+  const handle = await openReadNoFollow(path);
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile()) {
+      const error = new Error("path is not a regular file");
+      (error as NodeJS.ErrnoException).code = "ENOTFILE";
+      throw error;
+    }
+    if (stats.size > maxBytes) {
+      const error = new Error(`file exceeds ${maxBytes} bytes`);
+      (error as NodeJS.ErrnoException).code = "OWNED_TEXT_TOO_LARGE";
+      (error as NodeJS.ErrnoException & { bytes: number; maxBytes: number }).bytes =
+        stats.size;
+      (error as NodeJS.ErrnoException & { bytes: number; maxBytes: number }).maxBytes =
+        maxBytes;
+      throw error;
+    }
+
+    const buffer = Buffer.allocUnsafe(maxBytes + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        total,
+        buffer.length - total,
+        total,
+      );
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > maxBytes) {
+      const error = new Error(`file exceeds ${maxBytes} bytes`);
+      (error as NodeJS.ErrnoException).code = "OWNED_TEXT_TOO_LARGE";
+      (error as NodeJS.ErrnoException & { bytes: number; maxBytes: number }).bytes =
+        total;
+      (error as NodeJS.ErrnoException & { bytes: number; maxBytes: number }).maxBytes =
+        maxBytes;
+      throw error;
+    }
+    return buffer.subarray(0, total).toString("utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
 export function readRegularOwnedTextSync(path: string): string {
   const flags =
     constantsRaw.O_RDONLY | resolveNoFollowFlag(constantsRaw.O_NOFOLLOW);

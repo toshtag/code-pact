@@ -141,7 +141,12 @@ export async function applyLoopMemoryRetention(
   plan: LoopMemoryRetentionPlan,
 ): Promise<void> {
   for (const candidate of plan.remove) {
-    const current = await readCurrentStoredEpisodeBytes(cwd, candidate.episode);
+    let current: string | undefined;
+    try {
+      current = await readCurrentStoredEpisodeBytes(cwd, candidate.episode);
+    } catch {
+      throw loopMemoryPruneConflict("loop-memory retention candidate changed before prune");
+    }
     if (current === undefined || current !== candidate.episode.raw) {
       throw loopMemoryPruneConflict("loop-memory retention candidate changed before prune");
     }

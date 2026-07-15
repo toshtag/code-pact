@@ -42,6 +42,7 @@ import {
   openDirectoryNoFollow,
   openReadNoFollow,
   readRegularOwnedText as readRegularOwnedTextRaw,
+  readRegularOwnedTextBounded as readRegularOwnedTextBoundedRaw,
   readRegularOwnedTextSync as readRegularOwnedTextSyncRaw,
   existsSync as existsSyncRaw,
   readdirSync as readdirSyncRaw,
@@ -50,6 +51,13 @@ import { realpath as realpathRaw } from "node:fs/promises";
 
 export async function readOwnedText(path: OwnedReadPath): Promise<string> {
   return readRegularOwnedTextRaw(unbrand(path));
+}
+
+export async function readOwnedTextBounded(
+  path: OwnedReadPath,
+  maxBytes: number,
+): Promise<string> {
+  return readRegularOwnedTextBoundedRaw(unbrand(path), maxBytes);
 }
 
 export async function readExplicitUserText(

@@ -161,3 +161,6 @@ phases:
   - id: P59
     path: design/phases/P59-local-loop-memory-hardening.yaml
     weight: 4
+  - id: P60
+    path: design/phases/P60-local-loop-memory-boundary-completion.yaml
+    weight: 3

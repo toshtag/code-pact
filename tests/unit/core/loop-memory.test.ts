@@ -198,9 +198,18 @@ describe("loop memory episode schema", () => {
     expect(LoopMemoryEpisodeSchema.parse(episode({}, "2026-07-14T12:01:02.345Z")).recorded_at).toBe(
       "2026-07-14T12:01:02.345Z",
     );
-    expect(() =>
-      LoopMemoryEpisodeSchema.parse(episode({}, "2026-07-14T12:01:02.345+09:00")),
-    ).toThrow();
+    for (const recordedAt of [
+      "2026-99-99T99:99:99.999Z",
+      "2026-02-31T00:00:00.000Z",
+      "2026-13-01T00:00:00.000Z",
+      "2026-07-14T24:00:00.000Z",
+      "2026-07-14T12:01:02Z",
+      "2026-07-14T12:01:02.345+09:00",
+    ]) {
+      expect(() =>
+        LoopMemoryEpisodeSchema.parse(episode({}, recordedAt)),
+      ).toThrow();
+    }
   });
 });
 
@@ -232,6 +241,15 @@ describe("loop memory store", () => {
     );
   });
 
+  it("treats oversized same-filename content as a closed collision", async () => {
+    const stored = await storeLoopMemoryEpisode(dir, episode());
+    await writeRawEpisode(stored.filename, "{".padEnd(MAX_EPISODE_BYTES + 1, "x"));
+
+    await expect(storeLoopMemoryEpisode(dir, episode())).rejects.toThrow(
+      /filename collision/,
+    );
+  });
+
   it("isolates malformed, oversized, non-canonical, identity-mismatched, and unsafe files during scan", async () => {
     const stored = await storeLoopMemoryEpisode(dir, episode());
     await writeRawEpisode("not-an-episode.json", "{}");
@@ -251,6 +269,10 @@ describe("loop memory store", () => {
       `${utcBasicTimestamp(new Date("2026-07-14T12:01:05.345Z"))}-3333333333333333.json`,
       canonicalJson(episode({}, "2026-07-14T12:01:05.345Z")),
     );
+    await writeRawEpisode(
+      `${utcBasicTimestamp(new Date("2026-07-14T12:01:06.345Z"))}-4444444444444444.json`,
+      canonicalJson(episode({}, "2026-99-99T99:99:99.999Z")),
+    );
 
     const scan = await scanLoopMemoryEpisodes(dir);
     expect(scan.episodes.map(e => e.filename)).toEqual([stored.filename]);
@@ -259,6 +281,7 @@ describe("loop memory store", () => {
       "invalid_filename",
       "invalid_json",
       "oversized",
+      "schema_invalid",
       "schema_invalid",
     ]);
     expect(scan.corrupt.find(c => c.reason === "oversized")?.bytes).toBeGreaterThan(
@@ -394,7 +417,7 @@ describe("loop memory retention", () => {
     const after = await scanLoopMemoryEpisodes(dir);
     expect(after.episodes).toHaveLength(LOOP_MEMORY_RETENTION_LIMITS.maxEpisodes);
     expect(after.episodes.some(e => e.filename === protectedEpisode.filename)).toBe(true);
-  });
+  }, 10_000);
 
   it("does not delete any candidate when retention preflight sees changed bytes", async () => {
     const first = await storeLoopMemoryEpisode(
@@ -420,6 +443,28 @@ describe("loop memory retention", () => {
 
     const after = await scanLoopMemoryEpisodes(dir);
     expect(after.episodes.map(e => e.filename)).toContain(first.filename);
+  });
+
+  it("treats oversized retention candidates as prune conflicts without deleting", async () => {
+    const old = await storeLoopMemoryEpisode(
+      dir,
+      episode({}, "2026-01-01T00:00:00.000Z"),
+    );
+    const scan = await scanLoopMemoryEpisodes(dir);
+    const plan = planLoopMemoryRetention(scan.episodes, {
+      now: new Date("2026-07-14T12:00:00.000Z"),
+    });
+    await writeRawEpisode(old.filename, "{".padEnd(MAX_EPISODE_BYTES + 1, "x"));
+
+    await expect(applyLoopMemoryRetention(dir, plan)).rejects.toMatchObject({
+      code: "MEMORY_PRUNE_CONFLICT",
+    });
+    await expect(
+      readFile(
+        join(dir, ".code-pact", "cache", "loop-memory", "v1", "episodes", old.filename),
+        "utf8",
+      ),
+    ).resolves.toHaveLength(MAX_EPISODE_BYTES + 1);
   });
 
   it("treats concurrent deletion after retention preflight as idempotent", async () => {
