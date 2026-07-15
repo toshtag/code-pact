@@ -51,6 +51,8 @@ export type LoopMemoryScan = {
   corrupt: CorruptLoopMemoryEpisode[];
 };
 
+export type LoopMemoryDeleteOutcome = "deleted" | "already_missing";
+
 export async function storeLoopMemoryEpisode(
   cwd: string,
   episode: LoopMemoryEpisode,
@@ -211,12 +213,14 @@ function asciiCompare(a: string, b: string): number {
 export async function deleteStoredLoopMemoryEpisode(
   cwd: string,
   episode: StoredLoopMemoryEpisode,
-): Promise<void> {
+): Promise<LoopMemoryDeleteOutcome> {
   const deletePath = await resolveLoopMemoryEpisodeDeletePath(cwd, episode.filename);
   try {
     await unlinkOwned(deletePath);
+    return "deleted";
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "already_missing";
+    throw error;
   }
 }
 

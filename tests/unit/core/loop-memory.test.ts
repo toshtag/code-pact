@@ -16,6 +16,7 @@ import { canonicalJson } from "../../../src/core/content-addressed-store/canonic
 import {
   LOOP_MEMORY_RETENTION_LIMITS,
   __setAfterRetentionPreflightForTests,
+  __setBeforeRetentionDeleteForTests,
   applyLoopMemoryRetention,
   planLoopMemoryRetention,
   pruneLoopMemoryEpisodes,
@@ -54,6 +55,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   __setAfterRetentionPreflightForTests(null);
+  __setBeforeRetentionDeleteForTests(null);
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -779,6 +781,100 @@ describe("loop memory retention", () => {
 
     await expect(applyLoopMemoryRetention(dir, plan)).resolves.toBeUndefined();
     expect((await scanLoopMemoryEpisodes(dir)).episodes).toHaveLength(0);
+  });
+
+  it("does not count concurrently missing delete outcomes as invocation deletes", async () => {
+    const first = await storeLoopMemoryEpisode(
+      dir,
+      episode({}, "2026-01-01T00:00:00.000Z"),
+    );
+    const second = await storeLoopMemoryEpisode(
+      dir,
+      episode({ task: { task_id: "P58-T9" } }, "2026-01-01T00:00:01.000Z"),
+    );
+    const scan = await scanLoopMemoryEpisodes(dir);
+    const plan = planLoopMemoryRetention(scan.episodes, {
+      now: new Date("2026-07-14T12:00:00.000Z"),
+    });
+    __setAfterRetentionPreflightForTests(async () => {
+      await writeRawEpisode(second.filename, Buffer.from([0xff]));
+    });
+    __setBeforeRetentionDeleteForTests(async ({ episode: current }) => {
+      if (current.filename !== first.filename) return;
+      await unlink(
+        join(
+          dir,
+          ".code-pact",
+          "cache",
+          "loop-memory",
+          "v1",
+          "episodes",
+          current.filename,
+        ),
+      );
+    });
+
+    await expect(applyLoopMemoryRetention(dir, plan)).rejects.toMatchObject({
+      code: "MEMORY_PRUNE_CONFLICT",
+      partial_applied: false,
+      deleted_count: 0,
+    });
+
+    const after = await scanLoopMemoryEpisodes(dir);
+    expect(after.episodes.some(e => e.filename === first.filename)).toBe(false);
+    expect(after.corrupt).toEqual([
+      {
+        bytes: 1,
+        filename: second.filename,
+        reason: "invalid_utf8",
+      },
+    ]);
+  });
+
+  it("reports partial prune failure metadata when a later unlink fails", async () => {
+    const first = await storeLoopMemoryEpisode(
+      dir,
+      episode({}, "2026-01-01T00:00:00.000Z"),
+    );
+    const second = await storeLoopMemoryEpisode(
+      dir,
+      episode({ task: { task_id: "P58-T9" } }, "2026-01-01T00:00:01.000Z"),
+    );
+    const scan = await scanLoopMemoryEpisodes(dir);
+    const plan = planLoopMemoryRetention(scan.episodes, {
+      now: new Date("2026-07-14T12:00:00.000Z"),
+    });
+    __setBeforeRetentionDeleteForTests(async ({ episode: current }) => {
+      if (current.filename !== second.filename) return;
+      const path = join(
+        dir,
+        ".code-pact",
+        "cache",
+        "loop-memory",
+        "v1",
+        "episodes",
+        current.filename,
+      );
+      await unlink(path);
+      await mkdir(path);
+    });
+
+    await expect(applyLoopMemoryRetention(dir, plan)).rejects.toMatchObject({
+      code: "MEMORY_PRUNE_FAILED",
+      partial_applied: true,
+      deleted_count: 1,
+      system_code: expect.any(String),
+    });
+
+    const after = await scanLoopMemoryEpisodes(dir);
+    expect(after.episodes.some(e => e.filename === first.filename)).toBe(false);
+    expect(after.corrupt).toEqual([
+      {
+        filename: second.filename,
+        reason: "non_regular",
+        entry_kind: "directory",
+      },
+    ]);
   });
 
   it("dry-runs by default and reports status without episode bodies", async () => {

@@ -43,6 +43,31 @@ function memoryError(
         : {}),
     };
   }
+  if (systemCode === "MEMORY_PRUNE_FAILED") {
+    const partialApplied =
+      (error as NodeJS.ErrnoException & { partial_applied?: boolean }).partial_applied === true;
+    const deletedCount =
+      (error as NodeJS.ErrnoException & { deleted_count?: number }).deleted_count ?? 0;
+    const underlyingSystemCode = (error as NodeJS.ErrnoException & { system_code?: string })
+      .system_code;
+    return {
+      code: "MEMORY_PRUNE_FAILED",
+      message: "Local loop-memory cache could not be pruned.",
+      data: {
+        partial_applied: partialApplied,
+        deleted_count: deletedCount,
+        ...(underlyingSystemCode !== undefined
+          ? { system_code: underlyingSystemCode }
+          : {}),
+      },
+      ...(partialApplied
+        ? {
+            human:
+              "Local loop-memory pruning failed after deleting some entries.\nRun:\ncode-pact memory status\ncode-pact memory prune",
+          }
+        : {}),
+    };
+  }
   if (operation === "status") {
     return {
       code: "MEMORY_READ_FAILED",

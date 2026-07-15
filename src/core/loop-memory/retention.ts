@@ -5,7 +5,7 @@ import {
   scanLoopMemoryEpisodes,
   type StoredLoopMemoryEpisode,
 } from "./episode-store.ts";
-import { loopMemoryPruneConflict } from "./memory-errors.ts";
+import { loopMemoryPruneConflict, loopMemoryPruneFailed } from "./memory-errors.ts";
 
 export const LOOP_MEMORY_RETENTION_LIMITS = {
   maxEpisodes: 256,
@@ -34,11 +34,28 @@ export type LoopMemoryRetentionPlan = {
 };
 
 let afterRetentionPreflightForTests: (() => void | Promise<void>) | null = null;
+let beforeRetentionDeleteForTests:
+  | ((context: {
+      episode: StoredLoopMemoryEpisode;
+      deletedCount: number;
+    }) => void | Promise<void>)
+  | null = null;
 
 export function __setAfterRetentionPreflightForTests(
   hook: (() => void | Promise<void>) | null,
 ): void {
   afterRetentionPreflightForTests = hook;
+}
+
+export function __setBeforeRetentionDeleteForTests(
+  hook:
+    | ((context: {
+        episode: StoredLoopMemoryEpisode;
+        deletedCount: number;
+      }) => void | Promise<void>)
+    | null,
+): void {
+  beforeRetentionDeleteForTests = hook;
 }
 
 function addCandidate(
@@ -184,8 +201,26 @@ export async function applyLoopMemoryRetention(
       },
     );
     if (current === undefined) continue;
-    await deleteStoredLoopMemoryEpisode(cwd, candidate.episode);
-    deletedCount += 1;
+    if (beforeRetentionDeleteForTests) {
+      await beforeRetentionDeleteForTests({
+        episode: candidate.episode,
+        deletedCount,
+      });
+    }
+    try {
+      const outcome = await deleteStoredLoopMemoryEpisode(cwd, candidate.episode);
+      if (outcome === "deleted") deletedCount += 1;
+    } catch (error) {
+      throw loopMemoryPruneFailed(
+        "loop-memory retention candidate could not be deleted",
+        {
+          partial_applied: deletedCount > 0,
+          deleted_count: deletedCount,
+          system_code: (error as NodeJS.ErrnoException).code,
+        },
+        error,
+      );
+    }
   }
 }
 

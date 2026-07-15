@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { cmdMemory } from "../../../src/cli/commands/memory.ts";
@@ -7,7 +7,10 @@ import { runMemoryPrune } from "../../../src/commands/memory-prune.ts";
 import { formatMemoryStatus, runMemoryStatus } from "../../../src/commands/memory-status.ts";
 import { storeLoopMemoryEpisode } from "../../../src/core/loop-memory/episode-store.ts";
 import type { LoopMemoryEpisode } from "../../../src/core/loop-memory/episode-schema.ts";
-import { __setAfterRetentionPreflightForTests } from "../../../src/core/loop-memory/retention.ts";
+import {
+  __setAfterRetentionPreflightForTests,
+  __setBeforeRetentionDeleteForTests,
+} from "../../../src/core/loop-memory/retention.ts";
 
 let dir: string;
 let originalCwd: string;
@@ -21,6 +24,7 @@ beforeEach(async () => {
 afterEach(async () => {
   process.chdir(originalCwd);
   __setAfterRetentionPreflightForTests(null);
+  __setBeforeRetentionDeleteForTests(null);
   vi.restoreAllMocks();
   await rm(dir, { recursive: true, force: true });
 });
@@ -175,5 +179,59 @@ describe("memory commands", () => {
     expect(text).not.toContain(old.filename);
     expect(text).not.toContain(dir);
     expect(text).not.toContain("code-pact memory status");
+  });
+
+  it("emits partial prune failure metadata as JSON without paths", async () => {
+    await storeLoopMemoryEpisode(dir, episode("2026-01-01T00:00:00.000Z"));
+    const second = await storeLoopMemoryEpisode(
+      dir,
+      episode("2026-01-01T00:00:01.000Z"),
+    );
+    __setBeforeRetentionDeleteForTests(async ({ episode: current }) => {
+      if (current.filename !== second.filename) return;
+      const path = join(
+        dir,
+        ".code-pact",
+        "cache",
+        "loop-memory",
+        "v1",
+        "episodes",
+        current.filename,
+      );
+      await unlink(path);
+      await mkdir(path);
+    });
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+      stdout.push(String(chunk));
+      return true;
+    });
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
+      stderr.push(String(chunk));
+      return true;
+    });
+    process.chdir(dir);
+
+    const exit = await cmdMemory(["prune", "--write", "--json"], "en-US", false);
+
+    expect(exit).toBe(1);
+    expect(stderr.join("")).toBe("");
+    const text = stdout.join("");
+    const envelope = JSON.parse(text);
+    expect(envelope).toMatchObject({
+      ok: false,
+      error: {
+        code: "MEMORY_PRUNE_FAILED",
+        message: "Local loop-memory cache could not be pruned.",
+      },
+      data: {
+        partial_applied: true,
+        deleted_count: 1,
+        system_code: expect.any(String),
+      },
+    });
+    expect(text).not.toContain(second.filename);
+    expect(text).not.toContain(dir);
   });
 });
