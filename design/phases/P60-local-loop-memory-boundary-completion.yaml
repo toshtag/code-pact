@@ -3,7 +3,7 @@ name: Local Loop Memory Boundary Completion
 weight: 3
 confidence: high
 risk: medium
-status: planned
+status: done
 objective: >
   Close remaining local loop-memory boundary gaps around canonical timestamps,
   bounded descriptor reads, protected retention caps, path privacy, and public
