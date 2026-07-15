@@ -161,6 +161,11 @@ describe("loop memory episode schema", () => {
     ).toThrow();
     for (const command of [
       "--config=/tmp/config.json",
+      "cat >/tmp/config.json",
+      "cat </tmp/config.json",
+      "node `/tmp/script.js`",
+      "--config=[/tmp/config.json]",
+      "open file:///tmp/config.json",
       'node "/tmp/script.js"',
       "--path=C:\\work\\file.ts",
       "--path=C:/work/file.ts",
@@ -173,6 +178,11 @@ describe("loop memory episode schema", () => {
         ),
       ).toThrow();
     }
+    expect(
+      LoopMemoryEpisodeSchema.parse(
+        episode({ verification: { failed_command: "pnpm vitest run tests/unit/foo.test.ts" } }),
+      ).verification.failed_command,
+    ).toBe("pnpm vitest run tests/unit/foo.test.ts");
     expect(() =>
       LoopMemoryEpisodeSchema.parse({
         ...episode(),

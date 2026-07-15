@@ -105,19 +105,19 @@ reports the actual post-write scan.
 - [x] T2: add the strict episode schema, canonical serialization, filesystem
   authority, atomic create path, scanning, status calculation, and retention
   plan/apply behavior.
-- [x] P58A: reject oversized files before body read, require filename/content
-  identity, require UTC `toISOString()` timestamps, and omit unsafe command
-  strings containing absolute paths.
+- [x] P59/P60: reject oversized files at the read boundary, require
+  filename/content identity, require canonical UTC `toISOString()`
+  timestamps, and omit unsafe command strings containing absolute paths.
 - [x] T3: record success and failure episodes from `task complete` only, after
   verification has produced its normal result. Failure Capsule and Evidence
   output remain independent of loop memory.
-- [x] P58A: memory write failures and retention maintenance failures are
+- [x] P59: memory write failures and retention maintenance failures are
   non-fatal, accurately distinguished, and do not change the task completion
   source-of-truth result, progress event contract, or exit code.
 - [x] T4: add `memory status` and dry-run-by-default `memory prune`.
 - [x] T4: add doctor checks for tracked loop-memory files and unsafe memory
   roots, without automatic deletion.
-- [x] P58A: use Git's ignore semantics for the cache ignore doctor check.
+- [x] P59: use Git's ignore semantics for the cache ignore doctor check.
 - [x] T4: keep normal successful `task complete` output free of memory metadata.
 
 ## References

@@ -298,6 +298,23 @@ describe("runTaskComplete — verify failure", () => {
     );
   });
 
+  it("omits unsafe absolute-path commands from local memory episodes", async () => {
+    await setupProject(dir, {
+      command: 'node -e "process.exit(1)" --path=[/tmp/code-pact-memory]',
+    });
+
+    await expect(
+      runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    ).rejects.toMatchObject({ code: "VERIFICATION_FAILED" });
+
+    const memory = await scanLoopMemoryEpisodes(dir);
+    expect(memory.episodes).toHaveLength(1);
+    expect(memory.episodes[0]!.episode.verification.failed_command).toBeUndefined();
+    expect(memory.episodes[0]!.episode.verification.failure_fingerprint).toMatch(
+      /^sha256:[0-9a-f]{64}$/,
+    );
+  });
+
   it("attaches verify checks to the thrown error", async () => {
     await setupProject(dir, { failingCommand: true });
     try {
