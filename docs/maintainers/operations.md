@@ -435,11 +435,13 @@ Evidence artifacts, or CI source of truth.
 Each episode file is capped at 8 KiB and must match its filename identity.
 Corrupt, oversized, identity-mismatched, invalid-UTF-8, or nonregular entries
 (symlinks, directories, sockets, etc.) are counted as corrupt local cache
-entries; `doctor` and `memory status` report them, but neither deletes them
-automatically. `memory status` separates `corrupt_bytes` (bytes safely measured
-from corrupt regular files) from `corrupt_unmeasured_count` (entries whose bytes
-were not measured, such as symlinks or unreadable files), so `corrupt_bytes` is
-not complete cache disk usage.
+entries. `memory status` reports corrupt episode entries; `doctor` reports only
+cache placement, Git tracking, ignore, and path-safety problems. Neither command
+deletes cache files automatically. `memory status` separates `corrupt_bytes`
+(bytes safely measured from corrupt regular files, including invalid UTF-8)
+from `corrupt_unmeasured_count` (entries whose bytes were not measured, such as
+symlinks or unreadable files), so `corrupt_bytes` is not complete cache disk
+usage.
 
 Inspect only aggregates:
 
@@ -457,11 +459,14 @@ code-pact memory prune --write --json
 `memory prune --write` preflights every retention candidate before deleting
 anything. A preflight conflict deletes nothing. If a candidate changes after
 pruning starts, the command reports `MEMORY_PRUNE_CONFLICT` with
-`partial_applied` and `deleted_count`; inspect the current state with
+`partial_applied` and `deleted_count`; `deleted_count` counts only successful
+unlinks by this invocation. A file deleted by another local process after the
+last identity read is treated as an idempotent skip and is not counted. If an
+I/O or platform failure happens after pruning starts, `MEMORY_PRUNE_FAILED` may
+also include `partial_applied` and `deleted_count`. The final identity-read to
+unlink window is not a portable filesystem CAS; inspect the current state with
 `code-pact memory status` and a dry-run `code-pact memory prune` before running
-`--write` again. A file deleted by another local process after preflight is
-treated as an idempotent skip. The reported `after` state is a fresh post-write
-scan.
+`--write` again. The reported `after` state is a fresh post-write scan.
 
 Keep `/.code-pact/cache/` in `.gitignore`. If `doctor` reports
 `LOOP_MEMORY_CACHE_NOT_GITIGNORED`, `LOOP_MEMORY_TRACKED`, or

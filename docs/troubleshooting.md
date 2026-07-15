@@ -706,21 +706,28 @@ code-pact memory prune --write --json
 ```
 
 `memory prune` is dry-run unless `--write` is present. `doctor` never deletes
-cache files and never runs `git rm`; it only reports what must be fixed.
+cache files and never runs `git rm`; it reports cache ignore, Git tracking, and
+path-safety problems, not individual corrupt episode files.
 If `memory prune --write` returns `MEMORY_PRUNE_CONFLICT`, inspect
 `data.partial_applied` and `data.deleted_count`. A preflight conflict deletes
-nothing; a post-preflight conflict may have deleted earlier candidates. In that
-case run `code-pact memory status` and dry-run `code-pact memory prune` again
-before retrying `--write`.
+nothing; a post-preflight conflict may have deleted earlier candidates.
+`deleted_count` counts only successful unlinks by that invocation. A candidate
+that another local process removed after the final identity read is skipped and
+not counted. If `memory prune --write` returns `MEMORY_PRUNE_FAILED`,
+`data.system_code` names the platform cause when available, and the JSON may
+also include `data.partial_applied` and `data.deleted_count` when deletion had
+begun. The final identity-read to unlink window is not a portable filesystem
+compare-and-swap, so run `code-pact memory status` and dry-run
+`code-pact memory prune` again before retrying `--write`.
 
 `memory status` may count corrupt local cache entries. That includes oversized
 files, invalid UTF-8, invalid JSON, schema-invalid episodes, files whose name
 does not match the canonical episode payload, and nonregular entries such as
 symlinks or directories. These entries are ignored by retention planning and
-future recall layers; remove them manually only after confirming they are local
-cache, not shared project state. `corrupt_bytes` is only the safely measured
-subset; use `corrupt_unmeasured_count` to see how many corrupt entries were not
-measured.
+local advisory consumers; remove them manually only after confirming they are
+local cache, not shared project state. `corrupt_bytes` is only the safely
+measured regular-file subset, including invalid UTF-8 files; use
+`corrupt_unmeasured_count` to see how many corrupt entries were not measured.
 
 `task complete` can return two advisory warning codes without changing the
 verification result or exit code:

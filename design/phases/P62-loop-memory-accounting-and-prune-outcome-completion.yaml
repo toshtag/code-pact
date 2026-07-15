@@ -99,7 +99,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: Reconcile public contracts, troubleshooting guidance, and changelog
       for final accounting and prune outcome semantics.
     depends_on:
@@ -112,12 +112,11 @@ tasks:
       - tests/unit/core/loop-memory.test.ts
       - tests/unit/commands/memory.test.ts
     writes:
+      - design/phases/P62-loop-memory-accounting-and-prune-outcome-completion.yaml
       - docs/cli-contract.md
       - docs/maintainers/operations.md
       - docs/troubleshooting.md
       - CHANGELOG.md
-      - tests/unit/core/loop-memory.test.ts
-      - tests/unit/commands/memory.test.ts
     acceptance_refs:
       - docs/cli-contract.md
       - tests/unit/core/loop-memory.test.ts
