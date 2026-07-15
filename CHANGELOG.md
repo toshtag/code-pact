@@ -13,6 +13,11 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Added
+
+- **Added local bounded loop memory.** `task complete` now records bounded machine-local verification episodes under the ignored cache, preserving task completion semantics and existing success JSON. New `memory status` and dry-run-by-default `memory prune` commands expose aggregate maintenance only; `doctor` warns when the local cache is tracked, not ignored, or resolves through an unsafe path.
+- **Hardened local loop memory.** Episode scans now reject oversized files at the bounded read boundary, require byte-exact UTF-8, require filename/content identity and canonical UTC timestamps, omit unused Evidence references from schema v1, distinguish write vs retention warnings, preflight prune batches, report partial prune conflicts and operational prune failures, keep protected episodes within retention caps, redact more shell absolute-path forms, report invalid-UTF-8 bytes in corrupt accounting, count only successful prune unlinks by the current invocation, return stable memory JSON errors, and use Git's ignore semantics for doctor cache checks.
+
 ## [2.6.0] — 2026-07-14
 
 ### Added

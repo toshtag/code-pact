@@ -52,6 +52,7 @@ import { cmdState } from "./cli/commands/state.ts";
 import { cmdSpec } from "./cli/commands/spec.ts";
 import { cmdDecision } from "./cli/commands/decision.ts";
 import { cmdEvidence } from "./cli/commands/evidence.ts";
+import { cmdMemory } from "./cli/commands/memory.ts";
 import { cmdContext } from "./cli/commands/context.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
 import { LocaleConfig } from "./core/schemas/locale.ts";
@@ -1129,6 +1130,9 @@ async function main(): Promise<number> {
 
     case "evidence":
       return cmdEvidence(rest, locale, json);
+
+    case "memory":
+      return cmdMemory(rest, locale, json);
 
     case "context":
       return cmdContext(rest, locale, json);

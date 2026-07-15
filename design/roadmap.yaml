@@ -152,6 +152,21 @@ phases:
   - id: P57
     path: design/phases/P57-regression-evidence.yaml
     weight: 5
+  - id: P58
+    path: design/phases/P58-local-bounded-loop-memory.yaml
+    weight: 6
   - id: P55
     path: design/phases/P55-stable-core-task-delta.yaml
     weight: 7
+  - id: P59
+    path: design/phases/P59-local-loop-memory-hardening.yaml
+    weight: 4
+  - id: P60
+    path: design/phases/P60-local-loop-memory-boundary-completion.yaml
+    weight: 3
+  - id: P61
+    path: design/phases/P61-loop-memory-canonicality-and-corrupt-entry-visibility.yaml
+    weight: 3
+  - id: P62
+    path: design/phases/P62-loop-memory-accounting-and-prune-outcome-completion.yaml
+    weight: 2

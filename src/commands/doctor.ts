@@ -34,6 +34,7 @@ import {
   resolveModelProfileDirectoryReadPath,
   resolveOwnedDirectoryReadPath,
   resolveContextDirectoryReadPath,
+  resolveLoopMemoryEpisodesDirectoryReadPath,
   resolveProjectConfigReadPath,
   resolveRoadmapReadPath,
   resolveModelProfileReadPath,
@@ -82,7 +83,7 @@ import {
 import { CONSTITUTION_PLACEHOLDER_MARKERS } from "../core/constitution.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
 import { auditWrites, runGit } from "../core/audit/index.ts";
-import { gitIgnoredControlPlaneAreas } from "../core/control-plane-ignore.ts";
+import { gitIgnoredControlPlaneAreas, isGitRepo } from "../core/control-plane-ignore.ts";
 import { matchGlob, validateGlobSyntax } from "../core/glob.ts";
 import { inspectAgent, type AdapterDoctorIssue } from "./adapter-doctor.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
@@ -922,6 +923,79 @@ async function checkLocalGitignored(
   }
 }
 
+async function checkLoopMemoryHealth(
+  cwd: string,
+  issues: DoctorIssue[],
+): Promise<void> {
+  const cacheProbe =
+    ".code-pact/cache/loop-memory/v1/episodes/19700101T000000000Z-0000000000000000.json";
+  const cacheIgnore = await runGit(cwd, [
+    "check-ignore",
+    "--no-index",
+    cacheProbe,
+  ]);
+  if ((await isGitRepo(cwd)) && !cacheIgnore.ok) {
+    issues.push({
+      code: "LOOP_MEMORY_CACHE_NOT_GITIGNORED",
+      severity: "warning",
+      message:
+        "`/.code-pact/cache/` is not ignored; local loop-memory episodes must remain machine-local.",
+      recovery: {
+        manual_action:
+          "Add `/.code-pact/cache/` to .gitignore and do not commit local loop-memory records.",
+        confirm: "code-pact doctor",
+        reference: "docs/cli-contract.md § State file write guarantees",
+      },
+    });
+  }
+
+  const tracked = await runGit(cwd, [
+    "ls-files",
+    "--",
+    ".code-pact/cache/loop-memory",
+  ]);
+  if (tracked.ok && tracked.stdout.trim().length > 0) {
+    issues.push({
+      code: "LOOP_MEMORY_TRACKED",
+      severity: "warning",
+      message:
+        "Local loop-memory files are tracked by git. Remove them from version control and keep `/.code-pact/cache/` ignored.",
+      details: {
+        files: tracked.stdout.trim().split("\n").filter(Boolean),
+      },
+      recovery: {
+        manual_action:
+          "Remove local loop-memory files from version control; do not delete unrelated project state.",
+        confirm: "code-pact doctor",
+        reference: "docs/cli-contract.md § State file write guarantees",
+      },
+    });
+  }
+
+  try {
+    await resolveLoopMemoryEpisodesDirectoryReadPath(cwd);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "PATH_NOT_OWNED" || code === "PATH_OUTSIDE_PROJECT") {
+      issues.push({
+        code: "LOOP_MEMORY_PATH_UNSAFE",
+        severity: "warning",
+        message:
+          "Local loop-memory cache path resolves through a symlink or outside the project; memory reads and writes will fail closed.",
+        details: { system_code: code },
+        recovery: {
+          manual_action:
+            "Replace the loop-memory cache path with a normal directory under `.code-pact/cache/loop-memory/`.",
+          confirm: "code-pact doctor",
+          reference: "docs/cli-contract.md § State file write guarantees",
+        },
+      });
+    } else {
+      throw error;
+    }
+  }
+}
+
 // Check 11: enabled agents have their adapter instruction file on disk.
 //
 // This legacy check ONLY fires when no manifest exists. With a manifest,
@@ -1722,6 +1796,14 @@ export async function runDoctor(
   // never spawns git.
   if (!disabled.has("CONTROL_PLANE_GITIGNORED")) {
     await checkControlPlaneGitignored(cwd, allIssues);
+  }
+
+  if (
+    !disabled.has("LOOP_MEMORY_CACHE_NOT_GITIGNORED") ||
+    !disabled.has("LOOP_MEMORY_TRACKED") ||
+    !disabled.has("LOOP_MEMORY_PATH_UNSAFE")
+  ) {
+    await checkLoopMemoryHealth(cwd, allIssues);
   }
 
   // Apply disabled_checks filter

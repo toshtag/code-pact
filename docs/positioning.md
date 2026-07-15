@@ -29,6 +29,11 @@ The project keeps two state surfaces:
   `blocked` / `resumed` events that drives state-machine
   transitions and renders runbook output.
 
+Derived local caches under `.code-pact/cache/` are intentionally outside those
+state surfaces. They may hold regenerable artifacts or bounded local loop-memory
+episodes, but they are not shared project truth and deleting them must not
+change the plan, progress state, or verification result.
+
 Around those two surfaces, `code-pact` ships a small set of
 stable verbs an agent uses to advance work. The CLI is the
 contract; everything else (instruction files, skills, hooks
@@ -52,6 +57,10 @@ of `code-pact`:
   fields (`context_size`, `ambiguity`, `write_surface`,
   `depends_on`, `reads`, `writes`, `decision_refs`,
   `acceptance_refs`), not by embedding similarity.
+- **No shared autonomous memory.** Local loop-memory records may
+  help future phases reduce repeated investigation, but they stay
+  bounded, gitignored, and advisory. They are not project rules,
+  contributor-shared knowledge, or a substitute for verification.
 - **No web UI, no desktop app.** All interaction is via the
   CLI and the generated per-agent instruction files.
 - **No external tracker integration.** No GitHub Issues, no
@@ -104,6 +113,10 @@ finalize`** — the state-machine transitions. `start` records
 - **`code-pact verify`** — runs the declared verification
   commands for a task without recording an event. Used to
   pre-flight a `task complete`.
+- **`code-pact memory status` / `memory prune`** — local,
+  disposable loop-memory cache maintenance. These commands
+  report aggregates and apply bounded retention only; memory is
+  never a correctness source and is not injected into context.
 - **`code-pact phase reconcile`** — phase-level reconciliation
   of task statuses against progress events; writes phase YAML
   status updates when run with `--write`.

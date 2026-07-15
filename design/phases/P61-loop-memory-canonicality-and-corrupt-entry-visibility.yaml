@@ -1,0 +1,131 @@
+id: P61
+name: Loop Memory Canonicality and Corrupt-Entry Visibility
+weight: 3
+confidence: high
+risk: medium
+status: done
+objective: >
+  Complete the local loop-memory boundaries required before any exact-match
+  recall work: byte-exact UTF-8 decoding, visible corrupt/nonregular entries,
+  accurate corrupt byte accounting, and public prune-conflict reporting.
+non_goals:
+  - Add exact-match recall, memory retrieval, semantic search, embeddings,
+    SQLite, JSONL, or remote sync.
+  - Read loop memory from task prepare, task context, recommend, or standalone
+    verify.
+  - Inject memory into context packs, Evidence artifacts, Failure Capsules,
+    adapters, or project rules.
+  - Change retention limit values, storage root, episode schema version, repair
+    policy, progress event schema, CI workflow, release version, tags, or
+    archive state.
+  - Automatically delete corrupt or nonregular cache entries.
+definition_of_done:
+  - Invalid UTF-8 bytes cannot be accepted as a valid canonical episode.
+  - Loop-memory episode task identity uses the same PlanId and TaskType schemas
+    as the plan model.
+  - Symlinks, directories, and other nonregular episode entries are visible as
+    corrupt entries without being followed, read, or deleted.
+  - Memory status reports known corrupt bytes and unmeasured corrupt entry
+    counts separately.
+  - Retention conflicts during preflight or delete are surfaced as
+    MEMORY_PRUNE_CONFLICT with partial-application metadata.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+tasks:
+  - id: P61-T1
+    type: bugfix
+    ambiguity: medium
+    risk: medium
+    context_size: large
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: Enforce byte-exact UTF-8 decoding and align loop-memory task
+      identity with the plan schemas.
+    reads:
+      - src/core/project-fs/**
+      - src/core/loop-memory/**
+      - src/core/schemas/**
+      - scripts/check-fs-authority.mjs
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/error-code-surface.test.ts
+    writes:
+      - src/core/project-fs/**
+      - src/core/loop-memory/**
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/error-code-surface.test.ts
+    acceptance_refs:
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/error-code-surface.test.ts
+  - id: P61-T2
+    type: bugfix
+    ambiguity: medium
+    risk: medium
+    context_size: large
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: Surface nonregular and corrupt loop-memory cache entries with
+      accurate known-byte and unmeasured-entry status reporting.
+    depends_on:
+      - P61-T1
+    reads:
+      - src/core/loop-memory/**
+      - src/cli/commands/memory.ts
+      - docs/cli-contract.md
+      - docs/maintainers/operations.md
+      - docs/troubleshooting.md
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+    writes:
+      - src/core/loop-memory/**
+      - docs/cli-contract.md
+      - docs/maintainers/operations.md
+      - docs/troubleshooting.md
+      - CHANGELOG.md
+      - tests/unit/core/loop-memory.test.ts
+    acceptance_refs:
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+      - docs/cli-contract.md
+  - id: P61-T3
+    type: bugfix
+    ambiguity: medium
+    risk: medium
+    context_size: large
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: Return prune conflicts consistently, including partial application
+      metadata for delete-phase conflicts.
+    depends_on:
+      - P61-T2
+    reads:
+      - src/core/loop-memory/**
+      - src/cli/commands/memory.ts
+      - docs/cli-contract.md
+      - docs/maintainers/operations.md
+      - docs/troubleshooting.md
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+      - tests/integration/json-stdout.test.ts
+    writes:
+      - src/core/loop-memory/**
+      - src/cli/commands/memory.ts
+      - docs/cli-contract.md
+      - docs/maintainers/operations.md
+      - docs/troubleshooting.md
+      - CHANGELOG.md
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+    acceptance_refs:
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+      - tests/integration/json-stdout.test.ts

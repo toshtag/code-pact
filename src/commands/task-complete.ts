@@ -6,6 +6,11 @@ import { resolveEventAuthor } from "../core/progress/author.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { runVerify, throwIfAborted, type CheckResult } from "./verify.ts";
+import { loadPhase } from "../core/plan/load-phase.ts";
+import {
+  recordLoopMemoryEpisodeBestEffort,
+  type LoopMemoryWarning,
+} from "../core/loop-memory/task-complete-recorder.ts";
 
 export type TaskCompleteOptions = {
   cwd: string;
@@ -30,6 +35,7 @@ export type TaskCompleteResult =
       agent: string;
       event: ProgressEvent;
       verify: { ok: true; checks: CheckResult[] };
+      warnings?: LoopMemoryWarning[];
     }
   | {
       kind: "already_done";
@@ -58,7 +64,14 @@ export async function runTaskComplete(
   const agentName = resolveEnabledAgent(project, opts.agent);
   throwIfAborted(opts.signal);
 
-  const { phaseId } = await resolveTaskInRoadmap(cwd, taskId);
+  const { phaseId, phasePath } = await resolveTaskInRoadmap(cwd, taskId);
+  const phase = await loadPhase(cwd, phasePath);
+  const task = phase.tasks?.find(candidate => candidate.id === taskId);
+  if (!task) {
+    const error = new Error(`Task "${taskId}" not found in phase "${phaseId}".`);
+    (error as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
+    throw error;
+  }
   throwIfAborted(opts.signal);
 
   const { log } = await loadProgressLog(cwd);
@@ -97,12 +110,26 @@ export async function runTaskComplete(
   });
 
   if (!verifyResult.ok) {
+    const memoryWarning = dryRun
+      ? undefined
+      : await recordLoopMemoryEpisodeBestEffort({
+          cwd,
+          phase,
+          task,
+          verify: verifyResult,
+          recordedAt: now(),
+        });
     const error = new Error(
       `Verification failed for "${taskId}". No progress event was recorded.`,
     );
     (error as NodeJS.ErrnoException).code = "VERIFICATION_FAILED";
     (error as NodeJS.ErrnoException & { checks?: CheckResult[] }).checks =
       verifyResult.checks;
+    if (memoryWarning !== undefined) {
+      (error as NodeJS.ErrnoException & { warnings?: LoopMemoryWarning[] }).warnings = [
+        memoryWarning,
+      ];
+    }
     throw error;
   }
 
@@ -136,6 +163,13 @@ export async function runTaskComplete(
   // starts, it is the commit point and is allowed to finish.
   throwIfAborted(opts.signal);
   await writeEventFile(cwd, event);
+  const memoryWarning = await recordLoopMemoryEpisodeBestEffort({
+    cwd,
+    phase,
+    task,
+    verify: verifyResult,
+    recordedAt: now(),
+  });
 
   return {
     kind: "done",
@@ -144,5 +178,6 @@ export async function runTaskComplete(
     agent: agentName,
     event,
     verify: { ok: true, checks: verifyResult.checks },
+    ...(memoryWarning !== undefined ? { warnings: [memoryWarning] } : {}),
   };
 }

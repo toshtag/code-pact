@@ -38,6 +38,7 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`EVENT_FILE_ID_MISMATCH`](#event_file_id_mismatch-from-doctor--plan-lint)                                                                                                                                                   | A per-event ledger file's content doesn't match its content-addressed name (corrupt / hand-edited)   | Restore from git or remove the file named in the message, then re-run                                                                                                                                                                      |
 | [`PROGRESS_EVENT_CONFLICT`](#progress_event_conflict-from-doctor--plan-analyze)                                                                                                                                              | Incompatible same-task lifecycle events (e.g. two branches both `done` a task)                       | Reconcile the conflicting event(s) for the named task                                                                                                                                                                                      |
 | [`CONTROL_PLANE_GITIGNORED`](#control_plane_gitignored-from-doctor)                                                                                                                                                          | A `.gitignore` rule keeps part of the shared control plane off git, so collaboration silently breaks | Narrow the `.gitignore` to the local-only subset and commit the shared control plane (project.yaml, profiles, baselines, state/events/)                                                                                                    |
+| [`LOOP_MEMORY_*`](#loop_memory_-from-doctor)                                                                                                                                                                                  | Local bounded loop-memory cache is tracked, not ignored, or path-unsafe                             | Keep `/.code-pact/cache/` ignored, remove local cache files from version control, and replace unsafe cache symlinks with normal project-local directories                                                                                 |
 | [`DUPLICATE_PHASE_ID`](#duplicate_phase_id-from-plan-lint--doctor)                                                                                                                                                           | Two phase files claim the same `P<N>` id (often a clean-but-wrong branch merge)                      | Renumber one phase + its roadmap entry, then re-run `plan lint`                                                                                                                                                                            |
 | [`DUPLICATE_TASK_ID`](#duplicate_task_id-from-plan-lint--doctor)                                                                                                                                                             | One task id appears in two phases                                                                    | Renumber one task (+ refs to it), then re-run `plan lint`                                                                                                                                                                                  |
 | [`PHASE_ID_MISMATCH`](#phase_id_mismatch-from-plan-lint--doctor)                                                                                                                                                             | A phase file's inner `id:` differs from its roadmap entry                                            | Make the two ids match, then re-run `plan lint`                                                                                                                                                                                            |
@@ -682,6 +683,63 @@ Advisory (`severity: warning`): `doctor` and default `validate` do not fail on
 it, but `validate --strict` promotes it to exit-relevant (like other doctor
 warnings), so CI can gate on it. If the repo is intentionally solo/throwaway,
 silence it via `.code-pact/doctor.yaml` (`disabled_checks: [CONTROL_PLANE_GITIGNORED]`).
+
+## `LOOP_MEMORY_*` from `doctor`
+
+Loop memory is a bounded local cache under
+`.code-pact/cache/loop-memory/v1/episodes/`. It is useful only inside one
+checkout and must not become shared project state. `doctor` reports three
+advisories:
+
+| Code | Meaning | Fix |
+| --- | --- | --- |
+| `LOOP_MEMORY_CACHE_NOT_GITIGNORED` | `/.code-pact/cache/` is not ignored. | Add `/.code-pact/cache/` to `.gitignore`. |
+| `LOOP_MEMORY_TRACKED` | One or more files under `.code-pact/cache/loop-memory/` are tracked by git. | Remove those local cache files from version control; do not delete unrelated state. |
+| `LOOP_MEMORY_PATH_UNSAFE` | The cache path resolves through a symlink or outside the project. | Replace it with a normal directory under `.code-pact/cache/loop-memory/`. |
+
+Use aggregate maintenance commands; they do not print episode bodies:
+
+```sh
+code-pact memory status --json
+code-pact memory prune --json
+code-pact memory prune --write --json
+```
+
+`memory prune` is dry-run unless `--write` is present. `doctor` never deletes
+cache files and never runs `git rm`; it reports cache ignore, Git tracking, and
+path-safety problems, not individual corrupt episode files.
+If `memory prune --write` returns `MEMORY_PRUNE_CONFLICT`, inspect
+`data.partial_applied` and `data.deleted_count`. A preflight conflict deletes
+nothing; a post-preflight conflict may have deleted earlier candidates.
+`deleted_count` counts only successful unlinks by that invocation. A candidate
+that another local process removed after the final identity read is skipped and
+not counted. If `memory prune --write` returns `MEMORY_PRUNE_FAILED`,
+`data.system_code` names the platform cause when available, and the JSON may
+also include `data.partial_applied` and `data.deleted_count` when deletion had
+begun. The final identity-read to unlink window is not a portable filesystem
+compare-and-swap, so run `code-pact memory status` and dry-run
+`code-pact memory prune` again before retrying `--write`.
+
+`memory status` may count corrupt local cache entries. That includes oversized
+files, invalid UTF-8, invalid JSON, schema-invalid episodes, files whose name
+does not match the canonical episode payload, and nonregular entries such as
+symlinks or directories. These entries are ignored by retention planning and
+local advisory consumers; remove them manually only after confirming they are
+local cache, not shared project state. `corrupt_bytes` is only the safely
+measured regular-file subset, including invalid UTF-8 files; use
+`corrupt_unmeasured_count` to see how many corrupt entries were not measured.
+
+`task complete` can return two advisory warning codes without changing the
+verification result or exit code:
+
+| Code | Meaning |
+| --- | --- |
+| `LOCAL_MEMORY_WRITE_SKIPPED` | The episode was not recorded. |
+| `LOCAL_MEMORY_PRUNE_SKIPPED` | The episode was recorded, but best-effort retention maintenance did not complete. |
+
+`memory` operational errors use stable exit-1 JSON codes under `--json`:
+`MEMORY_PATH_UNSAFE`, `MEMORY_READ_FAILED`, `MEMORY_PRUNE_CONFLICT`, and
+`MEMORY_PRUNE_FAILED`.
 
 ## Id collisions & mismatches (collaboration)
 

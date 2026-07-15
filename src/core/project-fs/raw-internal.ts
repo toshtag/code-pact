@@ -49,6 +49,7 @@ import {
   openSync as openSyncRaw,
   readFileSync as readFileSyncRaw,
 } from "node:fs";
+import { isUtf8 } from "node:buffer";
 import { open as openRaw, constants as constantsRaw } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 
@@ -123,6 +124,69 @@ export async function readRegularOwnedText(path: string): Promise<string> {
       throw error;
     }
     return await handle.readFile({ encoding: "utf8" });
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function readRegularOwnedTextBounded(
+  path: string,
+  maxBytes: number,
+): Promise<string> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+    throw new RangeError("maxBytes must be a non-negative safe integer");
+  }
+
+  const handle = await openReadNoFollow(path);
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile()) {
+      const error = new Error("path is not a regular file");
+      (error as NodeJS.ErrnoException).code = "ENOTFILE";
+      throw error;
+    }
+    if (stats.size > maxBytes) {
+      const error = new Error(`file exceeds ${maxBytes} bytes`);
+      (error as NodeJS.ErrnoException).code = "OWNED_TEXT_TOO_LARGE";
+      (error as NodeJS.ErrnoException & { bytes: number; maxBytes: number }).bytes =
+        stats.size;
+      (error as NodeJS.ErrnoException & { bytes: number; maxBytes: number }).maxBytes =
+        maxBytes;
+      throw error;
+    }
+
+    const buffer = Buffer.allocUnsafe(maxBytes + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const { bytesRead } = await handle.read(
+        buffer,
+        total,
+        buffer.length - total,
+        total,
+      );
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > maxBytes) {
+      const error = new Error(`file exceeds ${maxBytes} bytes`);
+      (error as NodeJS.ErrnoException).code = "OWNED_TEXT_TOO_LARGE";
+      (error as NodeJS.ErrnoException & { bytes: number; maxBytes: number }).bytes =
+        total;
+      (error as NodeJS.ErrnoException & { bytes: number; maxBytes: number }).maxBytes =
+        maxBytes;
+      throw error;
+    }
+    const bytes = buffer.subarray(0, total);
+    if (!isUtf8(bytes)) {
+      const error = new Error("file is not valid UTF-8");
+      (error as NodeJS.ErrnoException).code = "OWNED_TEXT_INVALID_UTF8";
+      (error as NodeJS.ErrnoException & { bytes: number; maxBytes: number }).bytes =
+        total;
+      (error as NodeJS.ErrnoException & { bytes: number; maxBytes: number }).maxBytes =
+        maxBytes;
+      throw error;
+    }
+    return bytes.toString("utf8");
   } finally {
     await handle.close();
   }

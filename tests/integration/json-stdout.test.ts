@@ -137,6 +137,16 @@ describe("json-stdout contract: read-only Stable (v1.0) commands", () => {
     expectStdoutIsJson(p.run(["doctor", "--json"]), "doctor");
   });
 
+  it("memory status --json", async () => {
+    const p = await freshProject("memory-status");
+    expectStdoutIsJson(p.run(["memory", "status", "--json"]), "memory status");
+  });
+
+  it("memory prune --json", async () => {
+    const p = await freshProject("memory-prune");
+    expectStdoutIsJson(p.run(["memory", "prune", "--json"]), "memory prune");
+  });
+
   it("validate --json", async () => {
     const p = await freshProject("validate");
     expectStdoutIsJson(p.run(["validate", "--json"]), "validate");

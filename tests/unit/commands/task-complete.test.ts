@@ -5,6 +5,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runTaskComplete } from "../../../src/commands/task-complete.ts";
 import { loadMergedProgress } from "../../../src/core/progress/io.ts";
+import { scanLoopMemoryEpisodes } from "../../../src/core/loop-memory/episode-store.ts";
+import {
+  __setLoopMemoryPruneFailureForTests,
+  __setLoopMemoryRecordFailureForTests,
+} from "../../../src/core/loop-memory/task-complete-recorder.ts";
 
 // ---------------------------------------------------------------------------
 // Minimal project fixture — uses `echo ok` so verify's `commands` check
@@ -132,6 +137,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  __setLoopMemoryRecordFailureForTests(null);
+  __setLoopMemoryPruneFailureForTests(null);
   if (dir) await rm(dir, { recursive: true, force: true });
 });
 
@@ -165,6 +172,11 @@ describe("runTaskComplete — happy path", () => {
     expect(log.events[0]!.status).toBe("done");
     expect(log.events[0]!.agent).toBe("claude-code");
     expect(log.events[0]!.source).toBe("loop");
+
+    const memory = await scanLoopMemoryEpisodes(dir);
+    expect(memory.episodes).toHaveLength(1);
+    expect(memory.episodes[0]!.episode.kind).toBe("verification_passed");
+    expect(memory.episodes[0]!.episode.verification.ok).toBe(true);
   });
 
   it("uses default_agent when --agent is omitted", async () => {
@@ -271,6 +283,36 @@ describe("runTaskComplete — verify failure", () => {
       "utf8",
     );
     expect(after).toBe(before);
+
+    const memory = await scanLoopMemoryEpisodes(dir);
+    expect(memory.episodes).toHaveLength(1);
+    expect(memory.episodes[0]!.episode.kind).toBe("verification_failed");
+    expect(memory.episodes[0]!.episode.verification).toMatchObject({
+      ok: false,
+      failure_kind: "command_failed",
+      failed_check: "commands",
+      failed_command: "false",
+    });
+    expect(memory.episodes[0]!.episode.verification.failure_fingerprint).toMatch(
+      /^sha256:[0-9a-f]{64}$/,
+    );
+  });
+
+  it("omits unsafe absolute-path commands from local memory episodes", async () => {
+    await setupProject(dir, {
+      command: 'node -e "process.exit(1)" --path=[/tmp/code-pact-memory]',
+    });
+
+    await expect(
+      runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    ).rejects.toMatchObject({ code: "VERIFICATION_FAILED" });
+
+    const memory = await scanLoopMemoryEpisodes(dir);
+    expect(memory.episodes).toHaveLength(1);
+    expect(memory.episodes[0]!.episode.verification.failed_command).toBeUndefined();
+    expect(memory.episodes[0]!.episode.verification.failure_fingerprint).toMatch(
+      /^sha256:[0-9a-f]{64}$/,
+    );
   });
 
   it("attaches verify checks to the thrown error", async () => {
@@ -285,6 +327,27 @@ describe("runTaskComplete — verify failure", () => {
       const commands = e.checks!.find((c) => c.name === "commands");
       expect(commands?.ok).toBe(false);
     }
+  });
+
+  it("does not change verification failure when local memory recording fails", async () => {
+    await setupProject(dir, { failingCommand: true });
+    __setLoopMemoryRecordFailureForTests(() => new Error("disk full"));
+
+    try {
+      await runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+      throw new Error("should have thrown");
+    } catch (err: unknown) {
+      const e = err as Error & { code?: string; warnings?: Array<{ code: string; affects_exit: boolean }> };
+      expect(e.code).toBe("VERIFICATION_FAILED");
+      expect(e.warnings).toEqual([
+        {
+          code: "LOCAL_MEMORY_WRITE_SKIPPED",
+          message: "The local loop-memory episode was not recorded.",
+          affects_exit: false,
+        },
+      ]);
+    }
+    expect((await scanLoopMemoryEpisodes(dir)).episodes).toHaveLength(0);
   });
 });
 
@@ -313,6 +376,7 @@ describe("runTaskComplete — dry run", () => {
       "utf8",
     );
     expect(after).toBe(before);
+    expect((await scanLoopMemoryEpisodes(dir)).episodes).toHaveLength(0);
   });
 
   it("SECURITY: --dry-run does NOT execute verification commands (no side effects)", async () => {
@@ -347,6 +411,7 @@ describe("runTaskComplete — dry run", () => {
       "utf8",
     );
     expect(progressAfter).toBe(progressBefore);
+    expect((await scanLoopMemoryEpisodes(dir)).episodes).toHaveLength(0);
   });
 
   it("contrast: a real (non-dry-run) completion DOES execute verification commands", async () => {
@@ -362,6 +427,52 @@ describe("runTaskComplete — dry run", () => {
     expect(result.kind).toBe("done");
     // The command ran → marker exists.
     expect(existsSync(marker)).toBe(true);
+  });
+
+  it("does not change successful completion when local memory recording fails", async () => {
+    await setupProject(dir);
+    __setLoopMemoryRecordFailureForTests(() => new Error("disk full"));
+
+    const result = await runTaskComplete({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+
+    expect(result.kind).toBe("done");
+    if (result.kind !== "done") throw new Error("type narrow");
+    expect(result.warnings).toEqual([
+      {
+        code: "LOCAL_MEMORY_WRITE_SKIPPED",
+        message: "The local loop-memory episode was not recorded.",
+        affects_exit: false,
+      },
+    ]);
+    expect((await loadMergedProgress(dir)).log.events).toHaveLength(1);
+    expect((await scanLoopMemoryEpisodes(dir)).episodes).toHaveLength(0);
+  });
+
+  it("reports retention maintenance failure separately after recording the episode", async () => {
+    await setupProject(dir);
+    __setLoopMemoryPruneFailureForTests(() => new Error("maintenance failed"));
+
+    const result = await runTaskComplete({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+
+    expect(result.kind).toBe("done");
+    if (result.kind !== "done") throw new Error("type narrow");
+    expect(result.warnings).toEqual([
+      {
+        code: "LOCAL_MEMORY_PRUNE_SKIPPED",
+        message: "The local loop-memory episode was recorded, but retention maintenance was skipped.",
+        affects_exit: false,
+      },
+    ]);
+    expect((await loadMergedProgress(dir)).log.events).toHaveLength(1);
+    expect((await scanLoopMemoryEpisodes(dir)).episodes).toHaveLength(1);
   });
 
   it("would_append carries author (dry-run preview matches what would be written)", async () => {
@@ -518,6 +629,9 @@ describe("runTaskComplete — bounded verification and cancellation", () => {
       }),
     ).rejects.toMatchObject({ code: "VERIFICATION_FAILED" });
     expect((await loadMergedProgress(dir)).log.events).toHaveLength(0);
+    const memory = await scanLoopMemoryEpisodes(dir);
+    expect(memory.episodes).toHaveLength(1);
+    expect(memory.episodes[0]!.episode.verification.failure_kind).toBe("timed_out");
   }, 10_000);
 
   it("rejects an already-aborted operation without recording an event", async () => {
@@ -534,6 +648,7 @@ describe("runTaskComplete — bounded verification and cancellation", () => {
       }),
     ).rejects.toMatchObject({ code: "ABORTED" });
     expect((await loadMergedProgress(dir)).log.events).toHaveLength(0);
+    expect((await scanLoopMemoryEpisodes(dir)).episodes).toHaveLength(0);
   });
 
   it("honours cancellation immediately before the event-write commit point", async () => {

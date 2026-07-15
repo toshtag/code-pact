@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdtemp, rm, readFile, writeFile, mkdir, symlink } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { runInit } from "../../../src/commands/init.ts";
@@ -1351,5 +1351,115 @@ describe("runDoctor — CONTROL_PLANE_GITIGNORED (v1.32)", () => {
       "utf8",
     );
     expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Local loop-memory cache health
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — local loop-memory cache", () => {
+  function git(cwd: string, args: readonly string[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn("git", args, {
+        cwd,
+        stdio: ["ignore", "ignore", "pipe"],
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@e.com",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@e.com",
+        },
+      });
+      proc.on("close", (code) =>
+        code === 0 ? resolve() : reject(new Error(`git ${args.join(" ")} (${code})`)),
+      );
+      proc.on("error", reject);
+    });
+  }
+
+  const find = (r: Awaited<ReturnType<typeof runDoctor>>, code: string) =>
+    r.issues.find((i) => i.code === code);
+
+  it("is silent for init's narrow local cache ignore", async () => {
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    const result = await runDoctor(dir);
+    expect(find(result, "LOOP_MEMORY_CACHE_NOT_GITIGNORED")).toBeUndefined();
+    expect(find(result, "LOOP_MEMORY_TRACKED")).toBeUndefined();
+    expect(find(result, "LOOP_MEMORY_PATH_UNSAFE")).toBeUndefined();
+  });
+
+  it("warns when the cache root is not gitignored", async () => {
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await writeFile(join(dir, ".gitignore"), "/.local/\n", "utf8");
+
+    const issue = find(await runDoctor(dir), "LOOP_MEMORY_CACHE_NOT_GITIGNORED");
+
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+    expect(issue?.recovery?.manual_action).toContain("/.code-pact/cache/");
+  });
+
+  it("uses git ignore semantics for blanket ignores and negations", async () => {
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/\n", "utf8");
+    expect(find(await runDoctor(dir), "LOOP_MEMORY_CACHE_NOT_GITIGNORED")).toBeUndefined();
+
+    await writeFile(
+      join(dir, ".gitignore"),
+      [
+        "/.code-pact/*",
+        "!/.code-pact/cache/",
+        "!/.code-pact/cache/loop-memory/",
+        "!/.code-pact/cache/loop-memory/v1/",
+        "!/.code-pact/cache/loop-memory/v1/episodes/",
+        "!/.code-pact/cache/loop-memory/v1/episodes/*.json",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    expect(find(await runDoctor(dir), "LOOP_MEMORY_CACHE_NOT_GITIGNORED")).toBeDefined();
+  });
+
+  it("warns when the loop-memory cache resolves through an unsafe symlink", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-loop-memory-outside-"));
+    try {
+      await rm(join(dir, ".code-pact", "cache"), { recursive: true, force: true });
+      await symlink(outside, join(dir, ".code-pact", "cache"));
+
+      const issue = find(await runDoctor(dir), "LOOP_MEMORY_PATH_UNSAFE");
+
+      expect(issue).toBeDefined();
+      expect(issue?.severity).toBe("warning");
+      expect(issue?.details?.system_code).toBeDefined();
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("warns when local loop-memory files are tracked", async () => {
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    const episodePath = join(
+      dir,
+      ".code-pact",
+      "cache",
+      "loop-memory",
+      "v1",
+      "episodes",
+      "20260714T120102345Z-a1b2c3d4e5f60718.json",
+    );
+    await mkdir(dirname(episodePath), { recursive: true });
+    await writeFile(episodePath, "{}\n", "utf8");
+    await git(dir, ["add", "-f", ".code-pact/cache/loop-memory"]);
+
+    const issue = find(await runDoctor(dir), "LOOP_MEMORY_TRACKED");
+
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+    expect(issue?.details?.files).toContain(
+      ".code-pact/cache/loop-memory/v1/episodes/20260714T120102345Z-a1b2c3d4e5f60718.json",
+    );
+    expect(issue?.recovery?.manual_action).toContain("version control");
   });
 });

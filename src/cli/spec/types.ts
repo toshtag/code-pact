@@ -47,6 +47,7 @@ export type CommandSpec = {
     | "state"
     | "spec"
     | "evidence"
+    | "memory"
     | "context"
     | "root";
   /** Subcommand name, e.g. "prepare". */

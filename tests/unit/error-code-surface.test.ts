@@ -102,6 +102,12 @@ const KNOWN_CODES: Record<
   INVALID_EVIDENCE_REF: "public",
   INVALID_TASK_TRANSITION: "public",
   LOCK_HELD: "public",
+  LOCAL_MEMORY_WRITE_SKIPPED: "public",
+  LOCAL_MEMORY_PRUNE_SKIPPED: "public",
+  MEMORY_PATH_UNSAFE: "public",
+  MEMORY_READ_FAILED: "public",
+  MEMORY_PRUNE_CONFLICT: "public",
+  MEMORY_PRUNE_FAILED: "public",
   MANIFEST_NOT_FOUND: "public",
   PHASE_NOT_FOUND: "public",
   // design-docs-ephemeral step 7 PR-B1: the `phase archive` destructive verb.
@@ -233,6 +239,9 @@ const KNOWN_CODES: Record<
   CONTROL_PLANE_GITIGNORED: "doctor",
   EMPTY_OBJECTIVE: "doctor",
   LOCAL_NOT_GITIGNORED: "doctor",
+  LOOP_MEMORY_CACHE_NOT_GITIGNORED: "doctor",
+  LOOP_MEMORY_PATH_UNSAFE: "doctor",
+  LOOP_MEMORY_TRACKED: "doctor",
   MISSING_DIR: "doctor",
   MISSING_MODEL_TIER: "doctor",
   MODEL_ID_UNKNOWN: "doctor",
@@ -283,6 +292,14 @@ const KNOWN_CODES: Record<
   // Emitted by readRegularOwnedText (raw-internal.ts) when a path that
   // should be a regular file is not. Always caught and remapped by callers.
   ENOTFILE: "internal",
+  // Emitted by bounded raw reads when an owned file exceeds the caller's byte
+  // budget. Loop-memory callers catch and remap it to corrupt/retention
+  // diagnostics, so it is not a top-level public envelope.
+  OWNED_TEXT_TOO_LARGE: "internal",
+  // Emitted by bounded raw reads when an owned file is not byte-exact UTF-8.
+  // Loop-memory callers catch and remap it to corrupt/retention diagnostics,
+  // so it is not a top-level public envelope.
+  OWNED_TEXT_INVALID_UTF8: "internal",
   // Emitted by pruned-ledger.ts when a serialized row has a path that
   // fails decision ref validation. Surfaced as an unhandled exception.
   INVALID_PRUNED_DECISION_PATH: "internal",

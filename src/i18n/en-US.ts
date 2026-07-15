@@ -17,6 +17,7 @@ export const messages = {
     "  verify     run deterministic completion criteria",
     "  evidence   show cached verification evidence by reference",
     "  context    inspect or retrieve deferred context by reference",
+    "  memory     inspect and prune bounded local loop-memory episodes",
     "  adapter    generate or refresh per-agent rule files",
     "  recommend  suggest a model tier for a task",
     "  doctor     report project structure issues (human-friendly)",

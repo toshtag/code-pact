@@ -176,6 +176,25 @@ context-budget option, so it does not enter the deferred-context manifest flow.
 Where a command writes deterministic artifacts (context pack, adapter
 files), the same input produces the same on-disk bytes.
 
+### Local loop memory
+
+Code Pact may write bounded local loop-memory episodes under
+`.code-pact/cache/loop-memory/`. This cache is advisory and disposable. It is
+not part of the shared control plane, is not committed, and is not a source of
+truth for task status, verification, decisions, write audit, Evidence, Context
+artifacts, or Failure Capsules.
+
+Agents must not rely on local memory for correctness. In P58, `task prepare`,
+`task context`, and `recommend` do not read loop memory, and no memory content is
+added to the context pack. If the cache is absent or corrupt, the normal
+lifecycle still runs from the design files, progress ledger, and verification
+commands.
+
+Episode files are bounded to 8 KiB, validated against their filename identity,
+and use UTC `Date.prototype.toISOString()` timestamps. Corrupt, oversized, or
+identity-mismatched cache files are reported as local cache problems; they are
+not promoted into agent context and are not deleted by `doctor`.
+
 ### Progress is an append-only event log
 
 The progress ledger is an append-only event log — code-pact never edits a past

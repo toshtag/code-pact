@@ -424,6 +424,56 @@ code-pact doctor --json
 
 Selective per-code promotion ("strict on everything EXCEPT `TASK_WRITES_PROTECTED_PATH`") is **not** supported in v1.5+; it remains a P15+ candidate. Until then, the binary `--strict` flag is your only lever.
 
+### Local loop-memory maintenance (v2.7+)
+
+Loop memory is derived, machine-local state under
+`.code-pact/cache/loop-memory/v1/episodes/`. It records bounded verification
+episodes from `task complete` so later local work can avoid repeating the same
+investigation, but it is not part of the progress ledger, context packs,
+Evidence artifacts, or CI source of truth.
+
+Each episode file is capped at 8 KiB and must match its filename identity.
+Corrupt, oversized, identity-mismatched, invalid-UTF-8, or nonregular entries
+(symlinks, directories, sockets, etc.) are counted as corrupt local cache
+entries. `memory status` reports corrupt episode entries; `doctor` reports only
+cache placement, Git tracking, ignore, and path-safety problems. Neither command
+deletes cache files automatically. `memory status` separates `corrupt_bytes`
+(bytes safely measured from corrupt regular files, including invalid UTF-8)
+from `corrupt_unmeasured_count` (entries whose bytes were not measured, such as
+symlinks or unreadable files), so `corrupt_bytes` is not complete cache disk
+usage.
+
+Inspect only aggregates:
+
+```sh
+code-pact memory status --json
+```
+
+Prune is dry-run by default:
+
+```sh
+code-pact memory prune --json
+code-pact memory prune --write --json
+```
+
+`memory prune --write` preflights every retention candidate before deleting
+anything. A preflight conflict deletes nothing. If a candidate changes after
+pruning starts, the command reports `MEMORY_PRUNE_CONFLICT` with
+`partial_applied` and `deleted_count`; `deleted_count` counts only successful
+unlinks by this invocation. A file deleted by another local process after the
+last identity read is treated as an idempotent skip and is not counted. If an
+I/O or platform failure happens after pruning starts, `MEMORY_PRUNE_FAILED` may
+also include `partial_applied` and `deleted_count`. The final identity-read to
+unlink window is not a portable filesystem CAS; inspect the current state with
+`code-pact memory status` and a dry-run `code-pact memory prune` before running
+`--write` again. The reported `after` state is a fresh post-write scan.
+
+Keep `/.code-pact/cache/` in `.gitignore`. If `doctor` reports
+`LOOP_MEMORY_CACHE_NOT_GITIGNORED`, `LOOP_MEMORY_TRACKED`, or
+`LOOP_MEMORY_PATH_UNSAFE`, fix the local cache shape and re-run
+`code-pact doctor`. `doctor` reports these conditions only; it never deletes
+cache files or runs `git rm`.
+
 ### Tracking release prep with `phase runbook --across-phases` (v1.9+)
 
 When a release ships work from several in_progress phases (typical for a roadmap with cross-phase `depends_on` references), the aggregated runbook surfaces every phase still in scope in one shot:
