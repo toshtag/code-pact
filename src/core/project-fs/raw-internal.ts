@@ -49,6 +49,7 @@ import {
   openSync as openSyncRaw,
   readFileSync as readFileSyncRaw,
 } from "node:fs";
+import { isUtf8 } from "node:buffer";
 import { open as openRaw, constants as constantsRaw } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 
@@ -175,7 +176,13 @@ export async function readRegularOwnedTextBounded(
         maxBytes;
       throw error;
     }
-    return buffer.subarray(0, total).toString("utf8");
+    const bytes = buffer.subarray(0, total);
+    if (!isUtf8(bytes)) {
+      const error = new Error("file is not valid UTF-8");
+      (error as NodeJS.ErrnoException).code = "OWNED_TEXT_INVALID_UTF8";
+      throw error;
+    }
+    return bytes.toString("utf8");
   } finally {
     await handle.close();
   }

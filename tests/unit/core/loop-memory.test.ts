@@ -103,15 +103,19 @@ function passed(recordedAt = "2026-07-14T12:01:02.345Z"): LoopMemoryEpisode {
   );
 }
 
-async function writeRawEpisode(filename: string, content: string): Promise<void> {
+async function writeRawEpisode(
+  filename: string,
+  content: string | Buffer,
+): Promise<void> {
   await mkdir(join(dir, ".code-pact", "cache", "loop-memory", "v1", "episodes"), {
     recursive: true,
   });
-  await writeFile(
-    join(dir, ".code-pact", "cache", "loop-memory", "v1", "episodes", filename),
-    content,
-    "utf8",
-  );
+  const path = join(dir, ".code-pact", "cache", "loop-memory", "v1", "episodes", filename);
+  if (typeof content === "string") {
+    await writeFile(path, content, "utf8");
+  } else {
+    await writeFile(path, content);
+  }
 }
 
 describe("loop memory episode schema", () => {
@@ -146,6 +150,25 @@ describe("loop memory episode schema", () => {
         prompt: "never store prompts",
       }),
     ).toThrow();
+  });
+
+  it("uses plan identity and task type schemas for episode task identity", () => {
+    expect(() =>
+      LoopMemoryEpisodeSchema.parse(episode({ task: { phase_id: "../P58" } })),
+    ).toThrow();
+    expect(() =>
+      LoopMemoryEpisodeSchema.parse(episode({ task: { task_id: "P58/T2" } })),
+    ).toThrow();
+    expect(() =>
+      LoopMemoryEpisodeSchema.parse(
+        episode({ task: { task_type: "security" as LoopMemoryEpisode["task"]["task_type"] } }),
+      ),
+    ).toThrow();
+    expect(LoopMemoryEpisodeSchema.parse(episode()).task).toMatchObject({
+      phase_id: "P58",
+      task_id: "P58-T2",
+      task_type: "feature",
+    });
   });
 
   it("rejects oversized commands, absolute paths, evidence_ref, and oversized episodes", () => {
@@ -258,6 +281,63 @@ describe("loop memory store", () => {
     await expect(storeLoopMemoryEpisode(dir, episode())).rejects.toThrow(
       /filename collision/,
     );
+  });
+
+  it("treats invalid UTF-8 same-filename content as a closed collision", async () => {
+    const stored = await storeLoopMemoryEpisode(dir, episode());
+    await writeRawEpisode(stored.filename, Buffer.from([0xff]));
+
+    await expect(storeLoopMemoryEpisode(dir, episode())).rejects.toThrow(
+      /filename collision/,
+    );
+  });
+
+  it("rejects invalid UTF-8 bytes before JSON and identity checks", async () => {
+    const filename = `${utcBasicTimestamp(new Date("2026-07-14T12:01:06.345Z"))}-4444444444444444.json`;
+    const replacementEpisode = episode(
+      { verification: { failed_command: "bad \uFFFD byte" } },
+      "2026-07-14T12:01:06.345Z",
+    );
+    const replacementRaw = canonicalJson(replacementEpisode);
+    const replacementBytes = Buffer.from(replacementRaw, "utf8");
+    const replacementAt = replacementBytes.indexOf(Buffer.from([0xef, 0xbf, 0xbd]));
+    expect(replacementAt).toBeGreaterThanOrEqual(0);
+    const spoofedBytes = Buffer.from(replacementBytes);
+    spoofedBytes[replacementAt] = 0xff;
+    spoofedBytes[replacementAt + 1] = 0xff;
+    spoofedBytes[replacementAt + 2] = 0xff;
+
+    await writeRawEpisode(filename, Buffer.from([0xff]));
+    await writeRawEpisode(
+      `${utcBasicTimestamp(new Date("2026-07-14T12:01:07.345Z"))}-5555555555555555.json`,
+      Buffer.from([0xc0, 0xaf]),
+    );
+    await writeRawEpisode(
+      `${utcBasicTimestamp(new Date("2026-07-14T12:01:08.345Z"))}-6666666666666666.json`,
+      Buffer.from([0xe2, 0x82]),
+    );
+    await writeRawEpisode(
+      `${utcBasicTimestamp(new Date("2026-07-14T12:01:09.345Z"))}-7777777777777777.json`,
+      Buffer.concat([
+        Buffer.from([0xef, 0xbb, 0xbf]),
+        Buffer.from(canonicalJson(episode({}, "2026-07-14T12:01:09.345Z"))),
+      ]),
+    );
+    await writeRawEpisode(
+      `${utcBasicTimestamp(new Date("2026-07-14T12:01:10.345Z"))}-8888888888888888.json`,
+      spoofedBytes,
+    );
+
+    const scan = await scanLoopMemoryEpisodes(dir);
+
+    expect(scan.episodes).toHaveLength(0);
+    expect(scan.corrupt.map(c => c.reason).sort()).toEqual([
+      "invalid_json",
+      "invalid_utf8",
+      "invalid_utf8",
+      "invalid_utf8",
+      "invalid_utf8",
+    ]);
   });
 
   it("isolates malformed, oversized, non-canonical, identity-mismatched, and unsafe files during scan", async () => {
@@ -533,6 +613,29 @@ describe("loop memory retention", () => {
         "utf8",
       ),
     ).resolves.toHaveLength(MAX_EPISODE_BYTES + 1);
+  });
+
+  it("treats invalid UTF-8 retention candidates as prune conflicts", async () => {
+    const old = await storeLoopMemoryEpisode(
+      dir,
+      episode({}, "2026-01-01T00:00:00.000Z"),
+    );
+    const scan = await scanLoopMemoryEpisodes(dir);
+    const plan = planLoopMemoryRetention(scan.episodes, {
+      now: new Date("2026-07-14T12:00:00.000Z"),
+    });
+    await writeRawEpisode(old.filename, Buffer.from([0xff]));
+
+    await expect(applyLoopMemoryRetention(dir, plan)).rejects.toMatchObject({
+      code: "MEMORY_PRUNE_CONFLICT",
+    });
+    const after = await scanLoopMemoryEpisodes(dir);
+    expect(after.corrupt).toEqual([
+      {
+        filename: old.filename,
+        reason: "invalid_utf8",
+      },
+    ]);
   });
 
   it("treats concurrent deletion after retention preflight as idempotent", async () => {

@@ -164,3 +164,6 @@ phases:
   - id: P60
     path: design/phases/P60-local-loop-memory-boundary-completion.yaml
     weight: 3
+  - id: P61
+    path: design/phases/P61-loop-memory-canonicality-and-corrupt-entry-visibility.yaml
+    weight: 3

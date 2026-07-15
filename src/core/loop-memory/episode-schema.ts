@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { canonicalJson } from "../content-addressed-store/canonical-json.ts";
+import { PlanId } from "../schemas/plan-id.ts";
+import { TaskType } from "../schemas/task.ts";
 import { loopMemoryInvalid } from "./memory-errors.ts";
 import { containsAbsolutePathLike } from "./path-safety.ts";
 
@@ -15,19 +17,6 @@ const FAILURE_KINDS = [
   "unsafe_write",
   "invalid_state",
   "unknown",
-] as const;
-
-const LOOP_TASK_TYPES = [
-  "feature",
-  "bugfix",
-  "refactor",
-  "test",
-  "docs",
-  "chore",
-  "architecture",
-  "security",
-  "mechanical_refactor",
-  "other",
 ] as const;
 
 const LIFECYCLE_MODES = ["full_loop", "record_only", "decision_loop"] as const;
@@ -101,9 +90,9 @@ export const LoopMemoryEpisodeSchema = z.strictObject({
   }),
   kind: z.enum(["verification_failed", "verification_passed"]),
   task: z.strictObject({
-    phase_id: z.string().min(1),
-    task_id: z.string().min(1),
-    task_type: z.enum(LOOP_TASK_TYPES),
+    phase_id: PlanId,
+    task_id: PlanId,
+    task_type: TaskType,
   }),
   execution: z.strictObject({
     lifecycle_mode: z.enum(LIFECYCLE_MODES),

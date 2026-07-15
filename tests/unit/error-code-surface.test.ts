@@ -296,6 +296,10 @@ const KNOWN_CODES: Record<
   // budget. Loop-memory callers catch and remap it to corrupt/retention
   // diagnostics, so it is not a top-level public envelope.
   OWNED_TEXT_TOO_LARGE: "internal",
+  // Emitted by bounded raw reads when an owned file is not byte-exact UTF-8.
+  // Loop-memory callers catch and remap it to corrupt/retention diagnostics,
+  // so it is not a top-level public envelope.
+  OWNED_TEXT_INVALID_UTF8: "internal",
   // Emitted by pruned-ledger.ts when a serialized row has a path that
   // fails decision ref validation. Surfaced as an unhandled exception.
   INVALID_PRUNED_DECISION_PATH: "internal",

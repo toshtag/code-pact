@@ -36,6 +36,7 @@ export type CorruptLoopMemoryEpisode = {
     | "invalid_filename"
     | "read_failed"
     | "oversized"
+    | "invalid_utf8"
     | "invalid_json"
     | "schema_invalid"
     | "identity_mismatch";
@@ -66,7 +67,10 @@ export async function storeLoopMemoryEpisode(
     try {
       existing = await readOwnedTextBounded(readPath, MAX_EPISODE_BYTES);
     } catch (readError) {
-      if ((readError as NodeJS.ErrnoException).code === "OWNED_TEXT_TOO_LARGE") {
+      if (
+        (readError as NodeJS.ErrnoException).code === "OWNED_TEXT_TOO_LARGE" ||
+        (readError as NodeJS.ErrnoException).code === "OWNED_TEXT_INVALID_UTF8"
+      ) {
         throw loopMemoryConflict("loop-memory episode filename collision");
       }
       throw readError;
@@ -113,6 +117,10 @@ export async function scanLoopMemoryEpisodes(cwd: string): Promise<LoopMemorySca
           reason: "oversized",
           bytes: (error as NodeJS.ErrnoException & { bytes?: number }).bytes,
         });
+        continue;
+      }
+      if ((error as NodeJS.ErrnoException).code === "OWNED_TEXT_INVALID_UTF8") {
+        corrupt.push({ filename, reason: "invalid_utf8" });
         continue;
       }
       corrupt.push({
