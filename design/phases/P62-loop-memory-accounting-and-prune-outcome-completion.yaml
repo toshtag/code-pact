@@ -3,7 +3,7 @@ name: Loop Memory Accounting and Prune Outcome Completion
 weight: 2
 confidence: high
 risk: low
-status: planned
+status: done
 objective: >
   Complete local loop-memory accounting and prune outcome reporting: measured
   invalid-UTF-8 bytes, precise unlink counts, partial operational failure
@@ -51,8 +51,6 @@ tasks:
       - tests/unit/core/loop-memory.test.ts
       - tests/unit/commands/memory.test.ts
     writes:
-      - design/phases/P62-loop-memory-accounting-and-prune-outcome-completion.yaml
-      - design/roadmap.yaml
       - src/core/project-fs/raw-internal.ts
       - src/core/loop-memory/episode-store.ts
       - src/commands/memory-status.ts
@@ -112,7 +110,6 @@ tasks:
       - tests/unit/core/loop-memory.test.ts
       - tests/unit/commands/memory.test.ts
     writes:
-      - design/phases/P62-loop-memory-accounting-and-prune-outcome-completion.yaml
       - docs/cli-contract.md
       - docs/maintainers/operations.md
       - docs/troubleshooting.md
