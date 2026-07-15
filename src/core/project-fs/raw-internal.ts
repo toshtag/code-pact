@@ -180,6 +180,10 @@ export async function readRegularOwnedTextBounded(
     if (!isUtf8(bytes)) {
       const error = new Error("file is not valid UTF-8");
       (error as NodeJS.ErrnoException).code = "OWNED_TEXT_INVALID_UTF8";
+      (error as NodeJS.ErrnoException & { bytes: number; maxBytes: number }).bytes =
+        total;
+      (error as NodeJS.ErrnoException & { bytes: number; maxBytes: number }).maxBytes =
+        maxBytes;
       throw error;
     }
     return bytes.toString("utf8");

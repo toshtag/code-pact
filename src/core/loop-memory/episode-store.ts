@@ -129,7 +129,16 @@ export async function scanLoopMemoryEpisodes(cwd: string): Promise<LoopMemorySca
         continue;
       }
       if ((error as NodeJS.ErrnoException).code === "OWNED_TEXT_INVALID_UTF8") {
-        corrupt.push({ filename, reason: "invalid_utf8" });
+        const bytes = (error as NodeJS.ErrnoException & { bytes?: number }).bytes;
+        const measuredBytes =
+          typeof bytes === "number" && Number.isSafeInteger(bytes) && bytes >= 0
+            ? bytes
+            : undefined;
+        corrupt.push({
+          filename,
+          reason: "invalid_utf8",
+          ...(measuredBytes !== undefined ? { bytes: measuredBytes } : {}),
+        });
         continue;
       }
       corrupt.push({
@@ -174,7 +183,7 @@ export async function scanLoopMemoryEpisodes(cwd: string): Promise<LoopMemorySca
   }
 
   episodes.sort(compareStoredEpisodes);
-  corrupt.sort((a, b) => a.filename.localeCompare(b.filename));
+  corrupt.sort((a, b) => asciiCompare(a.filename, b.filename));
   return { episodes, corrupt };
 }
 

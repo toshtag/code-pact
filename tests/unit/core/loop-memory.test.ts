@@ -339,6 +339,12 @@ describe("loop memory store", () => {
       "invalid_utf8",
       "invalid_utf8",
     ]);
+    expect(
+      scan.corrupt
+        .filter(c => c.reason === "invalid_utf8")
+        .map(c => c.bytes)
+        .sort((a, b) => (a ?? 0) - (b ?? 0)),
+    ).toEqual([1, 2, 2, spoofedBytes.length]);
   });
 
   it("isolates malformed, oversized, non-canonical, identity-mismatched, and unsafe files during scan", async () => {
@@ -678,6 +684,7 @@ describe("loop memory retention", () => {
     const after = await scanLoopMemoryEpisodes(dir);
     expect(after.corrupt).toEqual([
       {
+        bytes: 1,
         filename: old.filename,
         reason: "invalid_utf8",
       },
@@ -711,6 +718,7 @@ describe("loop memory retention", () => {
     expect(after.episodes.some(e => e.filename === first.filename)).toBe(false);
     expect(after.corrupt).toEqual([
       {
+        bytes: 1,
         filename: second.filename,
         reason: "invalid_utf8",
       },
@@ -811,6 +819,7 @@ describe("loop memory retention", () => {
     });
     const identitySource = canonicalJson(episode({}, "2026-07-14T12:03:01.000Z"));
     const oversized = "{".padEnd(MAX_EPISODE_BYTES + 1, "x");
+    const invalidUtf8 = Buffer.from([0xff, 0xfe, 0xfd]);
     await writeRawEpisode("not-an-episode.json", "{}");
     await writeRawEpisode(
       `${utcBasicTimestamp(new Date("2026-07-14T12:03:00.000Z"))}-1111111111111111.json`,
@@ -828,7 +837,11 @@ describe("loop memory retention", () => {
       `${utcBasicTimestamp(new Date("2026-07-14T12:03:03.000Z"))}-4444444444444444.json`,
       oversized,
     );
-    const symlinkName = `${utcBasicTimestamp(new Date("2026-07-14T12:03:04.000Z"))}-5555555555555555.json`;
+    await writeRawEpisode(
+      `${utcBasicTimestamp(new Date("2026-07-14T12:03:04.000Z"))}-5555555555555555.json`,
+      invalidUtf8,
+    );
+    const symlinkName = `${utcBasicTimestamp(new Date("2026-07-14T12:03:05.000Z"))}-6666666666666666.json`;
     const target = join(dir, ".code-pact", "cache", "loop-memory", "v1", "target.json");
     await writeFile(target, canonicalJson(episode()), "utf8");
     await symlink(
@@ -840,12 +853,13 @@ describe("loop memory retention", () => {
       now: new Date("2026-07-14T12:00:00.000Z"),
     });
 
-    expect(status.corrupt_count).toBe(6);
+    expect(status.corrupt_count).toBe(7);
     expect(status.corrupt_bytes).toBe(
       Buffer.byteLength(schemaInvalid, "utf8") +
         Buffer.byteLength(identitySource, "utf8") +
         Buffer.byteLength(invalidJson, "utf8") +
-        Buffer.byteLength(oversized, "utf8"),
+        Buffer.byteLength(oversized, "utf8") +
+        invalidUtf8.length,
     );
     expect(status.corrupt_unmeasured_count).toBe(2);
     expect(JSON.stringify(status)).not.toContain("target.json");

@@ -1,0 +1,124 @@
+id: P62
+name: Loop Memory Accounting and Prune Outcome Completion
+weight: 2
+confidence: high
+risk: low
+status: planned
+objective: >
+  Complete local loop-memory accounting and prune outcome reporting: measured
+  invalid-UTF-8 bytes, precise unlink counts, partial operational failure
+  metadata, human status rendering, and accurate public contracts.
+non_goals:
+  - Add exact-match recall, memory retrieval, context injection, semantic
+    search, embeddings, SQLite, JSONL, remote sync, or contributor sharing.
+  - Change storage root, retention limits, episode schema version, Evidence,
+    Context Artifact, Failure Capsule, repairPolicy, progress event, adapter, CI
+    workflow, release version, tags, or phase archive behavior.
+  - Automatically delete corrupt or nonregular entries, or add doctor scans of
+    individual episode files.
+definition_of_done:
+  - Invalid UTF-8 regular files contribute measured corrupt bytes.
+  - Human memory status reports corrupt entries, measured corrupt bytes, and
+    unmeasured corrupt entries without exposing episode bodies or paths.
+  - Prune deleted_count counts only successful unlinks by this invocation.
+  - Prune conflicts and operational failures expose partial application metadata
+    without leaking paths, filenames, raw bytes, or stacks.
+  - Documentation distinguishes doctor cache-shape checks from memory status
+    episode scans and does not overstate the final read-to-unlink race.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+tasks:
+  - id: P62-T1
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: Complete corrupt byte accounting for invalid UTF-8 and render
+      corrupt accounting in human memory status.
+    reads:
+      - src/core/project-fs/raw-internal.ts
+      - src/core/loop-memory/episode-store.ts
+      - src/core/loop-memory/status.ts
+      - src/commands/memory-status.ts
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+    writes:
+      - design/phases/P62-loop-memory-accounting-and-prune-outcome-completion.yaml
+      - design/roadmap.yaml
+      - src/core/project-fs/raw-internal.ts
+      - src/core/loop-memory/episode-store.ts
+      - src/commands/memory-status.ts
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+    acceptance_refs:
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+  - id: P62-T2
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: Count only successful prune unlinks and report partial metadata on
+      operational prune failures.
+    depends_on:
+      - P62-T1
+    reads:
+      - src/core/loop-memory/episode-store.ts
+      - src/core/loop-memory/retention.ts
+      - src/core/loop-memory/memory-errors.ts
+      - src/cli/commands/memory.ts
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+    writes:
+      - src/core/loop-memory/episode-store.ts
+      - src/core/loop-memory/retention.ts
+      - src/core/loop-memory/memory-errors.ts
+      - src/cli/commands/memory.ts
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+    acceptance_refs:
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+  - id: P62-T3
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: Reconcile public contracts, troubleshooting guidance, and changelog
+      for final accounting and prune outcome semantics.
+    depends_on:
+      - P62-T2
+    reads:
+      - docs/cli-contract.md
+      - docs/maintainers/operations.md
+      - docs/troubleshooting.md
+      - CHANGELOG.md
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+    writes:
+      - docs/cli-contract.md
+      - docs/maintainers/operations.md
+      - docs/troubleshooting.md
+      - CHANGELOG.md
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+    acceptance_refs:
+      - docs/cli-contract.md
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts

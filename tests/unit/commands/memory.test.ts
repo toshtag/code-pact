@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { cmdMemory } from "../../../src/cli/commands/memory.ts";
 import { runMemoryPrune } from "../../../src/commands/memory-prune.ts";
-import { runMemoryStatus } from "../../../src/commands/memory-status.ts";
+import { formatMemoryStatus, runMemoryStatus } from "../../../src/commands/memory-status.ts";
 import { storeLoopMemoryEpisode } from "../../../src/core/loop-memory/episode-store.ts";
 import type { LoopMemoryEpisode } from "../../../src/core/loop-memory/episode-schema.ts";
 import { __setAfterRetentionPreflightForTests } from "../../../src/core/loop-memory/retention.ts";
@@ -65,6 +65,32 @@ describe("memory commands", () => {
       corrupt_count: 0,
     });
     expect(JSON.stringify(status)).not.toContain("pnpm test:unit");
+  });
+
+  it("human status reports corrupt entries and measured/unmeasured counts", async () => {
+    const status = {
+      schema_version: 1 as const,
+      episode_count: 1,
+      total_bytes: 123,
+      failure_count: 1,
+      success_count: 0,
+      unique_task_count: 1,
+      unique_fingerprint_count: 1,
+      expired_count: 0,
+      over_task_limit_count: 0,
+      over_fingerprint_limit_count: 0,
+      corrupt_count: 3,
+      corrupt_bytes: 8195,
+      corrupt_unmeasured_count: 2,
+    };
+
+    const output = formatMemoryStatus(status);
+
+    expect(output).toContain("Corrupt entries: 3");
+    expect(output).toContain("Measured corrupt bytes: 8195");
+    expect(output).toContain("Unmeasured corrupt entries: 2");
+    expect(output).not.toContain("Corrupt files");
+    expect(output).not.toContain("pnpm test:unit");
   });
 
   it("prune is dry-run by default and --write applies candidates", async () => {

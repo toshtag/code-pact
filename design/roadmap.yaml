@@ -167,3 +167,6 @@ phases:
   - id: P61
     path: design/phases/P61-loop-memory-canonicality-and-corrupt-entry-visibility.yaml
     weight: 3
+  - id: P62
+    path: design/phases/P62-loop-memory-accounting-and-prune-outcome-completion.yaml
+    weight: 2

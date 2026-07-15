@@ -14,6 +14,8 @@ export function formatMemoryStatus(status: MemoryStatusResult): string {
     `Successes: ${status.success_count}`,
     `Unique tasks: ${status.unique_task_count}`,
     `Unique fingerprints: ${status.unique_fingerprint_count}`,
-    `Corrupt files: ${status.corrupt_count}`,
+    `Corrupt entries: ${status.corrupt_count}`,
+    `Measured corrupt bytes: ${status.corrupt_bytes}`,
+    `Unmeasured corrupt entries: ${status.corrupt_unmeasured_count}`,
   ].join("\n");
 }
