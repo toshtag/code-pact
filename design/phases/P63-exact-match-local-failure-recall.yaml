@@ -1,0 +1,90 @@
+id: P63
+name: Exact-Match Local Failure Recall
+weight: 5
+confidence: medium
+risk: medium
+status: planned
+objective: >
+  Use bounded local episodes to surface a minimal advisory signal only when the
+  current verification failure has an exact matching fingerprint, reducing
+  repeated failure investigation without changing correctness decisions.
+non_goals:
+  - Inject memory into the initial task context.
+  - Return raw prior episodes, logs, prompts, responses, source, or diffs.
+  - Perform semantic, fuzzy, natural-language, or embedding search.
+  - Change verification, progress, Evidence, Failure Capsule, or repairPolicy.
+  - Treat prior success as proof that the same repair remains correct.
+  - Add contributor sharing, remote sync, SQLite, or project-level memory config.
+definition_of_done:
+  - Exact-match recall is limited to the current failure fingerprint.
+  - The advisory signal is bounded, local-only, and never a correctness gate.
+  - Missing or corrupt local memory keeps normal verification behavior unchanged.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+tasks:
+  - id: P63-T1
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: Materialize the token-reduction memory roadmap.
+    reads:
+      - design/roadmap.yaml
+      - design/phases/P55-stable-core-task-delta.yaml
+      - design/phases/P58-local-bounded-loop-memory.yaml
+      - design/phases/P62-loop-memory-accounting-and-prune-outcome-completion.yaml
+    writes:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+    acceptance_refs:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+      - design/roadmap.yaml
+  - id: P63-T2
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: Define and implement exact-fingerprint local lookup.
+    depends_on:
+      - P63-T1
+    reads:
+      - src/core/loop-memory/episode-store.ts
+      - src/core/loop-memory/status.ts
+      - tests/unit/core/loop-memory.test.ts
+    writes:
+      - src/core/loop-memory/episode-store.ts
+      - tests/unit/core/loop-memory.test.ts
+    acceptance_refs:
+      - tests/unit/core/loop-memory.test.ts
+  - id: P63-T3
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: Surface one bounded prior-local signal on current failures.
+    depends_on:
+      - P63-T2
+    reads:
+      - src/core/loop-memory/episode-store.ts
+      - src/core/loop-memory/task-complete-recorder.ts
+      - tests/unit/core/loop-memory.test.ts
+    writes:
+      - src/core/loop-memory/task-complete-recorder.ts
+      - tests/unit/core/loop-memory.test.ts
+    acceptance_refs:
+      - tests/unit/core/loop-memory.test.ts

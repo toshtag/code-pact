@@ -1,0 +1,48 @@
+id: P68
+name: Loop Memory Storage Backend Review
+weight: 3
+confidence: low
+risk: medium
+status: planned
+requires_decision: true
+objective: >
+  Decide, from measured local limits, whether loop memory should keep one-record
+  JSON files, add an index sidecar or aggregate file, or move to SQLite in a
+  later implementation phase.
+non_goals:
+  - Implement a backend migration in P68.
+  - Add a dependency, package-size increase, or schema migration before the ADR is accepted.
+  - Change storage roots, Git ignore policy, contributor sharing, or remote sync.
+  - Use backend choice to change verification, progress, Evidence, Failure Capsule, context, or repairPolicy behavior.
+definition_of_done:
+  - The ADR evaluates live record count, storage bytes, query latency, index needs, and observed writer conflicts.
+  - Migration, locking, corruption recovery, platform behavior, transactions, vacuum behavior, filesystem authority, cache deletion/rebuild, dependency cost, package size, and contributor burden are covered.
+  - If measured gates are not met, the outcome is rejected or deferred.
+  - Any accepted backend change is scheduled as a later phase.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+tasks:
+  - id: P68-T1
+    type: architecture
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P67-T3
+    description: Measure backend limits and record an ADR.
+    reads:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+      - design/phases/P67-loop-memory-consolidation.yaml
+      - docs/cli-contract.md
+    writes:
+      - design/decisions/P68-T1-loop-memory-storage-backend-review-rfc.md
+    acceptance_refs:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md

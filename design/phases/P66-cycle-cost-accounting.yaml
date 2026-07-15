@@ -1,0 +1,91 @@
+id: P66
+name: Cycle Cost Accounting
+weight: 6
+confidence: medium
+risk: medium
+status: planned
+objective: >
+  Measure task-level total input bytes across context, deferred retrieval,
+  evidence retrieval, memory retrieval, and repeated failure capsules so token
+  reduction decisions use whole-cycle evidence rather than prompt-size slices.
+non_goals:
+  - Convert bytes to provider tokens or prices.
+  - Call model APIs or external telemetry services.
+  - Store source, logs, prompts, responses, or reasoning.
+  - Track metrics in Git or share them between contributors.
+  - Increase agent output size just to report the measurement.
+  - Change verification, progress, Evidence, Failure Capsule, or repairPolicy.
+definition_of_done:
+  - The metric contract defines context_pack_bytes, deferred_context_retrieval_bytes, evidence_retrieval_bytes, memory_retrieval_bytes, verification_run_count, repair_attempt_count, first_pass_success, success_after_repair, same_failure_repeated, and stopped_without_success.
+  - task_total_input_bytes is defined as context_pack_bytes plus deferred_context_retrieval_bytes plus evidence_retrieval_bytes plus memory_retrieval_bytes plus repeated_failure_capsule_bytes.
+  - Metrics are local, bounded, disposable, and not Git-tracked.
+  - P55 can consume task-level cycle evidence before deciding whether split context output is justified.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+tasks:
+  - id: P66-T1
+    type: architecture
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P65-T3
+    description: Accept the cycle-cost metric contract.
+    reads:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+      - design/phases/P65-lazy-local-memory-retrieval.yaml
+      - docs/cli-contract.md
+    writes:
+      - design/decisions/P66-T1-cycle-cost-metric-rfc.md
+    acceptance_refs:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+  - id: P66-T2
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P66-T1
+    description: Record bounded local task-cycle metrics.
+    reads:
+      - src/core/loop-memory/task-complete-recorder.ts
+      - src/core/pack/index.ts
+      - tests/unit/core/loop-memory.test.ts
+    writes:
+      - src/core/loop-memory/task-complete-recorder.ts
+      - tests/unit/core/loop-memory.test.ts
+    acceptance_refs:
+      - tests/unit/core/loop-memory.test.ts
+  - id: P66-T3
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P66-T2
+    description: Report task-level total input byte evidence.
+    reads:
+      - src/core/loop-memory/task-complete-recorder.ts
+      - docs/cli-contract.md
+      - tests/unit/commands/memory.test.ts
+    writes:
+      - docs/cli-contract.md
+      - tests/unit/commands/memory.test.ts
+    acceptance_refs:
+      - docs/cli-contract.md

@@ -7,7 +7,8 @@ status: planned
 requires_decision: true
 objective: >
   Decide whether split context output should exist after reversible deferral,
-  recommended budgets, and projection have produced measurement evidence.
+  recommended budgets, structural projection, local failure recall, and
+  task-level cycle-cost accounting have produced measurement evidence.
 non_goals:
   - Move active design authoring out of `design/`.
   - Trust a digest as a substitute for validating the referenced local files.
@@ -24,6 +25,9 @@ definition_of_done:
   - If approved, split JSON must include context output mode, manifest reference, stable-core reference, stable-core digest and bytes, task-delta reference, task-delta digest and bytes, and retrieval commands for both parts.
   - Failure delta must reuse the existing Failure Capsule fingerprint, evidence reference, and compact envelope by reference; no new failure schema or failure-delta byte count is introduced.
   - Stable-core digest alone is insufficient unless the agent has the matching content; otherwise a retrieval command must be returned.
+  - The decision compares context resend cost against failure investigation, verification repetition, and memory retrieval cost.
+  - Split context is not accepted when cycle evidence shows that retries and retrieval dominate total task input bytes.
+  - Stable Core retention by an agent must be demonstrated rather than assumed.
 verification:
   commands:
     - pnpm check:docs
@@ -41,9 +45,11 @@ tasks:
     expected_duration: short
     status: planned
     depends_on:
-      - P54-T4
-    description: Evaluate P52-P54 measurement evidence and decide whether split context output should be accepted, rejected, or deferred.
+      - P66-T3
+    description: Evaluate P52-P54 and P63-P66 measurement evidence and decide whether split context output should be accepted, rejected, or deferred.
     reads:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+      - design/phases/P66-cycle-cost-accounting.yaml
       - docs/agent-contract.md
       - docs/cli-contract.md
       - src/core/pack/index.ts

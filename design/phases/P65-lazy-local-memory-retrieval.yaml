@@ -1,0 +1,94 @@
+id: P65
+name: Lazy Local Memory Retrieval
+weight: 6
+confidence: medium
+risk: medium
+status: planned
+objective: >
+  Provide explicit, bounded local memory retrieval only after a current failure
+  exists and an agent chooses to request prior matching details, keeping initial
+  task context memory-free.
+non_goals:
+  - Inject memory into initial task context or recommendations.
+  - Retrieve by fuzzy, semantic, natural-language, or embedding search.
+  - Return raw stdout, stderr, prompts, responses, reasoning, source, or diffs.
+  - Change verification results, progress, Evidence, Failure Capsule, or repairPolicy.
+  - Add contributor sharing, remote sync, or a new storage backend.
+definition_of_done:
+  - Retrieval is explicit and fingerprint-exact.
+  - Retrieval returns at most three records and less than 4 KiB total.
+  - Missing local cache returns an empty successful result.
+  - Retrieval output is advisory and never changes verification outcome.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+tasks:
+  - id: P65-T1
+    type: architecture
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P64-T3
+    description: Accept the lazy retrieval contract.
+    reads:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+      - design/phases/P64-deterministic-resolution-aggregation.yaml
+      - docs/cli-contract.md
+    writes:
+      - design/decisions/P65-T1-lazy-local-memory-retrieval-rfc.md
+    acceptance_refs:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+  - id: P65-T2
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P65-T1
+    description: Implement bounded explicit retrieval.
+    reads:
+      - src/cli/spec/memory.ts
+      - src/core/loop-memory/episode-store.ts
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+    writes:
+      - src/cli/spec/memory.ts
+      - src/core/loop-memory/episode-store.ts
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+    acceptance_refs:
+      - tests/unit/core/loop-memory.test.ts
+  - id: P65-T3
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P65-T2
+    description: Add agent guidance and byte-bound coverage.
+    reads:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - tests/unit/commands/memory.test.ts
+    writes:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - tests/unit/commands/memory.test.ts
+    acceptance_refs:
+      - docs/cli-contract.md
