@@ -419,6 +419,64 @@ describe("loop memory retention", () => {
     expect(after.episodes.some(e => e.filename === protectedEpisode.filename)).toBe(true);
   }, 10_000);
 
+  it("counts protected episodes inside per-task retention caps", async () => {
+    const sameTask = await storedEpisodes(
+      LOOP_MEMORY_RETENTION_LIMITS.maxEpisodesPerTask + 1,
+      i =>
+        episode(
+          {
+            task: { task_id: "P58-T-protected-task" },
+            verification: {
+              failure_fingerprint: `sha256:${i.toString(16).padStart(64, "0")}`,
+            },
+          },
+          new Date(Date.parse("2026-07-14T00:00:00.000Z") + i * 1000).toISOString(),
+        ),
+    );
+    const protectedEpisode = sameTask[0]!;
+    const scan = await scanLoopMemoryEpisodes(dir);
+    const plan = planLoopMemoryRetention(scan.episodes, {
+      now: new Date("2026-07-14T12:00:00.000Z"),
+      protectedFilename: protectedEpisode.filename,
+    });
+
+    expect(plan.remove.some(c => c.episode.filename === protectedEpisode.filename)).toBe(false);
+    expect(plan.remove.filter(c => c.reason === "over_task_limit")).toHaveLength(1);
+    expect(plan.keep.filter(e => e.episode.task.task_id === "P58-T-protected-task"))
+      .toHaveLength(LOOP_MEMORY_RETENTION_LIMITS.maxEpisodesPerTask);
+    expect(plan.keep.some(e => e.filename === protectedEpisode.filename)).toBe(true);
+  });
+
+  it("counts protected episodes inside per-fingerprint retention caps", async () => {
+    const fingerprint = `sha256:${"f".repeat(64)}`;
+    const sameFingerprint = await storedEpisodes(
+      LOOP_MEMORY_RETENTION_LIMITS.maxEpisodesPerFingerprint + 1,
+      i =>
+        episode(
+          {
+            task: { task_id: `P58-T-protected-fingerprint-${i}` },
+            verification: {
+              failure_fingerprint: fingerprint,
+            },
+          },
+          new Date(Date.parse("2026-07-14T00:00:00.000Z") + i * 1000).toISOString(),
+        ),
+    );
+    const protectedEpisode = sameFingerprint[0]!;
+    const scan = await scanLoopMemoryEpisodes(dir);
+    const plan = planLoopMemoryRetention(scan.episodes, {
+      now: new Date("2026-07-14T12:00:00.000Z"),
+      protectedFilename: protectedEpisode.filename,
+    });
+
+    expect(plan.remove.some(c => c.episode.filename === protectedEpisode.filename)).toBe(false);
+    expect(plan.remove.filter(c => c.reason === "over_fingerprint_limit")).toHaveLength(1);
+    expect(
+      plan.keep.filter(e => e.episode.verification.failure_fingerprint === fingerprint),
+    ).toHaveLength(LOOP_MEMORY_RETENTION_LIMITS.maxEpisodesPerFingerprint);
+    expect(plan.keep.some(e => e.filename === protectedEpisode.filename)).toBe(true);
+  });
+
   it("does not delete any candidate when retention preflight sees changed bytes", async () => {
     const first = await storeLoopMemoryEpisode(
       dir,

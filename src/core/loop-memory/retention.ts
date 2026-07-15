@@ -53,6 +53,25 @@ function addCandidate(
   }
 }
 
+function newestFilenamesWithProtected(
+  group: StoredLoopMemoryEpisode[],
+  limit: number,
+  protectedFilename?: string,
+): Set<string> {
+  if (limit <= 0) return new Set();
+  if (protectedFilename === undefined || !group.some(e => e.filename === protectedFilename)) {
+    return new Set(group.slice(-limit).map(e => e.filename));
+  }
+
+  const keep = new Set<string>([protectedFilename]);
+  for (const episode of [...group].reverse()) {
+    if (keep.size >= limit) break;
+    if (episode.filename === protectedFilename) continue;
+    keep.add(episode.filename);
+  }
+  return keep;
+}
+
 export function planLoopMemoryRetention(
   episodes: StoredLoopMemoryEpisode[],
   opts: {
@@ -77,8 +96,11 @@ export function planLoopMemoryRetention(
     byTask.set(key, [...(byTask.get(key) ?? []), episode]);
   }
   for (const group of byTask.values()) {
-    const keep = group.slice(-LOOP_MEMORY_RETENTION_LIMITS.maxEpisodesPerTask);
-    const keepNames = new Set(keep.map(e => e.filename));
+    const keepNames = newestFilenamesWithProtected(
+      group,
+      LOOP_MEMORY_RETENTION_LIMITS.maxEpisodesPerTask,
+      opts.protectedFilename,
+    );
     for (const episode of group) {
       if (!keepNames.has(episode.filename)) {
         addCandidate(candidates, episode, "over_task_limit", opts.protectedFilename);
@@ -93,8 +115,11 @@ export function planLoopMemoryRetention(
     byFingerprint.set(fingerprint, [...(byFingerprint.get(fingerprint) ?? []), episode]);
   }
   for (const group of byFingerprint.values()) {
-    const keep = group.slice(-LOOP_MEMORY_RETENTION_LIMITS.maxEpisodesPerFingerprint);
-    const keepNames = new Set(keep.map(e => e.filename));
+    const keepNames = newestFilenamesWithProtected(
+      group,
+      LOOP_MEMORY_RETENTION_LIMITS.maxEpisodesPerFingerprint,
+      opts.protectedFilename,
+    );
     for (const episode of group) {
       if (!keepNames.has(episode.filename)) {
         addCandidate(

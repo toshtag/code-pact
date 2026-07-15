@@ -73,7 +73,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: Preserve protected episodes without violating per-task,
       per-fingerprint, count, byte, or age retention caps.
     depends_on:
