@@ -3,7 +3,7 @@ name: Loop Memory Canonicality and Corrupt-Entry Visibility
 weight: 3
 confidence: high
 risk: medium
-status: planned
+status: done
 objective: >
   Complete the local loop-memory boundaries required before any exact-match
   recall work: byte-exact UTF-8 decoding, visible corrupt/nonregular entries,
@@ -55,8 +55,6 @@ tasks:
       - tests/unit/core/loop-memory.test.ts
       - tests/unit/error-code-surface.test.ts
     writes:
-      - design/phases/P61-loop-memory-canonicality-and-corrupt-entry-visibility.yaml
-      - design/roadmap.yaml
       - src/core/project-fs/**
       - src/core/loop-memory/**
       - tests/unit/core/loop-memory.test.ts
@@ -86,7 +84,6 @@ tasks:
       - tests/unit/core/loop-memory.test.ts
       - tests/unit/commands/memory.test.ts
     writes:
-      - design/phases/P61-loop-memory-canonicality-and-corrupt-entry-visibility.yaml
       - src/core/loop-memory/**
       - docs/cli-contract.md
       - docs/maintainers/operations.md
@@ -120,7 +117,6 @@ tasks:
       - tests/unit/commands/memory.test.ts
       - tests/integration/json-stdout.test.ts
     writes:
-      - design/phases/P61-loop-memory-canonicality-and-corrupt-entry-visibility.yaml
       - src/core/loop-memory/**
       - src/cli/commands/memory.ts
       - docs/cli-contract.md
