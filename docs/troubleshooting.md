@@ -707,6 +707,11 @@ code-pact memory prune --write --json
 
 `memory prune` is dry-run unless `--write` is present. `doctor` never deletes
 cache files and never runs `git rm`; it only reports what must be fixed.
+If `memory prune --write` returns `MEMORY_PRUNE_CONFLICT`, inspect
+`data.partial_applied` and `data.deleted_count`. A preflight conflict deletes
+nothing; a post-preflight conflict may have deleted earlier candidates. In that
+case run `code-pact memory status` and dry-run `code-pact memory prune` again
+before retrying `--write`.
 
 `memory status` may count corrupt local cache entries. That includes oversized
 files, invalid UTF-8, invalid JSON, schema-invalid episodes, files whose name

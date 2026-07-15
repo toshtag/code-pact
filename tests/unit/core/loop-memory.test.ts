@@ -627,6 +627,8 @@ describe("loop memory retention", () => {
 
     await expect(applyLoopMemoryRetention(dir, plan)).rejects.toMatchObject({
       code: "MEMORY_PRUNE_CONFLICT",
+      partial_applied: false,
+      deleted_count: 0,
     });
 
     const after = await scanLoopMemoryEpisodes(dir);
@@ -646,6 +648,8 @@ describe("loop memory retention", () => {
 
     await expect(applyLoopMemoryRetention(dir, plan)).rejects.toMatchObject({
       code: "MEMORY_PRUNE_CONFLICT",
+      partial_applied: false,
+      deleted_count: 0,
     });
     await expect(
       readFile(
@@ -668,12 +672,84 @@ describe("loop memory retention", () => {
 
     await expect(applyLoopMemoryRetention(dir, plan)).rejects.toMatchObject({
       code: "MEMORY_PRUNE_CONFLICT",
+      partial_applied: false,
+      deleted_count: 0,
     });
     const after = await scanLoopMemoryEpisodes(dir);
     expect(after.corrupt).toEqual([
       {
         filename: old.filename,
         reason: "invalid_utf8",
+      },
+    ]);
+  });
+
+  it("reports partial application when a later delete-phase candidate changes", async () => {
+    const first = await storeLoopMemoryEpisode(
+      dir,
+      episode({}, "2026-01-01T00:00:00.000Z"),
+    );
+    const second = await storeLoopMemoryEpisode(
+      dir,
+      episode({ task: { task_id: "P58-T9" } }, "2026-01-01T00:00:01.000Z"),
+    );
+    const scan = await scanLoopMemoryEpisodes(dir);
+    const plan = planLoopMemoryRetention(scan.episodes, {
+      now: new Date("2026-07-14T12:00:00.000Z"),
+    });
+    __setAfterRetentionPreflightForTests(async () => {
+      await writeRawEpisode(second.filename, Buffer.from([0xff]));
+    });
+
+    await expect(applyLoopMemoryRetention(dir, plan)).rejects.toMatchObject({
+      code: "MEMORY_PRUNE_CONFLICT",
+      partial_applied: true,
+      deleted_count: 1,
+    });
+
+    const after = await scanLoopMemoryEpisodes(dir);
+    expect(after.episodes.some(e => e.filename === first.filename)).toBe(false);
+    expect(after.corrupt).toEqual([
+      {
+        filename: second.filename,
+        reason: "invalid_utf8",
+      },
+    ]);
+  });
+
+  it("treats a delete-phase nonregular candidate as a prune conflict", async () => {
+    const old = await storeLoopMemoryEpisode(
+      dir,
+      episode({}, "2026-01-01T00:00:00.000Z"),
+    );
+    const scan = await scanLoopMemoryEpisodes(dir);
+    const plan = planLoopMemoryRetention(scan.episodes, {
+      now: new Date("2026-07-14T12:00:00.000Z"),
+    });
+    __setAfterRetentionPreflightForTests(async () => {
+      const path = join(
+        dir,
+        ".code-pact",
+        "cache",
+        "loop-memory",
+        "v1",
+        "episodes",
+        old.filename,
+      );
+      await unlink(path);
+      await mkdir(path);
+    });
+
+    await expect(applyLoopMemoryRetention(dir, plan)).rejects.toMatchObject({
+      code: "MEMORY_PRUNE_CONFLICT",
+      partial_applied: false,
+      deleted_count: 0,
+    });
+    expect((await scanLoopMemoryEpisodes(dir)).corrupt).toEqual([
+      {
+        filename: old.filename,
+        reason: "non_regular",
+        entry_kind: "directory",
       },
     ]);
   });

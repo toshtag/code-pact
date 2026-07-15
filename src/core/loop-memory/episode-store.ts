@@ -21,7 +21,7 @@ import {
   MAX_EPISODE_BYTES,
   type LoopMemoryEpisode,
 } from "./episode-schema.ts";
-import { loopMemoryConflict, loopMemoryInvalid } from "./memory-errors.ts";
+import { loopMemoryConflict } from "./memory-errors.ts";
 
 export type StoredLoopMemoryEpisode = {
   filename: string;
@@ -203,11 +203,6 @@ export async function deleteStoredLoopMemoryEpisode(
   cwd: string,
   episode: StoredLoopMemoryEpisode,
 ): Promise<void> {
-  const current = await readCurrentStoredEpisodeBytes(cwd, episode);
-  if (current === undefined) return;
-  if (current !== episode.raw) {
-    throw loopMemoryInvalid("loop-memory episode changed before prune");
-  }
   const deletePath = await resolveLoopMemoryEpisodeDeletePath(cwd, episode.filename);
   try {
     await unlinkOwned(deletePath);

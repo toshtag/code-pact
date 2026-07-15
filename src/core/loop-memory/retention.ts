@@ -166,21 +166,65 @@ export async function applyLoopMemoryRetention(
   plan: LoopMemoryRetentionPlan,
 ): Promise<void> {
   for (const candidate of plan.remove) {
-    let current: string | undefined;
-    try {
-      current = await readCurrentStoredEpisodeBytes(cwd, candidate.episode);
-    } catch {
-      throw loopMemoryPruneConflict("loop-memory retention candidate changed before prune");
-    }
-    if (current === undefined || current !== candidate.episode.raw) {
-      throw loopMemoryPruneConflict("loop-memory retention candidate changed before prune");
-    }
+    await assertRetentionCandidateUnchanged(cwd, candidate.episode, {
+      deletedCount: 0,
+      allowMissing: false,
+    });
   }
   if (afterRetentionPreflightForTests) await afterRetentionPreflightForTests();
 
+  let deletedCount = 0;
   for (const candidate of plan.remove) {
+    const current = await assertRetentionCandidateUnchanged(
+      cwd,
+      candidate.episode,
+      {
+        deletedCount,
+        allowMissing: true,
+      },
+    );
+    if (current === undefined) continue;
     await deleteStoredLoopMemoryEpisode(cwd, candidate.episode);
+    deletedCount += 1;
   }
+}
+
+async function assertRetentionCandidateUnchanged(
+  cwd: string,
+  episode: StoredLoopMemoryEpisode,
+  opts: { deletedCount: number; allowMissing: boolean },
+): Promise<string | undefined> {
+  let current: string | undefined;
+  try {
+    current = await readCurrentStoredEpisodeBytes(cwd, episode);
+  } catch {
+    throw loopMemoryPruneConflict(
+      "loop-memory retention candidate changed before deletion",
+      {
+        partial_applied: opts.deletedCount > 0,
+        deleted_count: opts.deletedCount,
+      },
+    );
+  }
+  if (current === undefined && !opts.allowMissing) {
+    throw loopMemoryPruneConflict(
+      "loop-memory retention candidate changed before deletion",
+      {
+        partial_applied: opts.deletedCount > 0,
+        deleted_count: opts.deletedCount,
+      },
+    );
+  }
+  if (current !== undefined && current !== episode.raw) {
+    throw loopMemoryPruneConflict(
+      "loop-memory retention candidate changed before deletion",
+      {
+        partial_applied: opts.deletedCount > 0,
+        deleted_count: opts.deletedCount,
+      },
+    );
+  }
+  return current;
 }
 
 export async function pruneLoopMemoryEpisodes(

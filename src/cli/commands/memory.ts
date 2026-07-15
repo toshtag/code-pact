@@ -15,7 +15,8 @@ function memoryError(
 ): {
   code: "MEMORY_PATH_UNSAFE" | "MEMORY_READ_FAILED" | "MEMORY_PRUNE_CONFLICT" | "MEMORY_PRUNE_FAILED";
   message: string;
-  data?: { system_code?: string };
+  data?: { system_code?: string; partial_applied?: boolean; deleted_count?: number };
+  human?: string;
 } {
   const systemCode = (error as NodeJS.ErrnoException).code;
   if (systemCode === "PATH_NOT_OWNED" || systemCode === "PATH_OUTSIDE_PROJECT") {
@@ -26,9 +27,20 @@ function memoryError(
     };
   }
   if (systemCode === "MEMORY_PRUNE_CONFLICT") {
+    const partialApplied =
+      (error as NodeJS.ErrnoException & { partial_applied?: boolean }).partial_applied === true;
+    const deletedCount =
+      (error as NodeJS.ErrnoException & { deleted_count?: number }).deleted_count ?? 0;
     return {
       code: "MEMORY_PRUNE_CONFLICT",
-      message: "Local loop-memory retention candidates changed before prune.",
+      message: "Local loop-memory retention candidates changed before deletion.",
+      data: { partial_applied: partialApplied, deleted_count: deletedCount },
+      ...(partialApplied
+        ? {
+            human:
+              "Local loop-memory retention candidates changed after pruning started.\nRun:\ncode-pact memory status\ncode-pact memory prune",
+          }
+        : {}),
     };
   }
   if (operation === "status") {
@@ -129,7 +141,10 @@ async function cmdMemoryPrune(
     });
   } catch (error) {
     const mapped = memoryError(error, "prune");
-    emitError(json, mapped.code, mapped.message, { data: mapped.data });
+    emitError(json, mapped.code, mapped.message, {
+      data: mapped.data,
+      human: mapped.human,
+    });
     return 1;
   }
   if (json) {

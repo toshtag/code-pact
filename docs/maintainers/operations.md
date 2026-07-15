@@ -455,9 +455,13 @@ code-pact memory prune --write --json
 ```
 
 `memory prune --write` preflights every retention candidate before deleting
-anything. A preflight conflict deletes nothing; a file deleted by another local
-process after preflight is treated as an idempotent skip. The reported `after`
-state is a fresh post-write scan.
+anything. A preflight conflict deletes nothing. If a candidate changes after
+pruning starts, the command reports `MEMORY_PRUNE_CONFLICT` with
+`partial_applied` and `deleted_count`; inspect the current state with
+`code-pact memory status` and a dry-run `code-pact memory prune` before running
+`--write` again. A file deleted by another local process after preflight is
+treated as an idempotent skip. The reported `after` state is a fresh post-write
+scan.
 
 Keep `/.code-pact/cache/` in `.gitignore`. If `doctor` reports
 `LOOP_MEMORY_CACHE_NOT_GITIGNORED`, `LOOP_MEMORY_TRACKED`, or

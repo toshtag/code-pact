@@ -1,0 +1,11 @@
+task_id: P61-T3
+status: done
+at: 2026-07-15T01:50:56.191Z
+actor: agent
+agent: claude-code
+author: Pocket
+evidence:
+  - commands
+  - decision
+source: loop
+id: ff12f224bb003c7bdbee65aaafb8b2a2bd839fc4ac883e993a1822b37cead9cb

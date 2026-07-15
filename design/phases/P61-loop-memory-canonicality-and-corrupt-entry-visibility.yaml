@@ -105,7 +105,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: Return prune conflicts consistently, including partial application
       metadata for delete-phase conflicts.
     depends_on:
@@ -120,6 +120,7 @@ tasks:
       - tests/unit/commands/memory.test.ts
       - tests/integration/json-stdout.test.ts
     writes:
+      - design/phases/P61-loop-memory-canonicality-and-corrupt-entry-visibility.yaml
       - src/core/loop-memory/**
       - src/cli/commands/memory.ts
       - docs/cli-contract.md
@@ -128,7 +129,6 @@ tasks:
       - CHANGELOG.md
       - tests/unit/core/loop-memory.test.ts
       - tests/unit/commands/memory.test.ts
-      - tests/integration/json-stdout.test.ts
     acceptance_refs:
       - tests/unit/core/loop-memory.test.ts
       - tests/unit/commands/memory.test.ts
