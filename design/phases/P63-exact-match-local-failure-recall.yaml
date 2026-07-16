@@ -73,7 +73,6 @@ tasks:
       - src/core/loop-memory/status.ts
       - tests/unit/core/loop-memory.test.ts
     writes:
-      - design/phases/P63-exact-match-local-failure-recall.yaml
       - src/core/loop-memory/recall.ts
       - tests/unit/core/loop-memory.test.ts
     acceptance_refs:
@@ -101,7 +100,6 @@ tasks:
       - tests/integration/json-stdout.test.ts
       - tests/unit/error-code-surface.test.ts
     writes:
-      - design/phases/P63-exact-match-local-failure-recall.yaml
       - src/core/loop-memory/task-complete-recorder.ts
       - src/commands/task-complete.ts
       - src/cli/commands/task.ts
