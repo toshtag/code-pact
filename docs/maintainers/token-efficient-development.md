@@ -69,7 +69,11 @@ pnpm check:development-efficiency -- --next-task <task-id>
 The check uses `P72-T4` as the baseline. After that baseline, two consecutive
 current design-only tasks fail with `DEVELOPMENT_DESIGN_LOOP_EXCEEDED`. A
 runtime, test, or script implementation task resets the current streak to zero;
-the historical maximum remains diagnostic only. `release:check` runs this gate.
+the historical maximum remains diagnostic only. Even when the current streak is
+already 2, a prospective runtime/test/script task passes because it resets the
+streak to zero. Design-only includes `design/`, `docs/`, `.code-pact/`,
+root-level Markdown files, `LICENSE`, and `NOTICE` when no `src/`, `tests/`, or
+`scripts/` write is declared. `release:check` runs this gate.
 
 This page is linked from [CONTRIBUTING.md](../../CONTRIBUTING.md) and
 [Maintainer operations](operations.md) so the workflow is discoverable.
