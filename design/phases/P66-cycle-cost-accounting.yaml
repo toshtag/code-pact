@@ -3,8 +3,7 @@ name: Closed-Harness Token Reduction Evidence
 weight: 3
 confidence: high
 risk: low
-status: planned
-requires_decision: true
+status: done
 objective: >
   Measure Code Pact stdout bytes and retry counts in deterministic closed
   scenarios without adding production cycle telemetry, then decide whether
@@ -25,29 +24,28 @@ definition_of_done:
     is not part of the current implementation target.
   - The harness executes the built CLI as child processes with fixed fixtures,
     fixed command sequences, no network, and no model or Agent runtime.
-  - The harness measures stdout bytes with
-    `Buffer.byteLength(stdout, "utf8")` for each invocation.
+  - The harness measures stdout bytes with `Buffer.byteLength(stdout, "utf8")`
+    for each invocation.
   - Scenarios cover first-pass success, verification failure then repair then
     success, repeated same-fingerprint failure then success, deferred context
     retrieval, Evidence retrieval, exact-match signal absent, and exact-match
     signal present.
   - The tracked evidence records signal_field_incremental_bytes,
-    repeated_failure_envelope_bytes, default-output compatibility,
-    first-failure signal omission, repeat-failure signal presence, and
+    repeated_failure_envelope_bytes, default-output compatibility, first-failure
+    signal omission, repeat-failure signal presence, and
     break_even_avoided_repeat_count.
   - Fixture exact-match hit count, fixture repeat rate, and fixture success
     count are scenario-design outputs, not evidence of real-world frequency.
   - P66-T2 records one ADR with summarized evidence and go/no-go decisions for
     P64, P65, P67, and P68.
-  - P66-T2 computes break_even_avoided_repeat_count as
-    ceil(signal bytes accumulated / one repeated failure envelope bytes) and
-    does not claim that any repeat was actually avoided.
+  - P66-T2 computes break_even_avoided_repeat_count as ceil(signal bytes
+    accumulated / one repeated failure envelope bytes) and does not claim that
+    any repeat was actually avoided.
   - Without actual usage evidence from a non-synthetic concrete case or
     reproducible issue, P64, P65, P67, and P68 remain deferred.
   - P64 does not proceed from closed-harness hit count or fixture repeat rate.
   - P65 does not proceed from closed-harness hit count or fixture repeat rate.
-  - >-
-    P67 does not proceed from synthetic fixture frequency; it requires actual
+  - P67 does not proceed from synthetic fixture frequency; it requires actual
     usage evidence of store pressure.
   - P68 proceeds only after P67 is accepted and actual storage pressure is
     measured from non-synthetic evidence.
@@ -66,10 +64,10 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
+    description: Implement deterministic closed-loop measurement harness.
     depends_on:
       - P63-T4
-    description: Implement deterministic closed-loop measurement harness.
     reads:
       - tests/helpers/cli.ts
       - tests/integration/json-stdout.test.ts
@@ -80,6 +78,87 @@ tasks:
       - tests/fixtures/token-efficiency/**
     acceptance_refs:
       - tests/integration/json-stdout.test.ts
+  - id: P66-T1A
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Correct closed-harness repair semantics, scenario accounting, subprocess
+      reuse, test execution cost, and the P66-T1 declared-write violation before
+      token-reduction evidence is evaluated.
+    requires_decision: false
+    depends_on:
+      - P66-T1
+      - P63-T5
+    reads:
+      - tests/helpers/cli.ts
+      - tests/harness/token-efficiency/harness.ts
+      - tests/harness/token-efficiency/token-efficiency.test.ts
+      - tests/harness/token-efficiency/run.ts
+      - tests/harness/token-efficiency/vitest.config.ts
+      - tests/fixtures/token-efficiency/README.md
+      - design/phases/P66-cycle-cost-accounting.yaml
+    writes:
+      - design/phases/P66-cycle-cost-accounting.yaml
+      - tests/harness/token-efficiency/harness.ts
+      - tests/harness/token-efficiency/token-efficiency.test.ts
+      - tests/harness/token-efficiency/run.ts
+      - tests/harness/token-efficiency/vitest.config.ts
+      - tests/fixtures/token-efficiency/README.md
+  - id: P66-T1B
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Make the closed-harness default-output evidence fail closed, guarantee
+      temporary-project cleanup during setup failures, and remove one redundant
+      first-pass subprocess rerun before the P66 evidence decision.
+    depends_on:
+      - P66-T1A
+      - P63-T5
+    reads:
+      - tests/harness/token-efficiency/harness.ts
+      - tests/harness/token-efficiency/token-efficiency.test.ts
+      - design/phases/P66-cycle-cost-accounting.yaml
+    writes:
+      - design/phases/P66-cycle-cost-accounting.yaml
+      - tests/harness/token-efficiency/harness.ts
+      - tests/harness/token-efficiency/token-efficiency.test.ts
+  - id: P66-T1C
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Make default-output compatibility require an exact verification-failure
+      envelope and preserve the primary setup error when cleanup also fails,
+      then revalidate the accepted P66 evidence.
+    depends_on:
+      - P66-T2
+    reads:
+      - tests/harness/token-efficiency/harness.ts
+      - tests/harness/token-efficiency/token-efficiency.test.ts
+      - design/decisions/P66-T2-token-reduction-evidence-rfc.md
+      - design/phases/P66-cycle-cost-accounting.yaml
+    writes:
+      - design/phases/P66-cycle-cost-accounting.yaml
+      - tests/harness/token-efficiency/harness.ts
+      - tests/harness/token-efficiency/token-efficiency.test.ts
+      - design/decisions/P66-T2-token-reduction-evidence-rfc.md
   - id: P66-T2
     type: architecture
     ambiguity: medium
@@ -88,10 +167,11 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
-    depends_on:
-      - P66-T1
+    status: done
     description: Record closed-harness evidence and decide follow-up phases.
+    requires_decision: true
+    depends_on:
+      - P66-T1C
     reads:
       - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
       - design/phases/P63-exact-match-local-failure-recall.yaml
