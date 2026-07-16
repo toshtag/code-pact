@@ -92,6 +92,13 @@ async function projectWithTask(prefix: string): Promise<Project> {
   return p;
 }
 
+async function setProjectVerifyCommand(p: Project, command: string): Promise<void> {
+  const phasePath = join(p.dir, "design", "phases", "P1-foundation.yaml");
+  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
+  doc.verification = { commands: [command] };
+  await writeFile(phasePath, stringifyYaml(doc), "utf8");
+}
+
 async function projectWithAdapter(prefix: string): Promise<Project> {
   const p = await projectWithTask(prefix);
   const res = p.run(["adapter", "install", "claude-code", "--json"]);
@@ -694,6 +701,93 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
       p.run(["task", "complete", "P1-T1", "--agent", "claude-code", "--json"]),
       "task complete",
     );
+  });
+
+  it("task complete --detail agent emits bounded prior_local_signal only after repeat failure", async () => {
+    const p = await projectWithTask("task-complete-prior-local-signal");
+    await setProjectVerifyCommand(p, "node -e \"process.exit(1)\"");
+    p.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]);
+
+    const first = p.run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+      "--detail",
+      "agent",
+    ]);
+    expect(first.code).toBe(1);
+    expectStdoutIsJson(first, "task complete first failure detail agent");
+    const firstJson = JSON.parse(first.stdout) as {
+      ok: false;
+      data: { prior_local_signal?: unknown };
+    };
+    expect(firstJson.data.prior_local_signal).toBeUndefined();
+
+    const second = p.run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+      "--detail",
+      "agent",
+    ]);
+    expect(second.code).toBe(1);
+    expectStdoutIsJson(second, "task complete repeated failure detail agent");
+    const secondJson = JSON.parse(second.stdout) as {
+      ok: false;
+      data: {
+        failure: unknown;
+        prior_local_signal?: {
+          schema_version: number;
+          exact_match_count: number;
+          last_observed_at: string;
+        };
+      };
+    };
+    const signal = secondJson.data.prior_local_signal;
+    expect(signal).toMatchObject({
+      schema_version: 1,
+      exact_match_count: 1,
+    });
+    expect(signal?.last_observed_at).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+    );
+    expect(JSON.stringify(secondJson.data.failure)).not.toContain("prior_local_signal");
+
+    const defaultJson = p.run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(defaultJson.code).toBe(1);
+    expectStdoutIsJson(defaultJson, "task complete repeated failure default json");
+    expect(defaultJson.stdout).not.toContain("prior_local_signal");
+
+    const signalAbsentBytes = Buffer.byteLength(first.stdout, "utf8");
+    const signalPresentBytes = Buffer.byteLength(second.stdout, "utf8");
+    const measurement = {
+      signal_absent_failure_envelope_bytes: signalAbsentBytes,
+      signal_present_failure_envelope_bytes: signalPresentBytes,
+      additional_bytes: signalPresentBytes - signalAbsentBytes,
+      exact_match_hit_count: signal?.exact_match_count,
+      repeats: 1,
+      successes: 0,
+    };
+    expect(Buffer.byteLength(JSON.stringify(signal), "utf8")).toBeLessThanOrEqual(1024);
+    expect(measurement).toMatchObject({
+      exact_match_hit_count: 1,
+      repeats: 1,
+      successes: 0,
+    });
+    expect(measurement.additional_bytes).toBeGreaterThan(0);
   });
 
   it("task record-done P1-T1 --json", async () => {
