@@ -54,7 +54,7 @@ tasks:
     expected_duration: short
     status: planned
     depends_on:
-      - P66-T3
+      - P66-T6
     description: Evaluate P52-P54 and P63-P66 measurement evidence and decide whether split context output should be accepted, rejected, or deferred.
     reads:
       - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md

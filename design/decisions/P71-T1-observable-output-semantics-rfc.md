@@ -76,12 +76,17 @@ evidence_retrieval
 memory_retrieval
 task_complete_success
 task_complete_failure
-cycle_report
+verify_success
+verify_failure
+task_control
 ```
 
 `control_metadata` is not a summable category. Fields such as `cycle_ref` and
 `prior_local_signal` are components of the single stdout event that contains
 them. They must not be recorded as independent additive events.
+
+P72 removes cycle reports from the summable set. `memory cost` and maintenance
+commands are read-only observation surfaces for the target cycle.
 
 Optional component breakdown is diagnostic only:
 

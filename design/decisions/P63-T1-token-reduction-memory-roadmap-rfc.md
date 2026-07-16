@@ -90,6 +90,9 @@ instructions. It also omits resolution fields; P64 owns resolved/unresolved
 aggregation. Default human output and default JSON do not grow; absence of a
 match omits the field entirely.
 
+`exact_match_count` is the number of matching valid episodes currently retained
+in the bounded local store. It is not a lifetime occurrence count.
+
 ## Cycle cost model
 
 P66 measures observed Code Pact CLI stdout bytes with explicit opt-in local
@@ -148,7 +151,7 @@ retention by an agent must be demonstrated rather than assumed.
 ## Phase sequence
 
 ```text
-P58 -> P59 -> P60 -> P61 -> P62 -> P63 -> P69 -> P70 -> P71 -> P64 -> P65 -> P66 -> P55 -> P67 -> P68
+P58 -> P59 -> P60 -> P61 -> P62 -> P63 -> P69 -> P70 -> P71 -> P72 -> P64 -> P65 -> P66 -> P55 -> P67 -> P68
 ```
 
 P55 keeps its id because it is an existing planned decision. Only its position

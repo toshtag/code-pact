@@ -3,7 +3,7 @@ name: Cycle Metrics Execution Contract Closure
 weight: 3
 confidence: high
 risk: low
-status: planned
+status: done
 objective: >
   Close cycle-report self-observation, lifecycle coverage, active-cycle
   capacity, automatic correlation, and runtime task-size gaps before exact
@@ -33,6 +33,9 @@ definition_of_done:
     lifetime count.
   - P66 runtime work is split into bounded implementation tasks and downstream
     dependencies wait for the final P66 task.
+  - P72-T4 finalization audit declares every design file it changes; the
+    completed dogfood phase does not keep protected design YAML writes listed
+    solely to prove the advisory.
 verification:
   commands:
     - pnpm check:docs
@@ -110,7 +113,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: Split P66 into bounded implementation tasks and reconcile dependencies.
     depends_on:
       - P72-T3
@@ -128,15 +131,6 @@ tasks:
       - design/phases/P67-loop-memory-consolidation.yaml
       - design/roadmap.yaml
     writes:
-      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
-      - design/decisions/P71-T1-observable-output-semantics-rfc.md
-      - design/decisions/P71-T2-cycle-lifecycle-and-bounded-storage-rfc.md
-      - design/decisions/P71-T3-runtime-contract-reconciliation-rfc.md
-      - design/phases/P55-stable-core-task-delta.yaml
-      - design/phases/P63-exact-match-local-failure-recall.yaml
-      - design/phases/P66-cycle-cost-accounting.yaml
-      - design/phases/P67-loop-memory-consolidation.yaml
-      - design/roadmap.yaml
       - design/decisions/P72-T4-runtime-task-reconciliation-rfc.md
     acceptance_refs:
       - design/decisions/P72-T4-runtime-task-reconciliation-rfc.md

@@ -22,10 +22,11 @@ definition_of_done:
   - observed_code_pact_stdout_bytes is defined as the sum of emitted_bytes for
     tracked Code Pact CLI stdout emission events, with measurement_scope
     `code_pact_cli_stdout` and external_input_unobserved true in normal runtime.
-  - Summable emission categories are task_prepare, task_context,
-    context_retrieval, evidence_retrieval, memory_retrieval,
-    task_complete_success, task_complete_failure, and cycle_report; control
-    metadata and component breakdowns are diagnostic only and never re-added.
+  - Summable emission categories are task_prepare, task_control, task_context,
+    verify_success, verify_failure, context_retrieval, evidence_retrieval,
+    memory_retrieval, task_complete_success, and task_complete_failure; cycle
+    reports and maintenance commands are read-only observation surfaces and are
+    not counted on the target cycle.
   - The contract defines cycle start, cycle id, cycle continuation, cycle close,
     abandoned cycle, new attempt, retry, and task-already-done behavior; the
     cycle id is not only the task id and distinguishes multiple attempts for
@@ -42,16 +43,20 @@ definition_of_done:
   - Metrics are stored under `.code-pact/cache/cycle-metrics/v1/`.
   - Cycle metrics hard limits are MAX_CYCLES=256, MAX_TOTAL_BYTES=2 MiB,
     MAX_CYCLE_BYTES=32 KiB, MAX_RETAINED_EVENT_DETAILS=64,
-    MAX_CYCLES_PER_TASK=8, and MAX_AGE_DAYS=90; active cycles are not exempt
-    from per-cycle limits and compact detail before losing cumulative totals.
+    MAX_CYCLES_PER_TASK=8, MAX_AGE_DAYS=90, MAX_ACTIVE_IDLE_DAYS=7, and
+    MAX_MINIMAL_CYCLE_BYTES=4 KiB; active cycles are not exempt from admission
+    control, per-cycle limits, or global capacity checks.
   - Cycle reports distinguish complete, incomplete, and abandoned; only complete
     cycles without measurement_incomplete can report a complete
     observed_code_pact_stdout_bytes value, and normal runtime never claims
     external input was fully observed.
+  - Tracked prepare automatically propagates the cycle ref into generated task
+    lifecycle, verify, deferred-context, Evidence, and memory-retrieval
+    commands; default untracked prepare output remains byte-identical.
   - A single-cycle report uses `code-pact memory cost <cycle-ref>`, while
     `code-pact memory cost --task <task-id>` returns retained cycle summaries
     without latest-cycle selection or implicit cross-cycle aggregation.
-  - P66-T3 exposes a production report surface that P55 can consume before deciding whether split context output is justified.
+  - P66-T5 exposes a production report surface that P55 can consume before deciding whether split context output is justified.
 verification:
   commands:
     - pnpm check:docs
@@ -90,34 +95,11 @@ tasks:
     status: planned
     depends_on:
       - P66-T1
-    description: Record bounded local task-cycle metrics.
+    description: Implement the bounded cycle metrics store foundation.
     reads:
-      - src/cli/util.ts
-      - src/cli/commands/task.ts
-      - src/cli/commands/context.ts
-      - src/cli/commands/evidence.ts
-      - src/cli/commands/memory.ts
-      - src/cli/spec/task.ts
-      - src/cli/spec/context.ts
-      - src/cli/spec/evidence.ts
-      - src/cli/spec/memory.ts
-      - src/commands/task-prepare.ts
-      - src/commands/task-context.ts
-      - src/commands/context-show.ts
-      - src/commands/evidence-show.ts
-      - src/commands/task-complete.ts
-      - docs/cli-contract.md
-      - docs/cli-reference.generated.md
-      - src/core/loop-memory/task-complete-recorder.ts
-      - src/core/pack/index.ts
-      - src/core/project-fs/authorities/context-deferral-authority.ts
-      - src/core/project-fs/authorities/loop-memory-authority.ts
-      - tests/unit/cli/spec-render.test.ts
-      - tests/unit/core/loop-memory.test.ts
-      - tests/unit/commands/task-complete.test.ts
-      - tests/unit/commands/context-show.test.ts
-      - tests/unit/commands/evidence.test.ts
-      - tests/integration/json-stdout.test.ts
+      - src/core/project-fs/authority-resolvers.ts
+      - scripts/check-fs-authority.mjs
+      - scripts/check-fs-containment.mjs
     writes:
       - src/core/cycle-metrics/cycle-ref.ts
       - src/core/cycle-metrics/schema.ts
@@ -127,46 +109,16 @@ tasks:
       - src/core/cycle-metrics/errors.ts
       - src/core/project-fs/authorities/cycle-metrics-authority.ts
       - src/core/project-fs/authority-resolvers.ts
-      - src/commands/task-prepare.ts
-      - src/commands/task-context.ts
-      - src/commands/context-show.ts
-      - src/commands/evidence-show.ts
-      - src/commands/memory-recall.ts
-      - src/commands/task-complete.ts
-      - src/commands/cycle-metrics-status.ts
-      - src/commands/cycle-metrics-prune.ts
-      - src/commands/doctor.ts
-      - src/cli/util.ts
-      - src/cli/commands/task.ts
-      - src/cli/commands/context.ts
-      - src/cli/commands/evidence.ts
-      - src/cli/commands/memory.ts
-      - src/cli/spec/task.ts
-      - src/cli/spec/context.ts
-      - src/cli/spec/evidence.ts
-      - src/cli/spec/memory.ts
-      - src/i18n/en-US.ts
-      - src/i18n/ja-JP.ts
-      - docs/cli-contract.md
-      - docs/cli-reference.generated.md
-      - src/core/loop-memory/task-complete-recorder.ts
       - scripts/check-fs-authority.mjs
       - scripts/check-fs-containment.mjs
-      - tests/unit/cli/spec-render.test.ts
       - tests/unit/core/cycle-metrics/cycle-ref.test.ts
       - tests/unit/core/cycle-metrics/store.test.ts
       - tests/unit/core/cycle-metrics/retention.test.ts
-      - tests/unit/commands/task-prepare.test.ts
-      - tests/unit/commands/task-context.test.ts
-      - tests/unit/commands/context-show.test.ts
-      - tests/unit/commands/evidence.test.ts
-      - tests/unit/commands/memory.test.ts
-      - tests/unit/commands/task-complete.test.ts
+      - tests/unit/core/cycle-metrics/lifecycle.test.ts
+      - tests/unit/core/cycle-metrics/admission.test.ts
       - tests/unit/security/cycle-metrics-authority.test.ts
-      - tests/integration/json-stdout.test.ts
-      - tests/unit/core/loop-memory.test.ts
     acceptance_refs:
-      - tests/unit/core/loop-memory.test.ts
+      - scripts/check-fs-authority.mjs
   - id: P66-T3
     type: feature
     ambiguity: medium
@@ -178,17 +130,112 @@ tasks:
     status: planned
     depends_on:
       - P66-T2
-    description: Report one cycle by cycle ref and list retained cycle summaries by task id.
+    description: Add tracking start and generated command propagation.
     reads:
+      - src/commands/task-prepare.ts
+      - src/commands/task-context.ts
+      - src/commands/task-complete.ts
+      - src/commands/task-record-done.ts
+      - src/commands/verify.ts
+      - src/cli.ts
+      - src/cli/commands/task.ts
+      - src/cli/spec/task.ts
+      - docs/cli-contract.md
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/unit/commands/task-context.test.ts
+      - tests/unit/commands/task-complete.test.ts
+      - tests/unit/cli/spec-render.test.ts
+      - tests/integration/json-stdout.test.ts
+    writes:
+      - src/commands/task-prepare.ts
+      - src/commands/task-context.ts
+      - src/commands/task-complete.ts
+      - src/commands/task-record-done.ts
+      - src/commands/verify.ts
+      - src/cli.ts
+      - src/cli/commands/task.ts
+      - src/cli/spec/task.ts
+      - docs/cli-contract.md
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/unit/commands/task-context.test.ts
+      - tests/unit/commands/task-complete.test.ts
+      - tests/unit/cli/spec-render.test.ts
+      - tests/integration/json-stdout.test.ts
+    acceptance_refs:
+      - docs/cli-contract.md
+  - id: P66-T4
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P66-T3
+    description: Instrument exact serialized stdout emission events.
+    reads:
+      - src/cli/util.ts
+      - src/cli.ts
+      - src/cli/commands/task.ts
+      - src/cli/commands/context.ts
+      - src/cli/commands/evidence.ts
+      - src/cli/commands/memory.ts
+      - src/cli/spec/context.ts
+      - src/cli/spec/evidence.ts
+      - src/cli/spec/memory.ts
+      - src/commands/context-show.ts
+      - src/commands/evidence-show.ts
+      - tests/integration/json-stdout.test.ts
+      - tests/unit/commands/context-show.test.ts
+      - tests/unit/commands/evidence.test.ts
+      - tests/unit/commands/memory.test.ts
+    writes:
+      - src/cli/util.ts
+      - src/cli.ts
+      - src/cli/commands/task.ts
+      - src/cli/commands/context.ts
+      - src/cli/commands/evidence.ts
+      - src/cli/commands/memory.ts
+      - src/cli/spec/context.ts
+      - src/cli/spec/evidence.ts
+      - src/cli/spec/memory.ts
+      - src/commands/context-show.ts
+      - src/commands/evidence-show.ts
+      - src/commands/memory-recall.ts
+      - tests/integration/json-stdout.test.ts
+      - tests/unit/commands/context-show.test.ts
+      - tests/unit/commands/evidence.test.ts
+      - tests/unit/commands/memory.test.ts
+    acceptance_refs:
+      - tests/integration/json-stdout.test.ts
+  - id: P66-T5
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P66-T4
+    description: Add read-only reporting and maintenance surfaces.
+    reads:
+      - src/commands/doctor.ts
       - src/cli/commands/memory.ts
       - src/cli/spec/memory.ts
       - src/i18n/en-US.ts
       - src/i18n/ja-JP.ts
       - docs/cli-contract.md
       - tests/unit/commands/memory.test.ts
-      - tests/integration/json-stdout.test.ts
+      - tests/unit/error-code-surface.test.ts
     writes:
       - src/commands/cycle-cost.ts
+      - src/commands/cycle-metrics-status.ts
+      - src/commands/cycle-metrics-prune.ts
+      - src/commands/doctor.ts
       - src/cli/commands/memory.ts
       - src/cli/spec/memory.ts
       - src/i18n/en-US.ts
@@ -196,6 +243,42 @@ tasks:
       - docs/cli-contract.md
       - docs/cli-reference.generated.md
       - tests/unit/commands/memory.test.ts
-      - tests/integration/json-stdout.test.ts
+      - tests/unit/error-code-surface.test.ts
     acceptance_refs:
       - docs/cli-contract.md
+  - id: P66-T6
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P66-T5
+    description: Add regression and compatibility coverage for cycle metrics.
+    reads:
+      - docs/agent-contract.md
+      - docs/maintainers/operations.md
+      - tests/integration/json-stdout.test.ts
+      - tests/integration/task-context-budget.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/unit/commands/task-context.test.ts
+      - tests/unit/commands/task-complete.test.ts
+      - tests/unit/commands/context-show.test.ts
+      - tests/unit/commands/evidence.test.ts
+      - tests/unit/commands/memory.test.ts
+    writes:
+      - docs/agent-contract.md
+      - docs/maintainers/operations.md
+      - tests/integration/json-stdout.test.ts
+      - tests/integration/task-context-budget.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/unit/commands/task-context.test.ts
+      - tests/unit/commands/task-complete.test.ts
+      - tests/unit/commands/context-show.test.ts
+      - tests/unit/commands/evidence.test.ts
+      - tests/unit/commands/memory.test.ts
+    acceptance_refs:
+      - tests/integration/json-stdout.test.ts

@@ -41,7 +41,7 @@ tasks:
     expected_duration: short
     status: planned
     depends_on:
-      - P66-T3
+      - P66-T6
       - P55-T1
     description: Accept consolidation and contradiction rules.
     reads:

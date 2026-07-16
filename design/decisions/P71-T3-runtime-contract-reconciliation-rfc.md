@@ -8,9 +8,9 @@ P63-T2 begins.
 
 ## Decision
 
-P63-T2 waits for P71-T3. Future runtime work must implement the observable
-stdout and cycle lifecycle contracts from P71 before adding exact-match recall,
-retrieval, or cycle metrics.
+P72 supersedes the P71-T3 gate for P63-T2. Future runtime work must implement
+the observable stdout, cycle lifecycle, and P72 execution-closure contracts
+before adding exact-match recall, retrieval, or cycle metrics.
 
 ## P63
 
@@ -78,11 +78,16 @@ evidence_retrieval
 memory_retrieval
 task_complete_success
 task_complete_failure
-cycle_report
+verify_success
+verify_failure
+task_control
 ```
 
 `cycle_ref`, `prior_local_signal`, and other control fields may be recorded as
 component diagnostics, but they are not added separately.
+
+Cycle report commands are read-only observation surfaces for the target cycle
+and are not summable events on that cycle.
 
 P66-T2 scope includes the actual CLI serialization layer:
 
@@ -114,7 +119,7 @@ Metrics failure must not change the serialized stdout.
 
 ## Cycle Reports
 
-P66-T3 reports one cycle by ref:
+P66-T5 reports one cycle by ref:
 
 ```bash
 code-pact memory cost <cycle-ref>
@@ -177,6 +182,6 @@ P66 runtime implementation must cover:
 
 ## Consequences
 
-P63-T2 can start after P71-T3 without inheriting unobservable total-input
-claims, no-op public flags, ambiguous cycle reports, or impossible active-cycle
-retention semantics.
+P63-T2 can start only after P72-T4, so it does not inherit unobservable
+total-input claims, no-op public flags, ambiguous cycle reports, incomplete
+lifecycle coverage, or impossible active-cycle retention semantics.

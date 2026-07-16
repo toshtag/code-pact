@@ -194,12 +194,18 @@ MAX_CYCLE_BYTES = 32 KiB
 MAX_RETAINED_EVENT_DETAILS = 64
 MAX_CYCLES_PER_TASK = 8
 MAX_AGE_DAYS = 90
+MAX_ACTIVE_IDLE_DAYS = 7
+MAX_MINIMAL_CYCLE_BYTES = 4 KiB
 ```
 
 Active cycles are protected from deletion while they are being tracked, but
 they still converge to the per-cycle event and byte limits through compaction.
 Retention removes old inactive cycles by age, per-task count, global count, and
 global byte pressure without discarding cumulative totals from retained cycles.
+
+P72 adds admission control: stale active cycles are first abandoned, inactive
+cycles are retained or compacted, and a new cycle is created only if all hard
+limits remain satisfied. If capacity is exhausted, only tracking fails open.
 
 ## Consequences
 
