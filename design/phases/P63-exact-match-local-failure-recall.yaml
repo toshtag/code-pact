@@ -64,7 +64,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: Define and implement exact-fingerprint local lookup.
     depends_on:
       - P72-T4
@@ -73,8 +73,8 @@ tasks:
       - src/core/loop-memory/status.ts
       - tests/unit/core/loop-memory.test.ts
     writes:
+      - design/phases/P63-exact-match-local-failure-recall.yaml
       - src/core/loop-memory/recall.ts
-      - src/core/loop-memory/episode-store.ts
       - tests/unit/core/loop-memory.test.ts
     acceptance_refs:
       - tests/unit/core/loop-memory.test.ts
