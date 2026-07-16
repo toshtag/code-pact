@@ -1,6 +1,14 @@
 # Cycle Correlation and Accounting
 
-**Status:** accepted (P70-T2, 2026-07)
+**Status:** superseded
+**Superseded by:**
+- P71-T1 Observable Output Semantics
+- P71-T2 Cycle Lifecycle and Bounded Storage
+- P72-T1 Metric Self-Observation Closure
+
+Historical note: this ADR is retained as the P70-T2 record, but P71/P72 define
+the current runtime contract.
+
 **Scope:** define opt-in cycle tracking, correlation, byte accounting, and
 hard retention before retrieval and metrics runtime work begins.
 **Owners:** maintainer

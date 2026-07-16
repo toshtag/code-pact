@@ -1,0 +1,142 @@
+id: P72
+name: Cycle Metrics Execution Contract Closure
+weight: 3
+confidence: high
+risk: low
+status: planned
+objective: >
+  Close cycle-report self-observation, lifecycle coverage, active-cycle
+  capacity, automatic correlation, and runtime task-size gaps before exact
+  failure recall and cycle metrics implementation begin.
+non_goals:
+  - Implement exact-match runtime recall.
+  - Implement aggregation runtime behavior.
+  - Implement retrieval CLI runtime behavior.
+  - Implement cycle metrics runtime behavior.
+  - Add SQLite, JSONL, embeddings, semantic search, Git-tracked metrics,
+    contributor sharing, or remote sync.
+  - Change production source, test code, package metadata, CHANGELOG, context
+    packs, Evidence, Failure Capsule, repairPolicy, adapters, CI, release, or
+    phase archives.
+  - Rewrite completed P70 or P71 events or statuses.
+definition_of_done:
+  - Cycle reports and maintenance commands never update the target cycle they
+    observe.
+  - Summable categories include standalone verify and task-control lifecycle
+    stdout, and exclude cycle reports.
+  - Tracking mode generated commands automatically propagate the cycle ref while
+    default mode remains byte-identical.
+  - Active cycles have admission control, stale abandonment, and hard-limit
+    convergence.
+  - P70-T2 is marked superseded by P71/P72 without hiding historical content.
+  - exact_match_count is defined as a bounded retained local count, not a
+    lifetime count.
+  - P66 runtime work is split into bounded implementation tasks and downstream
+    dependencies wait for the final P66 task.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+tasks:
+  - id: P72-T1
+    type: architecture
+    ambiguity: medium
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: Eliminate metric self-observation and supersede conflicting contracts.
+    depends_on:
+      - P71-T3
+    reads:
+      - design/decisions/P70-T2-cycle-correlation-and-accounting-rfc.md
+      - design/decisions/P71-T1-observable-output-semantics-rfc.md
+      - design/decisions/P71-T3-runtime-contract-reconciliation-rfc.md
+      - design/phases/P66-cycle-cost-accounting.yaml
+      - design/phases/P63-exact-match-local-failure-recall.yaml
+    writes:
+      - design/decisions/P70-T2-cycle-correlation-and-accounting-rfc.md
+      - design/decisions/P72-T1-metric-observation-boundary-rfc.md
+    acceptance_refs:
+      - design/decisions/P72-T1-metric-observation-boundary-rfc.md
+  - id: P72-T2
+    type: architecture
+    ambiguity: medium
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: Define bounded active-cycle admission and abandonment.
+    depends_on:
+      - P72-T1
+    reads:
+      - design/decisions/P71-T2-cycle-lifecycle-and-bounded-storage-rfc.md
+      - design/phases/P66-cycle-cost-accounting.yaml
+    writes:
+      - design/decisions/P72-T2-active-cycle-admission-and-lifecycle-rfc.md
+    acceptance_refs:
+      - design/decisions/P72-T2-active-cycle-admission-and-lifecycle-rfc.md
+  - id: P72-T3
+    type: architecture
+    ambiguity: medium
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: Define complete lifecycle correlation and automatic ref propagation.
+    depends_on:
+      - P72-T2
+    reads:
+      - design/decisions/P71-T1-observable-output-semantics-rfc.md
+      - design/decisions/P71-T2-cycle-lifecycle-and-bounded-storage-rfc.md
+      - design/phases/P66-cycle-cost-accounting.yaml
+    writes:
+      - design/decisions/P72-T3-cycle-correlation-propagation-rfc.md
+    acceptance_refs:
+      - design/decisions/P72-T3-cycle-correlation-propagation-rfc.md
+  - id: P72-T4
+    type: architecture
+    ambiguity: medium
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: Split P66 into bounded implementation tasks and reconcile dependencies.
+    depends_on:
+      - P72-T3
+    reads:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+      - design/decisions/P71-T1-observable-output-semantics-rfc.md
+      - design/decisions/P71-T2-cycle-lifecycle-and-bounded-storage-rfc.md
+      - design/decisions/P71-T3-runtime-contract-reconciliation-rfc.md
+      - design/decisions/P72-T1-metric-observation-boundary-rfc.md
+      - design/decisions/P72-T2-active-cycle-admission-and-lifecycle-rfc.md
+      - design/decisions/P72-T3-cycle-correlation-propagation-rfc.md
+      - design/phases/P55-stable-core-task-delta.yaml
+      - design/phases/P63-exact-match-local-failure-recall.yaml
+      - design/phases/P66-cycle-cost-accounting.yaml
+      - design/phases/P67-loop-memory-consolidation.yaml
+      - design/roadmap.yaml
+    writes:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+      - design/decisions/P71-T1-observable-output-semantics-rfc.md
+      - design/decisions/P71-T2-cycle-lifecycle-and-bounded-storage-rfc.md
+      - design/decisions/P71-T3-runtime-contract-reconciliation-rfc.md
+      - design/phases/P55-stable-core-task-delta.yaml
+      - design/phases/P63-exact-match-local-failure-recall.yaml
+      - design/phases/P66-cycle-cost-accounting.yaml
+      - design/phases/P67-loop-memory-consolidation.yaml
+      - design/roadmap.yaml
+      - design/decisions/P72-T4-runtime-task-reconciliation-rfc.md
+    acceptance_refs:
+      - design/decisions/P72-T4-runtime-task-reconciliation-rfc.md

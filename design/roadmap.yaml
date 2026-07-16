@@ -179,6 +179,9 @@ phases:
   - id: P71
     path: design/phases/P71-observable-cycle-metrics-contract-completion.yaml
     weight: 3
+  - id: P72
+    path: design/phases/P72-cycle-metrics-execution-contract-closure.yaml
+    weight: 3
   - id: P64
     path: design/phases/P64-deterministic-resolution-aggregation.yaml
     weight: 5
