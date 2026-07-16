@@ -1,0 +1,63 @@
+id: P69
+name: Token Reduction Roadmap Execution Hardening
+weight: 3
+confidence: high
+risk: low
+status: done
+objective: >
+  Make the P63-P68 token-reduction roadmap executable before runtime memory
+  recall begins, by closing self-match, cycle attribution, task scope, and
+  backend-gate gaps without changing production behavior.
+non_goals:
+  - Implement exact-match runtime recall.
+  - Implement prior-local signal output.
+  - Implement retrieval, cycle metrics, consolidation, or SQLite.
+  - Change context packs, Evidence, Failure Capsules, repairPolicy, adapters,
+    CI, package version, release, or phase archives.
+  - Modify production source or test code.
+definition_of_done:
+  - P63 prevents current-failure self-match by contract and defines a bounded
+    prior-local signal shape.
+  - P63, P65, P66, and P67 implementation tasks declare executable read/write
+    surfaces.
+  - P66 defines multi-command cycle attribution and a report surface that P55
+    can consume.
+  - P68 backend review gates are reachable within the current bounded store
+    limits.
+  - P69-T1 finalization audit declares every design file it changes; the
+    completed dogfood phase does not keep protected design YAML writes listed
+    solely to prove the advisory.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+tasks:
+  - id: P69-T1
+    type: architecture
+    ambiguity: medium
+    risk: low
+    context_size: large
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: Harden memory-roadmap execution contracts.
+    depends_on:
+      - P63-T1
+    reads:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+      - design/phases/P63-exact-match-local-failure-recall.yaml
+      - design/phases/P64-deterministic-resolution-aggregation.yaml
+      - design/phases/P65-lazy-local-memory-retrieval.yaml
+      - design/phases/P66-cycle-cost-accounting.yaml
+      - design/phases/P55-stable-core-task-delta.yaml
+      - design/phases/P67-loop-memory-consolidation.yaml
+      - design/phases/P68-loop-memory-storage-backend-review.yaml
+      - design/roadmap.yaml
+    writes:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+    acceptance_refs:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+      - design/phases/P69-token-reduction-roadmap-execution-hardening.yaml

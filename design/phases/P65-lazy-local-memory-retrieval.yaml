@@ -1,0 +1,120 @@
+id: P65
+name: Lazy Local Memory Retrieval
+weight: 6
+confidence: medium
+risk: medium
+status: planned
+requires_decision: true
+objective: >
+  Provide explicit, bounded local memory retrieval only after a current failure
+  exists and an agent chooses to request prior matching details, keeping initial
+  task context memory-free.
+non_goals:
+  - Inject memory into initial task context or recommendations.
+  - Retrieve by fuzzy, semantic, natural-language, or embedding search.
+  - Return raw stdout, stderr, prompts, responses, reasoning, source, or diffs.
+  - Change verification results, progress, Evidence, Failure Capsule, or repairPolicy.
+  - Add contributor sharing, remote sync, or a new storage backend.
+definition_of_done:
+  - Retrieval is explicit and fingerprint-exact through
+    `code-pact memory recall <fingerprint> --json`.
+  - P65 defines a read-only retrieval boundary; production cycle-tracking CLI
+    options are not part of the current implementation target.
+  - Retrieval returns at most three records and a successful JSON envelope,
+    including any trailing newline actually written, less than 4 KiB total.
+  - Retrieval returns no raw episode, failed command, stdout, stderr, prompts,
+    responses, reasoning, source, diffs, or resolution instruction.
+  - Missing local cache returns an empty successful result.
+  - Retrieval output is advisory and never changes verification outcome.
+  - Retrieval is read-only and remains gated by P66-T2 closed-harness evidence.
+  - Explicit retrieval may include the P64 bounded aggregate plus at most three
+    derived records; P63 automatic signal remains the minimal exact-match shape.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+tasks:
+  - id: P65-T1
+    type: architecture
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P66-T2
+    description: Accept the lazy retrieval contract.
+    reads:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+      - design/phases/P64-deterministic-resolution-aggregation.yaml
+      - docs/cli-contract.md
+    writes:
+      - design/decisions/P65-T1-lazy-local-memory-retrieval-rfc.md
+    acceptance_refs:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+  - id: P65-T2
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P65-T1
+    description: Implement bounded explicit retrieval.
+    reads:
+      - src/cli/commands/memory.ts
+      - src/cli/spec/memory.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - scripts/gen-cli-reference.ts
+      - src/core/loop-memory/episode-store.ts
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+      - tests/integration/json-stdout.test.ts
+      - tests/unit/error-code-surface.test.ts
+    writes:
+      - src/core/loop-memory/recall.ts
+      - src/commands/memory-recall.ts
+      - src/cli/commands/memory.ts
+      - src/cli/spec/memory.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - docs/cli-reference.generated.md
+      - src/core/loop-memory/episode-store.ts
+      - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/memory.test.ts
+      - tests/integration/json-stdout.test.ts
+      - tests/unit/error-code-surface.test.ts
+    acceptance_refs:
+      - tests/unit/core/loop-memory.test.ts
+  - id: P65-T3
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P65-T2
+    description: Add agent guidance and byte-bound coverage.
+    reads:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/maintainers/operations.md
+      - tests/unit/commands/memory.test.ts
+    writes:
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/maintainers/operations.md
+      - tests/unit/commands/memory.test.ts
+    acceptance_refs:
+      - docs/cli-contract.md

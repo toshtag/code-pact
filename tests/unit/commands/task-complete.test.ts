@@ -329,6 +329,52 @@ describe("runTaskComplete — verify failure", () => {
     }
   });
 
+  it("attaches prior-local signal only after an exact prior failure exists", async () => {
+    await setupProject(dir, { failingCommand: true });
+
+    try {
+      await runTaskComplete({
+        cwd: dir,
+        taskId: "P1-T1",
+        agent: "claude-code",
+        now: () => new Date("2026-07-16T00:00:00.000Z"),
+      });
+      throw new Error("should have thrown");
+    } catch (err: unknown) {
+      const e = err as Error & { code?: string; priorLocalSignal?: unknown };
+      expect(e.code).toBe("VERIFICATION_FAILED");
+      expect(e.priorLocalSignal).toBeUndefined();
+    }
+
+    try {
+      await runTaskComplete({
+        cwd: dir,
+        taskId: "P1-T1",
+        agent: "claude-code",
+        now: () => new Date("2026-07-16T00:00:01.000Z"),
+      });
+      throw new Error("should have thrown");
+    } catch (err: unknown) {
+      const e = err as Error & {
+        code?: string;
+        priorLocalSignal?: {
+          schema_version: number;
+          exact_match_count: number;
+          last_observed_at: string;
+        };
+      };
+      expect(e.code).toBe("VERIFICATION_FAILED");
+      expect(e.priorLocalSignal).toEqual({
+        schema_version: 1,
+        exact_match_count: 1,
+        last_observed_at: "2026-07-16T00:00:00.000Z",
+      });
+    }
+
+    const memory = await scanLoopMemoryEpisodes(dir);
+    expect(memory.episodes).toHaveLength(2);
+  });
+
   it("does not change verification failure when local memory recording fails", async () => {
     await setupProject(dir, { failingCommand: true });
     __setLoopMemoryRecordFailureForTests(() => new Error("disk full"));

@@ -351,6 +351,10 @@ export function detectTaskWritesGlobInvalid(phases: PhaseEntry[]): PlanIssue[] {
  * the hardcoded `PROTECTED_PATHS` constant in `src/core/glob.ts` is
  * the fallback.
  *
+ * Completed tasks keep the warning visible, but mark it non-exit-relevant:
+ * at that point the declaration is historical evidence for write audit, not a
+ * live plan risk that release strictness can still fix.
+ *
  * Accepts an optional `protectedPaths` parameter for callers that have
  * already loaded the list (lint orchestrator does this once per run);
  * omitting it falls back to the hardcoded defaults so this function
@@ -379,6 +383,7 @@ export function detectTaskWritesProtectedPath(
             task_id: task.id,
             path: `writes[${index}]`,
             details: { value: g, protected_pattern: entry.pattern },
+            ...(task.status === "done" ? { affects_exit: false } : {}),
           });
         }
       });

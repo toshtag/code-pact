@@ -14,6 +14,7 @@ bottom.
 | Import Spec Kit artifacts | [Ingesting a Spec Kit `tasks.md`](#ingesting-an-existing-spec-kit-tasksmd-v18) |
 | Refresh generated agent files | [Upgrading an adapter safely](#upgrading-an-adapter-safely-v09) |
 | Prepare a release PR | [Planning integrity](#planning-integrity-v07--checkpoint-commands) · [Release prep](#release-prep-uses-strict-clean-dogfood-checks-v151-guidance) |
+| Avoid design-review loops | [Token-efficient development](token-efficient-development.md) |
 | Keep the archive bounded | [Archive maintenance](#archive-maintenance-v20) |
 | Understand design-vs-progress drift | [`task complete` vs `design/`](#task-complete-vs-design-v10-contract) |
 
@@ -411,7 +412,10 @@ passing verification command as regression evidence.
 
 ### Release prep uses strict-clean dogfood checks (v1.5.1+ guidance)
 
-`plan lint --strict` promotes every warning to exit-relevant — including `TASK_WRITES_PROTECTED_PATH` advisories. As of v1.5.1, this repo's dogfood corpus is expected to be strict-clean; completed historical meta-design tasks do not keep protected design YAML writes declared solely to prove the advisory exists.
+`plan lint --strict` promotes every exit-relevant warning, including live-task
+`TASK_WRITES_PROTECTED_PATH` advisories. Completed-task protected-write warnings
+remain visible, but are historical (`affects_exit: false`) and do not fail
+strict release checks.
 
 The recommended release-prep posture:
 
@@ -422,7 +426,7 @@ code-pact validate --json
 code-pact doctor --json
 ```
 
-Selective per-code promotion ("strict on everything EXCEPT `TASK_WRITES_PROTECTED_PATH`") is **not** supported in v1.5+; it remains a P15+ candidate. Until then, the binary `--strict` flag is your only lever.
+Selective per-code promotion ("strict on everything EXCEPT `TASK_WRITES_PROTECTED_PATH`") is **not** supported in v1.5+; it remains a P15+ candidate. Until then, the binary `--strict` flag plus per-issue `affects_exit` is the contract.
 
 ### Local loop-memory maintenance (v2.7+)
 

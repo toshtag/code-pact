@@ -155,9 +155,6 @@ phases:
   - id: P58
     path: design/phases/P58-local-bounded-loop-memory.yaml
     weight: 6
-  - id: P55
-    path: design/phases/P55-stable-core-task-delta.yaml
-    weight: 7
   - id: P59
     path: design/phases/P59-local-loop-memory-hardening.yaml
     weight: 4
@@ -170,3 +167,36 @@ phases:
   - id: P62
     path: design/phases/P62-loop-memory-accounting-and-prune-outcome-completion.yaml
     weight: 2
+  - id: P63
+    path: design/phases/P63-exact-match-local-failure-recall.yaml
+    weight: 5
+  - id: P69
+    path: design/phases/P69-token-reduction-roadmap-execution-hardening.yaml
+    weight: 3
+  - id: P70
+    path: design/phases/P70-token-reduction-runtime-boundary-completion.yaml
+    weight: 3
+  - id: P71
+    path: design/phases/P71-observable-cycle-metrics-contract-completion.yaml
+    weight: 3
+  - id: P72
+    path: design/phases/P72-cycle-metrics-execution-contract-closure.yaml
+    weight: 3
+  - id: P64
+    path: design/phases/P64-deterministic-resolution-aggregation.yaml
+    weight: 5
+  - id: P65
+    path: design/phases/P65-lazy-local-memory-retrieval.yaml
+    weight: 6
+  - id: P66
+    path: design/phases/P66-cycle-cost-accounting.yaml
+    weight: 6
+  - id: P55
+    path: design/phases/P55-stable-core-task-delta.yaml
+    weight: 7
+  - id: P67
+    path: design/phases/P67-loop-memory-consolidation.yaml
+    weight: 5
+  - id: P68
+    path: design/phases/P68-loop-memory-storage-backend-review.yaml
+    weight: 3
