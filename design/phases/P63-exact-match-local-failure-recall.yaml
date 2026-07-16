@@ -3,7 +3,7 @@ name: Exact-Match Local Failure Recall
 weight: 5
 confidence: medium
 risk: medium
-status: in_progress
+status: done
 objective: >
   Use bounded local episodes to surface a minimal advisory signal only when the
   current verification failure has an exact matching fingerprint, reducing
