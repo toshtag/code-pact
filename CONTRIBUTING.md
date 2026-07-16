@@ -55,25 +55,6 @@ acceptable; GitHub CI owns the merge gate.
 Ordinary contributors are not expected to run Deep CI or platform compatibility
 jobs. Maintainers select those jobs when the changed risk surface requires them.
 
-## Token-efficient development
-
-Before starting an architecture or docs-only task, run:
-
-```sh
-pnpm check:development-efficiency -- --next-task <task-id>
-```
-
-Before external review, run:
-
-```sh
-pnpm check:development-efficiency
-```
-
-Before release, run `pnpm release:check`, which includes the same gate. See
-[`docs/maintainers/token-efficient-development.md`](docs/maintainers/token-efficient-development.md)
-and [`docs/maintainers/operations.md`](docs/maintainers/operations.md) for the
-maintainer workflow.
-
 ## Branch / PR workflow
 
 - One CLI command (or one cohesive concern) per branch: `feat/<command>` or `chore/<scope>`.

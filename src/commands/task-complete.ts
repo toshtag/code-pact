@@ -7,34 +7,10 @@ import { deriveTaskState } from "../core/progress/task-state.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { runVerify, throwIfAborted, type CheckResult } from "./verify.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
-import { canonicalJson } from "../core/content-addressed-store/canonical-json.ts";
 import {
-  buildLoopMemoryEpisodeForTaskComplete,
   recordLoopMemoryEpisodeBestEffort,
   type LoopMemoryWarning,
 } from "../core/loop-memory/task-complete-recorder.ts";
-import { recallExactFailure, type ExactFailureRecall } from "../core/loop-memory/recall.ts";
-
-export type PriorLocalSignal = {
-  schema_version: 1;
-  exact_match_count: number;
-  last_observed_at: string;
-};
-
-const MAX_PRIOR_LOCAL_SIGNAL_BYTES = 1024;
-
-function priorLocalSignalFromRecall(recall: ExactFailureRecall): PriorLocalSignal | undefined {
-  if (recall === null) return undefined;
-  const signal: PriorLocalSignal = {
-    schema_version: 1,
-    exact_match_count: recall.exact_match_count,
-    last_observed_at: recall.last_observed_at,
-  };
-  if (Buffer.byteLength(canonicalJson(signal), "utf8") > MAX_PRIOR_LOCAL_SIGNAL_BYTES) {
-    return undefined;
-  }
-  return signal;
-}
 
 export type TaskCompleteOptions = {
   cwd: string;
@@ -134,24 +110,6 @@ export async function runTaskComplete(
   });
 
   if (!verifyResult.ok) {
-    const recordedAt = now();
-    const episode = buildLoopMemoryEpisodeForTaskComplete({
-      cwd,
-      phase,
-      task,
-      verify: verifyResult,
-      recordedAt,
-    });
-    let priorLocalSignal: PriorLocalSignal | undefined;
-    if (!dryRun) {
-      try {
-        priorLocalSignal = priorLocalSignalFromRecall(
-          await recallExactFailure(cwd, episode.verification.failure_fingerprint),
-        );
-      } catch {
-        priorLocalSignal = undefined;
-      }
-    }
     const memoryWarning = dryRun
       ? undefined
       : await recordLoopMemoryEpisodeBestEffort({
@@ -159,8 +117,7 @@ export async function runTaskComplete(
           phase,
           task,
           verify: verifyResult,
-          recordedAt,
-          episode,
+          recordedAt: now(),
         });
     const error = new Error(
       `Verification failed for "${taskId}". No progress event was recorded.`,
@@ -168,10 +125,6 @@ export async function runTaskComplete(
     (error as NodeJS.ErrnoException).code = "VERIFICATION_FAILED";
     (error as NodeJS.ErrnoException & { checks?: CheckResult[] }).checks =
       verifyResult.checks;
-    if (priorLocalSignal !== undefined) {
-      (error as NodeJS.ErrnoException & { priorLocalSignal?: PriorLocalSignal }).priorLocalSignal =
-        priorLocalSignal;
-    }
     if (memoryWarning !== undefined) {
       (error as NodeJS.ErrnoException & { warnings?: LoopMemoryWarning[] }).warnings = [
         memoryWarning,

@@ -700,68 +700,6 @@ describe("failure projection", () => {
     expect(line).not.toContain("x".repeat(1024));
   });
 
-  it("omits prior-local signal before actionable suggested commands", () => {
-    const signal = {
-      schema_version: 1,
-      exact_match_count: 2,
-      last_observed_at: "2026-07-16T00:00:00.000Z",
-    };
-    const baseEnvelope = {
-      ok: false as const,
-      error: {
-        code: "VERIFICATION_FAILED",
-        cause_code: "COMMANDS_FAILED",
-        message: "Verification failed",
-      },
-      data: {
-        task_id: "P1-T1",
-        suggested_next_command: "code-pact task complete P1-T1",
-        failure: {
-          schema_version: 1,
-          kind: "command_failed",
-          check: "commands",
-          reason: "test failed",
-        },
-        verify: {
-          ok: false,
-          checks: [{ name: "commands", ok: false, reason: "test failed" }],
-          successful_commands: [],
-        },
-      },
-    };
-    const withoutSignal = structuredClone(baseEnvelope);
-    const baseBytes = Buffer.byteLength(`${JSON.stringify(withoutSignal)}\n`, "utf8");
-    withoutSignal.data.task_id = `P1-${"T".repeat(MAX_AGENT_JSON_BYTES - 100 - baseBytes)}`;
-    expect(Buffer.byteLength(`${JSON.stringify(withoutSignal)}\n`, "utf8")).toBeLessThan(
-      MAX_AGENT_JSON_BYTES,
-    );
-    const withSignal = structuredClone(withoutSignal);
-    Object.assign(withSignal.data, { prior_local_signal: signal });
-    expect(Buffer.byteLength(`${JSON.stringify(withSignal)}\n`, "utf8")).toBeGreaterThanOrEqual(
-      MAX_AGENT_JSON_BYTES,
-    );
-
-    const line = stringifyBoundedAgentEnvelope(withSignal);
-    const envelope = JSON.parse(line) as {
-      data: {
-        projection_truncated?: boolean;
-        omitted_fields?: string[];
-        prior_local_signal?: unknown;
-        suggested_next_command?: string;
-        failure?: unknown;
-        verify?: unknown;
-      };
-    };
-
-    expect(Buffer.byteLength(line, "utf8")).toBeLessThan(MAX_AGENT_JSON_BYTES);
-    expect(envelope.data.projection_truncated).toBe(true);
-    expect(envelope.data.omitted_fields).toEqual(["prior_local_signal"]);
-    expect(envelope.data.prior_local_signal).toBeUndefined();
-    expect(envelope.data.suggested_next_command).toBe("code-pact task complete P1-T1");
-    expect(envelope.data.failure).toBeDefined();
-    expect(envelope.data.verify).toBeDefined();
-  });
-
   it("omits oversized outer fields before shrinking failure diagnostics", () => {
     const line = stringifyBoundedAgentEnvelope({
       ok: false,

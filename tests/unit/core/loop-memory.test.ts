@@ -35,10 +35,6 @@ import {
   scanLoopMemoryEpisodes,
   storeLoopMemoryEpisode,
 } from "../../../src/core/loop-memory/episode-store.ts";
-import {
-  recallExactFailure,
-  recallExactFailureFromEpisodes,
-} from "../../../src/core/loop-memory/recall.ts";
 import { loopMemoryStatus } from "../../../src/core/loop-memory/status.ts";
 
 let dir: string;
@@ -480,82 +476,6 @@ describe("loop memory store", () => {
     } finally {
       await rm(outside, { recursive: true, force: true });
     }
-  });
-});
-
-describe("loop memory exact failure recall", () => {
-  it("returns null when the cache is missing, fingerprint is absent, or no exact match exists", async () => {
-    await rm(join(dir, ".code-pact", "cache"), { recursive: true, force: true });
-
-    await expect(recallExactFailure(dir, `sha256:${"a".repeat(64)}`)).resolves.toBeNull();
-    await expect(recallExactFailure(dir, undefined)).resolves.toBeNull();
-    await expect(recallExactFailure(dir, "sha256:abc")).resolves.toBeNull();
-
-    await storeLoopMemoryEpisode(dir, episode());
-
-    await expect(recallExactFailure(dir, `sha256:${"b".repeat(64)}`)).resolves.toBeNull();
-  });
-
-  it("counts only valid prior failure episodes with the exact fingerprint", async () => {
-    const target = `sha256:${"f".repeat(64)}`;
-    await storeLoopMemoryEpisode(
-      dir,
-      episode({ verification: { failure_fingerprint: target } }, "2026-07-14T00:00:01.000Z"),
-    );
-    await storeLoopMemoryEpisode(
-      dir,
-      episode(
-        {
-          task: { task_id: "P58-T3" },
-          verification: { failure_fingerprint: `sha256:${"b".repeat(64)}` },
-        },
-        "2026-07-14T00:00:02.000Z",
-      ),
-    );
-    await storeLoopMemoryEpisode(
-      dir,
-      episode(
-        {
-          task: { task_id: "P58-T4" },
-          verification: { failure_fingerprint: target },
-        },
-        "2026-07-14T00:00:03.000Z",
-      ),
-    );
-    await storeLoopMemoryEpisode(
-      dir,
-      passed("2026-07-14T00:00:04.000Z"),
-    );
-    await writeRawEpisode(
-      `${utcBasicTimestamp(new Date("2026-07-14T00:00:05.000Z"))}-cccccccccccccccc.json`,
-      "{bad",
-    );
-
-    const recall = await recallExactFailure(dir, target);
-
-    expect(recall).toEqual({
-      exact_match_count: 2,
-      last_observed_at: "2026-07-14T00:00:03.000Z",
-    });
-  });
-
-  it("uses the provided snapshot and does not include an unrecorded current failure", async () => {
-    const target = `sha256:${"d".repeat(64)}`;
-    await storeLoopMemoryEpisode(
-      dir,
-      episode({ verification: { failure_fingerprint: target } }, "2026-07-14T00:00:01.000Z"),
-    );
-    const scan = await scanLoopMemoryEpisodes(dir);
-    const currentFailure = episode(
-      { verification: { failure_fingerprint: target } },
-      "2026-07-14T00:00:02.000Z",
-    );
-
-    expect(recallExactFailureFromEpisodes(scan.episodes, target)).toEqual({
-      exact_match_count: 1,
-      last_observed_at: "2026-07-14T00:00:01.000Z",
-    });
-    expect(currentFailure.verification.failure_fingerprint).toBe(target);
   });
 });
 
