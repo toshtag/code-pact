@@ -79,16 +79,15 @@ is an additive `prior_local_signal` field on `--detail agent` failure JSON:
 {
   "schema_version": 1,
   "exact_match_count": 2,
-  "observed_resolution_count": 1,
-  "last_observed_at": "2026-07-15T00:00:00.000Z",
-  "last_resolved_at": "2026-07-14T00:00:00.000Z"
+  "last_observed_at": "2026-07-15T00:00:00.000Z"
 }
 ```
 
 The canonical JSON for this object must stay at or below 1 KiB. It omits the
 fingerprint because the current failure already carries it, and it never
 includes task id lists, raw episodes, failed commands, or resolution
-instructions. Default human output and default JSON do not grow; absence of a
+instructions. It also omits resolution fields; P64 owns resolved/unresolved
+aggregation. Default human output and default JSON do not grow; absence of a
 match omits the field entirely.
 
 ## Cycle cost model

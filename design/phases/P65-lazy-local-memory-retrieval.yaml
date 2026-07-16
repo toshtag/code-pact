@@ -24,6 +24,8 @@ definition_of_done:
   - Retrieval output is advisory and never changes verification outcome.
   - Retrieval is read-only and the actual returned bytes are observable by P66
     cycle-cost accounting.
+  - Explicit retrieval may include the P64 bounded aggregate plus at most three
+    derived records; P63 automatic signal remains the minimal exact-match shape.
 verification:
   commands:
     - pnpm check:docs

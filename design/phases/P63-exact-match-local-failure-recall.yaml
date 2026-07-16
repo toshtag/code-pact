@@ -20,9 +20,12 @@ definition_of_done:
   - Lookup runs against the pre-current-failure episode snapshot; the current
     failure episode must never contribute to prior_match_count.
   - First observation of a fingerprint emits no prior-local signal.
-  - The advisory signal is a closed `prior_local_signal` object, emitted only in
-    `--detail agent` failure JSON, canonical JSON <= 1 KiB, and never a
+  - The advisory signal is a closed `prior_local_signal` object with
+    schema_version, exact_match_count, and last_observed_at only; it is emitted
+    only in `--detail agent` failure JSON, canonical JSON <= 1 KiB, and never a
     correctness gate.
+  - P63 does not compute observed resolution counts, last_resolved_at,
+    resolved_count, unresolved_count, or task_count.
   - Missing or corrupt local memory keeps normal verification behavior unchanged.
 verification:
   commands:
@@ -62,7 +65,7 @@ tasks:
     status: planned
     description: Define and implement exact-fingerprint local lookup.
     depends_on:
-      - P69-T1
+      - P70-T3
     reads:
       - src/core/loop-memory/episode-store.ts
       - src/core/loop-memory/status.ts

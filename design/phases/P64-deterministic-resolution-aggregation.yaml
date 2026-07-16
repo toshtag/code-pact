@@ -17,6 +17,9 @@ non_goals:
 definition_of_done:
   - Aggregates are derived only from episode order, task identity, fingerprints, and verification outcomes.
   - Each aggregate reports failure_count, resolved_count, unresolved_count, last_observed_at, last_resolved_at, and task_count.
+  - P64 is the only phase that defines and derives resolved_count,
+    unresolved_count, last_resolved_at, and task_count for loop-memory
+    fingerprints.
   - "`resolved_count` means a same-task `verification_failed` episode is followed
     by that task's next terminal verification episode being `passed`; it does
     not infer that a repair caused the success."
@@ -64,7 +67,7 @@ tasks:
     status: planned
     depends_on:
       - P64-T1
-    description: Derive bounded fingerprint aggregates.
+    description: Derive bounded fingerprint aggregates through a reusable pure function.
     reads:
       - src/core/loop-memory/episode-store.ts
       - tests/unit/core/loop-memory.test.ts
