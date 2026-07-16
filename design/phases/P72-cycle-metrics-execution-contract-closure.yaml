@@ -90,7 +90,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: Define complete lifecycle correlation and automatic ref propagation.
     depends_on:
       - P72-T2
