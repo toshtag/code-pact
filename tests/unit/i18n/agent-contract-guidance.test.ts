@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { messages } from "../../../src/i18n/index.ts";
+import { renderAgentContractSection } from "../../../src/core/adapters/template-sections.ts";
 import {
   STRUCTURAL_PROJECTION_GUIDANCE_COMMON_ANCHORS,
   STRUCTURAL_PROJECTION_GUIDANCE_VARIANTS,
@@ -88,6 +89,30 @@ describe("agent contract failure guidance", () => {
       expect(combined).not.toContain(
         "既存の `task prepare` / `recommend` 結果にある `data.recommendation.repairPolicy`",
       );
+    });
+
+    it(`${locale} documents prior-local signal consumption in generated guidance`, () => {
+      const t = messages[locale].templates.adapterCommon;
+      const failBody = t.agentContract.failBody;
+      const generated = renderAgentContractSection(t).join("\n");
+
+      for (const text of [failBody, generated]) {
+        for (const anchor of [
+          "prior_local_signal",
+          "exact_match_count",
+          "stopOnRepeatedFingerprint",
+        ]) {
+          expect(text).toContain(anchor);
+        }
+      }
+
+      if (locale === "en-US") {
+        expect(generated).toContain("does not describe previous repair attempts");
+        expect(generated).toContain("do not infer them");
+      } else {
+        expect(generated).toContain("過去の repair や仮説の内容は示さない");
+        expect(generated).toContain("推測しない");
+      }
     });
 
     it(`${locale} documents structural projection consumption anchors`, () => {

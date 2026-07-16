@@ -472,6 +472,14 @@ The verbs in detail:
   normally exist only for command-output failures. Do not fetch full evidence by
   default.
 
+  On `task complete --json --detail agent`, `data.prior_local_signal` means
+  only that the same failure fingerprint is retained in the bounded local store
+  (`exact_match_count`, `last_observed_at`). It does not describe previous
+  repair attempts or hypotheses, so agents must not infer them. If the current
+  conversation or diff proves the same change is being rerun unchanged, avoid
+  that rerun. If `stopOnRepeatedFingerprint` is true, the stop contract takes
+  precedence.
+
 ### Bounded repair recommendation
 
 Code Pact does not repair a failed task, restart an agent, schedule retries, call
@@ -553,6 +561,11 @@ contract shape.
   retrieve commands are optional and normally exist only for command-output
   failures. Do not fetch full evidence by default; use `retrieve_command` only
   when command-output excerpts are insufficient to decide the fix.
+  `data.prior_local_signal` means only that the same failure fingerprint is
+  retained in the bounded local store. It does not identify prior repair
+  attempts. Do not infer prior repairs from it; avoid an unchanged rerun only
+  when the current conversation or diff proves the change is the same, and honor
+  `stopOnRepeatedFingerprint` first when it is true.
 
 - **`task record-done <task-id> --evidence "<text>"`** —
   records a `done` event with `source: external` **without** running

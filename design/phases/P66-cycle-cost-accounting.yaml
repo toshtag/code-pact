@@ -31,22 +31,26 @@ definition_of_done:
     success, repeated same-fingerprint failure then success, deferred context
     retrieval, Evidence retrieval, exact-match signal absent, and exact-match
     signal present.
-  - The tracked evidence records total_code_pact_stdout_bytes, command_count,
-    verification_count, failure_count, same_fingerprint_repeat_count,
-    context_retrieval_count, evidence_retrieval_count, and prior_signal_count.
+  - The tracked evidence records signal_field_incremental_bytes,
+    repeated_failure_envelope_bytes, default-output compatibility,
+    first-failure signal omission, repeat-failure signal presence, and
+    break_even_avoided_repeat_count.
+  - Fixture exact-match hit count, fixture repeat rate, and fixture success
+    count are scenario-design outputs, not evidence of real-world frequency.
   - P66-T2 records one ADR with summarized evidence and go/no-go decisions for
     P64, P65, P67, and P68.
-  - P64 proceeds only when exact-match evidence shows enough retained hits or
-    repeated same-fingerprint failures and the prior-local signal bytes are
-    smaller than repeated failure-envelope bytes.
-  - P65 proceeds only when exact-match signal alone fails in enough cases,
-    bounded detail would have changed the decision, and expected retry-byte
-    savings exceed retrieval bytes.
+  - P66-T2 computes break_even_avoided_repeat_count as
+    ceil(signal bytes accumulated / one repeated failure envelope bytes) and
+    does not claim that any repeat was actually avoided.
+  - Without actual usage evidence from a non-synthetic concrete case or
+    reproducible issue, P64, P65, P67, and P68 remain deferred.
+  - P64 does not proceed from closed-harness hit count or fixture repeat rate.
+  - P65 does not proceed from closed-harness hit count or fixture repeat rate.
   - >-
-    P67 proceeds only with measured store pressure: repeated 80% cap pressure
-    or retention churn above 25% across at least 100 writes.
+    P67 does not proceed from synthetic fixture frequency; it requires actual
+    usage evidence of store pressure.
   - P68 proceeds only after P67 is accepted and actual storage pressure is
-    measured.
+    measured from non-synthetic evidence.
 verification:
   commands:
     - pnpm check:docs
@@ -64,7 +68,7 @@ tasks:
     expected_duration: medium
     status: planned
     depends_on:
-      - P63-T3
+      - P63-T4
     description: Implement deterministic closed-loop measurement harness.
     reads:
       - tests/helpers/cli.ts
