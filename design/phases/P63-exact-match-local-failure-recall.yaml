@@ -3,7 +3,7 @@ name: Exact-Match Local Failure Recall
 weight: 5
 confidence: medium
 risk: medium
-status: done
+status: in_progress
 objective: >
   Use bounded local episodes to surface a minimal advisory signal only when the
   current verification failure has an exact matching fingerprint, reducing
@@ -169,3 +169,29 @@ tasks:
       - tests/unit/i18n/agent-contract-guidance.test.ts
       - tests/unit/scripts/check-development-efficiency.test.ts
       - tests/integration/json-stdout.test.ts
+  - id: P63-T5
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description:
+      Correct prospective recovery and root-document classification in
+      the development-efficiency gate.
+    depends_on:
+      - P63-T4
+    reads:
+      - scripts/check-development-efficiency.mjs
+      - tests/unit/scripts/check-development-efficiency.test.ts
+      - docs/maintainers/token-efficient-development.md
+      - design/phases/P63-exact-match-local-failure-recall.yaml
+    writes:
+      - design/phases/P63-exact-match-local-failure-recall.yaml
+      - scripts/check-development-efficiency.mjs
+      - tests/unit/scripts/check-development-efficiency.test.ts
+      - docs/maintainers/token-efficient-development.md
+    acceptance_refs:
+      - tests/unit/scripts/check-development-efficiency.test.ts
