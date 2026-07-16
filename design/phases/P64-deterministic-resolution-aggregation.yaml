@@ -17,6 +17,13 @@ non_goals:
 definition_of_done:
   - Aggregates are derived only from episode order, task identity, fingerprints, and verification outcomes.
   - Each aggregate reports failure_count, resolved_count, unresolved_count, last_observed_at, last_resolved_at, and task_count.
+  - "`resolved_count` means a same-task `verification_failed` episode is followed
+    by that task's next terminal verification episode being `passed`; it does
+    not infer that a repair caused the success."
+  - If another failure appears before a pass, the earlier failure is not counted
+    as resolved; a later pass is not assigned to every intervening fingerprint.
+  - The contract covers retention-truncated history, incomplete sequences,
+    same-timestamp tie-breaks, and corrupt episode exclusion.
   - Missing, empty, or corrupt local memory leaves normal command behavior unchanged.
   - Aggregates are advisory and never participate in correctness gates.
 verification:
@@ -62,6 +69,7 @@ tasks:
       - src/core/loop-memory/episode-store.ts
       - tests/unit/core/loop-memory.test.ts
     writes:
+      - src/core/loop-memory/aggregation.ts
       - src/core/loop-memory/episode-store.ts
       - tests/unit/core/loop-memory.test.ts
     acceptance_refs:

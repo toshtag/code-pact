@@ -170,6 +170,9 @@ phases:
   - id: P63
     path: design/phases/P63-exact-match-local-failure-recall.yaml
     weight: 5
+  - id: P69
+    path: design/phases/P69-token-reduction-roadmap-execution-hardening.yaml
+    weight: 3
   - id: P64
     path: design/phases/P64-deterministic-resolution-aggregation.yaml
     weight: 5

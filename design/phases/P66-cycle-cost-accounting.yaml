@@ -18,8 +18,17 @@ non_goals:
 definition_of_done:
   - The metric contract defines context_pack_bytes, deferred_context_retrieval_bytes, evidence_retrieval_bytes, memory_retrieval_bytes, verification_run_count, repair_attempt_count, first_pass_success, success_after_repair, same_failure_repeated, and stopped_without_success.
   - task_total_input_bytes is defined as context_pack_bytes plus deferred_context_retrieval_bytes plus evidence_retrieval_bytes plus memory_retrieval_bytes plus repeated_failure_capsule_bytes.
+  - The contract defines cycle start, cycle id, cycle continuation, cycle close,
+    abandoned cycle, new attempt, retry, and task-already-done behavior; the
+    cycle id is not only the task id and distinguishes multiple attempts for
+    the same task.
+  - Metrics distinguish bytes referenced, bytes emitted, bytes explicitly
+    retrieved, and bytes actually returned by the CLI; only bytes actually
+    returned to the agent are added to total input.
+  - Re-running the same retrieval command counts the returned bytes again.
   - Metrics are local, bounded, disposable, and not Git-tracked.
-  - P55 can consume task-level cycle evidence before deciding whether split context output is justified.
+  - Metrics are stored under `.code-pact/cache/cycle-metrics/v1/`.
+  - P66-T3 exposes a production report surface that P55 can consume before deciding whether split context output is justified.
 verification:
   commands:
     - pnpm check:docs
@@ -60,11 +69,32 @@ tasks:
       - P66-T1
     description: Record bounded local task-cycle metrics.
     reads:
+      - src/commands/task-prepare.ts
+      - src/commands/task-context.ts
+      - src/commands/context-show.ts
+      - src/commands/evidence-show.ts
+      - src/commands/task-complete.ts
       - src/core/loop-memory/task-complete-recorder.ts
       - src/core/pack/index.ts
+      - src/core/project-fs/authorities/context-deferral-authority.ts
+      - src/core/project-fs/authorities/loop-memory-authority.ts
       - tests/unit/core/loop-memory.test.ts
+      - tests/unit/commands/task-complete.test.ts
+      - tests/unit/commands/context-show.test.ts
+      - tests/unit/commands/evidence.test.ts
     writes:
+      - src/core/cycle-metrics/**
+      - src/core/project-fs/authorities/**
+      - src/commands/task-prepare.ts
+      - src/commands/task-context.ts
+      - src/commands/context-show.ts
+      - src/commands/evidence-show.ts
+      - src/commands/memory-recall.ts
+      - src/commands/task-complete.ts
       - src/core/loop-memory/task-complete-recorder.ts
+      - scripts/check-fs-authority.mjs
+      - tests/unit/core/cycle-metrics/**
+      - tests/unit/commands/**
       - tests/unit/core/loop-memory.test.ts
     acceptance_refs:
       - tests/unit/core/loop-memory.test.ts
@@ -79,13 +109,24 @@ tasks:
     status: planned
     depends_on:
       - P66-T2
-    description: Report task-level total input byte evidence.
+    description: Report task-level total input byte evidence through `code-pact memory cost <task-id>`.
     reads:
-      - src/core/loop-memory/task-complete-recorder.ts
+      - src/cli/commands/memory.ts
+      - src/cli/spec/memory.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
       - docs/cli-contract.md
       - tests/unit/commands/memory.test.ts
+      - tests/integration/json-stdout.test.ts
     writes:
+      - src/commands/cycle-cost.ts
+      - src/cli/commands/memory.ts
+      - src/cli/spec/memory.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
       - docs/cli-contract.md
+      - docs/cli-reference.generated.md
       - tests/unit/commands/memory.test.ts
+      - tests/integration/json-stdout.test.ts
     acceptance_refs:
       - docs/cli-contract.md

@@ -17,7 +17,7 @@ non_goals:
   - Create a second failure schema that duplicates the Failure Capsule.
   - Implement split output before the decision is accepted.
 definition_of_done:
-  - The decision evaluates P52-P54 measurement evidence before approving any implementation.
+  - The decision evaluates P52-P54 context evidence and P63-P66 local recall, retrieval, and whole-cycle cost evidence before approving any implementation.
   - "The task creates `design/decisions/P55-T1-stable-core-task-delta-rfc.md` with `Status: accepted` and a decision outcome of accepted, rejected, or deferred."
   - The ADR records natural bytes, final budgeted bytes, deferred bytes, projection before and after bytes, retrieval bytes, default combined-pack bytes, and artifact or command count changes.
   - If approved, split artifacts must be explicit opt-in and the default combined pack must remain unchanged.
@@ -26,6 +26,9 @@ definition_of_done:
   - Failure delta must reuse the existing Failure Capsule fingerprint, evidence reference, and compact envelope by reference; no new failure schema or failure-delta byte count is introduced.
   - Stable-core digest alone is insufficient unless the agent has the matching content; otherwise a retrieval command must be returned.
   - The decision compares context resend cost against failure investigation, verification repetition, and memory retrieval cost.
+  - The decision compares initial context savings, task-level total input bytes,
+    retry count, retrieval bytes, verification repetition, and cases where the
+    agent did or did not retain Stable Core.
   - Split context is not accepted when cycle evidence shows that retries and retrieval dominate total task input bytes.
   - Stable Core retention by an agent must be demonstrated rather than assumed.
 verification:
@@ -49,7 +52,9 @@ tasks:
     description: Evaluate P52-P54 and P63-P66 measurement evidence and decide whether split context output should be accepted, rejected, or deferred.
     reads:
       - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+      - design/decisions/*.md
       - design/phases/P66-cycle-cost-accounting.yaml
+      - design/phases/P69-token-reduction-roadmap-execution-hardening.yaml
       - docs/agent-contract.md
       - docs/cli-contract.md
       - src/core/pack/index.ts

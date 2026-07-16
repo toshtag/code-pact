@@ -43,6 +43,8 @@ The accepted sequence is:
 - P58-P62: record the local memory substrate and close safety/accounting gaps.
 - P63: surface a minimal local advisory only when the current failure
   fingerprint exactly matches prior local history.
+- P69: harden the executable scopes and decision gates before P63 runtime work
+  begins.
 - P64: derive deterministic aggregates for matching fingerprints and observed
   resolutions.
 - P65: allow explicit lazy retrieval when the exact-match signal is too small.
@@ -60,6 +62,35 @@ fingerprint, record count, and total bytes. It must not return raw stdout,
 stderr, prompts, responses, reasoning, source, or diffs. Missing local cache
 must be a normal empty result.
 
+P63 exact-match recall must avoid self-match. The runtime order is:
+
+```text
+compute the current failure fingerprint
+lookup against the existing episode snapshot
+generate any prior-local signal
+record the current failure episode
+```
+
+The current failure episode must never contribute to `prior_match_count`, and
+the first observation of a fingerprint returns no signal. The only signal shape
+is an additive `prior_local_signal` field on `--detail agent` failure JSON:
+
+```json
+{
+  "schema_version": 1,
+  "exact_match_count": 2,
+  "observed_resolution_count": 1,
+  "last_observed_at": "2026-07-15T00:00:00.000Z",
+  "last_resolved_at": "2026-07-14T00:00:00.000Z"
+}
+```
+
+The canonical JSON for this object must stay at or below 1 KiB. It omits the
+fingerprint because the current failure already carries it, and it never
+includes task id lists, raw episodes, failed commands, or resolution
+instructions. Default human output and default JSON do not grow; absence of a
+match omits the field entirely.
+
 ## Cycle cost model
 
 P66 measures task-level input cost with local bounded byte accounting:
@@ -75,8 +106,14 @@ task_total_input_bytes
 
 The metric also records verification_run_count, repair_attempt_count,
 first_pass_success, success_after_repair, same_failure_repeated, and
-stopped_without_success. It does not convert bytes to provider token counts or
-prices, does not call model APIs, and does not send telemetry.
+stopped_without_success. P66 defines cycle start, cycle id, continuation,
+close, abandoned cycle, new attempt, retry, task-already-done, and cache
+deletion behavior. The cycle id is not just task id; it distinguishes multiple
+attempts on the same task. Metrics distinguish bytes referenced, bytes emitted,
+bytes explicitly retrieved, and bytes actually returned by the CLI. Only bytes
+actually returned to the agent are added to total input, and a repeated
+retrieval command is counted again. It does not convert bytes to provider token
+counts or prices, does not call model APIs, and does not send telemetry.
 
 ## Consolidation policy
 
@@ -92,11 +129,11 @@ P68 considers storage alternatives only after measured pressure exists. The
 review gate is:
 
 ```text
-live records > 2,000
-OR memory storage > 8 MiB
-OR status/query p95 > 50 ms
-OR multiple index queries are actually needed
-OR concurrent writer conflict is observed
+status, prune, or exact lookup p95 > 50 ms near current hard caps
+OR at least 25% of 100+ writes trigger retention removal
+OR aggregate storage reaches 80% of its byte cap three consecutive times
+OR writer conflict rate exceeds 1% across 100+ writes
+OR two or more independent index queries or atomic multi-record updates are accepted as required
 ```
 
 The ADR must compare one-record JSON, SQLite, an index sidecar, and an
@@ -116,7 +153,7 @@ retention by an agent must be demonstrated rather than assumed.
 ## Phase sequence
 
 ```text
-P58 -> P59 -> P60 -> P61 -> P62 -> P63 -> P64 -> P65 -> P66 -> P55 -> P67 -> P68
+P58 -> P59 -> P60 -> P61 -> P62 -> P63 -> P69 -> P64 -> P65 -> P66 -> P55 -> P67 -> P68
 ```
 
 P55 keeps its id because it is an existing planned decision. Only its position
@@ -139,6 +176,9 @@ and dependency change.
 
 - P63-T1 creates the formal roadmap and keeps production source and tests
   unchanged.
+- P63-T1 established the roadmap through phase-imported design files; P69-T1
+  hardens executable task scopes and decision gates before runtime
+  implementation begins.
 - P63-T2/P63-T3 remain planned implementation tasks for exact-match recall.
 - P64 defines deterministic aggregate semantics before implementation.
 - P65 requires explicit bounded retrieval instead of initial context injection.
