@@ -57,6 +57,18 @@ function writesFor(task) {
   return Array.isArray(task?.writes) ? task.writes.map(String) : [];
 }
 
+const ROOT_DOCUMENT_FILES = new Set(["LICENSE", "NOTICE"]);
+
+function isDocumentationOrDesignPath(path) {
+  return (
+    path.startsWith("design/") ||
+    path.startsWith("docs/") ||
+    path.startsWith(".code-pact/") ||
+    (!path.includes("/") && path.endsWith(".md")) ||
+    ROOT_DOCUMENT_FILES.has(path)
+  );
+}
+
 export function isDesignOnlyTask(task) {
   const writes = writesFor(task);
   if (writes.length === 0) return true;
