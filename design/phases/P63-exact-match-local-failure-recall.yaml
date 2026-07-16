@@ -108,3 +108,64 @@ tasks:
       - tests/integration/json-stdout.test.ts
     acceptance_refs:
       - tests/unit/core/loop-memory.test.ts
+  - id: P63-T4
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: >
+      Protect actionable Agent output from the advisory prior-local signal,
+      complete generated Agent guidance, make signal byte evidence exact, and
+      enforce the token-efficient development guard prospectively and at
+      release.
+    depends_on:
+      - P63-T3
+    reads:
+      - src/core/evidence/failure-capsule.ts
+      - src/core/adapters/template-sections.ts
+      - src/core/adapters/conformance-spec.ts
+      - src/core/plan/checks/path-fields.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - src/commands/task-complete.ts
+      - src/cli/commands/task.ts
+      - scripts/check-development-efficiency.mjs
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/maintainers/token-efficient-development.md
+      - CONTRIBUTING.md
+      - package.json
+      - design/phases/P66-cycle-cost-accounting.yaml
+      - tests/unit/core/evidence.test.ts
+      - tests/unit/core/plan/checks.test.ts
+      - tests/unit/i18n/agent-contract-guidance.test.ts
+      - tests/integration/json-stdout.test.ts
+    writes:
+      - design/phases/P63-exact-match-local-failure-recall.yaml
+      - src/core/evidence/failure-capsule.ts
+      - src/core/plan/checks/path-fields.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/maintainers/token-efficient-development.md
+      - docs/maintainers/operations.md
+      - CONTRIBUTING.md
+      - package.json
+      - design/phases/P66-cycle-cost-accounting.yaml
+      - scripts/check-development-efficiency.mjs
+      - tests/unit/core/evidence.test.ts
+      - tests/unit/core/plan/checks.test.ts
+      - tests/unit/i18n/agent-contract-guidance.test.ts
+      - tests/integration/json-stdout.test.ts
+      - tests/unit/scripts/check-development-efficiency.test.ts
+    acceptance_refs:
+      - tests/unit/core/evidence.test.ts
+      - tests/unit/core/plan/checks.test.ts
+      - tests/unit/i18n/agent-contract-guidance.test.ts
+      - tests/unit/scripts/check-development-efficiency.test.ts
+      - tests/integration/json-stdout.test.ts
