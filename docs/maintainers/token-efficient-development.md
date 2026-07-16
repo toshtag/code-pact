@@ -59,7 +59,17 @@ Run this before external review and during release preparation:
 pnpm check:development-efficiency
 ```
 
+Before starting a planned architecture or docs-only task, run the prospective
+gate:
+
+```sh
+pnpm check:development-efficiency -- --next-task <task-id>
+```
+
 The check uses `P72-T4` as the baseline. After that baseline, two consecutive
-completed design-only tasks fail with `DEVELOPMENT_DESIGN_LOOP_EXCEEDED`.
-Implement the next runtime task before starting another architecture or
-docs-only task.
+current design-only tasks fail with `DEVELOPMENT_DESIGN_LOOP_EXCEEDED`. A
+runtime, test, or script implementation task resets the current streak to zero;
+the historical maximum remains diagnostic only. `release:check` runs this gate.
+
+This page is linked from [CONTRIBUTING.md](../../CONTRIBUTING.md) and
+[Maintainer operations](operations.md) so the workflow is discoverable.
