@@ -33,10 +33,7 @@ import {
 import { underlyingSystemCode } from "../../core/context-deferral/context-errors.ts";
 import { isStandardContextBudgetProfile } from "../../core/context-fit/budget-profiles.ts";
 import type { ContextBudgetProfiles } from "../../core/schemas/agent-profile.ts";
-import {
-  runTaskComplete,
-  type PriorLocalSignal,
-} from "../../commands/task-complete.ts";
+import { runTaskComplete } from "../../commands/task-complete.ts";
 import { projectVerifyForPublicJson } from "../../commands/verify.ts";
 import {
   runTaskRecordDone,
@@ -1147,9 +1144,6 @@ async function cmdTaskComplete(
         (error as NodeJS.ErrnoException & { checks?: FailureCheckLike[] }).checks ?? [];
       const warnings =
         (error as NodeJS.ErrnoException & { warnings?: unknown[] }).warnings ?? undefined;
-      const priorLocalSignal =
-        (error as NodeJS.ErrnoException & { priorLocalSignal?: PriorLocalSignal })
-          .priorLocalSignal ?? undefined;
       const summary = buildFailureSummaryFromChecks(checks, taskId);
       const wasAborted = checks.some(
         check => (check as FailureCheckLike & { aborted?: boolean }).aborted === true,
@@ -1205,9 +1199,6 @@ async function cmdTaskComplete(
               data: {
                 task_id: taskId,
                 ...(await projectVerifyForAgent(process.cwd(), verifyResult)),
-                ...(priorLocalSignal !== undefined
-                  ? { prior_local_signal: priorLocalSignal }
-                  : {}),
                 suggested_next_command: summary.suggested_next_command,
                 ...(warnings !== undefined ? { warnings } : {}),
                 ...(wasAborted ? { aborted: true } : {}),

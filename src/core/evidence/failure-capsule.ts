@@ -521,7 +521,6 @@ export function stringifyBoundedAgentEnvelope(envelope: AgentJsonEnvelope): stri
   }
 
   const omissionOrder = [
-    "prior_local_signal",
     "suggested_next_command",
     "would_append",
     "event",
