@@ -17,6 +17,9 @@ non_goals:
 definition_of_done:
   - Retrieval is explicit and fingerprint-exact through
     `code-pact memory recall <fingerprint> --json`.
+  - Retrieval reserves optional tracking through
+    `code-pact memory recall <fingerprint> --cycle-ref <ref> --json`; cycle ref
+    presence does not change retrieval contents.
   - Retrieval returns at most three records and canonical JSON less than 4 KiB total.
   - Retrieval returns no raw episode, failed command, stdout, stderr, prompts,
     responses, reasoning, source, diffs, or resolution instruction.
@@ -68,6 +71,7 @@ tasks:
     reads:
       - src/cli/commands/memory.ts
       - src/cli/spec/memory.ts
+      - src/core/cycle-metrics/cycle-ref.ts
       - src/i18n/en-US.ts
       - src/i18n/ja-JP.ts
       - scripts/gen-cli-reference.ts
@@ -78,12 +82,12 @@ tasks:
       - tests/unit/error-code-surface.test.ts
     writes:
       - src/core/loop-memory/recall.ts
+      - src/core/cycle-metrics/cycle-ref.ts
       - src/commands/memory-recall.ts
       - src/cli/commands/memory.ts
       - src/cli/spec/memory.ts
       - src/i18n/en-US.ts
       - src/i18n/ja-JP.ts
-      - scripts/gen-cli-reference.ts
       - docs/cli-reference.generated.md
       - src/core/loop-memory/episode-store.ts
       - tests/unit/core/loop-memory.test.ts

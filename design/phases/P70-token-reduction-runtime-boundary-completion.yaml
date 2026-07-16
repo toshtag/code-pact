@@ -66,7 +66,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: Define cycle correlation and bounded byte accounting.
     depends_on:
       - P70-T1
@@ -76,7 +76,11 @@ tasks:
       - design/phases/P66-cycle-cost-accounting.yaml
       - design/phases/P55-stable-core-task-delta.yaml
     writes:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
       - design/decisions/P70-T2-cycle-correlation-and-accounting-rfc.md
+      - design/phases/P55-stable-core-task-delta.yaml
+      - design/phases/P65-lazy-local-memory-retrieval.yaml
+      - design/phases/P66-cycle-cost-accounting.yaml
     acceptance_refs:
       - design/decisions/P70-T2-cycle-correlation-and-accounting-rfc.md
   - id: P70-T3

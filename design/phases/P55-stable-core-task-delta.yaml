@@ -29,6 +29,8 @@ definition_of_done:
   - The decision compares initial context savings, task-level total input bytes,
     retry count, retrieval bytes, verification repetition, and cases where the
     agent did or did not retain Stable Core.
+  - Complete cycle evidence and incomplete observed-agent-input evidence are
+    compared separately.
   - Split context is not accepted when cycle evidence shows that retries and retrieval dominate total task input bytes.
   - Stable Core retention by an agent must be demonstrated rather than assumed.
 verification:

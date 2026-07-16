@@ -92,27 +92,22 @@ match omits the field entirely.
 
 ## Cycle cost model
 
-P66 measures task-level input cost with local bounded byte accounting:
+P66 measures task-level input cost with explicit opt-in local bounded byte
+accounting. Default command output remains byte-identical and no metrics are
+written without tracking mode. The fixed additive formula is retired in favor
+of agent-visible emission events:
 
 ```text
-task_total_input_bytes
-= context_pack_bytes
-+ deferred_context_retrieval_bytes
-+ evidence_retrieval_bytes
-+ memory_retrieval_bytes
-+ repeated_failure_capsule_bytes
+task_total_agent_input_bytes =
+sum(event.returned_bytes for all tracked agent-visible emission events)
 ```
 
 The metric also records verification_run_count, repair_attempt_count,
 first_pass_success, success_after_repair, same_failure_repeated, and
-stopped_without_success. P66 defines cycle start, cycle id, continuation,
-close, abandoned cycle, new attempt, retry, task-already-done, and cache
-deletion behavior. The cycle id is not just task id; it distinguishes multiple
-attempts on the same task. Metrics distinguish bytes referenced, bytes emitted,
-bytes explicitly retrieved, and bytes actually returned by the CLI. Only bytes
-actually returned to the agent are added to total input, and a repeated
-retrieval command is counted again. It does not convert bytes to provider token
-counts or prices, does not call model APIs, and does not send telemetry.
+stopped_without_success. P66 defines explicit `cycle_ref` propagation; commands
+without a cycle ref are untracked and are never assigned to the latest open
+cycle by inference. It does not convert bytes to provider token counts or
+prices, does not call model APIs, and does not send telemetry.
 
 ## Consolidation policy
 

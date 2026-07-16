@@ -1,0 +1,11 @@
+task_id: P70-T2
+status: done
+at: 2026-07-16T05:02:36.867Z
+actor: agent
+agent: claude-code
+author: Pocket
+evidence:
+  - design-only T2 cycle-correlation contract staged; final full verification
+    deferred until P70-T3 creates remaining ADR and closes lint
+source: external
+id: e7ed8c3d2f1196b05183d02a537a3a7400f216f0d7f2165102f2f6074632d8c5

@@ -16,8 +16,9 @@ non_goals:
   - Increase agent output size just to report the measurement.
   - Change verification, progress, Evidence, Failure Capsule, or repairPolicy.
 definition_of_done:
-  - The metric contract defines context_pack_bytes, deferred_context_retrieval_bytes, evidence_retrieval_bytes, memory_retrieval_bytes, verification_run_count, repair_attempt_count, first_pass_success, success_after_repair, same_failure_repeated, and stopped_without_success.
-  - task_total_input_bytes is defined as context_pack_bytes plus deferred_context_retrieval_bytes plus evidence_retrieval_bytes plus memory_retrieval_bytes plus repeated_failure_capsule_bytes.
+  - The metric contract defines verification_run_count, repair_attempt_count, first_pass_success, success_after_repair, same_failure_repeated, stopped_without_success, and agent-visible emission events.
+  - Tracking is opt-in; default command output remains byte-identical, includes no added fields, emits no added suggested flags, and writes no metrics.
+  - task_total_agent_input_bytes is defined as the sum of returned_bytes for tracked agent-visible emission events.
   - The contract defines cycle start, cycle id, cycle continuation, cycle close,
     abandoned cycle, new attempt, retry, and task-already-done behavior; the
     cycle id is not only the task id and distinguishes multiple attempts for
@@ -28,6 +29,12 @@ definition_of_done:
   - Re-running the same retrieval command counts the returned bytes again.
   - Metrics are local, bounded, disposable, and not Git-tracked.
   - Metrics are stored under `.code-pact/cache/cycle-metrics/v1/`.
+  - Cycle metrics hard limits are MAX_CYCLES=256, MAX_TOTAL_BYTES=2 MiB,
+    MAX_CYCLE_BYTES=32 KiB, MAX_EVENTS_PER_CYCLE=64, MAX_CYCLES_PER_TASK=8,
+    and MAX_AGE_DAYS=90, with retention in age, per-task, per-cycle-event,
+    global-count, then global-byte order.
+  - Cycle reports distinguish complete, incomplete, and abandoned; only complete
+    cycles without unobserved_external_read report task_total_agent_input_bytes.
   - P66-T3 exposes a production report surface that P55 can consume before deciding whether split context output is justified.
 verification:
   commands:
