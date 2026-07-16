@@ -742,6 +742,7 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
       ok: false;
       data: {
         failure: unknown;
+        projection_truncated?: boolean;
         prior_local_signal?: {
           schema_version: number;
           exact_match_count: number;
@@ -757,6 +758,7 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
     expect(signal?.last_observed_at).toMatch(
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
     );
+    expect(secondJson.data.projection_truncated).not.toBe(true);
     expect(JSON.stringify(secondJson.data.failure)).not.toContain("prior_local_signal");
 
     const defaultJson = p.run([
@@ -771,23 +773,34 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
     expectStdoutIsJson(defaultJson, "task complete repeated failure default json");
     expect(defaultJson.stdout).not.toContain("prior_local_signal");
 
-    const signalAbsentBytes = Buffer.byteLength(first.stdout, "utf8");
-    const signalPresentBytes = Buffer.byteLength(second.stdout, "utf8");
+    const withoutSignal = structuredClone(secondJson);
+    delete withoutSignal.data.prior_local_signal;
+    const fullEnvelopeBytesWithSignal = Buffer.byteLength(
+      `${JSON.stringify(secondJson)}\n`,
+      "utf8",
+    );
+    const fullEnvelopeBytesWithoutSignal = Buffer.byteLength(
+      `${JSON.stringify(withoutSignal)}\n`,
+      "utf8",
+    );
+    const signalFieldIncrementalBytes =
+      fullEnvelopeBytesWithSignal - fullEnvelopeBytesWithoutSignal;
     const measurement = {
-      signal_absent_failure_envelope_bytes: signalAbsentBytes,
-      signal_present_failure_envelope_bytes: signalPresentBytes,
-      additional_bytes: signalPresentBytes - signalAbsentBytes,
+      signal_object_bytes: Buffer.byteLength(JSON.stringify(signal), "utf8"),
+      signal_field_incremental_bytes: signalFieldIncrementalBytes,
+      full_envelope_bytes_with_signal: fullEnvelopeBytesWithSignal,
+      full_envelope_bytes_without_signal: fullEnvelopeBytesWithoutSignal,
       exact_match_hit_count: signal?.exact_match_count,
       repeats: 1,
       successes: 0,
     };
-    expect(Buffer.byteLength(JSON.stringify(signal), "utf8")).toBeLessThanOrEqual(1024);
+    expect(measurement.signal_object_bytes).toBeLessThanOrEqual(1024);
     expect(measurement).toMatchObject({
       exact_match_hit_count: 1,
       repeats: 1,
       successes: 0,
     });
-    expect(measurement.additional_bytes).toBeGreaterThan(0);
+    expect(measurement.signal_field_incremental_bytes).toBeGreaterThan(0);
   });
 
   it("task record-done P1-T1 --json", async () => {
