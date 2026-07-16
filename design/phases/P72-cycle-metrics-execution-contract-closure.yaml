@@ -71,7 +71,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: Define bounded active-cycle admission and abandonment.
     depends_on:
       - P72-T1
