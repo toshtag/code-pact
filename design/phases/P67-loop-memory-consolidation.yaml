@@ -79,10 +79,17 @@ tasks:
       - src/commands/memory-consolidate.ts
       - src/cli/commands/memory.ts
       - src/cli/spec/memory.ts
-      - src/core/project-fs/authorities/**
+      - src/core/project-fs/authorities/loop-memory-aggregate-authority.ts
+      - src/core/project-fs/authority-resolvers.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - docs/cli-contract.md
+      - docs/cli-reference.generated.md
       - scripts/check-fs-authority.mjs
       - tests/unit/core/loop-memory.test.ts
       - tests/unit/commands/memory.test.ts
+      - tests/integration/json-stdout.test.ts
+      - tests/unit/error-code-surface.test.ts
     acceptance_refs:
       - tests/unit/core/loop-memory.test.ts
   - id: P67-T3

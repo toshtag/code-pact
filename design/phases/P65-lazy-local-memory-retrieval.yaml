@@ -71,7 +71,6 @@ tasks:
     reads:
       - src/cli/commands/memory.ts
       - src/cli/spec/memory.ts
-      - src/core/cycle-metrics/cycle-ref.ts
       - src/i18n/en-US.ts
       - src/i18n/ja-JP.ts
       - scripts/gen-cli-reference.ts

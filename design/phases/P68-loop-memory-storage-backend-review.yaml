@@ -22,6 +22,13 @@ definition_of_done:
     conflict rate over 1% across at least 100 writes, or accepted need for at
     least two independent index queries or atomic multi-record updates.
   - Migration, locking, corruption recovery, platform behavior, transactions, vacuum behavior, filesystem authority, cache deletion/rebuild, dependency cost, package size, and contributor burden are covered.
+  - Benchmark method fixes 20 warm-up runs, 200 measured runs,
+    `process.hrtime.bigint()`, median/p95/max reporting, cold and warm cache
+    cases, single-writer and two-writer contention cases, isolated temporary
+    directories, and a fixed near-hard-cap fixture digest.
+  - The ADR records Node version, OS, architecture, filesystem type when
+    available, CPU model, record count, total bytes, fixture digest, command,
+    and p95 calculation method.
   - If measured gates are not met, the outcome is rejected or deferred.
   - Any accepted backend change is scheduled as a later phase.
 verification:

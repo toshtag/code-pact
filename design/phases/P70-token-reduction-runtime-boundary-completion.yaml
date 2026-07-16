@@ -3,7 +3,7 @@ name: Token Reduction Runtime Boundary Completion
 weight: 3
 confidence: high
 risk: low
-status: planned
+status: done
 objective: >
   Complete the runtime responsibility, cycle-correlation, byte-accounting,
   retention, and benchmark contracts required before P63 exact-match recall
@@ -49,13 +49,7 @@ tasks:
       - design/phases/P64-deterministic-resolution-aggregation.yaml
       - design/phases/P65-lazy-local-memory-retrieval.yaml
     writes:
-      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
       - design/decisions/P70-T1-recall-aggregation-boundary-rfc.md
-      - design/phases/P63-exact-match-local-failure-recall.yaml
-      - design/phases/P64-deterministic-resolution-aggregation.yaml
-      - design/phases/P65-lazy-local-memory-retrieval.yaml
-      - design/phases/P70-token-reduction-runtime-boundary-completion.yaml
-      - design/roadmap.yaml
     acceptance_refs:
       - design/decisions/P70-T1-recall-aggregation-boundary-rfc.md
   - id: P70-T2
@@ -76,11 +70,7 @@ tasks:
       - design/phases/P66-cycle-cost-accounting.yaml
       - design/phases/P55-stable-core-task-delta.yaml
     writes:
-      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
       - design/decisions/P70-T2-cycle-correlation-and-accounting-rfc.md
-      - design/phases/P55-stable-core-task-delta.yaml
-      - design/phases/P65-lazy-local-memory-retrieval.yaml
-      - design/phases/P66-cycle-cost-accounting.yaml
     acceptance_refs:
       - design/decisions/P70-T2-cycle-correlation-and-accounting-rfc.md
   - id: P70-T3
@@ -91,7 +81,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: Narrow implementation scopes and benchmark contracts.
     depends_on:
       - P70-T2

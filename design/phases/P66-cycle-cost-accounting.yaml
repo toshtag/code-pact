@@ -90,18 +90,41 @@ tasks:
       - tests/unit/commands/context-show.test.ts
       - tests/unit/commands/evidence.test.ts
     writes:
-      - src/core/cycle-metrics/**
-      - src/core/project-fs/authorities/**
+      - src/core/cycle-metrics/cycle-ref.ts
+      - src/core/cycle-metrics/schema.ts
+      - src/core/cycle-metrics/store.ts
+      - src/core/cycle-metrics/retention.ts
+      - src/core/cycle-metrics/status.ts
+      - src/core/cycle-metrics/errors.ts
+      - src/core/project-fs/authorities/cycle-metrics-authority.ts
+      - src/core/project-fs/authority-resolvers.ts
       - src/commands/task-prepare.ts
       - src/commands/task-context.ts
       - src/commands/context-show.ts
       - src/commands/evidence-show.ts
       - src/commands/memory-recall.ts
       - src/commands/task-complete.ts
+      - src/commands/cycle-metrics-status.ts
+      - src/commands/cycle-metrics-prune.ts
+      - src/commands/doctor.ts
+      - src/cli/commands/memory.ts
+      - src/cli/spec/memory.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
       - src/core/loop-memory/task-complete-recorder.ts
       - scripts/check-fs-authority.mjs
-      - tests/unit/core/cycle-metrics/**
-      - tests/unit/commands/**
+      - scripts/check-fs-containment.mjs
+      - tests/unit/core/cycle-metrics/cycle-ref.test.ts
+      - tests/unit/core/cycle-metrics/store.test.ts
+      - tests/unit/core/cycle-metrics/retention.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/unit/commands/task-context.test.ts
+      - tests/unit/commands/context-show.test.ts
+      - tests/unit/commands/evidence.test.ts
+      - tests/unit/commands/memory.test.ts
+      - tests/unit/commands/task-complete.test.ts
+      - tests/unit/security/cycle-metrics-authority.test.ts
+      - tests/integration/json-stdout.test.ts
       - tests/unit/core/loop-memory.test.ts
     acceptance_refs:
       - tests/unit/core/loop-memory.test.ts
