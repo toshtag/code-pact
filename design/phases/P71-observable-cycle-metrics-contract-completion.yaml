@@ -66,7 +66,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: Define cycle lifecycle, bounded active-cycle storage, and report identity.
     depends_on:
       - P71-T1
