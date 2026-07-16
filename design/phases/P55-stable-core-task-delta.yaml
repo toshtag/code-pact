@@ -8,7 +8,7 @@ requires_decision: true
 objective: >
   Decide whether split context output should exist after reversible deferral,
   recommended budgets, structural projection, local failure recall, and
-  task-level cycle-cost accounting have produced measurement evidence.
+  closed-harness token-reduction evidence have produced measurement evidence.
 non_goals:
   - Move active design authoring out of `design/`.
   - Trust a digest as a substitute for validating the referenced local files.
@@ -17,9 +17,9 @@ non_goals:
   - Create a second failure schema that duplicates the Failure Capsule.
   - Implement split output before the decision is accepted.
 definition_of_done:
-  - The decision evaluates P52-P54 context evidence and P63-P66 local recall,
-    retrieval, observed Code Pact stdout bytes, and any closed-harness total
-    evidence before approving any implementation.
+  - The decision evaluates P52-P54 context evidence, P63 exact-match recall,
+    and P66 closed-harness Code Pact stdout evidence before approving any
+    implementation.
   - "The task creates `design/decisions/P55-T1-stable-core-task-delta-rfc.md` with `Status: accepted` and a decision outcome of accepted, rejected, or deferred."
   - The ADR records natural bytes, final budgeted bytes, deferred bytes, projection before and after bytes, retrieval bytes, default combined-pack bytes, and artifact or command count changes.
   - If approved, split artifacts must be explicit opt-in and the default combined pack must remain unchanged.
@@ -28,14 +28,11 @@ definition_of_done:
   - Failure delta must reuse the existing Failure Capsule fingerprint, evidence reference, and compact envelope by reference; no new failure schema or failure-delta byte count is introduced.
   - Stable-core digest alone is insufficient unless the agent has the matching content; otherwise a retrieval command must be returned.
   - The decision compares context resend cost against failure investigation, verification repetition, and memory retrieval cost.
-  - The decision compares initial context savings,
-    observed_code_pact_stdout_bytes, closed-harness controlled totals when
-    available, retry count, retrieval bytes, verification repetition, and cases
-    where the agent did or did not retain Stable Core.
-  - Complete, incomplete, truncated, and abandoned cycle evidence are compared
-    separately.
-  - Split context is not accepted merely from normal runtime stdout evidence,
-    and unobserved external input must remain explicit in the decision.
+  - The decision compares initial context bytes, total Code Pact stdout bytes
+    in closed scenarios, verification count, same-fingerprint repeat count,
+    deferred retrieval bytes, Evidence retrieval bytes, and prior-local signal
+    bytes.
+  - The decision does not claim to measure total model input in normal runtime.
   - Stable Core retention by an agent must be demonstrated rather than assumed.
 verification:
   commands:
@@ -54,7 +51,7 @@ tasks:
     expected_duration: short
     status: planned
     depends_on:
-      - P66-T6
+      - P66-T2
     description: Evaluate P52-P54 and P63-P66 measurement evidence and decide whether split context output should be accepted, rejected, or deferred.
     reads:
       - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md

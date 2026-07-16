@@ -48,7 +48,8 @@ The accepted sequence is:
 - P64: derive deterministic aggregates for matching fingerprints and observed
   resolutions.
 - P65: allow explicit lazy retrieval when the exact-match signal is too small.
-- P66: measure whole task-cycle input cost.
+- P66: measure Code Pact stdout bytes and retry counts in a deterministic
+  closed harness, then decide whether later local-memory phases should proceed.
 - P55: re-evaluate Stable Core and Task Delta only after P66 evidence exists.
 - P67: consolidate sufficiently repeated local facts while preserving
   contradictions.
@@ -95,23 +96,20 @@ in the bounded local store. It is not a lifetime occurrence count.
 
 ## Cycle cost model
 
-P66 measures observed Code Pact CLI stdout bytes with explicit opt-in local
-bounded byte accounting. Default command output remains byte-identical and no
-metrics are written without tracking mode. The fixed additive formula is:
+P66 no longer targets production cycle telemetry. P69-P72 remain historical
+design records, but the current implementation target is a deterministic
+closed harness that runs fixed CLI scenarios and measures stdout bytes:
 
 ```text
-observed_code_pact_stdout_bytes =
-sum(event.emitted_bytes for all tracked Code Pact CLI stdout emission events)
+total_code_pact_stdout_bytes =
+sum(Buffer.byteLength(stdout, "utf8") for each fixed harness invocation)
 ```
 
-The metric also records verification_run_count, repair_attempt_count,
-first_pass_success, success_after_repair, same_failure_repeated, and
-stopped_without_success. The normal runtime measurement scope is
-`code_pact_cli_stdout` with `external_input_unobserved: true`; it is not total
-Agent input or provider token usage. P66 defines explicit `cycle_ref`
-propagation; commands without a cycle ref are untracked and are never assigned
-to the latest open cycle by inference. It does not convert bytes to provider
-token counts or prices, does not call model APIs, and does not send telemetry.
+The harness also records command_count, verification_count, failure_count,
+same_fingerprint_repeat_count, context_retrieval_count,
+evidence_retrieval_count, and prior_signal_count. It does not add
+`--track-cycle`, `--cycle-ref`, production cycle stores, `memory cost`, model
+API calls, provider token conversion, or telemetry.
 
 ## Consolidation policy
 
@@ -180,7 +178,8 @@ and dependency change.
 - P63-T2/P63-T3 remain planned implementation tasks for exact-match recall.
 - P64 defines deterministic aggregate semantics before implementation.
 - P65 requires explicit bounded retrieval instead of initial context injection.
-- P66 supplies whole-cycle byte evidence before P55 can decide split context.
+- P66 supplies closed-harness stdout/retry evidence before P55 can decide split
+  context.
 - P67 addresses long-term boundedness and contradiction handling.
 - P68 makes backend change conditional on measured gates and a later accepted
   implementation phase.

@@ -4,6 +4,7 @@ weight: 5
 confidence: low
 risk: medium
 status: planned
+requires_decision: true
 objective: >
   Consolidate sufficiently repeated local episode facts into bounded aggregates
   without turning contradictory local history into a single unsupported rule or
@@ -41,7 +42,7 @@ tasks:
     expected_duration: short
     status: planned
     depends_on:
-      - P66-T6
+      - P66-T2
       - P55-T1
     description: Accept consolidation and contradiction rules.
     reads:

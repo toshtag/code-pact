@@ -53,6 +53,7 @@ tasks:
     expected_duration: short
     status: planned
     depends_on:
+      - P66-T2
       - P67-T3
     description: Measure backend limits and record an ADR.
     reads:

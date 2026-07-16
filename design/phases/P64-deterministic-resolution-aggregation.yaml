@@ -4,6 +4,7 @@ weight: 5
 confidence: medium
 risk: medium
 status: planned
+requires_decision: true
 objective: >
   Derive bounded local fingerprint aggregates from episode order and task
   identity so repeated failures and observed resolutions can be summarized
@@ -46,7 +47,7 @@ tasks:
     expected_duration: short
     status: planned
     depends_on:
-      - P63-T3
+      - P66-T2
     description: Accept the deterministic aggregation contract.
     reads:
       - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
