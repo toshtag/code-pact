@@ -1,0 +1,11 @@
+task_id: P66-T1C
+status: done
+at: 2026-07-16T13:38:11.486Z
+actor: agent
+agent: claude-code
+author: Pocket
+evidence:
+  - commands
+  - decision
+source: loop
+id: e7c730ff802b3d5bc02d736fafb54f09400b84a3c4d2355ccf8234a0e164d1a5
