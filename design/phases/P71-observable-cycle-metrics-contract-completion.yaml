@@ -1,0 +1,113 @@
+id: P71
+name: Observable Cycle Metrics Contract Completion
+weight: 3
+confidence: high
+risk: low
+status: planned
+objective: >
+  Replace unobservable total-agent-input claims with exact Code Pact CLI output
+  measurements, complete cycle lifecycle and bounded retention semantics, and
+  make future runtime scopes executable before P63-T2 begins.
+non_goals:
+  - Implement exact-match runtime recall.
+  - Implement aggregation runtime behavior.
+  - Implement retrieval CLI behavior.
+  - Implement cycle metrics runtime behavior.
+  - Change production source, test code, package metadata, CHANGELOG, adapters,
+    CI, context packs, Evidence, Failure Capsule, or repairPolicy.
+  - Archive phases or rewrite completed P70 events.
+definition_of_done:
+  - Code Pact does not call unobservable values total Agent input.
+  - Observable stdout measurement is separated from token usage and external
+    Agent context.
+  - Summable emission event categories are mutually exclusive.
+  - Cycle start, failure, unknown-ref, dry-run, early-return, and store-failure
+    contracts are defined.
+  - Active cycles remain within hard event and byte limits while preserving
+    cumulative totals.
+  - P65 does not expose a no-op tracking flag before P66 metrics runtime exists.
+  - P66 implementation scope includes the actual CLI stdout serialization layer
+    and public flag surfaces.
+  - P66 report identity is unambiguous for multiple cycles per task.
+  - P68 cold and warm benchmark definitions are portable and do not claim OS
+    page-cache control.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+tasks:
+  - id: P71-T1
+    type: architecture
+    ambiguity: medium
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: done
+    description: Define observable output and non-overlapping emission semantics.
+    depends_on:
+      - P70-T3
+    reads:
+      - design/decisions/P70-T2-cycle-correlation-and-accounting-rfc.md
+      - design/phases/P66-cycle-cost-accounting.yaml
+      - design/phases/P55-stable-core-task-delta.yaml
+    writes:
+      - design/decisions/P71-T1-observable-output-semantics-rfc.md
+    acceptance_refs:
+      - design/decisions/P71-T1-observable-output-semantics-rfc.md
+  - id: P71-T2
+    type: architecture
+    ambiguity: medium
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: Define cycle lifecycle, bounded active-cycle storage, and report identity.
+    depends_on:
+      - P71-T1
+    reads:
+      - design/decisions/P71-T1-observable-output-semantics-rfc.md
+      - design/decisions/P70-T2-cycle-correlation-and-accounting-rfc.md
+      - design/phases/P66-cycle-cost-accounting.yaml
+    writes:
+      - design/decisions/P71-T2-cycle-lifecycle-and-bounded-storage-rfc.md
+    acceptance_refs:
+      - design/decisions/P71-T2-cycle-lifecycle-and-bounded-storage-rfc.md
+  - id: P71-T3
+    type: architecture
+    ambiguity: medium
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: Correct future phase scopes, dependencies, and benchmark definitions.
+    depends_on:
+      - P71-T2
+    reads:
+      - design/decisions/P71-T1-observable-output-semantics-rfc.md
+      - design/decisions/P71-T2-cycle-lifecycle-and-bounded-storage-rfc.md
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+      - design/phases/P55-stable-core-task-delta.yaml
+      - design/phases/P63-exact-match-local-failure-recall.yaml
+      - design/phases/P65-lazy-local-memory-retrieval.yaml
+      - design/phases/P66-cycle-cost-accounting.yaml
+      - design/phases/P68-loop-memory-storage-backend-review.yaml
+      - design/roadmap.yaml
+    writes:
+      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
+      - design/phases/P55-stable-core-task-delta.yaml
+      - design/phases/P63-exact-match-local-failure-recall.yaml
+      - design/phases/P65-lazy-local-memory-retrieval.yaml
+      - design/phases/P66-cycle-cost-accounting.yaml
+      - design/phases/P68-loop-memory-storage-backend-review.yaml
+      - design/roadmap.yaml
+      - design/decisions/P71-T3-runtime-contract-reconciliation-rfc.md
+    acceptance_refs:
+      - design/decisions/P71-T3-runtime-contract-reconciliation-rfc.md

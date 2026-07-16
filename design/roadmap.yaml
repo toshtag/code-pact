@@ -176,6 +176,9 @@ phases:
   - id: P70
     path: design/phases/P70-token-reduction-runtime-boundary-completion.yaml
     weight: 3
+  - id: P71
+    path: design/phases/P71-observable-cycle-metrics-contract-completion.yaml
+    weight: 3
   - id: P64
     path: design/phases/P64-deterministic-resolution-aggregation.yaml
     weight: 5
