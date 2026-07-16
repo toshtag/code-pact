@@ -76,11 +76,7 @@ export function isDesignOnlyTask(task) {
     path.startsWith("src/") || path.startsWith("tests/") || path.startsWith("scripts/"),
   );
   if (writesImplementation) return false;
-  return writes.every(path =>
-    path.startsWith("design/") ||
-    path.startsWith("docs/") ||
-    path.startsWith(".code-pact/"),
-  );
+  return writes.every(path => isDocumentationOrDesignPath(path));
 }
 
 export function evaluateDevelopmentEfficiency({
@@ -146,8 +142,7 @@ export function evaluateDevelopmentEfficiency({
     const prospectiveConsecutiveDesignOnlyTasks = nextDesignOnly
       ? consecutiveDesignOnlyTasks + 1
       : 0;
-    const pass =
-      consecutiveDesignOnlyTasks <= 1 && prospectiveConsecutiveDesignOnlyTasks <= 1;
+    const pass = prospectiveConsecutiveDesignOnlyTasks <= 1;
     return {
       ...baseResult,
       next_task: nextTask,
