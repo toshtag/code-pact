@@ -171,7 +171,7 @@ tasks:
     description: Record closed-harness evidence and decide follow-up phases.
     requires_decision: true
     depends_on:
-      - P66-T1C
+      - P66-T1B
     reads:
       - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
       - design/phases/P63-exact-match-local-failure-recall.yaml
