@@ -18,7 +18,7 @@ non_goals:
 definition_of_done:
   - Exact-match recall is limited to the current failure fingerprint.
   - Lookup runs against the pre-current-failure episode snapshot; the current
-    failure episode must never contribute to prior_match_count.
+    failure episode must never contribute to exact_match_count.
   - First observation of a fingerprint emits no prior-local signal.
   - The advisory signal is a closed `prior_local_signal` object with
     schema_version, exact_match_count, and last_observed_at only; it is emitted
@@ -65,7 +65,7 @@ tasks:
     status: planned
     description: Define and implement exact-fingerprint local lookup.
     depends_on:
-      - P70-T3
+      - P71-T3
     reads:
       - src/core/loop-memory/episode-store.ts
       - src/core/loop-memory/status.ts

@@ -26,6 +26,11 @@ definition_of_done:
     `process.hrtime.bigint()`, median/p95/max reporting, cold and warm cache
     cases, single-writer and two-writer contention cases, isolated temporary
     directories, and a fixed near-hard-cap fixture digest.
+  - Cold means the first measured invocation in a fresh Node process with a
+    fresh temporary project/store; warm means 20 warm-up runs followed by 200
+    measured runs in the same process and same store.
+  - The benchmark does not require OS page-cache clearing and must not claim a
+    fully cold filesystem cache unless the harness explicitly proves it.
   - The ADR records Node version, OS, architecture, filesystem type when
     available, CPU model, record count, total bytes, fixture digest, command,
     and p95 calculation method.

@@ -17,16 +17,16 @@ non_goals:
 definition_of_done:
   - Retrieval is explicit and fingerprint-exact through
     `code-pact memory recall <fingerprint> --json`.
-  - Retrieval reserves optional tracking through
-    `code-pact memory recall <fingerprint> --cycle-ref <ref> --json`; cycle ref
-    presence does not change retrieval contents.
-  - Retrieval returns at most three records and canonical JSON less than 4 KiB total.
+  - P65 defines a read-only retrieval boundary that P66 can later attach cycle
+    correlation to; P65 does not expose cycle-tracking CLI options.
+  - Retrieval returns at most three records and a successful JSON envelope,
+    including any trailing newline actually written, less than 4 KiB total.
   - Retrieval returns no raw episode, failed command, stdout, stderr, prompts,
     responses, reasoning, source, diffs, or resolution instruction.
   - Missing local cache returns an empty successful result.
   - Retrieval output is advisory and never changes verification outcome.
-  - Retrieval is read-only and the actual returned bytes are observable by P66
-    cycle-cost accounting.
+  - Retrieval is read-only and the exact emitted stdout bytes are observable by
+    P66 cycle-cost accounting.
   - Explicit retrieval may include the P64 bounded aggregate plus at most three
     derived records; P63 automatic signal remains the minimal exact-match shape.
 verification:
@@ -81,7 +81,6 @@ tasks:
       - tests/unit/error-code-surface.test.ts
     writes:
       - src/core/loop-memory/recall.ts
-      - src/core/cycle-metrics/cycle-ref.ts
       - src/commands/memory-recall.ts
       - src/cli/commands/memory.ts
       - src/cli/spec/memory.ts

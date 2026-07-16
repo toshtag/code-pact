@@ -3,7 +3,7 @@ name: Observable Cycle Metrics Contract Completion
 weight: 3
 confidence: high
 risk: low
-status: planned
+status: done
 objective: >
   Replace unobservable total-agent-input claims with exact Code Pact CLI output
   measurements, complete cycle lifecycle and bounded retention semantics, and
@@ -31,6 +31,9 @@ definition_of_done:
   - P66 report identity is unambiguous for multiple cycles per task.
   - P68 cold and warm benchmark definitions are portable and do not claim OS
     page-cache control.
+  - P71-T3 finalization audit declares every design file it changes; the
+    completed dogfood phase does not keep protected design YAML writes listed
+    solely to prove the advisory.
 verification:
   commands:
     - pnpm check:docs
@@ -86,7 +89,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: Correct future phase scopes, dependencies, and benchmark definitions.
     depends_on:
       - P71-T2
@@ -101,13 +104,6 @@ tasks:
       - design/phases/P68-loop-memory-storage-backend-review.yaml
       - design/roadmap.yaml
     writes:
-      - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
-      - design/phases/P55-stable-core-task-delta.yaml
-      - design/phases/P63-exact-match-local-failure-recall.yaml
-      - design/phases/P65-lazy-local-memory-retrieval.yaml
-      - design/phases/P66-cycle-cost-accounting.yaml
-      - design/phases/P68-loop-memory-storage-backend-review.yaml
-      - design/roadmap.yaml
       - design/decisions/P71-T3-runtime-contract-reconciliation-rfc.md
     acceptance_refs:
       - design/decisions/P71-T3-runtime-contract-reconciliation-rfc.md

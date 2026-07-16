@@ -71,7 +71,7 @@ generate any prior-local signal
 record the current failure episode
 ```
 
-The current failure episode must never contribute to `prior_match_count`, and
+The current failure episode must never contribute to `exact_match_count`, and
 the first observation of a fingerprint returns no signal. The only signal shape
 is an additive `prior_local_signal` field on `--detail agent` failure JSON:
 
@@ -92,22 +92,23 @@ match omits the field entirely.
 
 ## Cycle cost model
 
-P66 measures task-level input cost with explicit opt-in local bounded byte
-accounting. Default command output remains byte-identical and no metrics are
-written without tracking mode. The fixed additive formula is retired in favor
-of agent-visible emission events:
+P66 measures observed Code Pact CLI stdout bytes with explicit opt-in local
+bounded byte accounting. Default command output remains byte-identical and no
+metrics are written without tracking mode. The fixed additive formula is:
 
 ```text
-task_total_agent_input_bytes =
-sum(event.returned_bytes for all tracked agent-visible emission events)
+observed_code_pact_stdout_bytes =
+sum(event.emitted_bytes for all tracked Code Pact CLI stdout emission events)
 ```
 
 The metric also records verification_run_count, repair_attempt_count,
 first_pass_success, success_after_repair, same_failure_repeated, and
-stopped_without_success. P66 defines explicit `cycle_ref` propagation; commands
-without a cycle ref are untracked and are never assigned to the latest open
-cycle by inference. It does not convert bytes to provider token counts or
-prices, does not call model APIs, and does not send telemetry.
+stopped_without_success. The normal runtime measurement scope is
+`code_pact_cli_stdout` with `external_input_unobserved: true`; it is not total
+Agent input or provider token usage. P66 defines explicit `cycle_ref`
+propagation; commands without a cycle ref are untracked and are never assigned
+to the latest open cycle by inference. It does not convert bytes to provider
+token counts or prices, does not call model APIs, and does not send telemetry.
 
 ## Consolidation policy
 
@@ -147,7 +148,7 @@ retention by an agent must be demonstrated rather than assumed.
 ## Phase sequence
 
 ```text
-P58 -> P59 -> P60 -> P61 -> P62 -> P63 -> P69 -> P64 -> P65 -> P66 -> P55 -> P67 -> P68
+P58 -> P59 -> P60 -> P61 -> P62 -> P63 -> P69 -> P70 -> P71 -> P64 -> P65 -> P66 -> P55 -> P67 -> P68
 ```
 
 P55 keeps its id because it is an existing planned decision. Only its position
