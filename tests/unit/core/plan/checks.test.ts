@@ -425,6 +425,23 @@ describe("detectTaskWritesProtectedPath", () => {
     expect(issues[0]?.details?.protected_pattern).toBe("design/phases/*.yaml");
   });
 
+  it("marks completed-task protected writes as non-exit-relevant history", () => {
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            status: "done",
+            writes: ["design/phases/P1-foundation.yaml"],
+          }),
+        ]),
+      ),
+    ];
+    const issues = detectTaskWritesProtectedPath(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_WRITES_PROTECTED_PATH");
+    expect(issues[0]?.affects_exit).toBe(false);
+  });
+
   it("warning when writes target the .code-pact protected tree", () => {
     const entries = [
       entry(

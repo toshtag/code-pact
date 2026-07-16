@@ -161,13 +161,14 @@ export async function recordLoopMemoryEpisodeBestEffort(opts: {
   task: Task;
   verify: VerifyResult;
   recordedAt: Date;
+  episode?: LoopMemoryEpisode;
 }): Promise<LoopMemoryWarning | undefined> {
   let stored: Awaited<ReturnType<typeof storeLoopMemoryEpisode>>;
   try {
     if (recordFailureForTests) throw recordFailureForTests();
     stored = await storeLoopMemoryEpisode(
       opts.cwd,
-      buildLoopMemoryEpisodeForTaskComplete(opts),
+      opts.episode ?? buildLoopMemoryEpisodeForTaskComplete(opts),
     );
   } catch {
     return LOCAL_MEMORY_WRITE_SKIPPED_WARNING;
