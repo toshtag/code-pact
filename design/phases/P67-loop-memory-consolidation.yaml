@@ -4,7 +4,6 @@ weight: 5
 confidence: low
 risk: medium
 status: planned
-requires_decision: true
 objective: >
   Consolidate sufficiently repeated local episode facts into bounded aggregates
   without turning contradictory local history into a single unsupported rule or
@@ -15,22 +14,27 @@ non_goals:
   - Delete raw episodes unconditionally after an aggregate is written.
   - Promote local memory into project rules, decisions, or shared guidance.
   - Repair corrupt cache entries automatically.
-  - Add contributor sharing, remote sync, semantic search, embeddings, or a new backend.
+  - Add contributor sharing, remote sync, semantic search, embeddings, or a new
+    backend.
 definition_of_done:
-  - Consolidation has explicit thresholds, such as three matching fingerprints or two same-task failure-to-success observations.
+  - Consolidation has explicit thresholds, such as three matching fingerprints
+    or two same-task failure-to-success observations.
   - The ADR defines aggregate schema, aggregate storage root, TTL, count limit,
-    byte limit, contradiction representation, dry-run/write command,
-    raw-episode deletion conditions, partial failure behavior, and corruption handling.
+    byte limit, contradiction representation, dry-run/write command, raw-episode
+    deletion conditions, partial failure behavior, and corruption handling.
   - Dry-run and explicit write modes are separate.
   - Aggregates have TTL, count, and byte limits.
   - Contradictions are preserved as bounded evidence rather than flattened.
-  - Retention convergence, dry-run/write behavior, partial failure, and corrupt aggregate handling are demonstrated without changing local-only cache policy.
+  - Retention convergence, dry-run/write behavior, partial failure, and corrupt
+    aggregate handling are demonstrated without changing local-only cache
+    policy.
 verification:
   commands:
     - pnpm check:docs
     - pnpm typecheck
     - pnpm test:unit
     - pnpm test:integration:smoke
+requires_decision: true
 tasks:
   - id: P67-T1
     type: architecture
@@ -41,13 +45,13 @@ tasks:
     verification_strength: medium
     expected_duration: short
     status: planned
+    description: Accept consolidation and contradiction rules.
     depends_on:
       - P66-T2
       - P55-T1
-    description: Accept consolidation and contradiction rules.
     reads:
       - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
-      - design/phases/P66-cycle-cost-accounting.yaml
+      - design/decisions/P66-T2-token-reduction-evidence-rfc.md
       - docs/cli-contract.md
     writes:
       - design/decisions/P67-T1-loop-memory-consolidation-rfc.md
@@ -62,9 +66,9 @@ tasks:
     verification_strength: strong
     expected_duration: medium
     status: planned
+    description: Implement bounded aggregate consolidation.
     depends_on:
       - P67-T1
-    description: Implement bounded aggregate consolidation.
     reads:
       - src/core/loop-memory/episode-store.ts
       - src/core/loop-memory/retention.ts
@@ -102,9 +106,10 @@ tasks:
     verification_strength: strong
     expected_duration: medium
     status: planned
+    description: Add retention convergence, dry-run/write, partial failure, and
+      corrupt aggregate evidence.
     depends_on:
       - P67-T2
-    description: Add retention convergence, dry-run/write, partial failure, and corrupt aggregate evidence.
     reads:
       - src/core/loop-memory/retention.ts
       - tests/unit/commands/memory.test.ts

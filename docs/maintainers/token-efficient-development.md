@@ -66,14 +66,24 @@ gate:
 pnpm check:development-efficiency -- --next-task <task-id>
 ```
 
-The check uses `P72-T4` as the baseline. After that baseline, two consecutive
-current design-only tasks fail with `DEVELOPMENT_DESIGN_LOOP_EXCEEDED`. A
-runtime, test, or script implementation task resets the current streak to zero;
-the historical maximum remains diagnostic only. Even when the current streak is
-already 2, a prospective runtime/test/script task passes because it resets the
-streak to zero. Design-only includes `design/`, `docs/`, `.code-pact/`,
-root-level Markdown files, `LICENSE`, and `NOTICE` when no `src/`, `tests/`, or
-`scripts/` write is declared. `release:check` runs this gate.
+The check uses `P72-T4` as the conceptual baseline. After that baseline, two
+consecutive current design-only tasks fail with `DEVELOPMENT_DESIGN_LOOP_EXCEEDED`.
+A runtime, test, or script implementation task resets the current streak to
+zero; the historical maximum remains diagnostic only. Even when the current
+streak is already 2, a prospective runtime/test/script task passes because it
+resets the streak to zero. Design-only includes `design/`, `docs/`,
+`.code-pact/`, root-level Markdown files, `LICENSE`, and `NOTICE` when no
+`src/`, `tests/`, or `scripts/` write is declared. `release:check` runs this
+gate.
+
+When completed phases and their progress events are compacted into archive
+bundles, the gate uses a tracked checkpoint (`scripts/development-efficiency-checkpoint.json`)
+containing the accumulated counters and the exact terminal event identity for
+the baseline and checkpoint. Events after the checkpoint are classified from
+active task definitions. An event after the checkpoint without an available task
+definition is a configuration failure; it is never silently ignored. Before
+archiving tasks completed after the checkpoint, maintainers must advance the
+checkpoint while those task definitions are still available.
 
 This page is linked from [CONTRIBUTING.md](../../CONTRIBUTING.md) and
 [Maintainer operations](operations.md) so the workflow is discoverable.

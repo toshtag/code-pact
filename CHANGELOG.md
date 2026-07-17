@@ -13,10 +13,17 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [2.7.0] — 2026-07-17
+
 ### Added
 
-- **Added local bounded loop memory.** `task complete` now records bounded machine-local verification episodes under the ignored cache, preserving task completion semantics and existing success JSON. New `memory status` and dry-run-by-default `memory prune` commands expose aggregate maintenance only; `doctor` warns when the local cache is tracked, not ignored, or resolves through an unsafe path.
-- **Hardened local loop memory.** Episode scans now reject oversized files at the bounded read boundary, require byte-exact UTF-8, require filename/content identity and canonical UTC timestamps, omit unused Evidence references from schema v1, distinguish write vs retention warnings, preflight prune batches, report partial prune conflicts and operational prune failures, keep protected episodes within retention caps, redact more shell absolute-path forms, report invalid-UTF-8 bytes in corrupt accounting, count only successful prune unlinks by the current invocation, return stable memory JSON errors, and use Git's ignore semantics for doctor cache checks.
+- **Added bounded, machine-local loop-memory episodes.** `task complete` records bounded verification episodes under the ignored cache, preserving existing task-completion semantics and JSON. New `memory status` and dry-run-by-default `memory prune` commands expose aggregate maintenance only; `doctor` warns when the local cache is tracked, ignored, or resolves through an unsafe path.
+- **Added bounded exact-match recurrence metadata for repeated Agent-detail verification failures.** The signal is advisory, opaque, and never overrides actionable failure guidance.
+
+### Changed
+
+- **Hardened loop-memory scanning, canonicality, corruption visibility, retention, prune accounting, path safety, and stable JSON error behavior.** Episode scans reject oversized files at the bounded read boundary, require byte-exact UTF-8 and canonical UTC timestamps, omit unused Evidence references from schema v1, distinguish write vs retention warnings, preflight prune batches, report partial prune conflicts, keep protected episodes within retention caps, redact more shell absolute-path forms, report invalid-UTF-8 bytes in corrupt accounting, count only successful prune unlinks by the current invocation, and use Git's ignore semantics for `doctor` cache checks.
+- **Agent-detail envelopes omit advisory recurrence metadata before actionable failure guidance when the byte bound is reached.**
 
 ## [2.6.0] — 2026-07-14
 
