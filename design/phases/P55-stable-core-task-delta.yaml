@@ -3,8 +3,7 @@ name: Stable Core and Task Delta
 weight: 7
 confidence: low
 risk: high
-status: planned
-requires_decision: true
+status: done
 objective: >
   Decide whether split context output should exist after reversible deferral,
   recommended budgets, structural projection, local failure recall, and
@@ -17,19 +16,33 @@ non_goals:
   - Create a second failure schema that duplicates the Failure Capsule.
   - Implement split output before the decision is accepted.
 definition_of_done:
-  - The decision evaluates P52-P54 context evidence, P63 exact-match recall,
-    and P66 closed-harness Code Pact stdout evidence before approving any
+  - The decision evaluates P52-P54 context evidence, P63 exact-match recall, and
+    P66 closed-harness Code Pact stdout evidence before approving any
     implementation.
-  - "The task creates `design/decisions/P55-T1-stable-core-task-delta-rfc.md` with `Status: accepted` and a decision outcome of accepted, rejected, or deferred."
-  - The ADR records natural bytes, final budgeted bytes, deferred bytes, projection before and after bytes, retrieval bytes, default combined-pack bytes, and artifact or command count changes.
-  - If approved, split artifacts must be explicit opt-in and the default combined pack must remain unchanged.
-  - If approved, the public contract must define `task context <task-id> --context-output split` and `task prepare <task-id> --context-output split` or an equivalent non-conflicting flag.
-  - If approved, split JSON must include context output mode, manifest reference, stable-core reference, stable-core digest and bytes, task-delta reference, task-delta digest and bytes, and retrieval commands for both parts.
-  - Failure delta must reuse the existing Failure Capsule fingerprint, evidence reference, and compact envelope by reference; no new failure schema or failure-delta byte count is introduced.
-  - Stable-core digest alone is insufficient unless the agent has the matching content; otherwise a retrieval command must be returned.
-  - The decision compares context resend cost against failure investigation, verification repetition, and memory retrieval cost.
-  - The decision compares initial context bytes, total Code Pact stdout bytes
-    in closed scenarios, verification count, same-fingerprint repeat count,
+  - "The task creates `design/decisions/P55-T1-stable-core-task-delta-rfc.md`
+    with `Status: accepted` and a decision outcome of accepted, rejected, or
+    deferred."
+  - The ADR records natural bytes, final budgeted bytes, deferred bytes,
+    projection before and after bytes, retrieval bytes, default combined-pack
+    bytes, and artifact or command count changes.
+  - If approved, split artifacts must be explicit opt-in and the default
+    combined pack must remain unchanged.
+  - If approved, the public contract must define `task context <task-id>
+    --context-output split` and `task prepare <task-id> --context-output split`
+    or an equivalent non-conflicting flag.
+  - If approved, split JSON must include context output mode, manifest
+    reference, stable-core reference, stable-core digest and bytes, task-delta
+    reference, task-delta digest and bytes, and retrieval commands for both
+    parts.
+  - Failure delta must reuse the existing Failure Capsule fingerprint, evidence
+    reference, and compact envelope by reference; no new failure schema or
+    failure-delta byte count is introduced.
+  - Stable-core digest alone is insufficient unless the agent has the matching
+    content; otherwise a retrieval command must be returned.
+  - The decision compares context resend cost against failure investigation,
+    verification repetition, and memory retrieval cost.
+  - The decision compares initial context bytes, total Code Pact stdout bytes in
+    closed scenarios, verification count, same-fingerprint repeat count,
     deferred retrieval bytes, Evidence retrieval bytes, and prior-local signal
     bytes.
   - The decision does not claim to measure total model input in normal runtime.
@@ -40,6 +53,7 @@ verification:
     - pnpm typecheck
     - pnpm test:unit
     - pnpm test:integration:smoke
+requires_decision: true
 tasks:
   - id: P55-T1
     type: architecture
@@ -49,10 +63,11 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
+    description: Evaluate P52-P54 and P63-P66 measurement evidence and decide
+      whether split context output should be accepted, rejected, or deferred.
     depends_on:
       - P66-T2
-    description: Evaluate P52-P54 and P63-P66 measurement evidence and decide whether split context output should be accepted, rejected, or deferred.
     reads:
       - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
       - design/decisions/*.md

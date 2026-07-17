@@ -299,4 +299,5 @@ feature before a new decision.
 
 Stage 1 must show a favourable byte comparison before Stage 2 / 3 begins.
 
-Until then, P55-T1 remains deferred and no split context work begins.
+Until then, the Stable Core / Task Delta decision remains deferred and no
+split-context implementation begins.
