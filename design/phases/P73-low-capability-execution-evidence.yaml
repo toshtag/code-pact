@@ -109,6 +109,37 @@ tasks:
       - package.json
     acceptance_refs:
       - tests/unit/scripts/benchmark-low-capability.test.ts
+  - id: P73-T4
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: >
+      Close the benchmark trust boundary by detecting committed executor writes,
+      revalidating exact input bundles, enforcing complete paired pilots,
+      preserving cumulative session metrics, bounding feedback, and rejecting
+      unsafe filesystem evidence.
+    depends_on:
+      - P73-T3
+    reads:
+      - design/phases/P73-low-capability-execution-evidence.yaml
+      - benchmarks/low-capability/**
+      - scripts/benchmark-low-capability.mjs
+      - tests/unit/scripts/benchmark-low-capability.test.ts
+      - docs/maintainers/low-capability-benchmark.md
+      - package.json
+    writes:
+      - design/phases/P73-low-capability-execution-evidence.yaml
+      - benchmarks/low-capability/**
+      - scripts/benchmark-low-capability.mjs
+      - tests/unit/scripts/benchmark-low-capability.test.ts
+      - docs/maintainers/low-capability-benchmark.md
+    acceptance_refs:
+      - tests/unit/scripts/benchmark-low-capability.test.ts
   - id: P73-T2
     type: other
     ambiguity: medium
@@ -122,7 +153,7 @@ tasks:
       Validate paired external execution evidence and decide whether the current
       deterministic contract should be retained, revised, or blocked.
     depends_on:
-      - P73-T3
+      - P73-T4
     reads:
       - design/decisions/P66-T2-token-reduction-evidence-rfc.md
       - design/decisions/P55-T1-stable-core-task-delta-rfc.md

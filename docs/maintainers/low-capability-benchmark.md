@@ -19,13 +19,13 @@ It never calls a model API and does not hardcode a provider.
 
 ## Corpus cases
 
-| case | task type | expected outcome |
-|------|-----------|------------------|
-| `bounded-feature` | feature | `verified_success` |
-| `regression-repair` | bugfix | `verified_success` |
-| `scope-boundary` | bugfix | `verified_success` (no writes outside allowed list) |
-| `decision-stop` | explicit stop | `expected_stop_success` |
-| `explicit-context` | feature with context files | `verified_success` |
+| case                | task type                  | expected outcome                                    |
+| ------------------- | -------------------------- | --------------------------------------------------- |
+| `bounded-feature`   | feature                    | `verified_success`                                  |
+| `regression-repair` | bugfix                     | `verified_success`                                  |
+| `scope-boundary`    | bugfix                     | `verified_success` (no writes outside allowed list) |
+| `decision-stop`     | explicit stop              | `expected_stop_success`                             |
+| `explicit-context`  | feature with context files | `verified_success`                                  |
 
 Each case defines:
 
@@ -217,22 +217,34 @@ generated when `score-summary.json` reports `safety_gate: pass` and
 ## Safety and determinism
 
 - Each run gets a content-derived `run_id` and a fresh workspace copy.
-- The base fixture state is committed to git so `git status` can compute exactly
-  which files changed, including untracked files.
-- The scope check uses `allowed_writes` from the corpus. Allowed paths may be
-  exact files or directories; writes outside the allowed list are counted as
-  scope violations and downgrade the result to `verification_failed`.
-- The executor input bundle is content-hashed and recorded in the run manifest.
+- The fixture state and the evaluation base state are committed separately,
+  producing `fixture_base_commit` and `evaluation_base_commit` in the manifest.
+- Scope detection reads both `git diff` and `git status` NUL-terminated output
+  so committed, staged, and untracked changes are all counted.
+- The scope check uses canonicalized `allowed_writes` from the corpus. Allowed
+  paths may be exact files or directory prefixes; writes outside the allowed
+  list are counted as scope violations and downgrade the result to
+  `verification_failed`.
+- The executor input bundle is content-hashed, written to `executor-input/`,
+  and revalidated during `evaluate` and `finalize`.
+- Symlinks and other non-regular files are rejected from fixtures and from the
+  input bundle.
 - The result binds back to the manifest through `manifest_sha256`,
-  `input_bundle_sha256`, `task_contract_sha256`, `base_commit`, and
-  `tool_permission_class`.
+  `input_bundle_sha256`, `task_contract_sha256`, `fixture_base_commit`,
+  `evaluation_base_commit`, and `tool_permission_class`.
 - A fresh session is required for round 1; subsequent rounds must reuse the same
-  `session_id`.
+  `session_id`. Reusing a `session_id` across different runs is rejected.
+- Token, cost, context-retrieval, manual-intervention, and code-pact-command
+  counts are cumulative across rounds and finalization rejects any telemetry
+  that does not match the attested cumulative totals.
 - If a round produces the same failure fingerprint as the previous round, the
   next round is classified as `stop_repeated_failure`.
+- Failure feedback is bounded by `failure_feedback_max_bytes`.
 - `max_rounds` is 3; requesting a round beyond 3 yields `ROUND_OUT_OF_RANGE`.
 - `manual_intervention_count > 0` is terminal (`stop_manual_intervention`) and
   is rejected by the scorer.
+- Round attestations and executor telemetry are validated at runtime against
+  Zod schemas before the harness acts on them.
 
 ## Adding a new case
 

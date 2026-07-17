@@ -10,6 +10,36 @@ const repoRoot = process.cwd();
 const scriptPath = join(repoRoot, "scripts", "benchmark-low-capability.mjs");
 const codePactCliPath = join(repoRoot, "dist", "cli.js");
 
+type RunResult = Record<string, unknown> & {
+  status?: string;
+  completed_rounds?: number;
+  first_pass_success?: boolean;
+  repair_rounds?: number;
+  scope_violation_count?: number;
+  scope_violations?: string[];
+  exit_code?: number;
+  changed_paths?: string[];
+  session_id?: string;
+  manifest_sha256?: string;
+  failure_fingerprint?: string;
+  bounded_output?: string;
+  same_fingerprint_repeat_count?: number;
+  context_retrieval_count?: number;
+  context_retrieval_count_total?: number;
+  code_pact_stdout_bytes?: number;
+  code_pact_command_count_total?: number;
+  manual_intervention_count?: number;
+  manual_intervention_count_total?: number;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  total_tokens?: number | null;
+  billed_amount?: number | null;
+  currency?: string | null;
+  fixture_base_commit?: string;
+  evaluation_base_commit?: string;
+  next_action?: string;
+};
+
 function runScript(
   args: string[],
   env?: Record<string, string>,
@@ -132,7 +162,19 @@ async function evaluateRun(
     "--attestation",
     attestationPath,
   ]);
-  return jsonOk(res) as { result: Record<string, unknown> };
+  const envelope = jsonOk(res) as Record<string, unknown>;
+  const result = JSON.parse(
+    await readFile(join(runDir, "result.json"), "utf8"),
+  ) as Record<string, unknown>;
+  if (
+    !result.completed_rounds ||
+    (result.completed_rounds as number) !== round
+  ) {
+    throw new Error(
+      `evaluate did not write expected round result: ${JSON.stringify({ envelope, result })}`,
+    );
+  }
+  return { result } as { result: RunResult };
 }
 
 async function finalizeRun(
@@ -148,7 +190,7 @@ async function finalizeRun(
 ) {
   const result = JSON.parse(
     await readFile(join(runDir, "result.json"), "utf8"),
-  ) as { session_id: string };
+  ) as { session_id: string; manual_intervention_count_total?: number };
   const manifest = JSON.parse(
     await readFile(join(runDir, "run-manifest.json"), "utf8"),
   ) as {
@@ -179,7 +221,9 @@ async function finalizeRun(
         : billedAmount !== null
           ? "USD"
           : null,
-    manual_intervention_count: overrides.manual_intervention_count ?? 0,
+    manual_intervention_count:
+      overrides.manual_intervention_count ??
+      (result.manual_intervention_count_total || 0),
   };
   const telemetryPath = join(tempRoot, `tel-${randomUUID()}.json`);
   await writeFile(telemetryPath, JSON.stringify(telemetry), "utf8");
@@ -228,7 +272,8 @@ describe("benchmark-low-capability", () => {
     expect(manifest.case_id).toBe("bounded-feature");
     expect(manifest.variant).toBe("baseline");
     expect(manifest.executor_id).toBe("E1");
-    expect(manifest.base_commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(manifest.fixture_base_commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(manifest.evaluation_base_commit).toMatch(/^[0-9a-f]{40}$/);
     expect(manifest.tool_permission_class).toBe("workspace-read-write-shell");
     expect(manifest.fresh_session_required).toBe(true);
     expect(manifest.input_bundle_sha256).toMatch(/^[0-9a-f]{64}$/);
@@ -732,6 +777,7 @@ describe("benchmark-low-capability", () => {
       info.manifest,
       1,
       "implemented",
+      { manualIntervention: 1 },
     );
     await evaluateRun(info.run_dir, 1, att1);
     const { result } = await finalizeRun(info.run_dir, {
@@ -767,6 +813,128 @@ describe("benchmark-low-capability", () => {
     expect(score.code).not.toBe(0);
     const envelope = score.data as { ok: boolean };
     expect(envelope.ok).toBe(false);
+  });
+
+  it("rejects a tampered input bundle during evaluate", async () => {
+    const info = await prepareRun(
+      "bounded-feature",
+      "baseline",
+      "E1",
+      1,
+      tmp(),
+    );
+    const inputDir = info.manifest.executor_input_path;
+    const inputManifestPath = join(inputDir, "input-manifest.json");
+    const inputManifest = JSON.parse(await readFile(inputManifestPath, "utf8"));
+    const target = inputManifest.files[0].path;
+    await writeFile(join(inputDir, target), "tampered", "utf8");
+    const { path: attPath } = await makeAttestation(
+      info.manifest,
+      1,
+      "implemented",
+    );
+    const res = runScript([
+      "--json",
+      "evaluate",
+      "--run",
+      info.run_dir,
+      "--round",
+      "1",
+      "--attestation",
+      attPath,
+    ]);
+    expect(res.code).not.toBe(0);
+    const envelope = res.data as { ok: boolean; error?: { message: string } };
+    expect(envelope.ok).toBe(false);
+    expect(envelope.error?.message).toContain("EVIDENCE_INTEGRITY_ERROR");
+  });
+
+  it("rejects a reused session_id across runs", async () => {
+    const resultRoot = tmp("session");
+    const first = await prepareRun(
+      "bounded-feature",
+      "baseline",
+      "E1",
+      1,
+      resultRoot,
+    );
+    const second = await prepareRun(
+      "bounded-feature",
+      "baseline",
+      "E1",
+      2,
+      resultRoot,
+    );
+    const { path: firstAtt, sessionId: usedSessionId } = await makeAttestation(
+      first.manifest,
+      1,
+      "implemented",
+    );
+    await evaluateRun(first.run_dir, 1, firstAtt);
+    const { path: secondAtt } = await makeAttestation(
+      second.manifest,
+      1,
+      "implemented",
+      { sessionId: usedSessionId },
+    );
+    const res = runScript([
+      "--json",
+      "evaluate",
+      "--run",
+      second.run_dir,
+      "--round",
+      "1",
+      "--attestation",
+      secondAtt,
+    ]);
+    expect(res.code).not.toBe(0);
+    const envelope = res.data as { ok: boolean; error?: { message: string } };
+    expect(envelope.ok).toBe(false);
+    expect(envelope.error?.message).toContain("SESSION_ID_REUSED");
+  });
+
+  it("prepare-pilot stage b rejects missing or failing gate summary", async () => {
+    const pilotRoot = tmp("pilot-b");
+    const noGate = runScript([
+      "--json",
+      "prepare-pilot",
+      "--stage",
+      "b",
+      "--executors",
+      "E1",
+      "--replicates",
+      "1",
+      "--output",
+      pilotRoot,
+    ]);
+    expect(noGate.code).not.toBe(0);
+
+    const badGatePath = join(tempRoot, `bad-gate-${randomUUID()}.json`);
+    await writeFile(
+      badGatePath,
+      JSON.stringify({
+        schema_version: 1,
+        corpus_version: "x",
+        safety_gate: "fail",
+        stage_b_allowed: true,
+      }),
+      "utf8",
+    );
+    const badGate = runScript([
+      "--json",
+      "prepare-pilot",
+      "--stage",
+      "b",
+      "--executors",
+      "E1",
+      "--replicates",
+      "1",
+      "--output",
+      pilotRoot,
+      "--gate-summary",
+      badGatePath,
+    ]);
+    expect(badGate.code).not.toBe(0);
   });
 
   describe.skipIf(!existsSync(codePactCliPath))(

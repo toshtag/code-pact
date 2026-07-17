@@ -16,6 +16,7 @@ import {
   copyFile,
   rm,
   realpath,
+  lstat,
 } from "node:fs/promises";
 import { existsSync, writeSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -28,6 +29,7 @@ import {
   normalize,
 } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { z } from "zod";
 
 const CORPUSS_REL = "benchmarks/low-capability/corpus.json";
 const EXCLUDED_FIXTURE_DIRS = new Set([
@@ -41,13 +43,16 @@ const HIDDEN_SOURCE_DIRS = new Set([
   ".git",
   "node_modules",
   ".local",
+  ".context",
+  ".code-pact",
   ".DS_Store",
 ]);
-const BENCHMARK_GENERATED_PREFIXES = [
-  ".context/",
-  ".code-pact/state/events/",
-  ".code-pact/cache/",
-];
+const BENCH_GIT_ENV = {
+  GIT_AUTHOR_NAME: "bench",
+  GIT_AUTHOR_EMAIL: "bench@example.com",
+  GIT_COMMITTER_NAME: "bench",
+  GIT_COMMITTER_EMAIL: "bench@example.com",
+};
 const TOOL_PERMISSION_CLASS = "workspace-read-write-shell";
 const VALID_ACTIONS = new Set([
   "implemented",
@@ -63,6 +68,67 @@ const TERMINAL_STATUSES = new Set([
   "stop_manual_intervention",
   "invalid",
 ]);
+
+const hexSha256 = z.string().regex(/^[0-9a-f]{64}$/);
+const hexSha40 = z.string().regex(/^[0-9a-f]{40}$/);
+
+const manifestSchema = z.object({
+  schema_version: z.literal(1),
+  run_id: z.string().min(1),
+  corpus_version: z.string().min(1),
+  case_id: z.string().min(1),
+  variant: z.enum(["baseline", "code_pact"]),
+  executor_id: z.string().min(1),
+  replicate: z.number().int().min(1),
+  fixture_digest: hexSha256,
+  task_contract_digest: hexSha256,
+  task_contract_sha256: hexSha256,
+  max_rounds: z.number().int().min(1),
+  fixture_base_commit: hexSha40,
+  evaluation_base_commit: hexSha40,
+  tool_permission_class: z.string().min(1),
+  fresh_session_required: z.boolean(),
+  input_bundle_sha256: hexSha256,
+  manifest_sha256: hexSha256,
+  initial_code_pact_stdout_bytes: z.number().min(0).optional(),
+  initial_code_pact_command_count: z.number().int().min(0).optional(),
+  output_root: z.string().min(1).optional(),
+  workspace_path: z.string().min(1),
+  rounds_path: z.string().min(1),
+  executor_input_path: z.string().min(1),
+  instruction_path: z.string().min(1),
+  created_at: z.string().datetime(),
+  stage: z.string().min(1).optional(),
+});
+
+const attestationSchema = z.object({
+  schema_version: z.literal(1),
+  run_id: z.string().min(1),
+  round: z.number().int().min(1),
+  executor_id: z.string().min(1),
+  session_id: z.string().min(1),
+  fresh_session_started: z.boolean(),
+  tool_permission_class: z.string().min(1),
+  action: z.enum(["implemented", "stopped_decision", "failed_to_execute"]),
+  input_bundle_sha256: hexSha256,
+  manual_intervention_count: z.number().int().min(0),
+  context_retrieval_count: z.number().int().min(0),
+});
+
+const telemetrySchema = z.object({
+  schema_version: z.literal(1),
+  run_id: z.string().min(1),
+  executor_id: z.string().min(1),
+  variant: z.enum(["baseline", "code_pact"]),
+  replicate: z.number().int().min(1),
+  session_id: z.string().min(1),
+  tool_permission_class: z.string().min(1),
+  input_tokens: z.number().nullable().optional(),
+  output_tokens: z.number().nullable().optional(),
+  billed_amount: z.number().min(0).nullable().optional(),
+  currency: z.string().min(1).nullable().optional(),
+  manual_intervention_count: z.number().int().min(0),
+});
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -132,10 +198,6 @@ function hasDuplicates(values) {
   return new Set(values).size !== values.length;
 }
 
-function isJson(args) {
-  return args.includes("--json") || args.values?.json === true;
-}
-
 async function safeRealpath(p) {
   try {
     return await realpath(p);
@@ -160,11 +222,14 @@ async function fixtureDigest(fixturePath) {
     for (const ent of entries) {
       if (EXCLUDED_FIXTURE_DIRS.has(ent.name)) continue;
       const rel = prefix ? `${prefix}/${ent.name}` : ent.name;
+      const full = join(dir, ent.name);
       if (ent.isDirectory()) {
-        await walk(join(dir, ent.name), rel);
-      } else if (ent.isFile() || ent.isSymbolicLink()) {
-        const content = await readFile(join(dir, ent.name), "utf8");
+        await walk(full, rel);
+      } else if (ent.isFile() && !ent.isSymbolicLink()) {
+        const content = await readFile(full, "utf8");
         record[rel] = content;
+      } else {
+        throw new Error(`fixture contains non-regular file or symlink: ${rel}`);
       }
     }
   }
@@ -292,25 +357,33 @@ async function validateCorpus(corpus) {
           issues.push(`${c.id}: allowed_writes must contain strings`);
           continue;
         }
-        if (seen.has(w)) issues.push(`${c.id}: duplicate allowed_write ${w}`);
-        seen.add(w);
-        const norm = normalize(w)
-          .replace(/\\/g, "/")
-          .replace(/\/{2,}/g, "/")
-          .replace(/\/$/, "");
-        if (
-          isAbsolute(norm) ||
-          norm.startsWith("../") ||
-          norm.includes("/../") ||
-          norm === ".." ||
-          norm.split("/").some(s => s === "..") ||
-          norm.startsWith("/") ||
-          norm.trim() === ""
-        ) {
+        if (w.includes("\0") || w.includes("\n")) {
           issues.push(
-            `${c.id}: allowed_write must be a relative POSIX path: ${w}`,
+            `${c.id}: allowed_write must not contain NUL or newline: ${w}`,
           );
+          continue;
         }
+        if (w.includes("\\")) {
+          issues.push(`${c.id}: allowed_write must use forward slashes: ${w}`);
+          continue;
+        }
+        if (w.startsWith("./") || w === ".") {
+          issues.push(`${c.id}: allowed_write must not start with ./: ${w}`);
+          continue;
+        }
+        try {
+          canonicalizePathForScope(w);
+        } catch {
+          issues.push(
+            `${c.id}: allowed_write must be a canonical relative POSIX path: ${w}`,
+          );
+          continue;
+        }
+        if (seen.has(w)) {
+          issues.push(`${c.id}: duplicate allowed_write ${w}`);
+          continue;
+        }
+        seen.add(w);
       }
     }
     if (!Array.isArray(c.verification) || c.verification.length === 0) {
@@ -387,10 +460,12 @@ async function copyFixture(src, dst) {
     const d = join(dst, ent.name);
     if (ent.isDirectory()) {
       await copyFixture(s, d);
-    } else if (ent.isFile()) {
+    } else if (ent.isFile() && !ent.isSymbolicLink()) {
       await copyFile(s, d);
-    } else if (ent.isSymbolicLink()) {
-      await copyFile(s, d);
+    } else {
+      throw new Error(
+        `fixture contains non-regular file or symlink: ${ent.name}`,
+      );
     }
   }
 }
@@ -440,99 +515,179 @@ function runCodePactCli(cwd, args, env = {}) {
 }
 
 async function initGitWorkspace(workspace) {
-  const gitEnv = {
-    GIT_AUTHOR_NAME: "bench",
-    GIT_AUTHOR_EMAIL: "bench@example.com",
-    GIT_COMMITTER_NAME: "bench",
-    GIT_COMMITTER_EMAIL: "bench@example.com",
-  };
-  let step = runSync(workspace, "git", ["init", "-q"], gitEnv);
+  let step = runSync(workspace, "git", ["init", "-q"], BENCH_GIT_ENV);
   if (step.code !== 0) throw new Error(`git init failed: ${step.stderr}`);
   step = runSync(
     workspace,
     "git",
     ["config", "user.email", "bench@example.com"],
-    gitEnv,
+    BENCH_GIT_ENV,
   );
   if (step.code !== 0)
     throw new Error(`git config user.email failed: ${step.stderr}`);
-  step = runSync(workspace, "git", ["config", "user.name", "bench"], gitEnv);
+  step = runSync(
+    workspace,
+    "git",
+    ["config", "user.name", "bench"],
+    BENCH_GIT_ENV,
+  );
   if (step.code !== 0)
     throw new Error(`git config user.name failed: ${step.stderr}`);
-  step = runSync(workspace, "git", ["add", "."], gitEnv);
+  step = runSync(workspace, "git", ["add", "."], BENCH_GIT_ENV);
   if (step.code !== 0) throw new Error(`git add failed: ${step.stderr}`);
   let commit = runSync(
     workspace,
     "git",
-    ["commit", "-q", "-m", "base"],
-    gitEnv,
+    ["commit", "-q", "-m", "fixture-base"],
+    BENCH_GIT_ENV,
   );
   if (commit.code !== 0) {
     const empty = runSync(
       workspace,
       "git",
       ["diff", "--cached", "--quiet"],
-      gitEnv,
+      BENCH_GIT_ENV,
     );
     if (empty.code !== 0) {
       throw new Error(`git commit failed: ${commit.stderr}`);
     }
   }
-  const rev = runSync(workspace, "git", ["rev-parse", "HEAD"], gitEnv);
+  const rev = runSync(workspace, "git", ["rev-parse", "HEAD"], BENCH_GIT_ENV);
   if (rev.code !== 0 || !rev.stdout.trim())
     throw new Error("git rev-parse failed");
   return rev.stdout.trim();
 }
 
-function gitStatusChangedPaths(workspace) {
-  const res = runSync(workspace, "git", [
-    "status",
-    "--porcelain=1",
-    "--untracked-files=all",
-  ]);
-  if (res.code !== 0) throw new Error(`git status failed: ${res.stderr}`);
-  const lines = res.stdout.split("\n").filter(Boolean);
+function splitNulTerminated(data) {
+  return data.split("\0").filter(Boolean);
+}
+
+function validateScopePath(p) {
+  if (
+    p.includes("\n") ||
+    p.includes("\0") ||
+    p.startsWith("/") ||
+    p === ".." ||
+    p.startsWith("../") ||
+    p.includes("/../") ||
+    p.split("/").some(s => s === "..")
+  ) {
+    throw new Error(`SCOPE_PATH_ERROR: unsafe path ${JSON.stringify(p)}`);
+  }
+}
+
+function parseGitStatusPaths(stdout) {
+  const chunks = splitNulTerminated(stdout);
   const paths = [];
-  for (const line of lines) {
-    const status = line.slice(0, 2);
-    const rest = line.slice(3);
+  let i = 0;
+  while (i < chunks.length) {
+    const rec = chunks[i];
+    if (rec.length < 3 || rec[2] !== " ") {
+      throw new Error(`invalid git status -z record: ${JSON.stringify(rec)}`);
+    }
+    const status = rec.slice(0, 2);
+    const path = rec.slice(3);
     if (status[0] === "R" || status[0] === "C") {
-      const arrow = rest.indexOf(" -> ");
-      if (arrow !== -1) {
-        paths.push(rest.slice(0, arrow), rest.slice(arrow + 4));
-      } else {
-        paths.push(rest);
+      const newPath = chunks[i + 1];
+      if (newPath === undefined) {
+        throw new Error(`git status -z rename missing new path`);
       }
+      paths.push(path, newPath);
+      i += 2;
     } else {
-      paths.push(rest);
+      paths.push(path);
+      i += 1;
     }
   }
   return paths;
 }
 
-function isBenchmarkGeneratedPath(p) {
-  for (const prefix of BENCHMARK_GENERATED_PREFIXES) {
-    if (p === prefix || p.startsWith(prefix)) return true;
+function parseGitDiffNameStatus(stdout) {
+  const parts = splitNulTerminated(stdout);
+  const paths = [];
+  let i = 0;
+  while (i < parts.length) {
+    const status = parts[i];
+    if (status[0] === "R" || status[0] === "C") {
+      paths.push(parts[i + 1], parts[i + 2]);
+      i += 3;
+    } else {
+      paths.push(parts[i + 1]);
+      i += 2;
+    }
   }
-  return false;
+  return paths;
+}
+
+function gitChangedPaths(workspace, baseCommit) {
+  const diffRes = runSync(workspace, "git", [
+    "diff",
+    "--name-status",
+    "-z",
+    baseCommit,
+  ]);
+  if (diffRes.code !== 0) {
+    throw new Error(`git diff failed: ${diffRes.stderr}`);
+  }
+  const statusRes = runSync(workspace, "git", [
+    "status",
+    "--porcelain=v1",
+    "-z",
+    "--untracked-files=all",
+  ]);
+  if (statusRes.code !== 0) {
+    throw new Error(`git status failed: ${statusRes.stderr}`);
+  }
+  const paths = new Set([
+    ...parseGitDiffNameStatus(diffRes.stdout),
+    ...parseGitStatusPaths(statusRes.stdout),
+  ]);
+  for (const p of paths) validateScopePath(p);
+  return [...paths];
 }
 
 function sourceChangedPaths(changedPaths) {
   return changedPaths.filter(p => {
     const first = p.split("/")[0];
-    return !HIDDEN_SOURCE_DIRS.has(first) && !isBenchmarkGeneratedPath(p);
+    return !HIDDEN_SOURCE_DIRS.has(first);
   });
 }
 
+function canonicalizePathForScope(raw) {
+  const s = raw.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+  if (
+    s === "" ||
+    s === "/" ||
+    s.startsWith("/") ||
+    s.startsWith("../") ||
+    s.includes("/../") ||
+    s.split("/").some(seg => seg === "..")
+  ) {
+    throw new Error(`invalid scope path: ${raw}`);
+  }
+  const parts = s.split("/");
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    if (p === ".") throw new Error(`invalid scope path: ${raw}`);
+    if (p === "" && i !== parts.length - 1) {
+      throw new Error(`invalid scope path: ${raw}`);
+    }
+  }
+  if (s.startsWith("./")) throw new Error(`invalid scope path: ${raw}`);
+  return s;
+}
+
 function computeScopeViolations(changedPaths, allowedWrites) {
+  const allowed = allowedWrites.map(w => canonicalizePathForScope(w));
   const violations = [];
   for (const p of changedPaths) {
-    const allowed = allowedWrites.some(aw => {
-      if (p === aw) return true;
-      if (aw.endsWith("/") && p.startsWith(aw)) return true;
+    const norm = canonicalizePathForScope(p);
+    const ok = allowed.some(aw => {
+      if (norm === aw) return true;
+      if (aw.endsWith("/") && norm.startsWith(aw)) return true;
       return false;
     });
-    if (!allowed) violations.push(p);
+    if (!ok) violations.push(p);
   }
   return violations;
 }
@@ -659,7 +814,8 @@ function buildTaskContract(
   caseObj,
   corpus,
   variant,
-  baseCommit,
+  fixtureBaseCommit,
+  evaluationBaseCommit,
   toolPermissionClass,
   runId,
 ) {
@@ -672,7 +828,8 @@ function buildTaskContract(
     `expected_outcome: ${caseObj.expected_outcome}`,
     `requires_explicit_stop: ${caseObj.requires_explicit_stop}`,
     `tool_permission_class: ${toolPermissionClass}`,
-    `base_commit: ${baseCommit}`,
+    `fixture_base_commit: ${fixtureBaseCommit}`,
+    `evaluation_base_commit: ${evaluationBaseCommit}`,
     "",
     "## Objective",
     caseObj.objective,
@@ -774,7 +931,8 @@ async function generateExecutorInput({
   codePactPrepare,
   codePactRunbook,
   contextPackContent,
-  baseCommit,
+  fixtureBaseCommit,
+  evaluationBaseCommit,
   toolPermissionClass,
   runId,
   executorId,
@@ -786,7 +944,8 @@ async function generateExecutorInput({
     caseObj,
     corpus,
     variant,
-    baseCommit,
+    fixtureBaseCommit,
+    evaluationBaseCommit,
     toolPermissionClass,
     runId,
   );
@@ -894,9 +1053,11 @@ async function doPrepare({
   let contextPackContent = "";
   let initialCodePactStdoutBytes = 0;
 
+  let initialCodePactCommandCount = 0;
   try {
     await copyFixture(fixturePath, workspacePath);
-    const baseCommit = await initGitWorkspace(workspacePath);
+    const fixtureBaseCommit = await initGitWorkspace(workspacePath);
+    let evaluationBaseCommit = fixtureBaseCommit;
 
     if (variant === "code_pact") {
       const cliPath = resolve(repoRoot, "dist", "cli.js");
@@ -962,6 +1123,36 @@ async function doPrepare({
           "utf8",
         );
       }
+
+      initialCodePactCommandCount = 3;
+      const add2 = runSync(workspacePath, "git", ["add", "-A"], BENCH_GIT_ENV);
+      if (add2.code !== 0) throw new Error(`git add failed: ${add2.stderr}`);
+      const commit2 = runSync(
+        workspacePath,
+        "git",
+        ["commit", "-q", "-m", "evaluation-base"],
+        BENCH_GIT_ENV,
+      );
+      if (commit2.code !== 0) {
+        const empty2 = runSync(
+          workspacePath,
+          "git",
+          ["diff", "--cached", "--quiet"],
+          BENCH_GIT_ENV,
+        );
+        if (empty2.code !== 0) {
+          throw new Error(`git commit failed: ${commit2.stderr}`);
+        }
+      }
+      const rev2 = runSync(
+        workspacePath,
+        "git",
+        ["rev-parse", "HEAD"],
+        BENCH_GIT_ENV,
+      );
+      if (rev2.code !== 0 || !rev2.stdout.trim())
+        throw new Error("git rev-parse failed");
+      evaluationBaseCommit = rev2.stdout.trim();
     }
 
     const input = await generateExecutorInput({
@@ -972,7 +1163,8 @@ async function doPrepare({
       codePactPrepare,
       codePactRunbook,
       contextPackContent,
-      baseCommit,
+      fixtureBaseCommit,
+      evaluationBaseCommit,
       toolPermissionClass: TOOL_PERMISSION_CLASS,
       runId,
       executorId,
@@ -991,11 +1183,14 @@ async function doPrepare({
       task_contract_digest: contractDigest,
       task_contract_sha256: contractDigest,
       max_rounds: corpus.max_rounds,
-      base_commit: baseCommit,
+      fixture_base_commit: fixtureBaseCommit,
+      evaluation_base_commit: evaluationBaseCommit,
       tool_permission_class: TOOL_PERMISSION_CLASS,
       fresh_session_required: true,
       input_bundle_sha256: input.bundleSha256,
       initial_code_pact_stdout_bytes: initialCodePactStdoutBytes,
+      initial_code_pact_command_count: initialCodePactCommandCount,
+      output_root: outputRoot,
       workspace_path: workspacePath,
       rounds_path: roundsPath,
       executor_input_path: executorInputPath,
@@ -1015,11 +1210,14 @@ async function doPrepare({
       fixture_digest: manifest.fixture_digest,
       task_contract_digest: manifest.task_contract_digest,
       max_rounds: manifest.max_rounds,
-      base_commit: manifest.base_commit,
+      fixture_base_commit: manifest.fixture_base_commit,
+      evaluation_base_commit: manifest.evaluation_base_commit,
       tool_permission_class: manifest.tool_permission_class,
       fresh_session_required: manifest.fresh_session_required,
       input_bundle_sha256: manifest.input_bundle_sha256,
       task_contract_sha256: manifest.task_contract_sha256,
+      initial_code_pact_stdout_bytes: manifest.initial_code_pact_stdout_bytes,
+      initial_code_pact_command_count: manifest.initial_code_pact_command_count,
     };
     manifest.manifest_sha256 = sha256(canonicalJson(identity));
 
@@ -1028,6 +1226,7 @@ async function doPrepare({
       ok: true,
       run_id: runId,
       run_dir: runDir,
+      manifest,
       manifest_path: join(runDir, "run-manifest.json"),
       workspace_path: workspacePath,
       rounds_path: roundsPath,
@@ -1045,7 +1244,15 @@ async function doPrepare({
 async function loadAndValidateManifest(runDir) {
   const manifestPath = join(runDir, "run-manifest.json");
   if (!existsSync(manifestPath)) throw new Error("manifest not found");
-  const manifest = await readJson(manifestPath);
+  const raw = await readJson(manifestPath);
+  let manifest;
+  try {
+    manifest = manifestSchema.parse(raw);
+  } catch (err) {
+    const issue =
+      err instanceof z.ZodError ? err.issues[0]?.message : String(err);
+    throw new Error(`manifest schema validation failed: ${issue}`);
+  }
   const corpus = await loadCorpus();
   const caseObj = findCase(corpus, manifest.case_id);
   const fixDigest = await fixtureDigest(resolve(repoRoot, caseObj.fixture));
@@ -1064,6 +1271,15 @@ async function loadAndValidateManifest(runDir) {
       `manifest run_id mismatch: expected ${expectedRunId}, got ${manifest.run_id}`,
     );
   }
+  if (manifest.fixture_digest !== fixDigest) {
+    throw new Error("manifest fixture_digest mismatch");
+  }
+  if (manifest.task_contract_digest !== contractDigest) {
+    throw new Error("manifest task_contract_digest mismatch");
+  }
+  if (manifest.task_contract_sha256 !== contractDigest) {
+    throw new Error("manifest task_contract_sha256 mismatch");
+  }
   await assertContained(runDir, manifest.workspace_path, "workspace_path");
   await assertContained(runDir, manifest.rounds_path, "rounds_path");
   await assertContained(
@@ -1072,6 +1288,37 @@ async function loadAndValidateManifest(runDir) {
     "executor_input_path",
   );
   await assertContained(runDir, manifest.instruction_path, "instruction_path");
+  if (manifest.output_root) {
+    await assertContained(manifest.output_root, runDir, "run_dir");
+  }
+
+  const workspace = manifest.workspace_path;
+  if (!/^[0-9a-f]{40}$/.test(manifest.fixture_base_commit)) {
+    throw new Error("manifest fixture_base_commit is not a full SHA");
+  }
+  if (!/^[0-9a-f]{40}$/.test(manifest.evaluation_base_commit)) {
+    throw new Error("manifest evaluation_base_commit is not a full SHA");
+  }
+  const evalType = runSync(
+    workspace,
+    "git",
+    ["cat-file", "-t", manifest.evaluation_base_commit],
+    BENCH_GIT_ENV,
+  );
+  if (evalType.code !== 0 || evalType.stdout.trim() !== "commit") {
+    throw new Error("manifest evaluation_base_commit not found in workspace");
+  }
+  const ancestor = runSync(
+    workspace,
+    "git",
+    ["merge-base", "--is-ancestor", manifest.evaluation_base_commit, "HEAD"],
+    BENCH_GIT_ENV,
+  );
+  if (ancestor.code !== 0) {
+    throw new Error(
+      "manifest evaluation_base_commit is not an ancestor of HEAD",
+    );
+  }
 
   const identity = {
     schema_version: manifest.schema_version,
@@ -1084,17 +1331,157 @@ async function loadAndValidateManifest(runDir) {
     fixture_digest: manifest.fixture_digest,
     task_contract_digest: manifest.task_contract_digest,
     max_rounds: manifest.max_rounds,
-    base_commit: manifest.base_commit,
+    fixture_base_commit: manifest.fixture_base_commit,
+    evaluation_base_commit: manifest.evaluation_base_commit,
     tool_permission_class: manifest.tool_permission_class,
     fresh_session_required: manifest.fresh_session_required,
     input_bundle_sha256: manifest.input_bundle_sha256,
     task_contract_sha256: manifest.task_contract_sha256,
+    initial_code_pact_stdout_bytes: manifest.initial_code_pact_stdout_bytes,
+    initial_code_pact_command_count: manifest.initial_code_pact_command_count,
   };
   const expectedManifestSha = sha256(canonicalJson(identity));
   if (manifest.manifest_sha256 !== expectedManifestSha) {
     throw new Error("manifest manifest_sha256 mismatch");
   }
   return manifest;
+}
+
+async function validateInputBundle(runDir, manifest) {
+  const inputDir = manifest.executor_input_path;
+  await assertContained(runDir, inputDir, "executor_input_path");
+  const inputManifestPath = join(inputDir, "input-manifest.json");
+  if (!existsSync(inputManifestPath)) {
+    throw new Error("input manifest not found");
+  }
+  const inputManifest = await readJson(inputManifestPath);
+  if (inputManifest.schema_version !== 1) {
+    throw new Error("input manifest schema_version must be 1");
+  }
+  const expectedFiles = new Map(inputManifest.files.map(f => [f.path, f]));
+  const seen = new Set(expectedFiles.keys());
+  const actual = (await readdir(inputDir)).filter(
+    f => f !== "input-manifest.json",
+  );
+  if (actual.length !== seen.size) {
+    throw new Error(
+      "EVIDENCE_INTEGRITY_ERROR: input bundle file count mismatch",
+    );
+  }
+  const fileEntries = [];
+  for (const name of actual) {
+    if (!seen.has(name)) {
+      throw new Error(
+        `EVIDENCE_INTEGRITY_ERROR: unexpected input file ${name}`,
+      );
+    }
+    const entry = expectedFiles.get(name);
+    const filePath = join(inputDir, name);
+    const st = await lstat(filePath);
+    if (st.isSymbolicLink() || !st.isFile()) {
+      throw new Error(
+        `EVIDENCE_INTEGRITY_ERROR: input file ${name} is not a regular file`,
+      );
+    }
+    const content = await readFile(filePath);
+    const sha = createHash("sha256").update(content).digest("hex");
+    const bytes = content.length;
+    if (sha !== entry.sha256 || bytes !== entry.bytes) {
+      throw new Error(
+        `EVIDENCE_INTEGRITY_ERROR: input file ${name} content mismatch`,
+      );
+    }
+    fileEntries.push({ path: name, sha256: sha, bytes });
+  }
+  fileEntries.sort((a, b) => (a.path < b.path ? -1 : 1));
+  const expectedBundle = sha256(canonicalJson(fileEntries));
+  if (expectedBundle !== inputManifest.bundle_sha256) {
+    throw new Error(
+      "EVIDENCE_INTEGRITY_ERROR: input manifest bundle_sha256 mismatch",
+    );
+  }
+  if (expectedBundle !== manifest.input_bundle_sha256) {
+    throw new Error(
+      "EVIDENCE_INTEGRITY_ERROR: run manifest input_bundle_sha256 mismatch",
+    );
+  }
+  return inputManifest;
+}
+
+function sessionIndexPath(outputRoot) {
+  return join(outputRoot, ".low-capability-sessions.json");
+}
+
+async function loadSessionIndex(outputRoot) {
+  const path = sessionIndexPath(outputRoot);
+  if (!existsSync(path)) return {};
+  try {
+    return await readJson(path);
+  } catch {
+    return {};
+  }
+}
+
+async function saveSessionIndex(outputRoot, index) {
+  await writeJson(sessionIndexPath(outputRoot), index);
+}
+
+async function checkSessionIdUnique(manifest, sessionId) {
+  if (!manifest.output_root || !existsSync(manifest.output_root)) return;
+  const index = await loadSessionIndex(manifest.output_root);
+  if (index[sessionId] && index[sessionId] !== manifest.run_id) {
+    throw new Error(
+      `SESSION_ID_REUSED: session_id ${sessionId} already used by run ${index[sessionId]}`,
+    );
+  }
+}
+
+async function recordSessionId(manifest, sessionId) {
+  if (!manifest.output_root || !existsSync(manifest.output_root)) return;
+  const index = await loadSessionIndex(manifest.output_root);
+  index[sessionId] = manifest.run_id;
+  await saveSessionIndex(manifest.output_root, index);
+}
+
+function buildFailureEnvelope({
+  status,
+  round,
+  nextAction,
+  failureFingerprint,
+  feedback,
+  resultPath,
+  maxBytes,
+}) {
+  const base = {
+    ok: true,
+    data: {
+      status,
+      round,
+      next_action: nextAction,
+      failure_fingerprint: failureFingerprint,
+      feedback: "",
+      result_path: resultPath,
+    },
+  };
+  const baseBytes = byteLength(jsonOut(base));
+  const available = Math.max(0, maxBytes - baseBytes - 64);
+  if (available > 0 && typeof feedback === "string") {
+    const fb = Buffer.from(feedback, "utf8");
+    if (fb.length <= available) {
+      base.data.feedback = feedback;
+    } else {
+      const tail = fb.subarray(fb.length - available).toString("utf8");
+      let start = 0;
+      while (
+        start < tail.length &&
+        (tail.charCodeAt(start) & 0b1100_0000) === 0b1000_0000
+      ) {
+        start++;
+      }
+      base.data.feedback = tail.slice(start);
+    }
+  }
+  return base;
 }
 
 async function loadRoundResult(roundsPath, round) {
@@ -1122,25 +1509,15 @@ function isTerminalStatus(status) {
 
 async function loadAndValidateAttestation(attestationPath, manifest, round) {
   if (!attestationPath) throw new Error("attestation file required");
-  const attestation = await readJson(attestationPath);
-  const required = [
-    "schema_version",
-    "run_id",
-    "round",
-    "executor_id",
-    "session_id",
-    "fresh_session_started",
-    "tool_permission_class",
-    "action",
-    "input_bundle_sha256",
-    "manual_intervention_count",
-    "context_retrieval_count",
-  ];
-  for (const key of required) {
-    if (!(key in attestation)) throw new Error(`attestation missing ${key}`);
+  const raw = await readJson(attestationPath);
+  let attestation;
+  try {
+    attestation = attestationSchema.parse(raw);
+  } catch (err) {
+    const issue =
+      err instanceof z.ZodError ? err.issues[0]?.message : String(err);
+    throw new Error(`attestation schema validation failed: ${issue}`);
   }
-  if (attestation.schema_version !== 1)
-    throw new Error("attestation schema_version must be 1");
   if (attestation.run_id !== manifest.run_id)
     throw new Error("attestation run_id mismatch");
   if (attestation.round !== round)
@@ -1152,36 +1529,6 @@ async function loadAndValidateAttestation(attestationPath, manifest, round) {
   }
   if (attestation.tool_permission_class !== manifest.tool_permission_class) {
     throw new Error("attestation tool_permission_class mismatch");
-  }
-  if (!VALID_ACTIONS.has(attestation.action)) {
-    throw new Error(`attestation invalid action: ${attestation.action}`);
-  }
-  if (
-    typeof attestation.manual_intervention_count !== "number" ||
-    attestation.manual_intervention_count < 0 ||
-    !Number.isInteger(attestation.manual_intervention_count)
-  ) {
-    throw new Error(
-      "attestation manual_intervention_count must be a non-negative integer",
-    );
-  }
-  if (
-    typeof attestation.context_retrieval_count !== "number" ||
-    attestation.context_retrieval_count < 0 ||
-    !Number.isInteger(attestation.context_retrieval_count)
-  ) {
-    throw new Error(
-      "attestation context_retrieval_count must be a non-negative integer",
-    );
-  }
-  if (
-    typeof attestation.session_id !== "string" ||
-    attestation.session_id.length === 0
-  ) {
-    throw new Error("attestation session_id must be a non-empty string");
-  }
-  if (typeof attestation.fresh_session_started !== "boolean") {
-    throw new Error("attestation fresh_session_started must be boolean");
   }
   if (round === 1 && !attestation.fresh_session_started) {
     throw new Error("round 1 requires fresh_session_started");
@@ -1237,9 +1584,13 @@ async function doEvaluate({ runDir, round, attestationPath }) {
     round,
   );
 
+  await validateInputBundle(runDir, manifest);
+  await checkSessionIdUnique(manifest, attestation.session_id);
+
   let verificationOverall = 0;
   let verificationResults = [];
   let codePactStdoutBytes = 0;
+  let codePactCommandCount = 0;
   let nextAction = null;
   let failureKind = null;
 
@@ -1261,6 +1612,7 @@ async function doEvaluate({ runDir, round, attestationPath }) {
       "--detail",
       "agent",
     ]);
+    codePactCommandCount += 1;
     codePactStdoutBytes += byteLength(res.stdout);
     let envelope;
     try {
@@ -1300,7 +1652,7 @@ async function doEvaluate({ runDir, round, attestationPath }) {
   }
 
   const changedPaths = sourceChangedPaths(
-    gitStatusChangedPaths(manifest.workspace_path),
+    gitChangedPaths(manifest.workspace_path, manifest.evaluation_base_commit),
   );
   const scopeViolations = computeScopeViolations(
     changedPaths,
@@ -1318,28 +1670,34 @@ async function doEvaluate({ runDir, round, attestationPath }) {
 
   const expectedStop = caseObj.expected_outcome === "expected_stop_success";
   const action = attestation.action;
+  const manualIntervention = attestation.manual_intervention_count > 0;
 
   if (expectedStop) {
     if (
       action !== "stopped_decision" ||
       changedPaths.length > 0 ||
       scopeViolations.length > 0 ||
-      attestation.manual_intervention_count > 0
+      manualIntervention
     ) {
       verificationOverall = 1;
       if (action === "failed_to_execute") failureKind = "failed_to_execute";
       else if (action !== "stopped_decision") failureKind = "unexpected_action";
-      else if (attestation.manual_intervention_count > 0)
-        failureKind = "manual_intervention";
+      else if (manualIntervention) failureKind = "manual_intervention";
     } else {
       verificationOverall = 0;
       nextAction = "expected_stop";
     }
   } else {
-    if (action !== "implemented" || attestation.manual_intervention_count > 0) {
+    if (action !== "implemented" || manualIntervention) {
       verificationOverall = 1;
       failureKind = action;
     }
+  }
+
+  if (manualIntervention) {
+    verificationOverall = 1;
+    failureKind = "manual_intervention";
+    nextAction = "stop_manual_intervention";
   }
 
   const failureFingerprint =
@@ -1377,11 +1735,28 @@ async function doEvaluate({ runDir, round, attestationPath }) {
     }
   }
 
+  if (manualIntervention) {
+    status = "stop_manual_intervention";
+  }
+
   const previousTotalCodePactStdout =
     previousResult?.code_pact_stdout_bytes_total || 0;
   const inputTokens = previousResult?.input_tokens ?? null;
   const outputTokens = previousResult?.output_tokens ?? null;
   const totalTokens = previousResult?.total_tokens ?? null;
+  const previousContextRetrievalTotal =
+    previousResult?.context_retrieval_count_total || 0;
+  const contextRetrievalCountTotal =
+    previousContextRetrievalTotal + attestation.context_retrieval_count;
+  const previousManualInterventionTotal =
+    previousResult?.manual_intervention_count_total || 0;
+  const manualInterventionCountTotal =
+    previousManualInterventionTotal + attestation.manual_intervention_count;
+  const previousCodePactCommandCountTotal =
+    previousResult?.code_pact_command_count_total ||
+    manifest.initial_code_pact_command_count;
+  const codePactCommandCountTotal =
+    previousCodePactCommandCountTotal + codePactCommandCount;
 
   const result = {
     schema_version: 1,
@@ -1406,113 +1781,70 @@ async function doEvaluate({ runDir, round, attestationPath }) {
     session_id: attestation.session_id,
     tool_permission_class: attestation.tool_permission_class,
     context_retrieval_count: attestation.context_retrieval_count,
+    context_retrieval_count_total: contextRetrievalCountTotal,
     code_pact_stdout_bytes: codePactStdoutBytes,
     code_pact_stdout_bytes_total:
       previousTotalCodePactStdout + codePactStdoutBytes,
+    code_pact_command_count_total: codePactCommandCountTotal,
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     total_tokens: totalTokens,
     billed_amount: previousResult?.billed_amount ?? null,
     currency: previousResult?.currency ?? null,
     manual_intervention_count: attestation.manual_intervention_count,
+    manual_intervention_count_total: manualInterventionCountTotal,
     fixture_digest: manifest.fixture_digest,
     task_contract_digest: manifest.task_contract_digest,
     manifest_sha256: manifest.manifest_sha256,
     input_bundle_sha256: manifest.input_bundle_sha256,
     task_contract_sha256: manifest.task_contract_sha256,
-    base_commit: manifest.base_commit,
+    fixture_base_commit: manifest.fixture_base_commit,
+    evaluation_base_commit: manifest.evaluation_base_commit,
   };
 
   await writeJson(join(manifest.rounds_path, `round-${round}.json`), result);
   await writeJson(join(runDir, "result.json"), result);
-  return ok({ result });
+  await recordSessionId(manifest, attestation.session_id);
+
+  if (status === "verified_success" || status === "expected_stop_success") {
+    return ok({ result });
+  }
+
+  const resultPath = join(runDir, "result.json");
+  const maxFeedbackBytes = corpus.failure_feedback_max_bytes || 2048;
+  return buildFailureEnvelope({
+    status,
+    round,
+    nextAction: result.next_action,
+    failureFingerprint,
+    feedback: bounded,
+    resultPath,
+    maxBytes: maxFeedbackBytes,
+  });
 }
 
 function validateTelemetry(telemetry) {
-  if (telemetry.schema_version !== 1)
-    throw new Error("telemetry schema_version must be 1");
-  const required = [
-    "run_id",
-    "executor_id",
-    "variant",
-    "replicate",
-    "session_id",
-    "tool_permission_class",
-    "input_tokens",
-    "output_tokens",
-    "billed_amount",
-    "currency",
-    "manual_intervention_count",
-  ];
-  for (const key of required) {
-    if (!(key in telemetry)) throw new Error(`telemetry missing ${key}`);
+  let parsed;
+  try {
+    parsed = telemetrySchema.parse(telemetry);
+  } catch (err) {
+    const issue =
+      err instanceof z.ZodError ? err.issues[0]?.message : String(err);
+    throw new Error(`telemetry schema validation failed: ${issue}`);
   }
   if (
-    typeof telemetry.input_tokens !== "number" &&
-    telemetry.input_tokens !== null
-  ) {
-    throw new Error("telemetry input_tokens must be an integer or null");
-  }
-  if (
-    typeof telemetry.output_tokens !== "number" &&
-    telemetry.output_tokens !== null
-  ) {
-    throw new Error("telemetry output_tokens must be an integer or null");
-  }
-  for (const key of ["input_tokens", "output_tokens"]) {
-    const v = telemetry[key];
-    if (v !== null) {
-      if (
-        !Number.isInteger(v) ||
-        v < 0 ||
-        Number.isNaN(v) ||
-        !Number.isFinite(v)
-      ) {
-        throw new Error(
-          `telemetry ${key} must be a non-negative integer or null`,
-        );
-      }
-    }
-  }
-  if (telemetry.billed_amount !== null) {
-    if (
-      typeof telemetry.billed_amount !== "number" ||
-      Number.isNaN(telemetry.billed_amount) ||
-      !Number.isFinite(telemetry.billed_amount) ||
-      telemetry.billed_amount < 0
-    ) {
-      throw new Error(
-        "telemetry billed_amount must be a non-negative number or null",
-      );
-    }
-    if (
-      typeof telemetry.currency !== "string" ||
-      telemetry.currency.length === 0
-    ) {
-      throw new Error(
-        "telemetry currency must be a non-empty string when billed_amount is set",
-      );
-    }
-  }
-  if (
-    telemetry.currency !== null &&
-    (typeof telemetry.currency !== "string" || telemetry.currency.length === 0)
-  ) {
-    throw new Error("telemetry currency must be a non-empty string or null");
-  }
-  if (
-    typeof telemetry.manual_intervention_count !== "number" ||
-    !Number.isInteger(telemetry.manual_intervention_count) ||
-    telemetry.manual_intervention_count < 0
+    parsed.billed_amount !== null &&
+    (parsed.currency === null || parsed.currency === "")
   ) {
     throw new Error(
-      "telemetry manual_intervention_count must be a non-negative integer",
+      "telemetry currency must be a non-empty string when billed_amount is set",
     );
   }
 }
 
 async function doFinalize({ runDir, telemetryPath }) {
   const manifest = await loadAndValidateManifest(runDir);
+  await validateInputBundle(runDir, manifest);
   const resultPath = join(runDir, "result.json");
   if (!existsSync(resultPath))
     throw new Error("result not found; run evaluate first");
@@ -1543,6 +1875,24 @@ async function doFinalize({ runDir, telemetryPath }) {
     totalTokens = inputTokens + outputTokens;
   }
 
+  if (
+    telemetry.manual_intervention_count !==
+    result.manual_intervention_count_total
+  ) {
+    throw new Error(
+      "EVIDENCE_INTEGRITY_ERROR: telemetry manual_intervention_count does not match attestation cumulative total",
+    );
+  }
+
+  if (
+    telemetry.manual_intervention_count > 0 &&
+    result.status !== "stop_manual_intervention"
+  ) {
+    throw new Error(
+      "EVIDENCE_INTEGRITY_ERROR: manual intervention mismatch between attestation and telemetry",
+    );
+  }
+
   const updated = {
     ...result,
     input_tokens: inputTokens,
@@ -1551,12 +1901,8 @@ async function doFinalize({ runDir, telemetryPath }) {
     billed_amount: telemetry.billed_amount ?? null,
     currency: telemetry.currency ?? null,
     manual_intervention_count: telemetry.manual_intervention_count,
+    manual_intervention_count_total: telemetry.manual_intervention_count,
   };
-
-  if (updated.manual_intervention_count > 0) {
-    updated.status = "stop_manual_intervention";
-    updated.exit_code = updated.exit_code ?? 1;
-  }
 
   await writeJson(resultPath, updated);
   return ok({ result: updated });
@@ -1603,9 +1949,14 @@ async function validateResultIntegrity(result, manifest) {
       "task_contract_sha256 mismatch",
     ],
     [
-      "base_commit",
-      result.base_commit === manifest.base_commit,
-      "base_commit mismatch",
+      "fixture_base_commit",
+      result.fixture_base_commit === manifest.fixture_base_commit,
+      "fixture_base_commit mismatch",
+    ],
+    [
+      "evaluation_base_commit",
+      result.evaluation_base_commit === manifest.evaluation_base_commit,
+      "evaluation_base_commit mismatch",
     ],
     [
       "tool_permission_class",
@@ -1633,6 +1984,7 @@ async function doValidateResult({ file }) {
   const result = await readJson(file);
   const runDir = dirname(file);
   const manifest = await loadAndValidateManifest(runDir);
+  await validateInputBundle(runDir, manifest);
   const integrity = await validateResultIntegrity(result, manifest);
   if (!integrity.ok) {
     return fail("VALIDATION_FAILED", integrity.error);
@@ -1684,6 +2036,41 @@ function isSuccessfulOutcome(status) {
   return status === "verified_success" || status === "expected_stop_success";
 }
 
+function updateBilling(agg, prefix, billedAmount, currency) {
+  if (
+    billedAmount === null ||
+    billedAmount === undefined ||
+    typeof billedAmount !== "number" ||
+    Number.isNaN(billedAmount) ||
+    !Number.isFinite(billedAmount)
+  ) {
+    agg[`${prefix}_billing_available`] = false;
+    return;
+  }
+  if (typeof currency !== "string" || currency.length === 0) {
+    agg[`${prefix}_billing_available`] = false;
+    return;
+  }
+  agg[`${prefix}_total_billed_amount`] += billedAmount;
+  const existing = agg[`${prefix}_billing_currency`];
+  if (existing === null) {
+    agg[`${prefix}_billing_currency`] = currency;
+  } else if (existing !== currency) {
+    agg[`${prefix}_billing_available`] = false;
+  }
+}
+
+function costPerSuccessfulOutcome(
+  billedAmount,
+  available,
+  currency,
+  successfulOutcomes,
+) {
+  if (!available || successfulOutcomes === 0 || billedAmount === null)
+    return null;
+  return billedAmount / successfulOutcomes;
+}
+
 async function discoverRunDirs(root) {
   const dirs = [];
   async function walk(dir) {
@@ -1712,6 +2099,7 @@ async function doScore({ resultsRoot }) {
   for (const runDir of runDirs) {
     try {
       const manifest = await loadAndValidateManifest(runDir);
+      await validateInputBundle(runDir, manifest);
       const result = await readJson(join(runDir, "result.json"));
       const integrity = await validateResultIntegrity(result, manifest);
       if (!integrity.ok) {
@@ -1792,6 +2180,12 @@ async function doScore({ resultsRoot }) {
     code_pact_total_tokens: 0,
     baseline_tokens_available: true,
     code_pact_tokens_available: true,
+    baseline_total_billed_amount: 0,
+    code_pact_total_billed_amount: 0,
+    baseline_billing_currency: null,
+    code_pact_billing_currency: null,
+    baseline_billing_available: true,
+    code_pact_billing_available: true,
     baseline_repair_rounds: [],
     code_pact_repair_rounds: [],
     baseline_decision_stop_total: 0,
@@ -1827,6 +2221,12 @@ async function doScore({ resultsRoot }) {
         code_pact_total_tokens: 0,
         baseline_tokens_available: true,
         code_pact_tokens_available: true,
+        baseline_total_billed_amount: 0,
+        code_pact_total_billed_amount: 0,
+        baseline_billing_currency: null,
+        code_pact_billing_currency: null,
+        baseline_billing_available: true,
+        code_pact_billing_available: true,
         baseline_repair_rounds: [],
         code_pact_repair_rounds: [],
         baseline_decision_stop_total: 0,
@@ -1871,6 +2271,11 @@ async function doScore({ resultsRoot }) {
       e.code_pact_tokens_available = false;
       totals.code_pact_tokens_available = false;
     }
+
+    updateBilling(e, "baseline", b.billed_amount, b.currency);
+    updateBilling(totals, "baseline", b.billed_amount, b.currency);
+    updateBilling(e, "code_pact", c.billed_amount, c.currency);
+    updateBilling(totals, "code_pact", c.billed_amount, c.currency);
 
     if (caseObj.expected_outcome === "expected_stop_success") {
       e.baseline_decision_stop_total++;
@@ -2001,6 +2406,19 @@ async function doScore({ resultsRoot }) {
       allTokensAvailable = false;
     }
 
+    const baselineCost = costPerSuccessfulOutcome(
+      e.baseline_total_billed_amount,
+      e.baseline_billing_available,
+      e.baseline_billing_currency,
+      e.baseline_successful_outcomes,
+    );
+    const codePactCost = costPerSuccessfulOutcome(
+      e.code_pact_total_billed_amount,
+      e.code_pact_billing_available,
+      e.code_pact_billing_currency,
+      e.code_pact_successful_outcomes,
+    );
+
     executorRows.push({
       executor_id: e.executor_id,
       baseline_runs: e.baseline_runs,
@@ -2040,6 +2458,10 @@ async function doScore({ resultsRoot }) {
       baseline_tokens_per_successful_outcome: baselineTpso,
       code_pact_tokens_per_successful_outcome: codePactTpso,
       token_efficiency_conclusion: tokenConclusion,
+      baseline_cost_per_successful_outcome: baselineCost,
+      code_pact_cost_per_successful_outcome: codePactCost,
+      baseline_billing_currency: e.baseline_billing_currency,
+      code_pact_billing_currency: e.code_pact_billing_currency,
       safety_gate: safetyGate,
       efficiency_signal: efficiencySignal,
     });
@@ -2054,22 +2476,21 @@ async function doScore({ resultsRoot }) {
     }
   }
 
-  const totalBaseTpso = tokensPerSuccessfulOutcome(
-    totals.baseline_tokens_available ? totals.baseline_total_tokens : null,
+  const totalBaseCost = costPerSuccessfulOutcome(
+    totals.baseline_total_billed_amount,
+    totals.baseline_billing_available,
+    totals.baseline_billing_currency,
     totals.baseline_successful_outcomes,
   );
-  const totalCpTpso = tokensPerSuccessfulOutcome(
-    totals.code_pact_tokens_available ? totals.code_pact_total_tokens : null,
+  const totalCpCost = costPerSuccessfulOutcome(
+    totals.code_pact_total_billed_amount,
+    totals.code_pact_billing_available,
+    totals.code_pact_billing_currency,
     totals.code_pact_successful_outcomes,
   );
-  const totalBaseRepairMean = mean([]); // not meaningful globally
-  const totalCpRepairMean = mean([]);
-  const totalTokenConclusion = tokenEfficiencyConclusion(
-    totalBaseTpso,
-    totalCpTpso,
-    null,
-    null,
-  );
+  const totalBaseTpso = null;
+  const totalCpTpso = null;
+  const totalTokenConclusion = "not_comparable_across_executors";
 
   const caseRows = [];
   for (const cs of byCase.values()) {
@@ -2125,6 +2546,12 @@ async function doScore({ resultsRoot }) {
       baseline_tokens_per_successful_outcome: totalBaseTpso,
       code_pact_tokens_per_successful_outcome: totalCpTpso,
       token_efficiency_conclusion: totalTokenConclusion,
+      baseline_total_billed_amount: totals.baseline_total_billed_amount,
+      code_pact_total_billed_amount: totals.code_pact_total_billed_amount,
+      baseline_billing_currency: totals.baseline_billing_currency,
+      code_pact_billing_currency: totals.code_pact_billing_currency,
+      baseline_cost_per_successful_outcome: totalBaseCost,
+      code_pact_cost_per_successful_outcome: totalCpCost,
       safety_gate: globalSafetyGate,
       efficiency_signal: globalEfficiency,
       stage_b_allowed: globalSafetyGate === "pass",
@@ -2153,70 +2580,125 @@ async function doPreparePilot({
   for (const e of executors) validateExecutorId(e);
   if (stage !== "a" && stage !== "b") throw new Error("stage must be a or b");
 
+  if (
+    !Number.isInteger(replicates) ||
+    replicates < 1 ||
+    !Number.isFinite(replicates)
+  ) {
+    throw new Error("replicates must be a positive integer");
+  }
+
   if (stage === "b") {
     if (!gateSummaryPath) throw new Error("stage b requires --gate-summary");
     const summary = await readJson(gateSummaryPath);
+    if (summary.schema_version !== 1)
+      throw new Error("gate summary schema_version must be 1");
     if (summary.safety_gate !== "pass" || summary.stage_b_allowed !== true) {
       throw new Error("stage b safety gate not passed");
     }
+    if (summary.corpus_version !== corpus.corpus_version) {
+      throw new Error("gate summary corpus_version mismatch");
+    }
   }
 
+  const cliBuilt = existsSync(resolve(repoRoot, "dist", "cli.js"));
+  if (!cliBuilt) {
+    throw new Error("code-pact CLI not built; run `pnpm build`");
+  }
+
+  const outputRootExisted = existsSync(outputRoot);
   await mkdir(outputRoot, { recursive: true });
+  const createdDirs = [];
+  const planPath =
+    stage === "a"
+      ? join(outputRoot, "pilot-plan.json")
+      : join(outputRoot, "pilot-plan-stage-b.json");
+
   const plan = {
     schema_version: 1,
     corpus_version: corpus.corpus_version,
+    corpus_digest: sha256(canonicalJson(corpus)),
     stage,
-    cli_built: existsSync(resolve(repoRoot, "dist", "cli.js")),
+    cli_built: cliBuilt,
     executors,
     replicates,
+    created_at: new Date().toISOString(),
+    expected_pair_keys: [],
     runs: [],
   };
 
   const manifests = [];
-  const variants = stage === "a" ? ["baseline", "code_pact"] : ["code_pact"];
-  const cliBuilt = plan.cli_built;
+  const variants = ["baseline", "code_pact"];
 
-  for (const executorId of executors) {
-    const stageDir = join(outputRoot, `stage-${stage}`, executorId);
-    for (const caseObj of corpus.cases) {
-      for (const variant of variants) {
-        if (variant === "code_pact" && !cliBuilt) {
-          if (stage === "b")
-            throw new Error(
-              "code-pact CLI not built; stage b requires code_pact",
-            );
-          continue;
-        }
-        for (let r = 1; r <= replicates; r++) {
-          const info = await doPrepare({
-            corpus,
-            caseObj,
-            variant,
-            executorId,
-            replicate: r,
-            outputRoot: stageDir,
-            stage,
-          });
-          manifests.push(info);
-          plan.runs.push({
-            case_id: caseObj.id,
-            variant,
-            replicate: r,
-            run_id: info.run_id,
-            executor_id: executorId,
-            stage,
-          });
+  try {
+    for (const executorId of executors) {
+      const stageDir = join(outputRoot, `stage-${stage}`, executorId);
+      const stageDirExisted = existsSync(stageDir);
+      await mkdir(stageDir, { recursive: true });
+      if (!stageDirExisted) createdDirs.push(stageDir);
+      for (const caseObj of corpus.cases) {
+        for (const variant of variants) {
+          for (let r = 1; r <= replicates; r++) {
+            const info = await doPrepare({
+              corpus,
+              caseObj,
+              variant,
+              executorId,
+              replicate: r,
+              outputRoot: stageDir,
+              stage,
+            });
+            manifests.push(info);
+            plan.runs.push({
+              case_id: caseObj.id,
+              variant,
+              replicate: r,
+              run_id: info.run_id,
+              executor_id: executorId,
+              stage,
+            });
+            const key = [
+              caseObj.id,
+              executorId,
+              r,
+              info.manifest.fixture_digest,
+              info.manifest.task_contract_digest,
+              corpus.max_rounds,
+              TOOL_PERMISSION_CLASS,
+            ].join("\0");
+            if (!plan.expected_pair_keys.includes(key)) {
+              plan.expected_pair_keys.push(key);
+            }
+          }
         }
       }
     }
-  }
 
-  await writeJson(join(outputRoot, "pilot-plan.json"), plan);
-  return ok({
-    manifest_count: manifests.length,
-    cli_built: cliBuilt,
-    plan_path: join(outputRoot, "pilot-plan.json"),
-  });
+    plan.plan_sha256 = sha256(
+      canonicalJson({ ...plan, plan_sha256: undefined }),
+    );
+    await writeJson(planPath, plan);
+    return ok({
+      manifest_count: manifests.length,
+      cli_built: cliBuilt,
+      plan_path: planPath,
+    });
+  } catch (err) {
+    for (const d of createdDirs) {
+      try {
+        await rm(d, { recursive: true, force: true });
+      } catch {}
+    }
+    try {
+      if (existsSync(planPath)) await rm(planPath, { force: true });
+    } catch {}
+    if (!outputRootExisted) {
+      try {
+        await rm(outputRoot, { recursive: true, force: true });
+      } catch {}
+    }
+    throw err;
+  }
 }
 
 async function handleCorpusCheck(args) {
@@ -2282,7 +2764,13 @@ async function handlePreparePilot(args) {
     .filter(Boolean);
   if (executors.length === 0) return fail("CONFIG_ERROR", "executors required");
   const replicates = Number(args.values.replicates);
-  if (replicates < 1) return fail("CONFIG_ERROR", "replicates must be >= 1");
+  if (
+    !Number.isInteger(replicates) ||
+    replicates < 1 ||
+    !Number.isFinite(replicates)
+  ) {
+    return fail("CONFIG_ERROR", "replicates must be a positive integer");
+  }
   const stage = args.values.stage || "a";
   const gateSummaryPath = args.values["gate-summary"]
     ? resolve(args.values["gate-summary"])
