@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -1055,7 +1055,341 @@ describe("benchmark-low-capability", () => {
         expect(data.manifest_count).toBe(data.cli_built ? 10 : 5);
         expect(existsSync(join(pilotRoot, "pilot-plan.json"))).toBe(true);
       }, 30000);
+
+      it("rejects stage b with mismatched replicates or executors", async () => {
+        const pilotRoot = tmp("pilot-stage-b");
+        const planRes = runScript([
+          "--json",
+          "prepare-pilot",
+          "--stage",
+          "a",
+          "--executors",
+          "E1",
+          "--replicates",
+          "1",
+          "--output",
+          pilotRoot,
+        ]);
+        jsonOk(planRes);
+        const summary = {
+          schema_version: 1,
+          generated_at: new Date().toISOString(),
+          corpus_version: "1",
+          max_rounds: 3,
+          safety_gate: "pass",
+          stage_b_allowed: true,
+          efficiency_signal: "no_efficiency_signal",
+        };
+        const summaryPath = join(tempRoot, `gate-${randomUUID()}.json`);
+        await writeFile(summaryPath, JSON.stringify(summary), "utf8");
+        const badRes = runScript([
+          "--json",
+          "prepare-pilot",
+          "--stage",
+          "b",
+          "--executors",
+          "E2",
+          "--replicates",
+          "1",
+          "--output",
+          pilotRoot,
+          "--gate-summary",
+          summaryPath,
+        ]);
+        expect(badRes.code).not.toBe(0);
+        expect(badRes.stderr + badRes.stdout).toContain("stage b executor");
+      }, 30000);
     },
     30000,
   );
+
+  describe("P73-T5 regressions", () => {
+    it("treats .context and .code-pact files as scope violations for baseline", async () => {
+      const info = await prepareRun(
+        "bounded-feature",
+        "baseline",
+        "E1",
+        1,
+        tmp(),
+      );
+      await mkdir(join(info.workspace_path, ".context"), { recursive: true });
+      await mkdir(join(info.workspace_path, ".code-pact", "cache"), {
+        recursive: true,
+      });
+      await writeFile(
+        join(info.workspace_path, ".context", "new-file.md"),
+        "x",
+        "utf8",
+      );
+      await writeFile(
+        join(info.workspace_path, ".code-pact", "cache", "injected.json"),
+        "{}",
+        "utf8",
+      );
+      const { path } = await makeAttestation(info.manifest, 1, "implemented");
+      const res = runScript([
+        "--json",
+        "evaluate",
+        "--run",
+        info.run_dir,
+        "--round",
+        "1",
+        "--attestation",
+        path,
+      ]);
+      expect(res.code).toBe(0);
+      const result = JSON.parse(
+        await readFile(join(info.run_dir, "result.json"), "utf8"),
+      ) as RunResult;
+      expect(result.status).toBe("verification_failed");
+      const violations = result.scope_violations || [];
+      expect(violations.some(v => v.includes(".context/new-file.md"))).toBe(
+        true,
+      );
+      expect(
+        violations.some(v => v.includes(".code-pact/cache/injected.json")),
+      ).toBe(true);
+    });
+
+    it("adds initial_code_pact_stdout_bytes to round 1 cumulative total", async () => {
+      const info = await prepareRun(
+        "bounded-feature",
+        "baseline",
+        "E1",
+        1,
+        tmp(),
+      );
+      const manifest = JSON.parse(
+        await readFile(join(info.run_dir, "run-manifest.json"), "utf8"),
+      ) as { initial_code_pact_stdout_bytes: number };
+      const initial = manifest.initial_code_pact_stdout_bytes;
+      const { path } = await makeAttestation(info.manifest, 1, "implemented");
+      runScript([
+        "--json",
+        "evaluate",
+        "--run",
+        info.run_dir,
+        "--round",
+        "1",
+        "--attestation",
+        path,
+      ]);
+      const result = JSON.parse(
+        await readFile(join(info.run_dir, "result.json"), "utf8"),
+      ) as RunResult;
+      expect(result.code_pact_stdout_bytes_total).toBeGreaterThanOrEqual(
+        initial,
+      );
+      expect(result.code_pact_stdout_bytes_total).toBe(
+        initial + (result.code_pact_stdout_bytes || 0),
+      );
+    });
+
+    it("enforces global session uniqueness across output roots", async () => {
+      const root = tmp("global-session");
+      const base1 = await prepareRun(
+        "bounded-feature",
+        "baseline",
+        "E1",
+        1,
+        root,
+      );
+      const base2 = await prepareRun(
+        "bounded-feature",
+        "baseline",
+        "E2",
+        1,
+        root,
+      );
+      const sessionId = `session-${randomUUID()}`;
+      for (const run of [base1, base2]) {
+        await writeFile(
+          join(run.workspace_path, "src", "range.js"),
+          "export function range() {}",
+          "utf8",
+        );
+      }
+      const { path: att1 } = await makeAttestation(
+        base1.manifest,
+        1,
+        "implemented",
+        { sessionId },
+      );
+      const { path: att2 } = await makeAttestation(
+        base2.manifest,
+        1,
+        "implemented",
+        { sessionId },
+      );
+      await evaluateRun(base1.run_dir, 1, att1);
+      const res2 = runScript([
+        "--json",
+        "evaluate",
+        "--run",
+        base2.run_dir,
+        "--round",
+        "1",
+        "--attestation",
+        att2,
+      ]);
+      expect(res2.code).not.toBe(0);
+      expect(res2.stderr + res2.stdout).toContain("SESSION_ID_REUSED");
+    });
+
+    it("rejects manifests with unknown properties", async () => {
+      const info = await prepareRun(
+        "bounded-feature",
+        "baseline",
+        "E1",
+        1,
+        tmp(),
+      );
+      const manifest = JSON.parse(
+        await readFile(join(info.run_dir, "run-manifest.json"), "utf8"),
+      );
+      manifest.extra_field = "should_fail";
+      await writeFile(
+        join(info.run_dir, "run-manifest.json"),
+        JSON.stringify(manifest),
+        "utf8",
+      );
+      const { path } = await makeAttestation(info.manifest, 1, "implemented");
+      const res = runScript([
+        "--json",
+        "evaluate",
+        "--run",
+        info.run_dir,
+        "--round",
+        "1",
+        "--attestation",
+        path,
+      ]);
+      expect(res.code).not.toBe(0);
+      expect(res.stderr + res.stdout).toMatch(/Unrecognized|unknown|strict/);
+    });
+
+    it("bounds failure feedback to JSON serialized byte length and UTF-8 boundaries", async () => {
+      const info = await prepareRun(
+        "bounded-feature",
+        "baseline",
+        "E1",
+        1,
+        tmp(),
+      );
+      await writeFile(
+        join(info.workspace_path, "src", "range.js"),
+        "export function range() { return 'broken'; }",
+        "utf8",
+      );
+      const { path } = await makeAttestation(info.manifest, 1, "implemented");
+      const res = runScript([
+        "--json",
+        "evaluate",
+        "--run",
+        info.run_dir,
+        "--round",
+        "1",
+        "--attestation",
+        path,
+      ]);
+      expect(res.code).toBe(0);
+      const envelope = res.data as Record<string, unknown>;
+      const jsonBytes = Buffer.byteLength(JSON.stringify(envelope), "utf8");
+      expect(jsonBytes).toBeLessThanOrEqual(2048);
+      expect(JSON.stringify(envelope)).not.toContain("\uFFFD");
+      const feedback = (envelope.data as { feedback?: string } | undefined)
+        ?.feedback;
+      if (typeof feedback === "string") {
+        expect(Buffer.byteLength(feedback, "utf8")).toBeGreaterThan(0);
+      }
+    });
+
+    it("keeps cost metrics executor-local in score summary", async () => {
+      const resultRoot = tmp("cost-local");
+      const base = await prepareRun(
+        "bounded-feature",
+        "baseline",
+        "E1",
+        1,
+        resultRoot,
+      );
+      const cp = await prepareRun(
+        "bounded-feature",
+        "code_pact",
+        "E1",
+        1,
+        resultRoot,
+      );
+      const rangeImpl = `export function range(start, end, step = 1) {
+  const result = [];
+  if (step > 0) {
+    for (let i = start; i < end; i += step) result.push(i);
+  } else {
+    for (let i = start; i > end; i += step) result.push(i);
+  }
+  return result;
+}
+`;
+      for (const run of [base, cp]) {
+        await writeFile(
+          join(run.workspace_path, "src", "range.js"),
+          rangeImpl,
+          "utf8",
+        );
+      }
+      const { path: baseAtt } = await makeAttestation(
+        base.manifest,
+        1,
+        "implemented",
+      );
+      const { path: cpAtt } = await makeAttestation(
+        cp.manifest,
+        1,
+        "implemented",
+      );
+      await evaluateRun(base.run_dir, 1, baseAtt);
+      await evaluateRun(cp.run_dir, 1, cpAtt);
+      await finalizeRun(base.run_dir, {
+        billed_amount: 0.001,
+        currency: "USD",
+      });
+      await finalizeRun(cp.run_dir, { billed_amount: 0.002, currency: "USD" });
+      const scoreRes = runScript(["--json", "score", "--results", resultRoot]);
+      const data = jsonOk(scoreRes) as {
+        summary: {
+          totals: Record<string, unknown>;
+          by_executor: Array<Record<string, unknown>>;
+        };
+      };
+      const summary = JSON.parse(
+        await readFile(join(resultRoot, "score-summary.json"), "utf8"),
+      ) as typeof data.summary;
+      expect(summary.totals.baseline_cost_per_successful_outcome).toBeNull();
+      expect(summary.totals.code_pact_cost_per_successful_outcome).toBeNull();
+      const executor = summary.by_executor.find(e => e.executor_id === "E1");
+      expect(executor?.baseline_cost_per_successful_outcome).toBeGreaterThan(0);
+      expect(executor?.code_pact_cost_per_successful_outcome).toBeGreaterThan(
+        0,
+      );
+    });
+
+    it("prepare-pilot is atomic and leaves no partial plan on failure", async () => {
+      const pilotRoot = tmp("pilot-atomic");
+      const badRes = runScript([
+        "--json",
+        "prepare-pilot",
+        "--stage",
+        "a",
+        "--executors",
+        "bad executor!",
+        "--replicates",
+        "1",
+        "--output",
+        pilotRoot,
+      ]);
+      expect(badRes.code).not.toBe(0);
+      expect(existsSync(join(pilotRoot, "pilot-plan.json"))).toBe(false);
+      expect(existsSync(join(pilotRoot, "stage-a"))).toBe(false);
+    });
+  });
 });

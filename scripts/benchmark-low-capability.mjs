@@ -17,6 +17,7 @@ import {
   rm,
   realpath,
   lstat,
+  rename,
 } from "node:fs/promises";
 import { existsSync, writeSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -39,14 +40,13 @@ const EXCLUDED_FIXTURE_DIRS = new Set([
   ".context",
   ".DS_Store",
 ]);
-const HIDDEN_SOURCE_DIRS = new Set([
-  ".git",
-  "node_modules",
-  ".local",
+const EXCLUDED_SCOPE_PREFIXES = new Set([".git", "node_modules", ".DS_Store"]);
+const CODE_PACT_HARNESS_DIRS = [
+  ".code-pact/cache",
+  ".code-pact/state",
   ".context",
-  ".code-pact",
-  ".DS_Store",
-]);
+  ".local",
+];
 const BENCH_GIT_ENV = {
   GIT_AUTHOR_NAME: "bench",
   GIT_AUTHOR_EMAIL: "bench@example.com",
@@ -72,63 +72,141 @@ const TERMINAL_STATUSES = new Set([
 const hexSha256 = z.string().regex(/^[0-9a-f]{64}$/);
 const hexSha40 = z.string().regex(/^[0-9a-f]{40}$/);
 
-const manifestSchema = z.object({
-  schema_version: z.literal(1),
-  run_id: z.string().min(1),
-  corpus_version: z.string().min(1),
-  case_id: z.string().min(1),
-  variant: z.enum(["baseline", "code_pact"]),
-  executor_id: z.string().min(1),
-  replicate: z.number().int().min(1),
-  fixture_digest: hexSha256,
-  task_contract_digest: hexSha256,
-  task_contract_sha256: hexSha256,
-  max_rounds: z.number().int().min(1),
-  fixture_base_commit: hexSha40,
-  evaluation_base_commit: hexSha40,
-  tool_permission_class: z.string().min(1),
-  fresh_session_required: z.boolean(),
-  input_bundle_sha256: hexSha256,
-  manifest_sha256: hexSha256,
-  initial_code_pact_stdout_bytes: z.number().min(0).optional(),
-  initial_code_pact_command_count: z.number().int().min(0).optional(),
-  output_root: z.string().min(1).optional(),
-  workspace_path: z.string().min(1),
-  rounds_path: z.string().min(1),
-  executor_input_path: z.string().min(1),
-  instruction_path: z.string().min(1),
-  created_at: z.string().datetime(),
-  stage: z.string().min(1).optional(),
-});
+const manifestSchema = z
+  .object({
+    schema_version: z.literal(1),
+    run_id: z.string().min(1),
+    corpus_version: z.string().min(1),
+    case_id: z.string().min(1),
+    variant: z.enum(["baseline", "code_pact"]),
+    executor_id: z.string().min(1),
+    replicate: z.number().int().min(1),
+    fixture_digest: hexSha256,
+    task_contract_digest: hexSha256,
+    task_contract_sha256: hexSha256,
+    max_rounds: z.number().int().min(1),
+    fixture_base_commit: hexSha40,
+    evaluation_base_commit: hexSha40,
+    tool_permission_class: z.string().min(1),
+    fresh_session_required: z.boolean(),
+    input_bundle_sha256: hexSha256,
+    manifest_sha256: hexSha256,
+    initial_code_pact_stdout_bytes: z.number().int().min(0).optional(),
+    initial_code_pact_command_count: z.number().int().min(0).optional(),
+    output_root: z.string().min(1).optional(),
+    workspace_path: z.string().min(1),
+    rounds_path: z.string().min(1),
+    executor_input_path: z.string().min(1),
+    instruction_path: z.string().min(1),
+    created_at: z.string().datetime(),
+    stage: z.string().min(1).optional(),
+  })
+  .strict();
 
-const attestationSchema = z.object({
-  schema_version: z.literal(1),
-  run_id: z.string().min(1),
-  round: z.number().int().min(1),
-  executor_id: z.string().min(1),
-  session_id: z.string().min(1),
-  fresh_session_started: z.boolean(),
-  tool_permission_class: z.string().min(1),
-  action: z.enum(["implemented", "stopped_decision", "failed_to_execute"]),
-  input_bundle_sha256: hexSha256,
-  manual_intervention_count: z.number().int().min(0),
-  context_retrieval_count: z.number().int().min(0),
-});
+const attestationSchema = z
+  .object({
+    schema_version: z.literal(1),
+    run_id: z.string().min(1),
+    round: z.number().int().min(1),
+    executor_id: z.string().min(1),
+    session_id: z.string().min(1),
+    fresh_session_started: z.boolean(),
+    tool_permission_class: z.string().min(1),
+    action: z.enum(["implemented", "stopped_decision", "failed_to_execute"]),
+    input_bundle_sha256: hexSha256,
+    manual_intervention_count: z.number().int().min(0),
+    context_retrieval_count: z.number().int().min(0),
+  })
+  .strict();
 
-const telemetrySchema = z.object({
-  schema_version: z.literal(1),
-  run_id: z.string().min(1),
-  executor_id: z.string().min(1),
-  variant: z.enum(["baseline", "code_pact"]),
-  replicate: z.number().int().min(1),
-  session_id: z.string().min(1),
-  tool_permission_class: z.string().min(1),
-  input_tokens: z.number().nullable().optional(),
-  output_tokens: z.number().nullable().optional(),
-  billed_amount: z.number().min(0).nullable().optional(),
-  currency: z.string().min(1).nullable().optional(),
-  manual_intervention_count: z.number().int().min(0),
-});
+const resultSchema = z
+  .object({
+    schema_version: z.literal(1),
+    run_id: z.string().min(1),
+    case_id: z.string().min(1),
+    variant: z.enum(["baseline", "code_pact"]),
+    executor_id: z.string().min(1),
+    replicate: z.number().int().min(1),
+    status: z.enum([
+      "verified_success",
+      "expected_stop_success",
+      "verification_failed",
+      "stop_repeated_failure",
+      "stop_max_rounds",
+      "stop_manual_intervention",
+      "invalid",
+    ]),
+    completed_rounds: z.number().int().min(0),
+    first_pass_success: z.boolean(),
+    repair_rounds: z.number().int().min(0),
+    scope_violation_count: z.number().int().min(0),
+    same_fingerprint_repeat_count: z.number().int().min(0),
+    exit_code: z.number().int().nullable(),
+    failure_fingerprint: z.string().min(1).nullable(),
+    bounded_output: z.string().nullable(),
+    changed_paths: z.array(z.string()),
+    scope_violations: z.array(z.string()),
+    verification_command_results: z.array(
+      z.object({
+        command: z.string(),
+        exit_code: z.number().int(),
+        stdout: z.string(),
+        stderr: z.string(),
+      }),
+    ),
+    next_action: z.string().min(1).nullable(),
+    session_id: z.string().min(1),
+    tool_permission_class: z.string().min(1),
+    context_retrieval_count: z.number().int().min(0),
+    context_retrieval_count_total: z.number().int().min(0),
+    code_pact_stdout_bytes: z.number().int().min(0),
+    code_pact_stdout_bytes_total: z.number().int().min(0),
+    code_pact_command_count_total: z.number().int().min(0),
+    input_tokens: z.number().int().min(0).finite().nullable(),
+    output_tokens: z.number().int().min(0).finite().nullable(),
+    total_tokens: z.number().int().min(0).finite().nullable(),
+    billed_amount: z.number().min(0).finite().nullable(),
+    currency: z.string().min(1).nullable(),
+    manual_intervention_count: z.number().int().min(0),
+    manual_intervention_count_total: z.number().int().min(0),
+    fixture_digest: hexSha256,
+    task_contract_digest: hexSha256,
+    manifest_sha256: hexSha256,
+    input_bundle_sha256: hexSha256,
+    task_contract_sha256: hexSha256,
+    fixture_base_commit: hexSha40,
+    evaluation_base_commit: hexSha40,
+  })
+  .strict()
+  .refine(
+    data =>
+      (data.billed_amount === null || data.billed_amount === undefined) ===
+      (data.currency === null || data.currency === undefined),
+    { message: "billed_amount and currency must both be null or both be set" },
+  );
+
+const telemetrySchema = z
+  .object({
+    schema_version: z.literal(1),
+    run_id: z.string().min(1),
+    executor_id: z.string().min(1),
+    variant: z.enum(["baseline", "code_pact"]),
+    replicate: z.number().int().min(1),
+    session_id: z.string().min(1),
+    tool_permission_class: z.string().min(1),
+    input_tokens: z.number().int().min(0).finite().nullable().optional(),
+    output_tokens: z.number().int().min(0).finite().nullable().optional(),
+    billed_amount: z.number().min(0).finite().nullable().optional(),
+    currency: z.string().min(1).nullable().optional(),
+    manual_intervention_count: z.number().int().min(0),
+  })
+  .strict()
+  .refine(
+    data =>
+      (data.billed_amount === null || data.billed_amount === undefined) ===
+      (data.currency === null || data.currency === undefined),
+    { message: "billed_amount and currency must both be null or both be set" },
+  );
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -646,11 +724,56 @@ function gitChangedPaths(workspace, baseCommit) {
   return [...paths];
 }
 
-function sourceChangedPaths(changedPaths) {
-  return changedPaths.filter(p => {
-    const first = p.split("/")[0];
-    return !HIDDEN_SOURCE_DIRS.has(first);
-  });
+function isExcludedScopePrefix(p) {
+  const first = p.split("/")[0];
+  return EXCLUDED_SCOPE_PREFIXES.has(first);
+}
+
+function filterScopeChangedPaths(
+  changedPaths,
+  harnessGeneratedPaths = new Set(),
+) {
+  return changedPaths.filter(
+    p => !isExcludedScopePrefix(p) && !harnessGeneratedPaths.has(p),
+  );
+}
+
+async function loadHarnessGeneratedPaths(runDir) {
+  const path = join(runDir, ".harness-generated-paths.json");
+  if (!existsSync(path)) return new Set();
+  try {
+    const raw = await readJson(path);
+    if (!Array.isArray(raw)) return new Set();
+    return new Set(raw);
+  } catch {
+    return new Set();
+  }
+}
+
+async function saveHarnessGeneratedPaths(runDir, paths) {
+  const path = join(runDir, ".harness-generated-paths.json");
+  await writeJson(path, [...paths].sort());
+}
+
+async function scanCodePactHarnessGeneratedPaths(
+  workspace,
+  baseCommit,
+  existing = new Set(),
+) {
+  const updated = new Set(existing);
+  for (const dir of CODE_PACT_HARNESS_DIRS) {
+    const full = join(workspace, dir);
+    if (!existsSync(full)) continue;
+    const names = await readdir(full, { recursive: true }).catch(() => []);
+    for (const name of names) {
+      const fullPath = join(full, name);
+      const st = await lstat(fullPath).catch(() => null);
+      if (st && st.isFile() && !st.isSymbolicLink()) {
+        updated.add(`${dir}/${name}`);
+      }
+    }
+  }
+  return updated;
 }
 
 function canonicalizePathForScope(raw) {
@@ -793,21 +916,71 @@ function computeFailureFingerprint(verificationResults) {
   return sha256(canonicalJson(key));
 }
 
+function jsonByteLength(value) {
+  return Buffer.byteLength(JSON.stringify(value), "utf8");
+}
+
+function safeUtf8Tail(str, maxBytes) {
+  const buf = Buffer.from(str, "utf8");
+  if (buf.length <= maxBytes) return str;
+  let end = maxBytes;
+  while (end > 1 && (buf[end] & 0b1100_0000) === 0b1000_0000) {
+    end--;
+  }
+  if (
+    end > 1 &&
+    (buf[end - 1] & 0b1110_0000) === 0b1110_0000 &&
+    end + 1 <= buf.length &&
+    (buf[end + 1] & 0b1100_0000) === 0b1000_0000
+  ) {
+    end -= 1;
+  }
+  return buf.subarray(buf.length - end).toString("utf8");
+}
+
+function boundedFeedback(feedback, maxBytes, baseValue) {
+  if (typeof feedback !== "string" || maxBytes <= 0) return "";
+  const baseBytes = jsonByteLength(baseValue);
+  if (baseBytes >= maxBytes) return "";
+  let low = 0;
+  let high = Math.min(
+    Buffer.byteLength(feedback, "utf8"),
+    maxBytes - baseBytes,
+  );
+  let best = "";
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const candidate = safeUtf8Tail(feedback, mid);
+    const candidateValue = {
+      ...baseValue,
+      data: { ...baseValue.data, feedback: candidate },
+    };
+    if (jsonByteLength(candidateValue) <= maxBytes) {
+      best = candidate;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  return best;
+}
+
 function boundedOutput(verificationResults, maxBytes) {
   const combined = verificationResults
     .map(r => `${r.command}\nstdout:\n${r.stdout}\nstderr:\n${r.stderr}`)
     .join("\n---\n");
-  if (byteLength(combined) <= maxBytes) return combined;
-  const buf = Buffer.from(combined, "utf8");
-  const tail = buf.subarray(buf.length - maxBytes).toString("utf8");
-  let start = 0;
-  while (
-    start < tail.length &&
-    (tail.charCodeAt(start) & 0b1100_0000) === 0b1000_0000
-  ) {
-    start++;
-  }
-  return tail.slice(start);
+  const base = {
+    ok: true,
+    data: {
+      status: "",
+      round: 1,
+      next_action: "",
+      failure_fingerprint: "",
+      feedback: "",
+      result_path: "",
+    },
+  };
+  return boundedFeedback(combined, maxBytes, base);
 }
 
 function buildTaskContract(
@@ -1280,6 +1453,18 @@ async function loadAndValidateManifest(runDir) {
   if (manifest.task_contract_sha256 !== contractDigest) {
     throw new Error("manifest task_contract_sha256 mismatch");
   }
+  if (manifest.corpus_version !== corpus.corpus_version) {
+    throw new Error("manifest corpus_version mismatch");
+  }
+  if (manifest.max_rounds !== corpus.max_rounds) {
+    throw new Error("manifest max_rounds mismatch");
+  }
+  if (manifest.tool_permission_class !== TOOL_PERMISSION_CLASS) {
+    throw new Error("manifest tool_permission_class mismatch");
+  }
+  if (manifest.fresh_session_required !== true) {
+    throw new Error("manifest fresh_session_required must be true");
+  }
   await assertContained(runDir, manifest.workspace_path, "workspace_path");
   await assertContained(runDir, manifest.rounds_path, "rounds_path");
   await assertContained(
@@ -1347,6 +1532,22 @@ async function loadAndValidateManifest(runDir) {
   return manifest;
 }
 
+const inputFileEntrySchema = z
+  .object({
+    path: z.string().min(1),
+    sha256: hexSha256,
+    bytes: z.number().int().min(0),
+  })
+  .strict();
+
+const inputManifestSchema = z
+  .object({
+    schema_version: z.literal(1),
+    bundle_sha256: hexSha256,
+    files: z.array(inputFileEntrySchema),
+  })
+  .strict();
+
 async function validateInputBundle(runDir, manifest) {
   const inputDir = manifest.executor_input_path;
   await assertContained(runDir, inputDir, "executor_input_path");
@@ -1354,9 +1555,15 @@ async function validateInputBundle(runDir, manifest) {
   if (!existsSync(inputManifestPath)) {
     throw new Error("input manifest not found");
   }
-  const inputManifest = await readJson(inputManifestPath);
-  if (inputManifest.schema_version !== 1) {
-    throw new Error("input manifest schema_version must be 1");
+  let inputManifest;
+  try {
+    inputManifest = inputManifestSchema.parse(
+      await readJson(inputManifestPath),
+    );
+  } catch (err) {
+    const issue =
+      err instanceof z.ZodError ? err.issues[0]?.message : String(err);
+    throw new Error(`input manifest schema validation failed: ${issue}`);
   }
   const expectedFiles = new Map(inputManifest.files.map(f => [f.path, f]));
   const seen = new Set(expectedFiles.keys());
@@ -1415,11 +1622,11 @@ function sessionIndexPath(outputRoot) {
 async function loadSessionIndex(outputRoot) {
   const path = sessionIndexPath(outputRoot);
   if (!existsSync(path)) return {};
-  try {
-    return await readJson(path);
-  } catch {
-    return {};
+  const raw = await readJson(path);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("EVIDENCE_INTEGRITY_ERROR: session index is not an object");
   }
+  return raw;
 }
 
 async function saveSessionIndex(outputRoot, index) {
@@ -1429,9 +1636,10 @@ async function saveSessionIndex(outputRoot, index) {
 async function checkSessionIdUnique(manifest, sessionId) {
   if (!manifest.output_root || !existsSync(manifest.output_root)) return;
   const index = await loadSessionIndex(manifest.output_root);
-  if (index[sessionId] && index[sessionId] !== manifest.run_id) {
+  const existingRunId = index[sessionId];
+  if (existingRunId && existingRunId !== manifest.run_id) {
     throw new Error(
-      `SESSION_ID_REUSED: session_id ${sessionId} already used by run ${index[sessionId]}`,
+      `SESSION_ID_REUSED: session_id ${sessionId} already used by run ${existingRunId}`,
     );
   }
 }
@@ -1441,6 +1649,31 @@ async function recordSessionId(manifest, sessionId) {
   const index = await loadSessionIndex(manifest.output_root);
   index[sessionId] = manifest.run_id;
   await saveSessionIndex(manifest.output_root, index);
+}
+
+async function loadAllSessionIndices(runDirs) {
+  const byOutputRoot = new Map();
+  for (const runDir of runDirs) {
+    try {
+      const manifest = await readJson(join(runDir, "run-manifest.json"));
+      const outputRoot = manifest?.output_root;
+      if (!outputRoot || byOutputRoot.has(outputRoot)) continue;
+      byOutputRoot.set(outputRoot, await loadSessionIndex(outputRoot));
+    } catch {
+      // ignore missing/bad manifests; they will be reported elsewhere
+    }
+  }
+  return byOutputRoot;
+}
+
+function isSessionIdGloballyUnique(sessionId, runId, allIndices) {
+  for (const [outputRoot, index] of allIndices) {
+    const existing = index[sessionId];
+    if (existing && existing !== runId) {
+      return { ok: false, outputRoot, existingRunId: existing };
+    }
+  }
+  return { ok: true };
 }
 
 function buildFailureEnvelope({
@@ -1463,24 +1696,7 @@ function buildFailureEnvelope({
       result_path: resultPath,
     },
   };
-  const baseBytes = byteLength(jsonOut(base));
-  const available = Math.max(0, maxBytes - baseBytes - 64);
-  if (available > 0 && typeof feedback === "string") {
-    const fb = Buffer.from(feedback, "utf8");
-    if (fb.length <= available) {
-      base.data.feedback = feedback;
-    } else {
-      const tail = fb.subarray(fb.length - available).toString("utf8");
-      let start = 0;
-      while (
-        start < tail.length &&
-        (tail.charCodeAt(start) & 0b1100_0000) === 0b1000_0000
-      ) {
-        start++;
-      }
-      base.data.feedback = tail.slice(start);
-    }
-  }
+  base.data.feedback = boundedFeedback(feedback, maxBytes, base);
   return base;
 }
 
@@ -1532,6 +1748,11 @@ async function loadAndValidateAttestation(attestationPath, manifest, round) {
   }
   if (round === 1 && !attestation.fresh_session_started) {
     throw new Error("round 1 requires fresh_session_started");
+  }
+  if (round > 1 && attestation.fresh_session_started) {
+    throw new Error(
+      "rounds after round 1 must have fresh_session_started false",
+    );
   }
   if (round > 1) {
     const prev = await loadRoundResult(manifest.rounds_path, round - 1);
@@ -1602,6 +1823,7 @@ async function doEvaluate({ runDir, round, attestationPath }) {
     verificationOverall = v.overallExit;
     verificationResults = v.results;
   } else {
+    const harnessGeneratedPaths = await loadHarnessGeneratedPaths(runDir);
     const res = runCodePactCli(manifest.workspace_path, [
       "task",
       "complete",
@@ -1614,6 +1836,12 @@ async function doEvaluate({ runDir, round, attestationPath }) {
     ]);
     codePactCommandCount += 1;
     codePactStdoutBytes += byteLength(res.stdout);
+    const updatedHarnessPaths = await scanCodePactHarnessGeneratedPaths(
+      manifest.workspace_path,
+      manifest.evaluation_base_commit,
+      harnessGeneratedPaths,
+    );
+    await saveHarnessGeneratedPaths(runDir, updatedHarnessPaths);
     let envelope;
     try {
       envelope = JSON.parse(res.stdout.trim().split("\n").pop() || "{}");
@@ -1651,8 +1879,13 @@ async function doEvaluate({ runDir, round, attestationPath }) {
     }
   }
 
-  const changedPaths = sourceChangedPaths(
+  const harnessGeneratedPaths =
+    manifest.variant === "code_pact"
+      ? await loadHarnessGeneratedPaths(runDir)
+      : new Set();
+  const changedPaths = filterScopeChangedPaths(
     gitChangedPaths(manifest.workspace_path, manifest.evaluation_base_commit),
+    harnessGeneratedPaths,
   );
   const scopeViolations = computeScopeViolations(
     changedPaths,
@@ -1741,6 +1974,8 @@ async function doEvaluate({ runDir, round, attestationPath }) {
 
   const previousTotalCodePactStdout =
     previousResult?.code_pact_stdout_bytes_total || 0;
+  const initialCodePactStdoutBytes =
+    round === 1 ? (manifest.initial_code_pact_stdout_bytes ?? 0) : 0;
   const inputTokens = previousResult?.input_tokens ?? null;
   const outputTokens = previousResult?.output_tokens ?? null;
   const totalTokens = previousResult?.total_tokens ?? null;
@@ -1753,8 +1988,9 @@ async function doEvaluate({ runDir, round, attestationPath }) {
   const manualInterventionCountTotal =
     previousManualInterventionTotal + attestation.manual_intervention_count;
   const previousCodePactCommandCountTotal =
-    previousResult?.code_pact_command_count_total ||
-    manifest.initial_code_pact_command_count;
+    previousResult?.code_pact_command_count_total ??
+    manifest.initial_code_pact_command_count ??
+    0;
   const codePactCommandCountTotal =
     previousCodePactCommandCountTotal + codePactCommandCount;
 
@@ -1784,7 +2020,9 @@ async function doEvaluate({ runDir, round, attestationPath }) {
     context_retrieval_count_total: contextRetrievalCountTotal,
     code_pact_stdout_bytes: codePactStdoutBytes,
     code_pact_stdout_bytes_total:
-      previousTotalCodePactStdout + codePactStdoutBytes,
+      previousTotalCodePactStdout +
+      initialCodePactStdoutBytes +
+      codePactStdoutBytes,
     code_pact_command_count_total: codePactCommandCountTotal,
     input_tokens: inputTokens,
     output_tokens: outputTokens,
@@ -1824,21 +2062,12 @@ async function doEvaluate({ runDir, round, attestationPath }) {
 }
 
 function validateTelemetry(telemetry) {
-  let parsed;
   try {
-    parsed = telemetrySchema.parse(telemetry);
+    telemetrySchema.parse(telemetry);
   } catch (err) {
     const issue =
       err instanceof z.ZodError ? err.issues[0]?.message : String(err);
     throw new Error(`telemetry schema validation failed: ${issue}`);
-  }
-  if (
-    parsed.billed_amount !== null &&
-    (parsed.currency === null || parsed.currency === "")
-  ) {
-    throw new Error(
-      "telemetry currency must be a non-empty string when billed_amount is set",
-    );
   }
 }
 
@@ -1890,6 +2119,27 @@ async function doFinalize({ runDir, telemetryPath }) {
   ) {
     throw new Error(
       "EVIDENCE_INTEGRITY_ERROR: manual intervention mismatch between attestation and telemetry",
+    );
+  }
+
+  if (
+    (telemetry.billed_amount !== null &&
+      telemetry.billed_amount !== undefined) !==
+    (telemetry.currency !== null &&
+      telemetry.currency !== undefined &&
+      telemetry.currency !== "")
+  ) {
+    throw new Error(
+      "EVIDENCE_INTEGRITY_ERROR: billed_amount and currency must both be set or both be null",
+    );
+  }
+  if (
+    inputTokens !== null &&
+    outputTokens !== null &&
+    totalTokens !== inputTokens + outputTokens
+  ) {
+    throw new Error(
+      "EVIDENCE_INTEGRITY_ERROR: total_tokens must equal input_tokens + output_tokens",
     );
   }
 
@@ -2092,23 +2342,129 @@ async function discoverRunDirs(root) {
   return dirs;
 }
 
+const pilotPlanRunSchema = z
+  .object({
+    case_id: z.string().min(1),
+    variant: z.enum(["baseline", "code_pact"]),
+    replicate: z.number().int().min(1),
+    run_id: z.string().min(1),
+    executor_id: z.string().min(1),
+    stage: z.string().min(1),
+  })
+  .strict();
+
+const pilotPlanSchema = z
+  .object({
+    schema_version: z.literal(1),
+    corpus_version: z.string().min(1),
+    corpus_digest: hexSha256,
+    stage: z.string().min(1),
+    cli_built: z.boolean(),
+    executors: z.array(z.string().min(1)),
+    replicates: z.number().int().min(1),
+    created_at: z.string().datetime(),
+    expected_pair_keys: z.array(z.string().min(1)),
+    runs: z.array(pilotPlanRunSchema),
+    plan_sha256: hexSha256,
+  })
+  .strict();
+
+const scoreSummarySchema = z
+  .object({
+    schema_version: z.literal(1),
+    generated_at: z.string().datetime(),
+    corpus_version: z.string().min(1),
+    max_rounds: z.number().int().min(1),
+    paired_count: z.number().int().min(0),
+    by_executor: z.array(z.record(z.any())),
+    by_case: z.array(z.record(z.any())),
+    totals: z.record(z.any()),
+    notes: z.array(z.string()),
+  })
+  .strict();
+
+const gateSummarySchema = z
+  .object({
+    schema_version: z.literal(1),
+    generated_at: z.string().datetime(),
+    corpus_version: z.string().min(1),
+    max_rounds: z.number().int().min(1),
+    safety_gate: z.string().min(1),
+    stage_b_allowed: z.boolean(),
+    efficiency_signal: z.string().min(1),
+  })
+  .strict();
+
+async function loadAndValidatePilotPlan(outputRoot, stage) {
+  const planName =
+    stage === "b" ? "pilot-plan-stage-b.json" : "pilot-plan.json";
+  const planPath = join(outputRoot, planName);
+  if (!existsSync(planPath)) {
+    throw new Error(`pilot plan not found: ${planPath}`);
+  }
+  const raw = await readJson(planPath);
+  let plan;
+  try {
+    plan = pilotPlanSchema.parse(raw);
+  } catch (err) {
+    const issue =
+      err instanceof z.ZodError ? err.issues[0]?.message : String(err);
+    throw new Error(`pilot plan schema validation failed: ${issue}`);
+  }
+  const corpus = await loadCorpus();
+  if (plan.corpus_version !== corpus.corpus_version) {
+    throw new Error("pilot plan corpus_version mismatch");
+  }
+  const expectedCorpusDigest = sha256(canonicalJson(corpus));
+  if (plan.corpus_digest !== expectedCorpusDigest) {
+    throw new Error("pilot plan corpus_digest mismatch");
+  }
+  const planWithoutSha = { ...plan, plan_sha256: undefined };
+  const expectedSha = sha256(canonicalJson(planWithoutSha));
+  if (plan.plan_sha256 !== expectedSha) {
+    throw new Error("pilot plan plan_sha256 mismatch");
+  }
+  return plan;
+}
+
 async function doScore({ resultsRoot }) {
   const runDirs = await discoverRunDirs(resultsRoot);
   const runs = [];
   const errors = [];
+  const sessionCheckRoot = resolve(resultsRoot, "..");
+  const allSessionIndices = await loadAllSessionIndices(runDirs);
+  const pilotPlan = await loadAndValidatePilotPlan(sessionCheckRoot, "a").catch(
+    () => null,
+  );
   for (const runDir of runDirs) {
     try {
       const manifest = await loadAndValidateManifest(runDir);
       await validateInputBundle(runDir, manifest);
-      const result = await readJson(join(runDir, "result.json"));
+      const rawResult = await readJson(join(runDir, "result.json"));
+      let result;
+      try {
+        result = resultSchema.parse(rawResult);
+      } catch (err) {
+        const issue =
+          err instanceof z.ZodError ? err.issues[0]?.message : String(err);
+        throw new Error(`result schema validation failed: ${issue}`);
+      }
       const integrity = await validateResultIntegrity(result, manifest);
       if (!integrity.ok) {
-        errors.push(`${runDir}: ${integrity.error}`);
-        continue;
+        throw new Error(integrity.error);
       }
       if (result.manual_intervention_count > 0) {
-        errors.push(`${runDir}: manual intervention`);
-        continue;
+        throw new Error("manual intervention");
+      }
+      const unique = isSessionIdGloballyUnique(
+        result.session_id,
+        manifest.run_id,
+        allSessionIndices,
+      );
+      if (!unique.ok) {
+        throw new Error(
+          `SESSION_ID_REUSED: session_id ${result.session_id} already used by run ${unique.existingRunId}`,
+        );
       }
       runs.push({ manifest, result });
     } catch (e) {
@@ -2159,6 +2515,40 @@ async function doScore({ resultsRoot }) {
 
   if (errors.length > 0) {
     return fail("SCORE_INTEGRITY_ERROR", errors.join("; "));
+  }
+
+  const actualPairKeys = new Set(pairMap.keys());
+  if (pilotPlan) {
+    const expectedKeys = new Set(pilotPlan.expected_pair_keys);
+    for (const key of actualPairKeys) {
+      if (!expectedKeys.has(key)) {
+        errors.push(`unexpected paired run not in pilot plan: ${key}`);
+      }
+    }
+    for (const key of expectedKeys) {
+      if (!actualPairKeys.has(key)) {
+        errors.push(`missing paired run expected by pilot plan: ${key}`);
+      }
+    }
+    const plannedRuns = new Set(
+      pilotPlan.runs.map(r =>
+        [r.case_id, r.executor_id, r.replicate, r.variant].join("\0"),
+      ),
+    );
+    for (const run of runs) {
+      const runKey = [
+        run.manifest.case_id,
+        run.manifest.executor_id,
+        run.manifest.replicate,
+        run.manifest.variant,
+      ].join("\0");
+      if (!plannedRuns.has(runKey)) {
+        errors.push(`${run.manifest.run_id}: run not listed in pilot plan`);
+      }
+    }
+    if (errors.length > 0) {
+      return fail("SCORE_INTEGRITY_ERROR", errors.join("; "));
+    }
   }
 
   const byExecutor = new Map();
@@ -2476,18 +2866,8 @@ async function doScore({ resultsRoot }) {
     }
   }
 
-  const totalBaseCost = costPerSuccessfulOutcome(
-    totals.baseline_total_billed_amount,
-    totals.baseline_billing_available,
-    totals.baseline_billing_currency,
-    totals.baseline_successful_outcomes,
-  );
-  const totalCpCost = costPerSuccessfulOutcome(
-    totals.code_pact_total_billed_amount,
-    totals.code_pact_billing_available,
-    totals.code_pact_billing_currency,
-    totals.code_pact_successful_outcomes,
-  );
+  const totalBaseCost = null;
+  const totalCpCost = null;
   const totalBaseTpso = null;
   const totalCpTpso = null;
   const totalTokenConclusion = "not_comparable_across_executors";
@@ -2588,17 +2968,28 @@ async function doPreparePilot({
     throw new Error("replicates must be a positive integer");
   }
 
+  let stageAPlan = null;
   if (stage === "b") {
     if (!gateSummaryPath) throw new Error("stage b requires --gate-summary");
-    const summary = await readJson(gateSummaryPath);
-    if (summary.schema_version !== 1)
-      throw new Error("gate summary schema_version must be 1");
+    const raw = await readJson(gateSummaryPath);
+    let summary;
+    try {
+      summary = gateSummarySchema.parse(raw);
+    } catch (err) {
+      const issue =
+        err instanceof z.ZodError ? err.issues[0]?.message : String(err);
+      throw new Error(`gate summary schema validation failed: ${issue}`);
+    }
     if (summary.safety_gate !== "pass" || summary.stage_b_allowed !== true) {
       throw new Error("stage b safety gate not passed");
     }
     if (summary.corpus_version !== corpus.corpus_version) {
       throw new Error("gate summary corpus_version mismatch");
     }
+    if (summary.max_rounds !== corpus.max_rounds) {
+      throw new Error("gate summary max_rounds mismatch");
+    }
+    stageAPlan = await loadAndValidatePilotPlan(outputRoot, "a");
   }
 
   const cliBuilt = existsSync(resolve(repoRoot, "dist", "cli.js"));
@@ -2606,13 +2997,16 @@ async function doPreparePilot({
     throw new Error("code-pact CLI not built; run `pnpm build`");
   }
 
-  const outputRootExisted = existsSync(outputRoot);
-  await mkdir(outputRoot, { recursive: true });
-  const createdDirs = [];
   const planPath =
     stage === "a"
       ? join(outputRoot, "pilot-plan.json")
       : join(outputRoot, "pilot-plan-stage-b.json");
+  const planTmpPath = `${planPath}.tmp-${Date.now()}`;
+  const stageDir = join(outputRoot, `stage-${stage}`);
+  const stageTmpDir = join(
+    outputRoot,
+    `.tmp-pilot-stage-${stage}-${Date.now()}`,
+  );
 
   const plan = {
     schema_version: 1,
@@ -2631,11 +3025,11 @@ async function doPreparePilot({
   const variants = ["baseline", "code_pact"];
 
   try {
+    await mkdir(outputRoot, { recursive: true });
+    await mkdir(stageTmpDir, { recursive: true });
     for (const executorId of executors) {
-      const stageDir = join(outputRoot, `stage-${stage}`, executorId);
-      const stageDirExisted = existsSync(stageDir);
-      await mkdir(stageDir, { recursive: true });
-      if (!stageDirExisted) createdDirs.push(stageDir);
+      const executorTmpDir = join(stageTmpDir, executorId);
+      await mkdir(executorTmpDir, { recursive: true });
       for (const caseObj of corpus.cases) {
         for (const variant of variants) {
           for (let r = 1; r <= replicates; r++) {
@@ -2645,7 +3039,7 @@ async function doPreparePilot({
               variant,
               executorId,
               replicate: r,
-              outputRoot: stageDir,
+              outputRoot: executorTmpDir,
               stage,
             });
             manifests.push(info);
@@ -2674,29 +3068,66 @@ async function doPreparePilot({
       }
     }
 
+    if (stage === "b" && stageAPlan) {
+      const stageAExecutors = new Set(stageAPlan.executors);
+      for (const e of executors) {
+        if (!stageAExecutors.has(e)) {
+          throw new Error(`stage b executor ${e} not present in stage a plan`);
+        }
+      }
+      if (replicates !== stageAPlan.replicates) {
+        throw new Error("stage b replicates must match stage a plan");
+      }
+      const stageAKeys = new Set(stageAPlan.expected_pair_keys);
+      for (const key of plan.expected_pair_keys) {
+        if (!stageAKeys.has(key)) {
+          throw new Error(
+            `stage b expected pair key not in stage a plan: ${key}`,
+          );
+        }
+      }
+      if (
+        plan.expected_pair_keys.length !== stageAPlan.expected_pair_keys.length
+      ) {
+        throw new Error(
+          "stage b expected pair key count must match stage a plan",
+        );
+      }
+      if (plan.corpus_digest !== stageAPlan.corpus_digest) {
+        throw new Error("stage b corpus_digest must match stage a plan");
+      }
+    }
+
     plan.plan_sha256 = sha256(
       canonicalJson({ ...plan, plan_sha256: undefined }),
     );
-    await writeJson(planPath, plan);
+
+    for (const info of manifests) {
+      const manifestPath = join(info.run_dir, "run-manifest.json");
+      const manifest = await readJson(manifestPath);
+      manifest.output_root = stageDir;
+      await writeJson(manifestPath, manifest);
+    }
+
+    await writeJson(planTmpPath, plan);
+    await mkdir(stageDir, { recursive: true });
+    const finalStageDir = `${stageDir}.tmp-rename-${Date.now()}`;
+    await rename(stageTmpDir, finalStageDir);
+    const finalPlanPath = `${planPath}.tmp-rename-${Date.now()}`;
+    await rename(planTmpPath, finalPlanPath);
+    await rm(stageDir, { recursive: true, force: true }).catch(() => {});
+    await rm(planPath, { force: true }).catch(() => {});
+    await rename(finalStageDir, stageDir);
+    await rename(finalPlanPath, planPath);
+
     return ok({
       manifest_count: manifests.length,
       cli_built: cliBuilt,
       plan_path: planPath,
     });
   } catch (err) {
-    for (const d of createdDirs) {
-      try {
-        await rm(d, { recursive: true, force: true });
-      } catch {}
-    }
-    try {
-      if (existsSync(planPath)) await rm(planPath, { force: true });
-    } catch {}
-    if (!outputRootExisted) {
-      try {
-        await rm(outputRoot, { recursive: true, force: true });
-      } catch {}
-    }
+    await rm(stageTmpDir, { recursive: true, force: true }).catch(() => {});
+    await rm(planTmpPath, { force: true }).catch(() => {});
     throw err;
   }
 }

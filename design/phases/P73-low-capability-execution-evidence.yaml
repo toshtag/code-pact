@@ -140,6 +140,31 @@ tasks:
       - docs/maintainers/low-capability-benchmark.md
     acceptance_refs:
       - tests/unit/scripts/benchmark-low-capability.test.ts
+  - id: P73-T5
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: >
+      Enforce complete pilot-plan scoring, exact scope attribution, bounded
+      executor feedback, global session uniqueness, strict runtime evidence
+      schemas, and complete executor-local metric accounting.
+    depends_on:
+      - P73-T4
+    reads:
+      - design/phases/P73-low-capability-execution-evidence.yaml
+      - scripts/benchmark-low-capability.mjs
+      - tests/unit/scripts/benchmark-low-capability.test.ts
+    writes:
+      - design/phases/P73-low-capability-execution-evidence.yaml
+      - scripts/benchmark-low-capability.mjs
+      - tests/unit/scripts/benchmark-low-capability.test.ts
+    acceptance_refs:
+      - tests/unit/scripts/benchmark-low-capability.test.ts
   - id: P73-T2
     type: other
     ambiguity: medium
@@ -153,7 +178,7 @@ tasks:
       Validate paired external execution evidence and decide whether the current
       deterministic contract should be retained, revised, or blocked.
     depends_on:
-      - P73-T4
+      - P73-T5
     reads:
       - design/decisions/P66-T2-token-reduction-evidence-rfc.md
       - design/decisions/P55-T1-stable-core-task-delta-rfc.md
