@@ -360,16 +360,69 @@ function normalizeForFingerprint(str) {
   return str
     .replace(/"elapsed_ms":\d+/g, '"elapsed_ms":0')
     .replace(/"duration_ms":\d+(?:\.\d+)?/g, '"duration_ms":0')
-    .replace(/\(\d+(?:\.\d+)?ms\)/g, "(Xms)")
-    .replace(/ℹ duration_ms \d+(?:\.\d+)?/g, "ℹ duration_ms X");
+    .replace(/\(\d+(?:\.\d+)?(?:ms|µs|us)\)/g, "(Xms)")
+    .replace(/ℹ duration_ms \d+(?:\.\d+)?/g, "ℹ duration_ms X")
+    .replace(/# duration_ms \d+(?:\.\d+)?/g, "# duration_ms X");
+}
+
+function stableFailureSignature(stdout, stderr) {
+  const combined = `${stdout}\n${stderr}`;
+
+  // Code Pact agent envelopes are single-line JSON; pull out the stable
+  // failure descriptor so timing/path UUIDs do not affect the fingerprint.
+  const trimmed = stdout.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const obj = JSON.parse(trimmed);
+      if (obj.error) {
+        return `error:${obj.error.code}:${obj.error.cause_code || ""}:${obj.error.message || ""}`;
+      }
+      const failure = obj.data?.failure;
+      if (failure) {
+        return `failure:${failure.kind}:${failure.check}:${failure.command || ""}:${failure.exit_code ?? ""}:${failure.reason || ""}`;
+      }
+      if (obj.data?.verify?.ok === false) {
+        const checks = obj.data.verify.checks
+          .filter(c => !c.ok)
+          .map(c => `${c.name}:${c.reason}`)
+          .join("|");
+        return `verify:${checks}`;
+      }
+    } catch {
+      // fall through to generic handling
+    }
+  }
+
+  // For test runners (node --test spec / tap), extract the stable parts of
+  // failing output and sort them so completion order does not matter.
+  const lines = combined.split("\n");
+  const failures = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (
+      /^test at /.test(line) ||
+      /^Error:/.test(line) ||
+      /^not ok /.test(line) ||
+      /^# fail\b/.test(line) ||
+      /^# (?:tests|suites|pass|fail|cancelled|skipped|todo)\b/.test(line)
+    ) {
+      failures.push(line.replace(/\d+(?:\.\d+)?/g, "X"));
+    }
+  }
+
+  if (failures.length > 0) {
+    failures.sort();
+    return failures.join("\n");
+  }
+
+  return normalizeForFingerprint(combined).slice(-2048);
 }
 
 function computeFailureFingerprint(verificationResults) {
   const key = verificationResults.map(r => ({
     command: r.command,
     exit_code: r.exit_code,
-    stdout_tail: normalizeForFingerprint(r.stdout).slice(-2048),
-    stderr_tail: normalizeForFingerprint(r.stderr).slice(-2048),
+    signature: stableFailureSignature(r.stdout, r.stderr),
   }));
   return sha256(canonicalJson(key));
 }
@@ -1198,9 +1251,11 @@ async function doPreparePilot({ executors, replicates, outputRoot }) {
   const issues = validateCorpus(corpus, repoRoot);
   if (issues.length) throw new Error(`corpus invalid: ${issues.join("; ")}`);
 
+  const cliBuilt = existsSync(resolve(repoRoot, "dist", "cli.js"));
   const plan = {
     schema_version: 1,
     corpus_version: corpus.corpus_version,
+    cli_built: cliBuilt,
     stages: [],
   };
 
@@ -1213,6 +1268,7 @@ async function doPreparePilot({ executors, replicates, outputRoot }) {
 
     for (const caseObj of corpus.cases) {
       for (const variant of ["baseline", "code_pact"]) {
+        if (variant === "code_pact" && !cliBuilt) continue;
         for (let r = 1; r <= replicates; r++) {
           const info = await doPrepare({
             corpus,
@@ -1240,6 +1296,7 @@ async function doPreparePilot({ executors, replicates, outputRoot }) {
   return {
     ok: true,
     manifest_count: manifests.length,
+    cli_built: cliBuilt,
     plan_path: join(outputRoot, "pilot-plan.json"),
   };
 }

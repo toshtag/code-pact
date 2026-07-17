@@ -293,40 +293,46 @@ describe("benchmark-low-capability", () => {
     expect(envelope.ok).toBe(false);
   });
 
-  it("scores paired baseline and code_pact results", async () => {
-    const resultRoot = tmp("score-pair");
-    const base = await prepareRun(
-      "bounded-feature",
-      "baseline",
-      "E1",
-      1,
-      resultRoot,
-    );
-    const codePact = await prepareRun(
-      "bounded-feature",
-      "code_pact",
-      "E1",
-      1,
-      resultRoot,
-    );
-    for (const run of [base.run_dir, codePact.run_dir]) {
-      await writeFile(
-        join(run, "workspace", "src", "range.js"),
-        `export function range(start, end, step = 1) {\n  const result = [];\n  if (step > 0) {\n    for (let i = start; i < end; i += step) result.push(i);\n  } else {\n    for (let i = start; i > end; i += step) result.push(i);\n  }\n  return result;\n}\n`,
-        "utf8",
-      );
-      await evaluateRun(run, 1);
-    }
-    const score = runScript(["--json", "score", "--results", resultRoot]);
-    const data = jsonOk(score) as { summary: { paired_count: number } };
-    expect(data.summary.paired_count).toBe(1);
-    const summary = JSON.parse(
-      await readFile(join(resultRoot, "score-summary.json"), "utf8"),
-    );
-    expect(summary.schema_version).toBe(1);
-    expect(summary.totals.baseline_runs).toBe(1);
-    expect(summary.totals.code_pact_runs).toBe(1);
-  });
+  describe.skipIf(!existsSync(codePactCliPath))(
+    "scoring with code_pact",
+    () => {
+      it("scores paired baseline and code_pact results", async () => {
+        const resultRoot = tmp("score-pair");
+        const base = await prepareRun(
+          "bounded-feature",
+          "baseline",
+          "E1",
+          1,
+          resultRoot,
+        );
+        const codePact = await prepareRun(
+          "bounded-feature",
+          "code_pact",
+          "E1",
+          1,
+          resultRoot,
+        );
+        for (const run of [base.run_dir, codePact.run_dir]) {
+          await writeFile(
+            join(run, "workspace", "src", "range.js"),
+            `export function range(start, end, step = 1) {\n  const result = [];\n  if (step > 0) {\n    for (let i = start; i < end; i += step) result.push(i);\n  } else {\n    for (let i = start; i > end; i += step) result.push(i);\n  }\n  return result;\n}\n`,
+            "utf8",
+          );
+          await evaluateRun(run, 1);
+        }
+        const score = runScript(["--json", "score", "--results", resultRoot]);
+        const data = jsonOk(score) as { summary: { paired_count: number } };
+        expect(data.summary.paired_count).toBe(1);
+        const summary = JSON.parse(
+          await readFile(join(resultRoot, "score-summary.json"), "utf8"),
+        );
+        expect(summary.schema_version).toBe(1);
+        expect(summary.totals.baseline_runs).toBe(1);
+        expect(summary.totals.code_pact_runs).toBe(1);
+      });
+    },
+    15000,
+  );
 
   it("prepare-pilot generates the full pilot manifest set", async () => {
     const pilotRoot = tmp("pilot");
@@ -340,8 +346,9 @@ describe("benchmark-low-capability", () => {
       "--output",
       pilotRoot,
     ]);
-    const data = jsonOk(res) as { manifest_count: number };
-    expect(data.manifest_count).toBe(10);
+    const data = jsonOk(res) as { manifest_count: number; cli_built: boolean };
+    // code_pact manifests require a built dist/cli.js; baseline-only otherwise
+    expect(data.manifest_count).toBe(data.cli_built ? 10 : 5);
     expect(existsSync(join(pilotRoot, "pilot-plan.json"))).toBe(true);
   }, 15000);
 
