@@ -610,6 +610,10 @@ function stableFailureSignature(stdout, stderr) {
       line.startsWith("RangeError")
     ) {
       push(line);
+    } else if (line.startsWith("error:")) {
+      const rawValue = line.slice("error:".length).trim();
+      const value = rawValue.replace(/^['"]|['"]$/g, "").trim();
+      if (value) push(`error:${value}`);
     } else if (
       /^test at /.test(line) ||
       /^not ok /.test(line) ||
