@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "phase_id": "P55",
+  "phase_name": "Stable Core and Task Delta",
+  "original_path": "design/phases/P55-stable-core-task-delta.yaml",
+  "phase_status": "done",
+  "weight": 7,
+  "snapshotted_at": "2026-07-17T00:51:26.811Z",
+  "source_sha256": "a44e8b2d5ed2fad7bb7b44bac582f01dd915ae69ff1f664d95e354d01782da54",
+  "path_sha256": "8746ce6f7910ab9d648cbfbeb28535706621db54a417fc295fdf07f48041e75a",
+  "tasks": [
+    {
+      "id": "P55-T1",
+      "status": "done",
+      "depends_on": [
+        "P66-T2"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "96d28965b07f040c4b5d7112611415bdfadd748032bcc0df3fbe2770e5237aa2"
+        ]
+      }
+    }
+  ]
+}

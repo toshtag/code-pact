@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "phase_id": "P72",
+  "phase_name": "Cycle Metrics Execution Contract Closure",
+  "original_path": "design/phases/P72-cycle-metrics-execution-contract-closure.yaml",
+  "phase_status": "done",
+  "weight": 3,
+  "snapshotted_at": "2026-07-17T00:52:14.968Z",
+  "source_sha256": "285f7e4ecda1fac62e48263c8c3f00d7c1badb27b6c471ef59c1d52c5b81bb0a",
+  "path_sha256": "d588e55df4f6213b4c82185167b9ce3efadb313cc406994d535a57196fca191b",
+  "tasks": [
+    {
+      "id": "P72-T1",
+      "status": "done",
+      "depends_on": [
+        "P71-T3"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "301887c5416178fd8f274d33cfe19fc4b7dea7fc7817b42111a8302dcab1bd46"
+        ]
+      }
+    },
+    {
+      "id": "P72-T2",
+      "status": "done",
+      "depends_on": [
+        "P72-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "d7cf7749e6f095c0b6ac12f28b6340a76da3601092491cd1a83fa21cf64962c2"
+        ]
+      }
+    },
+    {
+      "id": "P72-T3",
+      "status": "done",
+      "depends_on": [
+        "P72-T2"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "362c3f66818aacb259ed5d732af389fa6f0c0d0b50f3dc6ca365eacd7ea3f525"
+        ]
+      }
+    },
+    {
+      "id": "P72-T4",
+      "status": "done",
+      "depends_on": [
+        "P72-T3"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "d15026dbf9cbd16df5f5b86d28fb9e3c4a0537db79490099e5e17cba17432aaa"
+        ]
+      }
+    }
+  ]
+}
