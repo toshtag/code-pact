@@ -1,0 +1,5 @@
+phases:
+  - id: PB03
+    name: Scope Boundary
+    path: design/phases/PB03-scope-boundary.yaml
+    weight: 1

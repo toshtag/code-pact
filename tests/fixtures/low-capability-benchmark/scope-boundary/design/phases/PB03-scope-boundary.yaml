@@ -1,0 +1,23 @@
+id: PB03
+name: Scope Boundary
+weight: 1
+confidence: high
+risk: low
+status: planned
+objective: Fix the greeting implementation without changing configuration files.
+definition_of_done:
+  - node --test passes
+tasks:
+  - id: PB03-T1
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: Make greet return an English greeting regardless of the config language.
+verification:
+  commands:
+    - node --test

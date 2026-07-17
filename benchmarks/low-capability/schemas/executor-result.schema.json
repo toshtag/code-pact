@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "case_id",
+    "variant",
+    "executor_id",
+    "replicate",
+    "status",
+    "completed_rounds",
+    "changed_paths",
+    "scope_violations",
+    "verification_command_results",
+    "context_retrieval_count",
+    "code_pact_stdout_bytes"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "case_id": { "type": "string", "minLength": 1 },
+    "variant": { "enum": ["baseline", "code_pact"] },
+    "executor_id": { "type": "string", "minLength": 1 },
+    "replicate": { "type": "integer", "minimum": 1 },
+    "status": {
+      "enum": [
+        "verified_success",
+        "expected_stop_success",
+        "verification_failed",
+        "stop_repeated_failure",
+        "stop_max_rounds",
+        "stop_manual_intervention",
+        "invalid"
+      ]
+    },
+    "completed_rounds": { "type": "integer", "minimum": 0 },
+    "first_pass_success": { "type": "boolean" },
+    "repair_rounds": { "type": "integer", "minimum": 0 },
+    "scope_violation_count": { "type": "integer", "minimum": 0 },
+    "same_fingerprint_repeat_count": { "type": "integer", "minimum": 0 },
+    "exit_code": { "type": ["integer", "null"] },
+    "failure_fingerprint": { "type": ["string", "null"] },
+    "bounded_output": { "type": ["string", "null"] },
+    "changed_paths": { "type": "array", "items": { "type": "string" } },
+    "scope_violations": { "type": "array", "items": { "type": "string" } },
+    "verification_command_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["command", "exit_code", "stdout", "stderr"],
+        "properties": {
+          "command": { "type": "string" },
+          "exit_code": { "type": "integer" },
+          "stdout": { "type": "string" },
+          "stderr": { "type": "string" }
+        }
+      }
+    },
+    "next_action": { "type": ["string", "null"] },
+    "context_retrieval_count": { "type": "integer", "minimum": 0 },
+    "code_pact_stdout_bytes": { "type": "integer", "minimum": 0 },
+    "input_tokens": { "type": ["integer", "null"], "minimum": 0 },
+    "output_tokens": { "type": ["integer", "null"], "minimum": 0 },
+    "total_tokens": { "type": ["integer", "null"], "minimum": 0 },
+    "billed_amount": { "type": ["number", "null"], "minimum": 0 },
+    "currency": { "type": ["string", "null"] },
+    "manual_intervention_count": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": false
+}

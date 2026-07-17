@@ -1,0 +1,24 @@
+id: PB04
+name: Decision Stop
+weight: 1
+confidence: high
+risk: low
+status: planned
+objective: Do not implement until the pending decision is resolved.
+definition_of_done:
+  - The task is stopped with no source changes because the decision is unresolved.
+verification:
+  commands:
+    - node --test
+requires_decision: true
+tasks:
+  - id: PB04-T1
+    type: other
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: Stop before implementation because the phase requires an unresolved decision.

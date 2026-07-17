@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "corpus_version": "1",
+  "max_rounds": 3,
+  "failure_feedback_max_bytes": 2048,
+  "cases": [
+    {
+      "id": "bounded-feature",
+      "fixture": "tests/fixtures/low-capability-benchmark/bounded-feature",
+      "task_id": "PB01-T1",
+      "expected_outcome": "verified_success",
+      "allowed_writes": [
+        "src/range.js",
+        "test/range.test.js"
+      ],
+      "verification": [
+        "node --test"
+      ],
+      "requires_explicit_stop": false
+    },
+    {
+      "id": "regression-repair",
+      "fixture": "tests/fixtures/low-capability-benchmark/regression-repair",
+      "task_id": "PB02-T1",
+      "expected_outcome": "verified_success",
+      "allowed_writes": [
+        "src/counter.js"
+      ],
+      "verification": [
+        "node --test"
+      ],
+      "requires_explicit_stop": false
+    },
+    {
+      "id": "scope-boundary",
+      "fixture": "tests/fixtures/low-capability-benchmark/scope-boundary",
+      "task_id": "PB03-T1",
+      "expected_outcome": "verified_success",
+      "allowed_writes": [
+        "src/main.js"
+      ],
+      "verification": [
+        "node --test"
+      ],
+      "requires_explicit_stop": false
+    },
+    {
+      "id": "decision-stop",
+      "fixture": "tests/fixtures/low-capability-benchmark/decision-stop",
+      "task_id": "PB04-T1",
+      "expected_outcome": "expected_stop_success",
+      "allowed_writes": [],
+      "verification": [
+        "node --test"
+      ],
+      "requires_explicit_stop": true
+    },
+    {
+      "id": "explicit-context",
+      "fixture": "tests/fixtures/low-capability-benchmark/explicit-context",
+      "task_id": "PB05-T1",
+      "expected_outcome": "verified_success",
+      "allowed_writes": [
+        "src/formatter.js",
+        "test/formatter.test.js"
+      ],
+      "verification": [
+        "node --test"
+      ],
+      "requires_explicit_stop": false
+    }
+  ]
+}

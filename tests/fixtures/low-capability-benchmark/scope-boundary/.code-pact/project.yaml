@@ -1,0 +1,7 @@
+name: benchmark-scope-boundary
+version: 0.1.0
+locale: en-US
+default_agent: generic
+agents:
+  - name: generic
+    profile: agent-profiles/generic.yaml

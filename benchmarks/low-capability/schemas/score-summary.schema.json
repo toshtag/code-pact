@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "corpus_version",
+    "max_rounds",
+    "paired_count",
+    "by_executor",
+    "by_case",
+    "totals",
+    "notes"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "corpus_version": { "type": "string", "minLength": 1 },
+    "max_rounds": { "type": "integer", "minimum": 1 },
+    "paired_count": { "type": "integer", "minimum": 0 },
+    "by_executor": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "executor_id",
+          "baseline_runs",
+          "code_pact_runs",
+          "baseline_verified_success_rate",
+          "code_pact_verified_success_rate",
+          "baseline_expected_stop_success_rate",
+          "code_pact_expected_stop_success_rate",
+          "baseline_first_pass_success_rate",
+          "code_pact_first_pass_success_rate",
+          "baseline_repair_rounds_median",
+          "code_pact_repair_rounds_median",
+          "baseline_scope_violation_rate",
+          "code_pact_scope_violation_rate",
+          "baseline_median_total_tokens_per_completed_task",
+          "code_pact_median_total_tokens_per_completed_task",
+          "token_efficiency_conclusion"
+        ],
+        "properties": {
+          "executor_id": { "type": "string" },
+          "baseline_runs": { "type": "integer", "minimum": 0 },
+          "code_pact_runs": { "type": "integer", "minimum": 0 },
+          "baseline_verified_success_rate": { "type": ["number", "null"] },
+          "code_pact_verified_success_rate": { "type": ["number", "null"] },
+          "baseline_expected_stop_success_rate": { "type": ["number", "null"] },
+          "code_pact_expected_stop_success_rate": { "type": ["number", "null"] },
+          "baseline_first_pass_success_rate": { "type": ["number", "null"] },
+          "code_pact_first_pass_success_rate": { "type": ["number", "null"] },
+          "baseline_repair_rounds_median": { "type": ["number", "null"] },
+          "code_pact_repair_rounds_median": { "type": ["number", "null"] },
+          "baseline_scope_violation_rate": { "type": ["number", "null"] },
+          "code_pact_scope_violation_rate": { "type": ["number", "null"] },
+          "baseline_median_total_tokens_per_completed_task": { "type": ["number", "null"] },
+          "code_pact_median_total_tokens_per_completed_task": { "type": ["number", "null"] },
+          "token_efficiency_conclusion": { "type": "string" }
+        }
+      }
+    },
+    "by_case": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "case_id",
+          "paired_count",
+          "baseline_verified_success_rate",
+          "code_pact_verified_success_rate"
+        ],
+        "properties": {
+          "case_id": { "type": "string" },
+          "paired_count": { "type": "integer", "minimum": 0 },
+          "baseline_verified_success_rate": { "type": ["number", "null"] },
+          "code_pact_verified_success_rate": { "type": ["number", "null"] }
+        }
+      }
+    },
+    "totals": {
+      "type": "object",
+      "required": [
+        "baseline_runs",
+        "code_pact_runs",
+        "baseline_verified_success_count",
+        "code_pact_verified_success_count",
+        "baseline_expected_stop_success_count",
+        "code_pact_expected_stop_success_count",
+        "baseline_scope_violation_count",
+        "code_pact_scope_violation_count",
+        "baseline_first_pass_success_count",
+        "code_pact_first_pass_success_count",
+        "token_efficiency_conclusion"
+      ],
+      "properties": {
+        "baseline_runs": { "type": "integer", "minimum": 0 },
+        "code_pact_runs": { "type": "integer", "minimum": 0 },
+        "baseline_verified_success_count": { "type": "integer", "minimum": 0 },
+        "code_pact_verified_success_count": { "type": "integer", "minimum": 0 },
+        "baseline_expected_stop_success_count": { "type": "integer", "minimum": 0 },
+        "code_pact_expected_stop_success_count": { "type": "integer", "minimum": 0 },
+        "baseline_scope_violation_count": { "type": "integer", "minimum": 0 },
+        "code_pact_scope_violation_count": { "type": "integer", "minimum": 0 },
+        "baseline_first_pass_success_count": { "type": "integer", "minimum": 0 },
+        "code_pact_first_pass_success_count": { "type": "integer", "minimum": 0 },
+        "baseline_median_total_tokens_per_completed_task": { "type": ["number", "null"] },
+        "code_pact_median_total_tokens_per_completed_task": { "type": ["number", "null"] },
+        "token_efficiency_conclusion": { "type": "string" }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}

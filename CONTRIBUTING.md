@@ -70,7 +70,8 @@ pnpm check:development-efficiency
 ```
 
 Before release, run `pnpm release:check`, which includes the same gate. See
-[`docs/maintainers/token-efficient-development.md`](docs/maintainers/token-efficient-development.md)
+[`docs/maintainers/token-efficient-development.md`](docs/maintainers/token-efficient-development.md),
+[`docs/maintainers/low-capability-benchmark.md`](docs/maintainers/low-capability-benchmark.md),
 and [`docs/maintainers/operations.md`](docs/maintainers/operations.md) for the
 maintainer workflow.
 

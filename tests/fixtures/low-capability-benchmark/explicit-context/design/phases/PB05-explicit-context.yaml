@@ -1,0 +1,26 @@
+id: PB05
+name: Explicit Context
+weight: 1
+confidence: high
+risk: low
+status: planned
+objective: Implement a formatter by retrieving the spec and examples from context/.
+definition_of_done:
+  - node --test passes
+tasks:
+  - id: PB05-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: Implement format by reading context/spec.md and context/examples.md.
+    reads:
+      - context/spec.md
+      - context/examples.md
+verification:
+  commands:
+    - node --test

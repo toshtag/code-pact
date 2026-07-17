@@ -1,0 +1,5 @@
+phases:
+  - id: PB04
+    name: Decision Stop
+    path: design/phases/PB04-decision-stop.yaml
+    weight: 1

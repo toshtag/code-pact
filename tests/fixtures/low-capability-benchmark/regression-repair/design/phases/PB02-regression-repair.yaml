@@ -1,0 +1,23 @@
+id: PB02
+name: Regression Repair
+weight: 1
+confidence: high
+risk: low
+status: planned
+objective: Fix the seeded edge-case regression in parseVersion.
+definition_of_done:
+  - node --test passes
+verification:
+  commands:
+    - node --test
+tasks:
+  - id: PB02-T1
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: Fix parseVersion so it handles major-only version strings.

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "corpus_version",
+    "case_id",
+    "variant",
+    "executor_id",
+    "replicate",
+    "fixture_digest",
+    "task_contract_digest",
+    "max_rounds",
+    "workspace_path",
+    "rounds_path",
+    "created_at",
+    "instruction_path"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "corpus_version": { "type": "string", "minLength": 1 },
+    "case_id": { "type": "string", "minLength": 1 },
+    "variant": { "enum": ["baseline", "code_pact"] },
+    "executor_id": { "type": "string", "minLength": 1 },
+    "replicate": { "type": "integer", "minimum": 1 },
+    "fixture_digest": { "type": "string", "minLength": 1 },
+    "task_contract_digest": { "type": "string", "minLength": 1 },
+    "max_rounds": { "type": "integer", "minimum": 1 },
+    "workspace_path": { "type": "string", "minLength": 1 },
+    "rounds_path": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "instruction_path": { "type": "string", "minLength": 1 },
+    "context_retrieval_count": { "type": "integer", "minimum": 0 },
+    "stage": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false
+}

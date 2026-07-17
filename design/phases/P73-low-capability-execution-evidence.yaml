@@ -1,0 +1,97 @@
+id: P73
+name: Low-Capability Execution Evidence
+weight: 8
+confidence: medium
+risk: medium
+status: planned
+objective: >
+  Measure whether Code Pact improves verified completion, bounded repair, scope
+  discipline, and token efficiency for lower-cost executors through a fixed
+  provider-neutral task corpus, without Code Pact calling model APIs.
+non_goals:
+  - Claim that Code Pact works with every model or every task.
+  - Call a model API from Code Pact, its CLI, tests, or benchmark scripts.
+  - Hard-code provider names, model names, prices, or authentication formats.
+  - Store model reasoning, hidden chain of thought, full transcripts, secrets,
+    prompts, or responses in committed evidence.
+  - Compare token counts between different executor implementations as if they
+    were directly equivalent.
+  - Implement P64, P65, P67, P68, Stable Core, or a new memory backend.
+  - Change public Code Pact runtime behavior in P73-T1.
+definition_of_done:
+  - A fixed corpus provides paired baseline and Code Pact variants from the same
+    repository state and task contract.
+  - Every run uses a fresh workspace and fresh executor session.
+  - Each run is bounded to at most three model rounds.
+  - Verification, changed paths, scope violations, and repeated failure
+    fingerprints are measured deterministically.
+  - Token and billing metrics are imported from executor evidence and are never
+    estimated by Code Pact.
+  - Missing token evidence prevents token-efficiency claims but does not hide
+    correctness results.
+  - Raw prompts, responses, reasoning, secrets, and repository contents are not
+    included in committed summaries.
+  - The scorer rejects unpaired, mismatched, manually edited, or incomparable
+    runs.
+  - No network or model API call is made by the benchmark implementation.
+verification:
+  commands:
+    - pnpm test
+    - pnpm check:docs
+tasks:
+  - id: P73-T1
+    type: feature
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: >
+      Implement a provider-neutral low-capability execution benchmark harness,
+      fixed corpus, deterministic evaluator, and paired scorer.
+    depends_on:
+      - P66-T2
+    reads:
+      - design/decisions/P66-T2-token-reduction-evidence-rfc.md
+      - design/decisions/P55-T1-stable-core-task-delta-rfc.md
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - tests/helpers/cli.ts
+      - tests/harness/token-efficiency/**
+      - src/commands/task-prepare.ts
+      - src/commands/task-complete.ts
+      - src/commands/task-runbook.ts
+    writes:
+      - benchmarks/low-capability/**
+      - tests/fixtures/low-capability-benchmark/**
+      - scripts/benchmark-low-capability.mjs
+      - tests/unit/scripts/benchmark-low-capability.test.ts
+      - docs/maintainers/low-capability-benchmark.md
+      - CONTRIBUTING.md
+      - package.json
+      - design/roadmap.yaml
+      - design/phases/P73-low-capability-execution-evidence.yaml
+    acceptance_refs:
+      - tests/unit/scripts/benchmark-low-capability.test.ts
+  - id: P73-T2
+    type: other
+    ambiguity: medium
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: >
+      Validate paired external execution evidence and decide whether the current
+      deterministic contract should be retained, revised, or blocked.
+    depends_on:
+      - P73-T1
+    reads:
+      - design/decisions/P66-T2-token-reduction-evidence-rfc.md
+      - design/decisions/P55-T1-stable-core-task-delta-rfc.md
+    writes:
+      - benchmarks/low-capability/evidence/summary-v1.json
+      - design/decisions/P73-T2-low-capability-execution-evidence-rfc.md

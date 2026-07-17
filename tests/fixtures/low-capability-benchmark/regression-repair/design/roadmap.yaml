@@ -1,0 +1,5 @@
+phases:
+  - id: PB02
+    name: Regression Repair
+    path: design/phases/PB02-regression-repair.yaml
+    weight: 1

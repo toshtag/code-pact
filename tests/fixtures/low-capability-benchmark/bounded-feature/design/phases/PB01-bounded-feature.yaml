@@ -1,0 +1,23 @@
+id: PB01
+name: Bounded Feature
+weight: 1
+confidence: high
+risk: low
+status: planned
+objective: Implement a range function that satisfies the provided tests.
+definition_of_done:
+  - node --test passes
+verification:
+  commands:
+    - node --test
+tasks:
+  - id: PB01-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: Implement a range function with support for ascending, descending, and custom-step ranges.

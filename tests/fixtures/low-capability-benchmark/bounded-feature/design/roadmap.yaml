@@ -1,0 +1,5 @@
+phases:
+  - id: PB01
+    name: Bounded Feature
+    path: design/phases/PB01-bounded-feature.yaml
+    weight: 1

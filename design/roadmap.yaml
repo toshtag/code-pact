@@ -200,3 +200,6 @@ phases:
   - id: P68
     path: design/phases/P68-loop-memory-storage-backend-review.yaml
     weight: 3
+  - id: P73
+    path: design/phases/P73-low-capability-execution-evidence.yaml
+    weight: 8

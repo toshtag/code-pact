@@ -1,0 +1,7 @@
+name: generic
+instruction_filename: INSTRUCTION.md
+context_dir: .context/generic
+model_map:
+  highest_reasoning: model-a
+  balanced_coding: model-b
+  cheap_mechanical: model-c

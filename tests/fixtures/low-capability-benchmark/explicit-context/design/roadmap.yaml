@@ -1,0 +1,5 @@
+phases:
+  - id: PB05
+    name: Explicit Context
+    path: design/phases/PB05-explicit-context.yaml
+    weight: 1
