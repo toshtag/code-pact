@@ -1304,23 +1304,25 @@ describe("benchmark-low-capability", () => {
       }
     });
 
-    it("keeps cost metrics executor-local in score summary", async () => {
-      const resultRoot = tmp("cost-local");
-      const base = await prepareRun(
-        "bounded-feature",
-        "baseline",
-        "E1",
-        1,
-        resultRoot,
-      );
-      const cp = await prepareRun(
-        "bounded-feature",
-        "code_pact",
-        "E1",
-        1,
-        resultRoot,
-      );
-      const rangeImpl = `export function range(start, end, step = 1) {
+    it.skipIf(!existsSync(codePactCliPath))(
+      "keeps cost metrics executor-local in score summary",
+      async () => {
+        const resultRoot = tmp("cost-local");
+        const base = await prepareRun(
+          "bounded-feature",
+          "baseline",
+          "E1",
+          1,
+          resultRoot,
+        );
+        const cp = await prepareRun(
+          "bounded-feature",
+          "code_pact",
+          "E1",
+          1,
+          resultRoot,
+        );
+        const rangeImpl = `export function range(start, end, step = 1) {
   const result = [];
   if (step > 0) {
     for (let i = start; i < end; i += step) result.push(i);
@@ -1330,48 +1332,59 @@ describe("benchmark-low-capability", () => {
   return result;
 }
 `;
-      for (const run of [base, cp]) {
-        await writeFile(
-          join(run.workspace_path, "src", "range.js"),
-          rangeImpl,
-          "utf8",
+        for (const run of [base, cp]) {
+          await writeFile(
+            join(run.workspace_path, "src", "range.js"),
+            rangeImpl,
+            "utf8",
+          );
+        }
+        const { path: baseAtt } = await makeAttestation(
+          base.manifest,
+          1,
+          "implemented",
         );
-      }
-      const { path: baseAtt } = await makeAttestation(
-        base.manifest,
-        1,
-        "implemented",
-      );
-      const { path: cpAtt } = await makeAttestation(
-        cp.manifest,
-        1,
-        "implemented",
-      );
-      await evaluateRun(base.run_dir, 1, baseAtt);
-      await evaluateRun(cp.run_dir, 1, cpAtt);
-      await finalizeRun(base.run_dir, {
-        billed_amount: 0.001,
-        currency: "USD",
-      });
-      await finalizeRun(cp.run_dir, { billed_amount: 0.002, currency: "USD" });
-      const scoreRes = runScript(["--json", "score", "--results", resultRoot]);
-      const data = jsonOk(scoreRes) as {
-        summary: {
-          totals: Record<string, unknown>;
-          by_executor: Array<Record<string, unknown>>;
+        const { path: cpAtt } = await makeAttestation(
+          cp.manifest,
+          1,
+          "implemented",
+        );
+        await evaluateRun(base.run_dir, 1, baseAtt);
+        await evaluateRun(cp.run_dir, 1, cpAtt);
+        await finalizeRun(base.run_dir, {
+          billed_amount: 0.001,
+          currency: "USD",
+        });
+        await finalizeRun(cp.run_dir, {
+          billed_amount: 0.002,
+          currency: "USD",
+        });
+        const scoreRes = runScript([
+          "--json",
+          "score",
+          "--results",
+          resultRoot,
+        ]);
+        const data = jsonOk(scoreRes) as {
+          summary: {
+            totals: Record<string, unknown>;
+            by_executor: Array<Record<string, unknown>>;
+          };
         };
-      };
-      const summary = JSON.parse(
-        await readFile(join(resultRoot, "score-summary.json"), "utf8"),
-      ) as typeof data.summary;
-      expect(summary.totals.baseline_cost_per_successful_outcome).toBeNull();
-      expect(summary.totals.code_pact_cost_per_successful_outcome).toBeNull();
-      const executor = summary.by_executor.find(e => e.executor_id === "E1");
-      expect(executor?.baseline_cost_per_successful_outcome).toBeGreaterThan(0);
-      expect(executor?.code_pact_cost_per_successful_outcome).toBeGreaterThan(
-        0,
-      );
-    });
+        const summary = JSON.parse(
+          await readFile(join(resultRoot, "score-summary.json"), "utf8"),
+        ) as typeof data.summary;
+        expect(summary.totals.baseline_cost_per_successful_outcome).toBeNull();
+        expect(summary.totals.code_pact_cost_per_successful_outcome).toBeNull();
+        const executor = summary.by_executor.find(e => e.executor_id === "E1");
+        expect(executor?.baseline_cost_per_successful_outcome).toBeGreaterThan(
+          0,
+        );
+        expect(executor?.code_pact_cost_per_successful_outcome).toBeGreaterThan(
+          0,
+        );
+      },
+    );
 
     it("prepare-pilot is atomic and leaves no partial plan on failure", async () => {
       const pilotRoot = tmp("pilot-atomic");
