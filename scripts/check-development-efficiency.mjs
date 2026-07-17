@@ -28,15 +28,55 @@ function eventFiles(repoRoot) {
     .sort();
 }
 
+function bundleFiles(repoRoot) {
+  const dir = resolve(repoRoot, ".code-pact/state/archive/bundles");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter(name => name.startsWith("event_pack-") && name.endsWith(".json"))
+    .map(name => `.code-pact/state/archive/bundles/${name}`)
+    .sort();
+}
+
 export function loadDoneEvents(repoRoot) {
+  const seen = new Set();
   const events = [];
+
   for (const rel of eventFiles(repoRoot)) {
     const doc = readYaml(repoRoot, rel);
     if (doc?.task_id && doc?.status === "done" && doc?.at) {
-      events.push({ task_id: String(doc.task_id), at: String(doc.at), file: rel });
+      const id = doc.id || rel;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      events.push({
+        task_id: String(doc.task_id),
+        at: String(doc.at),
+        file: rel,
+      });
     }
   }
-  events.sort((a, b) => a.at.localeCompare(b.at) || a.file.localeCompare(b.file));
+
+  for (const rel of bundleFiles(repoRoot)) {
+    const bundle = JSON.parse(readFileSync(resolve(repoRoot, rel), "utf8"));
+    for (const member of bundle?.members || []) {
+      const pack = JSON.parse(member.bytes || "{}");
+      for (const entry of pack?.events || []) {
+        const ev = entry?.event || {};
+        if (entry?.id && ev.task_id && ev.status === "done" && ev.at) {
+          if (seen.has(entry.id)) continue;
+          seen.add(entry.id);
+          events.push({
+            task_id: String(ev.task_id),
+            at: String(ev.at),
+            file: entry.file || `${member.id}/${entry.id}`,
+          });
+        }
+      }
+    }
+  }
+
+  events.sort(
+    (a, b) => a.at.localeCompare(b.at) || a.file.localeCompare(b.file),
+  );
   return events;
 }
 
@@ -44,7 +84,8 @@ export function loadTasksById(repoRoot) {
   const roadmap = readYaml(repoRoot, "design/roadmap.yaml");
   const tasks = new Map();
   for (const phaseRef of roadmap?.phases ?? []) {
-    if (!phaseRef?.path || !existsSync(resolve(repoRoot, phaseRef.path))) continue;
+    if (!phaseRef?.path || !existsSync(resolve(repoRoot, phaseRef.path)))
+      continue;
     const phase = readYaml(repoRoot, phaseRef.path);
     for (const task of phase?.tasks ?? []) {
       if (task?.id) tasks.set(String(task.id), task);
@@ -72,8 +113,11 @@ function isDocumentationOrDesignPath(path) {
 export function isDesignOnlyTask(task) {
   const writes = writesFor(task);
   if (writes.length === 0) return true;
-  const writesImplementation = writes.some(path =>
-    path.startsWith("src/") || path.startsWith("tests/") || path.startsWith("scripts/"),
+  const writesImplementation = writes.some(
+    path =>
+      path.startsWith("src/") ||
+      path.startsWith("tests/") ||
+      path.startsWith("scripts/"),
   );
   if (writesImplementation) return false;
   return writes.every(path => isDocumentationOrDesignPath(path));
@@ -85,7 +129,9 @@ export function evaluateDevelopmentEfficiency({
   baselineTask = BASELINE_TASK,
   nextTask,
 }) {
-  const baselineIndex = doneEvents.findIndex(event => event.task_id === baselineTask);
+  const baselineIndex = doneEvents.findIndex(
+    event => event.task_id === baselineTask,
+  );
   if (baselineIndex < 0) {
     return {
       baseline_task: baselineTask,
@@ -147,7 +193,8 @@ export function evaluateDevelopmentEfficiency({
       ...baseResult,
       next_task: nextTask,
       next_task_design_only: nextDesignOnly,
-      prospective_consecutive_design_only_tasks: prospectiveConsecutiveDesignOnlyTasks,
+      prospective_consecutive_design_only_tasks:
+        prospectiveConsecutiveDesignOnlyTasks,
       status: pass ? "pass" : "fail",
       ...(pass ? {} : { code: "DEVELOPMENT_DESIGN_LOOP_EXCEEDED" }),
     };
