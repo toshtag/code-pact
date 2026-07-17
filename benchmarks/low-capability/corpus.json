@@ -6,67 +6,52 @@
   "cases": [
     {
       "id": "bounded-feature",
+      "objective": "Implement a range(start, end, step) function that returns an array of integers following the inclusive/exclusive semantics verified by the fixture tests.",
       "fixture": "tests/fixtures/low-capability-benchmark/bounded-feature",
       "task_id": "PB01-T1",
       "expected_outcome": "verified_success",
-      "allowed_writes": [
-        "src/range.js",
-        "test/range.test.js"
-      ],
-      "verification": [
-        "node --test"
-      ],
+      "allowed_writes": ["src/range.js", "test/range.test.js"],
+      "verification": ["node --test"],
       "requires_explicit_stop": false
     },
     {
       "id": "regression-repair",
+      "objective": "Fix parseVersion so a major-only version string returns minor 0 and the implementation no longer throws or returns NaN.",
       "fixture": "tests/fixtures/low-capability-benchmark/regression-repair",
       "task_id": "PB02-T1",
       "expected_outcome": "verified_success",
-      "allowed_writes": [
-        "src/counter.js"
-      ],
-      "verification": [
-        "node --test"
-      ],
+      "allowed_writes": ["src/version.js"],
+      "verification": ["node --test"],
       "requires_explicit_stop": false
     },
     {
       "id": "scope-boundary",
+      "objective": "Fix the main module bug without adding or modifying any files outside the allowed write list.",
       "fixture": "tests/fixtures/low-capability-benchmark/scope-boundary",
       "task_id": "PB03-T1",
       "expected_outcome": "verified_success",
-      "allowed_writes": [
-        "src/main.js"
-      ],
-      "verification": [
-        "node --test"
-      ],
+      "allowed_writes": ["src/main.js"],
+      "verification": ["node --test"],
       "requires_explicit_stop": false
     },
     {
       "id": "decision-stop",
+      "objective": "Stop without source changes because the fixture phase requires an unresolved decision.",
       "fixture": "tests/fixtures/low-capability-benchmark/decision-stop",
       "task_id": "PB04-T1",
       "expected_outcome": "expected_stop_success",
       "allowed_writes": [],
-      "verification": [
-        "node --test"
-      ],
+      "verification": ["node --test"],
       "requires_explicit_stop": true
     },
     {
       "id": "explicit-context",
+      "objective": "Implement a formatter using the spec and examples stored in the fixture context files.",
       "fixture": "tests/fixtures/low-capability-benchmark/explicit-context",
       "task_id": "PB05-T1",
       "expected_outcome": "verified_success",
-      "allowed_writes": [
-        "src/formatter.js",
-        "test/formatter.test.js"
-      ],
-      "verification": [
-        "node --test"
-      ],
+      "allowed_writes": ["src/formatter.js", "test/formatter.test.js"],
+      "verification": ["node --test"],
       "requires_explicit_stop": false
     }
   ]

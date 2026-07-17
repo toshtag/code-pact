@@ -26,38 +26,10 @@
           "executor_id",
           "baseline_runs",
           "code_pact_runs",
-          "baseline_verified_success_rate",
-          "code_pact_verified_success_rate",
-          "baseline_expected_stop_success_rate",
-          "code_pact_expected_stop_success_rate",
-          "baseline_first_pass_success_rate",
-          "code_pact_first_pass_success_rate",
-          "baseline_repair_rounds_median",
-          "code_pact_repair_rounds_median",
-          "baseline_scope_violation_rate",
-          "code_pact_scope_violation_rate",
-          "baseline_median_total_tokens_per_completed_task",
-          "code_pact_median_total_tokens_per_completed_task",
-          "token_efficiency_conclusion"
+          "baseline_successful_outcome_rate",
+          "code_pact_successful_outcome_rate"
         ],
-        "properties": {
-          "executor_id": { "type": "string" },
-          "baseline_runs": { "type": "integer", "minimum": 0 },
-          "code_pact_runs": { "type": "integer", "minimum": 0 },
-          "baseline_verified_success_rate": { "type": ["number", "null"] },
-          "code_pact_verified_success_rate": { "type": ["number", "null"] },
-          "baseline_expected_stop_success_rate": { "type": ["number", "null"] },
-          "code_pact_expected_stop_success_rate": { "type": ["number", "null"] },
-          "baseline_first_pass_success_rate": { "type": ["number", "null"] },
-          "code_pact_first_pass_success_rate": { "type": ["number", "null"] },
-          "baseline_repair_rounds_median": { "type": ["number", "null"] },
-          "code_pact_repair_rounds_median": { "type": ["number", "null"] },
-          "baseline_scope_violation_rate": { "type": ["number", "null"] },
-          "code_pact_scope_violation_rate": { "type": ["number", "null"] },
-          "baseline_median_total_tokens_per_completed_task": { "type": ["number", "null"] },
-          "code_pact_median_total_tokens_per_completed_task": { "type": ["number", "null"] },
-          "token_efficiency_conclusion": { "type": "string" }
-        }
+        "additionalProperties": true
       }
     },
     "by_case": {
@@ -70,12 +42,7 @@
           "baseline_verified_success_rate",
           "code_pact_verified_success_rate"
         ],
-        "properties": {
-          "case_id": { "type": "string" },
-          "paired_count": { "type": "integer", "minimum": 0 },
-          "baseline_verified_success_rate": { "type": ["number", "null"] },
-          "code_pact_verified_success_rate": { "type": ["number", "null"] }
-        }
+        "additionalProperties": true
       }
     },
     "totals": {
@@ -83,6 +50,8 @@
       "required": [
         "baseline_runs",
         "code_pact_runs",
+        "baseline_successful_outcomes",
+        "code_pact_successful_outcomes",
         "baseline_verified_success_count",
         "code_pact_verified_success_count",
         "baseline_expected_stop_success_count",
@@ -91,23 +60,16 @@
         "code_pact_scope_violation_count",
         "baseline_first_pass_success_count",
         "code_pact_first_pass_success_count",
-        "token_efficiency_conclusion"
+        "baseline_decision_stop_unnecessary_count",
+        "code_pact_decision_stop_unnecessary_count",
+        "baseline_tokens_per_successful_outcome",
+        "code_pact_tokens_per_successful_outcome",
+        "token_efficiency_conclusion",
+        "safety_gate",
+        "efficiency_signal",
+        "stage_b_allowed"
       ],
-      "properties": {
-        "baseline_runs": { "type": "integer", "minimum": 0 },
-        "code_pact_runs": { "type": "integer", "minimum": 0 },
-        "baseline_verified_success_count": { "type": "integer", "minimum": 0 },
-        "code_pact_verified_success_count": { "type": "integer", "minimum": 0 },
-        "baseline_expected_stop_success_count": { "type": "integer", "minimum": 0 },
-        "code_pact_expected_stop_success_count": { "type": "integer", "minimum": 0 },
-        "baseline_scope_violation_count": { "type": "integer", "minimum": 0 },
-        "code_pact_scope_violation_count": { "type": "integer", "minimum": 0 },
-        "baseline_first_pass_success_count": { "type": "integer", "minimum": 0 },
-        "code_pact_first_pass_success_count": { "type": "integer", "minimum": 0 },
-        "baseline_median_total_tokens_per_completed_task": { "type": ["number", "null"] },
-        "code_pact_median_total_tokens_per_completed_task": { "type": ["number", "null"] },
-        "token_efficiency_conclusion": { "type": "string" }
-      }
+      "additionalProperties": true
     },
     "notes": {
       "type": "array",

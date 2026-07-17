@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "round",
+    "executor_id",
+    "session_id",
+    "fresh_session_started",
+    "tool_permission_class",
+    "action",
+    "input_bundle_sha256",
+    "manual_intervention_count",
+    "context_retrieval_count"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "round": { "type": "integer", "minimum": 1 },
+    "executor_id": { "type": "string", "minLength": 1 },
+    "session_id": { "type": "string", "minLength": 1 },
+    "fresh_session_started": { "type": "boolean" },
+    "tool_permission_class": { "type": "string", "minLength": 1 },
+    "action": { "enum": ["implemented", "stopped_decision", "failed_to_execute"] },
+    "input_bundle_sha256": { "type": "string", "minLength": 1 },
+    "manual_intervention_count": { "type": "integer", "minimum": 0 },
+    "context_retrieval_count": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": false
+}
