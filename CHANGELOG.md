@@ -17,21 +17,13 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
-- **Added local bounded loop memory.** `task complete` now records bounded machine-local verification episodes under the ignored cache, preserving task completion semantics and existing success JSON. New `memory status` and dry-run-by-default `memory prune` commands expose aggregate maintenance only; `doctor` warns when the local cache is tracked, not ignored, or resolves through an unsafe path.
-- **Hardened local loop memory.** Episode scans now reject oversized files at the bounded read boundary, require byte-exact UTF-8, require filename/content identity and canonical UTC timestamps, omit unused Evidence references from schema v1, distinguish write vs retention warnings, preflight prune batches, report partial prune conflicts and operational prune failures, keep protected episodes within retention caps, redact more shell absolute-path forms, report invalid-UTF-8 bytes in corrupt accounting, count only successful prune unlinks by the current invocation, return stable memory JSON errors, and use Git's ignore semantics for doctor cache checks.
-- **Added bounded exact-match local failure recall.** `task complete` records an opaque, bounded prior-local signal for repeated identical Agent-detail failures without storing semantic repair history. The signal is advisory and never overrides actionable failure guidance.
-- **Added closed-harness Code Pact CLI token-efficiency scenarios.** Deterministic fixtures measure bounded scenario-wide stdout bytes for first-pass success, failure/repair, repeated failure, deferred-context retrieval, and evidence retrieval without claiming real-model token savings.
-- **Added repository-level plan dependency graph verification.** An invariant test ensures the active plan has no unresolved, self-referential, or cyclic task dependencies.
+- **Added bounded, machine-local loop-memory episodes.** `task complete` records bounded verification episodes under the ignored cache, preserving existing task-completion semantics and JSON. New `memory status` and dry-run-by-default `memory prune` commands expose aggregate maintenance only; `doctor` warns when the local cache is tracked, ignored, or resolves through an unsafe path.
+- **Added bounded exact-match recurrence metadata for repeated Agent-detail verification failures.** The signal is advisory, opaque, and never overrides actionable failure guidance.
 
 ### Changed
 
-- **Deferred the Stable Core / Task Delta decision.** After reviewing P52-P54 context deferral/projection evidence, P63 failure-recall, and P66 closed-harness measurements, the decision is to keep the default combined Markdown context pack unchanged and not implement split-mode artifacts until executor-level Stable Core availability and byte savings are measured.
-- **Hardened bugfix regression evidence guidance.** `plan lint --include-quality` advisory warnings now require static test, fixture, or reproduction artifacts for active `type: bugfix` tasks.
-
-### Fixed
-
-- **Removed a cyclic dependency in P66.** `P66-T2` now depends on `P66-T1B` instead of `P66-T1C`, restoring correct task ordering.
-- **Corrected P55 ADR evidence semantics.** Scenario-wide stdout totals are no longer misinterpreted as context-pack or retrieval payload bytes; combined-context baseline metrics are measured from existing features; Stable Core availability is framed as an explicit executor attestation rather than model memory.
+- **Hardened loop-memory scanning, canonicality, corruption visibility, retention, prune accounting, path safety, and stable JSON error behavior.** Episode scans reject oversized files at the bounded read boundary, require byte-exact UTF-8 and canonical UTC timestamps, omit unused Evidence references from schema v1, distinguish write vs retention warnings, preflight prune batches, report partial prune conflicts, keep protected episodes within retention caps, redact more shell absolute-path forms, report invalid-UTF-8 bytes in corrupt accounting, count only successful prune unlinks by the current invocation, and use Git's ignore semantics for `doctor` cache checks.
+- **Agent-detail envelopes omit advisory recurrence metadata before actionable failure guidance when the byte bound is reached.**
 
 ## [2.6.0] — 2026-07-14
 

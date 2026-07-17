@@ -4,31 +4,36 @@ weight: 5
 confidence: medium
 risk: medium
 status: planned
-requires_decision: true
 objective: >
   Derive bounded local fingerprint aggregates from episode order and task
   identity so repeated failures and observed resolutions can be summarized
   without storing model-generated learning or changing correctness gates.
 non_goals:
   - Infer causality between a repair and a later success.
-  - Store raw commands, stdout, stderr, source, diffs, prompts, responses, or reasoning.
+  - Store raw commands, stdout, stderr, source, diffs, prompts, responses, or
+    reasoning.
   - Treat aggregate success as proof that a current repair is correct.
-  - Change verification, progress, Evidence, Failure Capsule, repairPolicy, or context packs.
-  - Add semantic search, embeddings, contributor sharing, remote sync, or a new backend.
+  - Change verification, progress, Evidence, Failure Capsule, repairPolicy, or
+    context packs.
+  - Add semantic search, embeddings, contributor sharing, remote sync, or a new
+    backend.
 definition_of_done:
-  - Aggregates are derived only from episode order, task identity, fingerprints, and verification outcomes.
-  - Each aggregate reports failure_count, resolved_count, unresolved_count, last_observed_at, last_resolved_at, and task_count.
+  - Aggregates are derived only from episode order, task identity, fingerprints,
+    and verification outcomes.
+  - Each aggregate reports failure_count, resolved_count, unresolved_count,
+    last_observed_at, last_resolved_at, and task_count.
   - P64 is the only phase that defines and derives resolved_count,
     unresolved_count, last_resolved_at, and task_count for loop-memory
     fingerprints.
-  - "`resolved_count` means a same-task `verification_failed` episode is followed
-    by that task's next terminal verification episode being `passed`; it does
-    not infer that a repair caused the success."
+  - "`resolved_count` means a same-task `verification_failed` episode is
+    followed by that task's next terminal verification episode being `passed`;
+    it does not infer that a repair caused the success."
   - If another failure appears before a pass, the earlier failure is not counted
     as resolved; a later pass is not assigned to every intervening fingerprint.
   - The contract covers retention-truncated history, incomplete sequences,
     same-timestamp tie-breaks, and corrupt episode exclusion.
-  - Missing, empty, or corrupt local memory leaves normal command behavior unchanged.
+  - Missing, empty, or corrupt local memory leaves normal command behavior
+    unchanged.
   - Aggregates are advisory and never participate in correctness gates.
 verification:
   commands:
@@ -36,6 +41,7 @@ verification:
     - pnpm typecheck
     - pnpm test:unit
     - pnpm test:integration:smoke
+requires_decision: true
 tasks:
   - id: P64-T1
     type: architecture
@@ -46,12 +52,11 @@ tasks:
     verification_strength: medium
     expected_duration: short
     status: planned
+    description: Accept the deterministic aggregation contract.
     depends_on:
       - P66-T2
-    description: Accept the deterministic aggregation contract.
     reads:
       - design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md
-      - design/phases/P63-exact-match-local-failure-recall.yaml
       - docs/cli-contract.md
     writes:
       - design/decisions/P64-T1-deterministic-resolution-aggregation-rfc.md
@@ -66,9 +71,9 @@ tasks:
     verification_strength: strong
     expected_duration: medium
     status: planned
+    description: Derive bounded fingerprint aggregates through a reusable pure function.
     depends_on:
       - P64-T1
-    description: Derive bounded fingerprint aggregates through a reusable pure function.
     reads:
       - src/core/loop-memory/episode-store.ts
       - tests/unit/core/loop-memory.test.ts
@@ -87,9 +92,9 @@ tasks:
     verification_strength: strong
     expected_duration: medium
     status: planned
+    description: Add aggregate compatibility and corruption coverage.
     depends_on:
       - P64-T2
-    description: Add aggregate compatibility and corruption coverage.
     reads:
       - src/core/loop-memory/episode-store.ts
       - tests/unit/core/loop-memory.test.ts
