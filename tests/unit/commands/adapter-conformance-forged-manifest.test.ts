@@ -33,9 +33,7 @@ code-pact validate --json
 
 ### What to verify first
 
-- The default minimal \`task prepare --json\` output is a bounded work order: \`data.task\`, \`data.next\`, and \`data.more.command\`. It does not build or write a context pack.
-- Use \`task prepare --detail full --json\` (or any explicit budget flag that forces full detail) to also receive \`data.recommendation\`; then read the execution profile. \`recommend --json\` also returns the same recommendation fields.
-- Let \`lifecycleMode\` pick the loop. When the runtime cannot switch model, report the limitation.
+- Read \`data.recommendation\`; let \`lifecycleMode\` pick the loop. When the runtime cannot switch model, report the limitation.
 - \`record_only\` is a lighter loop, not lighter verification — run verification, then \`task record-done\`.
 
 ### How to handle failures
@@ -43,7 +41,7 @@ code-pact validate --json
 - **blocked dependency** — wait or resume.
 - **verification failure** — fix and re-run.
 - **adapter drift** — re-upgrade.
-- **missing context pack** — default minimal \`task prepare --json\` does not build or write a context pack. To materialize the pack, use \`data.more.command\` from the minimal output, or run \`task prepare --detail full --json\`. If you only need the pack body, run \`task context\`.
+- **missing context pack** — task prepare rebuilds it.
 `;
 
 const SECRET = "API_TOKEN=top-secret-marker-7c1f";

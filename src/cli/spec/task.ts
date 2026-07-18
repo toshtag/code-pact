@@ -11,14 +11,11 @@ const prepare: CommandSpec = {
   command: "prepare",
   positional: "<task-id>",
   summary: [
-    "The single per-task entry point. Default (minimal) returns a compact work",
-    "order: current state, goal, declared read/write scope, done-when criteria,",
-    "verification commands, the next action, and a command to fetch the full",
-    "envelope. Use --detail full or any budget flag to also receive the",
-    "execution recommendation, context-pack metadata, a structured next_action,",
-    "and a commands dictionary. Progress-read-only — never records a progress",
-    "event and writes the context pack only in --detail full (or when a budget",
-    "flag forces full detail) unless --dry-run is passed.",
+    "The single per-task entry point. Returns the current state, the execution",
+    "recommendation (tier/model/effort/budget), context-pack metadata, a",
+    "structured next_action, and a commands dictionary with the exact next",
+    "commands to run. Progress-read-only — never records a progress event, but",
+    "writes the context pack unless --dry-run is passed.",
   ].join("\n"),
   // NOT `readOnly: true`: prepare records no progress event but DOES write
   // the context pack (unless --dry-run), so the generic "Read-only — never
@@ -26,45 +23,14 @@ const prepare: CommandSpec = {
   // note is inlined in the summary above.
   // See design/decisions/context-pack-write-contract-hygiene-rfc.md.
   flags: [
-    {
-      name: "agent",
-      value: "<name>",
-      description: "Agent name. Defaults to project default_agent.",
-    },
-    {
-      name: "budget-bytes",
-      value: "<N>",
-      description: "Cap the rendered context pack at N bytes.",
-    },
-    {
-      name: "context-budget",
-      value: "<profile>",
-      description:
-        "Use a named context budget profile (tight, balanced, wide, or an agent-defined profile). Resolves to a byte budget. Mutually exclusive with --budget-bytes.",
-    },
-    {
-      name: "recommended-context-budget",
-      description:
-        "Apply the deterministic context budget recommended in this same task prepare call. Mutually exclusive with --budget-bytes and --context-budget.",
-    },
-    {
-      name: "detail",
-      value: "<mode>",
-      description:
-        "Output detail mode: minimal (default) or full. Minimal returns a compact work order and does not build or write a context pack. Any explicit budget flag forces full detail. Full returns the historical contract with recommendation, context-pack metadata, next_action, and commands.",
-    },
-    {
-      name: "dry-run",
-      description:
-        "Full detail only: report the would-write pack path without writing it. It has no pack effect in minimal mode.",
-    },
+    { name: "agent", value: "<name>", description: "Agent name. Defaults to project default_agent." },
+    { name: "budget-bytes", value: "<N>", description: "Cap the rendered context pack at N bytes." },
+    { name: "context-budget", value: "<profile>", description: "Use a named context budget profile (tight, balanced, wide, or an agent-defined profile). Resolves to a byte budget. Mutually exclusive with --budget-bytes." },
+    { name: "recommended-context-budget", description: "Apply the deterministic context budget recommended in this same task prepare call. Mutually exclusive with --budget-bytes and --context-budget." },
+    { name: "dry-run", description: "Report the would-write pack path without writing it." },
     { name: "json", description: "Emit JSON." },
   ],
-  examples: [
-    "code-pact task prepare P1-T1 --agent claude-code --json",
-    "code-pact task prepare P1-T1 --agent claude-code --detail full --json",
-    "code-pact task prepare P1-T1 --agent claude-code --budget-bytes 100000 --json",
-  ],
+  examples: ["code-pact task prepare P1-T1 --agent claude-code --json"],
 };
 
 const complete: CommandSpec = {
@@ -79,24 +45,10 @@ const complete: CommandSpec = {
     "yourself — use `task record-done` instead.",
   ].join("\n"),
   flags: [
-    {
-      name: "agent",
-      value: "<name>",
-      description: "Agent name. Defaults to project default_agent.",
-    },
+    { name: "agent", value: "<name>", description: "Agent name. Defaults to project default_agent." },
     { name: "dry-run", description: "Show the event without recording it." },
-    {
-      name: "timeout",
-      value: "<ms>",
-      description:
-        "Per-command timeout in decimal milliseconds (default: 300000).",
-    },
-    {
-      name: "detail",
-      value: "<mode>",
-      description:
-        "JSON detail mode: full (default) or agent. Requires --json.",
-    },
+    { name: "timeout", value: "<ms>", description: "Per-command timeout in decimal milliseconds (default: 300000)." },
+    { name: "detail", value: "<mode>", description: "JSON detail mode: full (default) or agent. Requires --json." },
     { name: "json", description: "Emit JSON." },
   ],
   examples: [
@@ -116,19 +68,9 @@ const finalize: CommandSpec = {
     "--write to apply.",
   ].join("\n"),
   flags: [
-    {
-      name: "write",
-      description: "Apply the status flip (default is a dry-run preview).",
-    },
-    {
-      name: "base-ref",
-      value: "<ref>",
-      description: "Audit against the merge-base with <ref> (branch-level).",
-    },
-    {
-      name: "audit-strict",
-      description: "Promote write-audit warnings to a non-zero exit.",
-    },
+    { name: "write", description: "Apply the status flip (default is a dry-run preview)." },
+    { name: "base-ref", value: "<ref>", description: "Audit against the merge-base with <ref> (branch-level)." },
+    { name: "audit-strict", description: "Promote write-audit warnings to a non-zero exit." },
     { name: "json", description: "Emit JSON." },
   ],
   examples: [
@@ -148,88 +90,20 @@ const add: CommandSpec = {
     "is required. For bulk creation from a draft, use `phase import` instead.",
   ].join("\n"),
   flags: [
-    {
-      name: "description",
-      value: "<text>",
-      description: "Add non-interactively (skips the wizard); requires --type.",
-    },
-    {
-      name: "type",
-      value: "<type>",
-      description:
-        "Task type (feature | refactor | docs | test | …). Required with --description.",
-    },
-    {
-      name: "id",
-      value: "<task-id>",
-      description: "Override the generated task id. Valid in both paths.",
-    },
-    {
-      name: "depends-on",
-      value: "<id>",
-      repeatable: true,
-      description: "Upstream task dependency.",
-    },
-    {
-      name: "decision-ref",
-      value: "<path>",
-      repeatable: true,
-      description: "ADR this task depends on.",
-    },
-    {
-      name: "read",
-      value: "<path>",
-      repeatable: true,
-      description: "Declared read scope.",
-    },
-    {
-      name: "write",
-      value: "<path>",
-      repeatable: true,
-      description: "Declared write scope.",
-    },
-    {
-      name: "acceptance-ref",
-      value: "<path>",
-      repeatable: true,
-      description: "Acceptance reference.",
-    },
-    {
-      name: "ambiguity",
-      value: "<level>",
-      description:
-        "Optional sizing/readiness field; see the task schema for allowed values.",
-    },
-    {
-      name: "risk",
-      value: "<level>",
-      description:
-        "Optional sizing/readiness field; see the task schema for allowed values.",
-    },
-    {
-      name: "context-size",
-      value: "<size>",
-      description:
-        "Optional sizing/readiness field; see the task schema for allowed values.",
-    },
-    {
-      name: "write-surface",
-      value: "<size>",
-      description:
-        "Optional sizing/readiness field; see the task schema for allowed values.",
-    },
-    {
-      name: "verification-strength",
-      value: "<level>",
-      description:
-        "Optional sizing/readiness field; see the task schema for allowed values.",
-    },
-    {
-      name: "expected-duration",
-      value: "<dur>",
-      description:
-        "Optional sizing/readiness field; see the task schema for allowed values.",
-    },
+    { name: "description", value: "<text>", description: "Add non-interactively (skips the wizard); requires --type." },
+    { name: "type", value: "<type>", description: "Task type (feature | refactor | docs | test | …). Required with --description." },
+    { name: "id", value: "<task-id>", description: "Override the generated task id. Valid in both paths." },
+    { name: "depends-on", value: "<id>", repeatable: true, description: "Upstream task dependency." },
+    { name: "decision-ref", value: "<path>", repeatable: true, description: "ADR this task depends on." },
+    { name: "read", value: "<path>", repeatable: true, description: "Declared read scope." },
+    { name: "write", value: "<path>", repeatable: true, description: "Declared write scope." },
+    { name: "acceptance-ref", value: "<path>", repeatable: true, description: "Acceptance reference." },
+    { name: "ambiguity", value: "<level>", description: "Optional sizing/readiness field; see the task schema for allowed values." },
+    { name: "risk", value: "<level>", description: "Optional sizing/readiness field; see the task schema for allowed values." },
+    { name: "context-size", value: "<size>", description: "Optional sizing/readiness field; see the task schema for allowed values." },
+    { name: "write-surface", value: "<size>", description: "Optional sizing/readiness field; see the task schema for allowed values." },
+    { name: "verification-strength", value: "<level>", description: "Optional sizing/readiness field; see the task schema for allowed values." },
+    { name: "expected-duration", value: "<dur>", description: "Optional sizing/readiness field; see the task schema for allowed values." },
     { name: "json", description: "Emit JSON. Valid in both paths." },
   ],
   examples: [
@@ -243,33 +117,15 @@ const context: CommandSpec = {
   command: "context",
   positional: "<task-id>",
   summary: [
-    "Build and print the task's context pack. It is an explicit diagnostic and is",
-    "not included in default minimal `task prepare`. Use `task prepare --detail full`",
-    "when the full prepare envelope and materialized context pack are both required.",
+    "Build and print the task's context pack. `task prepare` bundles this with",
+    "the recommendation; call `task context` directly when you only need the pack.",
   ].join("\n"),
   readOnly: true,
   flags: [
-    {
-      name: "agent",
-      value: "<name>",
-      description: "Agent name. Defaults to project default_agent.",
-    },
-    {
-      name: "explain",
-      description: "Print the section-budget table instead of the pack body.",
-    },
-    {
-      name: "budget-bytes",
-      value: "<N>",
-      description:
-        "Cap the pack at N bytes (positive integer); over budget returns CONTEXT_OVER_BUDGET with the minimum achievable size.",
-    },
-    {
-      name: "context-budget",
-      value: "<profile>",
-      description:
-        "Use a named context budget profile (tight, balanced, wide, or an agent-defined profile). Resolves to a byte budget. Mutually exclusive with --budget-bytes.",
-    },
+    { name: "agent", value: "<name>", description: "Agent name. Defaults to project default_agent." },
+    { name: "explain", description: "Print the section-budget table instead of the pack body." },
+    { name: "budget-bytes", value: "<N>", description: "Cap the pack at N bytes (positive integer); over budget returns CONTEXT_OVER_BUDGET with the minimum achievable size." },
+    { name: "context-budget", value: "<profile>", description: "Use a named context budget profile (tight, balanced, wide, or an agent-defined profile). Resolves to a byte budget. Mutually exclusive with --budget-bytes." },
     { name: "json", description: "Emit JSON." },
   ],
   examples: [
@@ -288,11 +144,7 @@ const start: CommandSpec = {
     "implementation pass; then `task complete` when verification passes.",
   ].join("\n"),
   flags: [
-    {
-      name: "agent",
-      value: "<name>",
-      description: "Agent name. Defaults to project default_agent.",
-    },
+    { name: "agent", value: "<name>", description: "Agent name. Defaults to project default_agent." },
     { name: "json", description: "Emit JSON." },
   ],
   examples: ["code-pact task start P1-T1 --agent claude-code --json"],
@@ -320,22 +172,11 @@ const block: CommandSpec = {
     "(`task resume`) before it can complete. `--reason` is required.",
   ].join("\n"),
   flags: [
-    {
-      name: "reason",
-      value: "<text>",
-      required: true,
-      description: "Why the task is blocked.",
-    },
-    {
-      name: "agent",
-      value: "<name>",
-      description: "Agent name. Defaults to project default_agent.",
-    },
+    { name: "reason", value: "<text>", required: true, description: "Why the task is blocked." },
+    { name: "agent", value: "<name>", description: "Agent name. Defaults to project default_agent." },
     { name: "json", description: "Emit JSON." },
   ],
-  examples: [
-    'code-pact task block P1-T1 --reason "waiting on upstream API" --json',
-  ],
+  examples: ['code-pact task block P1-T1 --reason "waiting on upstream API" --json'],
 };
 
 const resume: CommandSpec = {
@@ -347,11 +188,7 @@ const resume: CommandSpec = {
     "`blocked` task must be resumed before `task complete` will run.",
   ].join("\n"),
   flags: [
-    {
-      name: "agent",
-      value: "<name>",
-      description: "Agent name. Defaults to project default_agent.",
-    },
+    { name: "agent", value: "<name>", description: "Agent name. Defaults to project default_agent." },
     { name: "json", description: "Emit JSON." },
   ],
   examples: ["code-pact task resume P1-T1 --agent claude-code --json"],
@@ -362,16 +199,12 @@ const runbook: CommandSpec = {
   command: "runbook",
   positional: "<task-id>",
   summary: [
-    'Print the ordered next-steps for a task ("what should I do next?") from its',
+    "Print the ordered next-steps for a task (\"what should I do next?\") from its",
     "derived state. Alias: `task next`.",
   ].join("\n"),
   readOnly: true,
   flags: [
-    {
-      name: "json",
-      description:
-        "Emit JSON (read data.next_steps[0].command for the next command).",
-    },
+    { name: "json", description: "Emit JSON (read data.next_steps[0].command for the next command)." },
   ],
   examples: ["code-pact task runbook P1-T1 --json"],
 };
@@ -395,23 +228,9 @@ const recordDone: CommandSpec = {
     "The event is recorded with source: external.",
   ].join("\n"),
   flags: [
-    {
-      name: "evidence",
-      value: "<text>",
-      required: true,
-      description:
-        "Completion proof — a PR, a CI result, or the verification command you ran.",
-    },
-    {
-      name: "notes",
-      value: "<text>",
-      description: "Optional note stored on the progress event.",
-    },
-    {
-      name: "agent",
-      value: "<name>",
-      description: "Agent name. Defaults to project default_agent.",
-    },
+    { name: "evidence", value: "<text>", required: true, description: "Completion proof — a PR, a CI result, or the verification command you ran." },
+    { name: "notes", value: "<text>", description: "Optional note stored on the progress event." },
+    { name: "agent", value: "<name>", description: "Agent name. Defaults to project default_agent." },
     { name: "dry-run", description: "Show the event without recording it." },
     { name: "json", description: "Emit JSON." },
   ],

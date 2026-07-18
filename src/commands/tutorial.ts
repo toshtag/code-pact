@@ -7,10 +7,7 @@ import { tmpdir } from "node:os";
 import type { LocaleCode } from "../core/schemas/locale.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
 import { runInitCore } from "./init.ts";
-import {
-  runTaskPrepare,
-  type TaskPrepareMinimalResult,
-} from "./task-prepare.ts";
+import { runTaskPrepare } from "./task-prepare.ts";
 import { runTaskStart } from "./task-progress.ts";
 import { runTaskComplete } from "./task-complete.ts";
 import { runTaskFinalize } from "./task-finalize.ts";
@@ -80,9 +77,7 @@ export async function runTutorial(
     }
   };
 
-  const sandboxPath = await createTutorialSandbox(
-    opts.sandboxParent ?? tmpdir(),
-  );
+  const sandboxPath = await createTutorialSandbox(opts.sandboxParent ?? tmpdir());
   const sandbox = unbrand(sandboxPath);
   let kept = false;
 
@@ -106,16 +101,18 @@ export async function runTutorial(
     });
 
     // 2. prepare T1 — the single per-task entry point.
-    const prepareT1 = (await runTaskPrepare({
+    const prepareT1 = await runTaskPrepare({
       cwd: sandbox,
       taskId: T1,
       agent: AGENT,
-      detail: "minimal",
-    })) as TaskPrepareMinimalResult;
+    });
     emit({
       command: `task prepare ${T1}`,
       explanation: t.step.prepareT1,
-      result: t.result.prepare(prepareT1.task.state, prepareT1.next.type),
+      result: t.result.prepare(
+        prepareT1.current_state,
+        prepareT1.next_action.type,
+      ),
     });
 
     // 3. start T1.
@@ -127,18 +124,15 @@ export async function runTutorial(
     });
 
     // 4. prepare T2 while T1 is unfinished — demonstrates the dependency gate.
-    const prepareT2Blocked = (await runTaskPrepare({
+    const prepareT2Blocked = await runTaskPrepare({
       cwd: sandbox,
       taskId: T2,
       agent: AGENT,
-      detail: "minimal",
-    })) as TaskPrepareMinimalResult;
+    });
     emit({
       command: `task prepare ${T2}`,
       explanation: t.step.prepareT2Blocked,
-      result: t.result.blocked(
-        (prepareT2Blocked.blocked_by ?? []).join(", ") || T1,
-      ),
+      result: t.result.blocked(prepareT2Blocked.blocked_by.join(", ") || T1),
     });
 
     // 5. complete T1 — runs verify, records a `done` event on pass.
@@ -164,18 +158,17 @@ export async function runTutorial(
     });
 
     // 7. prepare T2 again — now unblocked.
-    const prepareT2Ready = (await runTaskPrepare({
+    const prepareT2Ready = await runTaskPrepare({
       cwd: sandbox,
       taskId: T2,
       agent: AGENT,
-      detail: "minimal",
-    })) as TaskPrepareMinimalResult;
+    });
     emit({
       command: `task prepare ${T2}`,
       explanation: t.step.prepareT2Ready,
       result: t.result.prepare(
-        prepareT2Ready.task.state,
-        prepareT2Ready.next.type,
+        prepareT2Ready.current_state,
+        prepareT2Ready.next_action.type,
       ),
     });
 
