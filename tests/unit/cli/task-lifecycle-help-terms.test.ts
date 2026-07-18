@@ -13,7 +13,7 @@ import { subcommandUsage } from "../../../src/cli/usage.ts";
 
 // The second line of the 2-line stub (subcommandStub). A rich help must NOT
 // contain it — the canonical "did not regress to a stub" check.
-const STUB_MARKER = 'for the full subcommand list.';
+const STUB_MARKER = "for the full subcommand list.";
 
 // Per-verb required terms: the Usage line, the verb's documented flags, and a
 // purpose phrase. `task add` is pinned thickly (it is the bloat/thin-help risk
@@ -79,23 +79,42 @@ const REQUIRED_TERMS: Record<string, readonly string[]> = {
     "--json",
   ],
   // The 4 pre-existing rich verbs — keep them rich (anchor flag/term each).
-  // prepare is progress-read-only but DOES write the context pack — pin the
-  // precise token, not the generic "Read-only" note (P45).
-  prepare: ["Usage: code-pact task prepare <task-id>", "--budget-bytes", "Progress-read-only", "writes the context pack"],
-  complete: ["Usage: code-pact task complete <task-id>", "--dry-run", "record-done"],
-  "record-done": ["Usage: code-pact task record-done <task-id>", "--evidence", "record_only"],
-  finalize: ["Usage: code-pact task finalize <task-id>", "--audit-strict", "--write"],
+  // prepare is progress-read-only; the context pack is written only in
+  // --detail full or when a budget flag forces full detail.
+  prepare: [
+    "Usage: code-pact task prepare <task-id>",
+    "--detail",
+    "Progress-read-only",
+    "writes the context pack",
+  ],
+  complete: [
+    "Usage: code-pact task complete <task-id>",
+    "--dry-run",
+    "record-done",
+  ],
+  "record-done": [
+    "Usage: code-pact task record-done <task-id>",
+    "--evidence",
+    "record_only",
+  ],
+  finalize: [
+    "Usage: code-pact task finalize <task-id>",
+    "--audit-strict",
+    "--write",
+  ],
 };
 
 const VERBS = Object.keys(REQUIRED_TERMS);
 
 describe("task lifecycle verbs have rich --help (P41)", () => {
-  it.each(VERBS)("`task %s --help` is not the 2-line stub", (verb) => {
+  it.each(VERBS)("`task %s --help` is not the 2-line stub", verb => {
     expect(subcommandUsage("task", verb)).not.toContain(STUB_MARKER);
   });
 
   it.each(
-    VERBS.flatMap((verb) => REQUIRED_TERMS[verb]!.map((term) => [verb, term] as const)),
+    VERBS.flatMap(verb =>
+      REQUIRED_TERMS[verb]!.map(term => [verb, term] as const),
+    ),
   )("`task %s --help` includes %j", (verb, term) => {
     expect(subcommandUsage("task", verb)).toContain(term);
   });

@@ -150,8 +150,9 @@ code-pact task add P1 --description "Add X" --type feature --json
 
 `code-pact task context <task-id> [options]`
 
-Build and print the task's context pack. `task prepare` bundles this with
-the recommendation; call `task context` directly when you only need the pack. Read-only — never records a progress event.
+Build and print the task's context pack. It is an explicit diagnostic and is
+not included in default minimal `task prepare`. Use `task prepare --detail full`
+when the full prepare envelope and materialized context pack are both required. Read-only — never records a progress event.
 
 | Flag | Value | Description |
 | --- | --- | --- |
@@ -186,7 +187,7 @@ flag forces full detail) unless --dry-run is passed.
 | `--context-budget` | `<profile>` | Use a named context budget profile (tight, balanced, wide, or an agent-defined profile). Resolves to a byte budget. Mutually exclusive with --budget-bytes. |
 | `--recommended-context-budget` | — | Apply the deterministic context budget recommended in this same task prepare call. Mutually exclusive with --budget-bytes and --context-budget. |
 | `--detail` | `<mode>` | Output detail mode: minimal (default) or full. Minimal returns a compact work order and does not build or write a context pack. Any explicit budget flag forces full detail. Full returns the historical contract with recommendation, context-pack metadata, next_action, and commands. |
-| `--dry-run` | — | Report the would-write pack path without writing it. |
+| `--dry-run` | — | Full detail only: report the would-write pack path without writing it. It has no pack effect in minimal mode. |
 | `--json` | — | Emit JSON. |
 
 ```sh

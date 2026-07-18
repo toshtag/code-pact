@@ -209,3 +209,6 @@ phases:
   - id: P76
     path: design/phases/P76-complete-the-minimum-work-order-contract.yaml
     weight: 4
+  - id: P77
+    path: design/phases/P77-remove-remaining-full-default-contract-residue.yaml
+    weight: 4

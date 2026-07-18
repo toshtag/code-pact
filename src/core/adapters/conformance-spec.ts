@@ -220,6 +220,7 @@ export const BOUNDED_REPAIR_GUIDANCE_ANCHORS: ReadonlyArray<{
   {
     id: "repair_policy_json_paths_present",
     anchors: [
+      "task prepare --detail full",
       "data.recommendation.repairPolicy",
       "data.repairPolicy",
       "data.recommendation.allowedEscalation",

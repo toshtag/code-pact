@@ -90,8 +90,8 @@ honest path for two cases:
 | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
 | `task record-done <id> --evidence "PR #123 · pnpm test green"` | Records `done` without running verification commands — the proof is `--evidence` (a PR, CI link, or the verification you ran). The event carries `source: external`. The decision gate still applies for `requires_decision` tasks. | `done` (`source: external`) |
 
-When the work can be verified from the working tree and `lifecycleMode` is not
-`record_only`, prefer the normal `complete` path (it runs verification for you).
+When the work can be verified from the working tree and the recommendation's
+`lifecycleMode` is not `record_only`, prefer the normal `complete` path (it runs verification for you).
 `source: external` marks an event that did **not** go through `task complete`'s
 loop verification — so later diagnostics can tell the two apart. Put real proof
 in `--evidence`: a PR number, a CI result, or the verification command you ran.

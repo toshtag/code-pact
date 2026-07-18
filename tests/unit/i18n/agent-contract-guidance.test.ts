@@ -9,7 +9,8 @@ import {
 describe("agent contract failure guidance", () => {
   for (const locale of ["en-US", "ja-JP"] as const) {
     it(`${locale} points agents at compact failure capsule fields`, () => {
-      const failBody = messages[locale].templates.adapterCommon.agentContract.failBody;
+      const failBody =
+        messages[locale].templates.adapterCommon.agentContract.failBody;
 
       for (const anchor of [
         "data.failure.kind",
@@ -27,34 +28,72 @@ describe("agent contract failure guidance", () => {
     });
 
     it(`${locale} separates task complete cause codes from standalone verify failure kinds`, () => {
-      const failBody = messages[locale].templates.adapterCommon.agentContract.failBody;
+      const failBody =
+        messages[locale].templates.adapterCommon.agentContract.failBody;
 
       expect(failBody).toContain("task complete --json --detail agent");
       expect(failBody).toContain("verify --json --detail agent");
 
-      for (const causeCode of ["COMMANDS_FAILED", "DECISION_REQUIRED", "ABORTED"]) {
+      for (const causeCode of [
+        "COMMANDS_FAILED",
+        "DECISION_REQUIRED",
+        "ABORTED",
+      ]) {
         expect(failBody).toContain(causeCode);
       }
-      for (const kind of ["command_failed", "timed_out", "decision_required", "invalid_state"]) {
+      for (const kind of [
+        "command_failed",
+        "timed_out",
+        "decision_required",
+        "invalid_state",
+      ]) {
         expect(failBody).toContain(kind);
       }
       for (const stateAnchor of ["progress_event", "task_status"]) {
         expect(failBody).toContain(stateAnchor);
       }
 
-      expect(failBody).toMatch(/task complete[\s\S]*error\.cause_code[\s\S]*COMMANDS_FAILED[\s\S]*DECISION_REQUIRED[\s\S]*ABORTED/);
-      expect(failBody).toMatch(/verify --json --detail agent[\s\S]*data\.failure\.kind[\s\S]*command_failed[\s\S]*timed_out[\s\S]*decision_required[\s\S]*invalid_state/);
-      expect(failBody).toMatch(/invalid_state[\s\S]*data\.failure\.check[\s\S]*data\.failure\.reason/);
-      expect(failBody).not.toMatch(/verify --json --detail agent[\s\S]{0,160}COMMANDS_FAILED/);
-      expect(failBody).not.toMatch(/verify --json --detail agent[\s\S]{0,160}DECISION_REQUIRED/);
+      expect(failBody).toMatch(
+        /task complete[\s\S]*error\.cause_code[\s\S]*COMMANDS_FAILED[\s\S]*DECISION_REQUIRED[\s\S]*ABORTED/,
+      );
+      expect(failBody).toMatch(
+        /verify --json --detail agent[\s\S]*data\.failure\.kind[\s\S]*command_failed[\s\S]*timed_out[\s\S]*decision_required[\s\S]*invalid_state/,
+      );
+      expect(failBody).toMatch(
+        /invalid_state[\s\S]*data\.failure\.check[\s\S]*data\.failure\.reason/,
+      );
+      expect(failBody).not.toMatch(
+        /verify --json --detail agent[\s\S]{0,160}COMMANDS_FAILED/,
+      );
+      expect(failBody).not.toMatch(
+        /verify --json --detail agent[\s\S]{0,160}DECISION_REQUIRED/,
+      );
+    });
+
+    it(`${locale} documents default minimal prepare output fields`, () => {
+      const whenBody =
+        messages[locale].templates.adapterCommon.agentContract.whenBody;
+      const verifyBody =
+        messages[locale].templates.adapterCommon.agentContract.verifyBody;
+
+      for (const anchor of ["data.task", "data.next", "data.more.command"]) {
+        expect(whenBody).toContain(anchor);
+      }
+      expect(verifyBody).toContain("task prepare --detail full");
+      expect(verifyBody).not.toMatch(
+        /default minimal `?task prepare`?.*data\.recommendation/,
+      );
     });
 
     it(`${locale} documents bounded repair policy anchors`, () => {
-      const verifyBody = messages[locale].templates.adapterCommon.agentContract.verifyBody;
-      const repairBody = messages[locale].templates.adapterCommon.agentContract.repairBody;
+      const verifyBody =
+        messages[locale].templates.adapterCommon.agentContract.verifyBody;
+      const repairBody =
+        messages[locale].templates.adapterCommon.agentContract.repairBody;
       const combined = `${verifyBody}\n${repairBody}`;
 
       for (const anchor of [
+        "task prepare --detail full",
         "data.recommendation",
         "data.recommendation.repairPolicy",
         "data.repairPolicy",
@@ -89,6 +128,12 @@ describe("agent contract failure guidance", () => {
       expect(combined).not.toContain(
         "既存の `task prepare` / `recommend` 結果にある `data.recommendation.repairPolicy`",
       );
+      expect(repairBody).not.toMatch(
+        /data\.recommendation\.repairPolicy[^\n]*task prepare --json/,
+      );
+      expect(repairBody).not.toMatch(
+        /data\.recommendation\.allowedEscalation[^\n]*task prepare --json/,
+      );
     });
 
     it(`${locale} documents prior-local signal consumption in generated guidance`, () => {
@@ -107,7 +152,9 @@ describe("agent contract failure guidance", () => {
       }
 
       if (locale === "en-US") {
-        expect(generated).toContain("does not describe previous repair attempts");
+        expect(generated).toContain(
+          "does not describe previous repair attempts",
+        );
         expect(generated).toContain("do not infer them");
       } else {
         expect(generated).toContain("過去の repair や仮説の内容は示さない");
@@ -116,8 +163,9 @@ describe("agent contract failure guidance", () => {
     });
 
     it(`${locale} documents structural projection consumption anchors`, () => {
-      const contextBody = messages[locale].templates.adapterCommon.agentContract
-        .contextCommandBody;
+      const contextBody =
+        messages[locale].templates.adapterCommon.agentContract
+          .contextCommandBody;
 
       for (const anchor of STRUCTURAL_PROJECTION_GUIDANCE_COMMON_ANCHORS) {
         expect(contextBody).toContain(anchor);

@@ -55,7 +55,8 @@ const prepare: CommandSpec = {
     },
     {
       name: "dry-run",
-      description: "Report the would-write pack path without writing it.",
+      description:
+        "Full detail only: report the would-write pack path without writing it. It has no pack effect in minimal mode.",
     },
     { name: "json", description: "Emit JSON." },
   ],
@@ -242,8 +243,9 @@ const context: CommandSpec = {
   command: "context",
   positional: "<task-id>",
   summary: [
-    "Build and print the task's context pack. `task prepare` bundles this with",
-    "the recommendation; call `task context` directly when you only need the pack.",
+    "Build and print the task's context pack. It is an explicit diagnostic and is",
+    "not included in default minimal `task prepare`. Use `task prepare --detail full`",
+    "when the full prepare envelope and materialized context pack are both required.",
   ].join("\n"),
   readOnly: true,
   flags: [

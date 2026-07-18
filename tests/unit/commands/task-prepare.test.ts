@@ -635,43 +635,61 @@ describe("runTaskPrepare — minimal byte reduction", () => {
     return larger === 0 ? 0 : (larger - smaller) / larger;
   }
 
-  it("A. small runtime task: minimal JSON is much smaller than full prepare and context pack", async () => {
-    const { minimalBytes, fullPrepareBytes, contextPackBytes } =
-      await minimalAndFullBytes(PHASE_YAML);
+  it("A. small runtime task: minimal JSON is much smaller than full prepare and materialized output", async () => {
+    const {
+      minimalBytes,
+      fullPrepareBytes,
+      contextPackBytes,
+      materializedBytes,
+    } = await minimalAndFullBytes(PHASE_YAML);
 
     const prepareReduction = reduction(minimalBytes, fullPrepareBytes);
     const contextReduction = reduction(minimalBytes, contextPackBytes);
+    const materializedReduction = reduction(minimalBytes, materializedBytes);
 
     expect(prepareReduction).toBeGreaterThan(0.3);
     expect(contextReduction).toBeGreaterThan(0.3);
+    expect(materializedReduction).toBeGreaterThan(0.5);
   });
 
   it("B. declared scope task: minimal JSON stays small even with read/write lists", async () => {
-    const { minimalBytes, fullPrepareBytes, contextPackBytes } =
-      await minimalAndFullBytes(PHASE_YAML_WITH_SCOPE);
+    const {
+      minimalBytes,
+      fullPrepareBytes,
+      contextPackBytes,
+      materializedBytes,
+    } = await minimalAndFullBytes(PHASE_YAML_WITH_SCOPE);
 
     const prepareReduction = reduction(minimalBytes, fullPrepareBytes);
     const contextReduction = reduction(minimalBytes, contextPackBytes);
+    const materializedReduction = reduction(minimalBytes, materializedBytes);
 
     expect(prepareReduction).toBeGreaterThan(0.3);
     expect(contextReduction).toBeGreaterThan(0.3);
+    expect(materializedReduction).toBeGreaterThan(0.5);
   });
 
   it("C. failed task: minimal JSON is still smaller than full prepare output", async () => {
-    const { minimalBytes, fullPrepareBytes, contextPackBytes } =
-      await minimalAndFullBytes(
-        PHASE_YAML_FAILED,
-        `events:\n${atEvent("failed", "unit test failure")}`,
-      );
+    const {
+      minimalBytes,
+      fullPrepareBytes,
+      contextPackBytes,
+      materializedBytes,
+    } = await minimalAndFullBytes(
+      PHASE_YAML_FAILED,
+      `events:\n${atEvent("failed", "unit test failure")}`,
+    );
 
     const prepareReduction = reduction(minimalBytes, fullPrepareBytes);
+    const materializedReduction = reduction(minimalBytes, materializedBytes);
     expect(prepareReduction).toBeGreaterThan(0.2);
+    expect(materializedReduction).toBeGreaterThan(0.2);
     // Default minimal does not build a pack, so context-pack reduction vs
     // minimal JSON is a less meaningful metric for failed early returns.
     expect(minimalBytes).toBeLessThan(contextPackBytes + 1);
   });
 
-  it("D. reports serialized byte sizes for minimal, full, context pack, and combined materialized output", async () => {
+  it("D. byte sizes for minimal, full, context pack, and combined materialized output stay ordered", async () => {
     const a = await minimalAndFullBytes(PHASE_YAML);
     const b = await minimalAndFullBytes(PHASE_YAML_WITH_SCOPE);
     const c = await minimalAndFullBytes(
@@ -684,8 +702,6 @@ describe("runTaskPrepare — minimal byte reduction", () => {
       { fixture: "declared-scope", ...b },
       { fixture: "failed", ...c },
     ];
-    // eslint-disable-next-line no-console
-    console.table(table);
 
     for (const row of table) {
       expect(row.minimalBytes).toBeLessThan(row.fullPrepareBytes);
@@ -693,7 +709,7 @@ describe("runTaskPrepare — minimal byte reduction", () => {
     }
   });
 
-  it("median reduction across fixtures is at least 50%", async () => {
+  it("median reduction across fixtures is at least 50% for full and materialized outputs", async () => {
     const a = await minimalAndFullBytes(PHASE_YAML);
     const b = await minimalAndFullBytes(PHASE_YAML_WITH_SCOPE);
     const c = await minimalAndFullBytes(
@@ -701,14 +717,20 @@ describe("runTaskPrepare — minimal byte reduction", () => {
       `events:\n${atEvent("failed", "unit test failure")}`,
     );
 
-    const reductions = [
+    const fullPrepareReductions = [
       reduction(a.minimalBytes, a.fullPrepareBytes),
       reduction(b.minimalBytes, b.fullPrepareBytes),
       reduction(c.minimalBytes, c.fullPrepareBytes),
     ].sort((x, y) => x - y);
 
-    const median = reductions[1]!;
-    expect(median).toBeGreaterThanOrEqual(0.5);
+    const materializedReductions = [
+      reduction(a.minimalBytes, a.materializedBytes),
+      reduction(b.minimalBytes, b.materializedBytes),
+      reduction(c.minimalBytes, c.materializedBytes),
+    ].sort((x, y) => x - y);
+
+    expect(fullPrepareReductions[1]!).toBeGreaterThanOrEqual(0.5);
+    expect(materializedReductions[1]!).toBeGreaterThanOrEqual(0.5);
   });
 });
 

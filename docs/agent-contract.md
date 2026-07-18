@@ -143,14 +143,8 @@ For the same git SHA and the same inputs:
   and `budget_bytes` (only when a budget was applied) — are byte-based and
   deterministic (no tokenizer, summarization, model, or network), and
   `minimum_achievable_bytes` is the same floor `CONTEXT_OVER_BUDGET` reports.
-- `task prepare` writes the same context pack bytes that
-  `task context` produces for the same task (`task context` builds and
-  returns the content; `task prepare` writes it to disk).
-- When an explicit context budget defers sections, `task context`, normal
-  `task prepare`, and `task prepare --dry-run` compute the same rendered
-  Markdown bytes and the same `context:sha256:<digest>` manifest reference for
-  the same task, agent, and resolved byte budget. Only normal `task prepare`
-  materializes the derived manifest and returns a non-null retrieval command.
+- Full-detail `task prepare` (or any explicit budget flag, which forces full detail) writes the same context pack bytes that `task context` produces for the same task. Default minimal `task prepare` does not build or write a pack.
+- When an explicit context budget defers sections, `task context`, full-detail `task prepare`, and `task prepare --dry-run` (in full detail) compute the same rendered Markdown bytes and the same `context:sha256:<digest>` manifest reference for the same task, agent, and resolved byte budget. Only the full-detail `task prepare` materializes the derived manifest and returns a non-null retrieval command; default minimal `task prepare` does not build or write a pack.
 - When an explicit context budget would otherwise exceed the resolved byte cap,
   the pack may first use deterministic structural projections for safe content
   types before fully deferring sections. Projection is not summarization: read
@@ -162,11 +156,11 @@ For the same git SHA and the same inputs:
   manifest. No-budget packs and budgeted packs that naturally fit stay
   byte-identical to the unprojected form.
 
-| Path                     | Reference calculated | Artifact persisted | `retrieve_command` |
-| ------------------------ | -------------------: | -----------------: | -----------------: |
-| `task context`           |                  yes |                 no |             `null` |
-| `task prepare --dry-run` |                  yes |                 no |             `null` |
-| normal `task prepare`    |                  yes |                yes |           non-null |
+| Path                         | Reference calculated | Artifact persisted | `retrieve_command` |
+| ---------------------------- | -------------------: | -----------------: | -----------------: |
+| `task context`               |                  yes |                 no |             `null` |
+| `task prepare --dry-run`     |                  yes |                 no |             `null` |
+| `task prepare --detail full` |                  yes |                yes |           non-null |
 
 Agents must not infer retrieval availability from the manifest reference alone.
 Use the returned `deferred_context.retrieve_command` when present.

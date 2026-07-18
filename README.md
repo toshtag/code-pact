@@ -68,7 +68,7 @@ Contributors can also run from a clone with `pnpm link --global`, or install a l
 - **Code-pact-first** — capture a brief + constitution, then `plan prompt` and have your agent draft the full roadmap from them.
 - **Manual** — write the roadmap by hand with a mix of interactive wizards and flag-based commands.
 
-They all converge on the same per-task agent loop, entered through `task prepare` (`task prepare` → `task start` → implement → `verify` → `task complete` → `task finalize`). `task prepare` also returns a `lifecycleMode` (`full_loop` / `record_only` / `decision_loop`) recommending how heavy that loop should be — e.g. `record_only` lets a small, strongly-verified task record completion via `task record-done` instead of the full loop. See [`docs/per-task-loop.md`](docs/per-task-loop.md) for the lifecycle diagram and a worked example. `recommend` and `task context` remain available as standalone diagnostics — `task prepare` surfaces both for you in one call.
+They all converge on the same per-task agent loop, entered through `task prepare` (`task prepare` → `task start` → implement → `verify` → `task complete` → `task finalize`). Default `task prepare --json` returns a compact minimal work order (`data.task`, `data.next`, `data.more.command`). Use `task prepare --detail full` (or any explicit budget flag) to also receive the execution recommendation, context-pack metadata, `next_action`, and `commands` dictionary. `recommend` and `task context` remain available as standalone diagnostics.
 
 New to the terms used here (context pack, envelope, derived state, …)? The [`docs/glossary.md`](docs/glossary.md) defines them in plain language.
 
