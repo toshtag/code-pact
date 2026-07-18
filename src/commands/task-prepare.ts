@@ -15,6 +15,8 @@ import {
   resolveDecisionGate,
   parseAdrCommitments,
 } from "../core/decisions/adr.ts";
+import { fingerprintFailure } from "../core/evidence/failure-fingerprint.ts";
+import { recallExactFailure } from "../core/loop-memory/recall.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { loadProgressLog } from "../core/progress/io.ts";
 import {
@@ -29,6 +31,8 @@ import {
 import { loadPhase } from "../core/plan/load-phase.ts";
 import { loadProject, resolveEnabledAgent } from "../core/project.ts";
 import type { Task as TaskT } from "../core/schemas/task.ts";
+import type { Phase } from "../core/schemas/phase.ts";
+import type { ProgressEvent } from "../core/schemas/progress-event.ts";
 import {
   appliedBudgetBytes,
   resolveAppliedContextBudget,
@@ -40,6 +44,8 @@ import {
 // Public types
 // ---------------------------------------------------------------------------
 
+export type TaskPrepareDetail = "minimal" | "full";
+
 export type TaskPrepareOptions = {
   cwd: string;
   taskId: string;
@@ -48,6 +54,12 @@ export type TaskPrepareOptions = {
   /** When true, build the context pack but do not write it to disk. */
   dryRun?: boolean;
   budgetSelection?: TaskPrepareBudgetSelection;
+  /**
+   * Output detail level. `"minimal"` omits the recommendation details,
+   * context bodies, and runbook/memory guidance from the emitted result
+   * and context pack; `"full"` (default) preserves the existing contract.
+   */
+  detail?: TaskPrepareDetail;
 };
 
 export type NextActionType =
@@ -70,6 +82,39 @@ export type TaskPrepareCommands = {
    * exactly `record-done` (hyphen), accessed `commands["record-done"]`.
    */
   "record-done": string;
+};
+
+export type TaskPrepareMinimalEnvelope = {
+  detail: "minimal";
+  task_id: string;
+  phase_id: string;
+  agent: string;
+  current_state: TaskCurrentState;
+  next_action: {
+    type: NextActionType;
+    message: string;
+  };
+  commands: TaskPrepareCommands;
+  context_pack_path: string | null;
+  context_pack_bytes: number;
+  /** Present only in dry-run mode when a pack would have been written. */
+  would_write_context_pack_path?: string;
+  dry_run: boolean;
+  blocked_by: string[];
+  /** Actionable task state: decision gate and, when current_state is failed, failure retrieval. */
+  state: {
+    requires_decision: boolean;
+    failure_fingerprint?: string;
+    prior_exact_match?: boolean;
+  };
+  /** Explicit retrieval commands for context, runbook, memory, recommendation, and full detail. */
+  retrieval: {
+    context: { available: true; bytes: number; command: string };
+    runbook: { command: string };
+    memory: { command: string };
+    recommendation: { command: string };
+    full_detail: { command: string };
+  };
 };
 
 export type TaskPrepareResult = {
@@ -114,6 +159,11 @@ export type TaskPrepareResult = {
   deferred_context?: DeferredContextProjection;
   /** Present only on the context-pack build path; omitted for early returns. */
   applied_context_budget?: AppliedContextBudget;
+  /**
+   * Minimal-mode envelope, populated only when `detail` is "minimal".
+   * The CLI emits this instead of the full result for the minimal contract.
+   */
+  minimal?: TaskPrepareMinimalEnvelope;
 };
 
 // ---------------------------------------------------------------------------
@@ -164,7 +214,9 @@ function buildCommands(
 ): TaskPrepareCommands {
   return {
     context: `code-pact task context ${taskId} --agent ${agent}${
-      contextBudgetBytes !== undefined ? ` --budget-bytes ${contextBudgetBytes}` : ""
+      contextBudgetBytes !== undefined
+        ? ` --budget-bytes ${contextBudgetBytes}`
+        : ""
     }`,
     start: `code-pact task start ${taskId} --agent ${agent}`,
     verify: `code-pact verify --phase ${phaseId} --task ${taskId} --json --detail agent`,
@@ -234,6 +286,115 @@ function nextActionTypeFor(state: TaskCurrentState): NextActionType {
   }
 }
 
+async function buildMinimalEnvelope(opts: {
+  cwd: string;
+  result: TaskPrepareResult;
+  phase: Phase;
+  task: TaskT;
+  lastEvent: ProgressEvent | undefined;
+  agentName: string;
+  phaseId: string;
+  taskId: string;
+  contextPackPath: string | null;
+  contextPackBytes: number;
+  wouldWritePath: string | undefined;
+}): Promise<TaskPrepareMinimalEnvelope> {
+  const {
+    cwd,
+    result,
+    phase,
+    task,
+    lastEvent,
+    agentName,
+    phaseId,
+    taskId,
+    contextPackPath,
+    contextPackBytes,
+    wouldWritePath,
+  } = opts;
+
+  const state: TaskPrepareMinimalEnvelope["state"] = {
+    requires_decision: isDecisionRequiredForTask(phase, task),
+  };
+
+  if (result.current_state === "failed" && lastEvent?.reason) {
+    const failureFingerprint = fingerprintFailure(
+      {
+        command: "verification",
+        exitCode: 1,
+        timedOut: false,
+        aborted: false,
+        stdout: "",
+        stderr: lastEvent.reason,
+      },
+      cwd,
+    );
+    state.failure_fingerprint = failureFingerprint;
+    const recall = await recallExactFailure(cwd, failureFingerprint);
+    if (recall !== null) {
+      state.prior_exact_match = true;
+    }
+  }
+
+  const minimalNextActionMessage = (type: NextActionType): string => {
+    switch (type) {
+      case "start_task":
+        return "Start the task.";
+      case "continue_implementation":
+        return "Continue implementation.";
+      case "wait_for_dependencies":
+        return "Resolve blocking dependencies first.";
+      case "noop_already_done":
+        return "No action needed.";
+      case "investigate_failure":
+        return "Investigate the failure, then re-start.";
+    }
+  };
+
+  const minimal: TaskPrepareMinimalEnvelope = {
+    detail: "minimal",
+    task_id: taskId,
+    phase_id: phaseId,
+    agent: agentName,
+    current_state: result.current_state,
+    next_action: {
+      type: result.next_action.type,
+      message: minimalNextActionMessage(result.next_action.type),
+    },
+    commands: result.commands,
+    context_pack_path: contextPackPath,
+    context_pack_bytes: contextPackBytes,
+    dry_run: result.dry_run,
+    blocked_by: result.blocked_by,
+    state,
+    retrieval: {
+      context: {
+        available: true,
+        bytes: contextPackBytes,
+        command: `code-pact task context ${taskId} --agent ${agentName}`,
+      },
+      runbook: {
+        command: `code-pact task runbook ${taskId} --json`,
+      },
+      memory: {
+        command: "code-pact memory status --json",
+      },
+      recommendation: {
+        command: `code-pact recommend --phase ${phaseId} --task ${taskId} --json`,
+      },
+      full_detail: {
+        command: `code-pact task prepare ${taskId} --agent ${agentName} --detail full --json`,
+      },
+    },
+  };
+
+  if (wouldWritePath !== undefined) {
+    minimal.would_write_context_pack_path = wouldWritePath;
+  }
+
+  return minimal;
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -259,6 +420,7 @@ export async function runTaskPrepare(
   const { cwd, taskId } = opts;
   const dryRun = opts.dryRun ?? false;
   const budgetSelection = opts.budgetSelection ?? { kind: "none" };
+  const detail = opts.detail ?? "full";
 
   // 1. Agent validation (mirrors task context / task start order).
   const project = await loadProject(cwd);
@@ -285,7 +447,10 @@ export async function runTaskPrepare(
   }
 
   // 5. Derive current state.
-  const currentState = deriveTaskState(progress.log.events, taskId).current;
+  const { current: currentState, last_event: lastEvent } = deriveTaskState(
+    progress.log.events,
+    taskId,
+  );
 
   const commands = buildCommands(agentName, phaseId, taskId);
 
@@ -371,7 +536,7 @@ export async function runTaskPrepare(
         items: { text: string; done: boolean }[];
       }[]
     | undefined;
-  if (isDecisionRequiredForTask(phase, task)) {
+  if (detail === "full" && isDecisionRequiredForTask(phase, task)) {
     const resolution = await resolveDecisionGate(
       cwd,
       taskId,
@@ -418,6 +583,7 @@ export async function runTaskPrepare(
     phaseId,
     taskId,
     agentName,
+    detail,
     ...(budgetBytes !== undefined ? { budgetBytes } : {}),
   });
   const contextPackBytes = Buffer.byteLength(pack.content, "utf8");
@@ -488,6 +654,22 @@ export async function runTaskPrepare(
 
   if (deferredContext !== undefined) {
     result.deferred_context = deferredContext;
+  }
+
+  if (detail === "minimal") {
+    result.minimal = await buildMinimalEnvelope({
+      cwd,
+      result,
+      phase,
+      task,
+      lastEvent,
+      agentName,
+      phaseId,
+      taskId,
+      contextPackPath,
+      contextPackBytes,
+      wouldWritePath,
+    });
   }
 
   return result;

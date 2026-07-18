@@ -182,6 +182,7 @@ writes the context pack unless --dry-run is passed.
 | `--budget-bytes` | `<N>` | Cap the rendered context pack at N bytes. |
 | `--context-budget` | `<profile>` | Use a named context budget profile (tight, balanced, wide, or an agent-defined profile). Resolves to a byte budget. Mutually exclusive with --budget-bytes. |
 | `--recommended-context-budget` | — | Apply the deterministic context budget recommended in this same task prepare call. Mutually exclusive with --budget-bytes and --context-budget. |
+| `--detail` | `<mode>` | Output detail mode: minimal (default) or full. Minimal omits context bodies, runbook prose, memory details, and advisory guidance from the output and context pack. |
 | `--dry-run` | — | Report the would-write pack path without writing it. |
 | `--json` | — | Emit JSON. |
 

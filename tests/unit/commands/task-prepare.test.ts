@@ -143,10 +143,7 @@ async function fileExists(path: string): Promise<boolean> {
 }
 
 async function readProgress(dir: string): Promise<string> {
-  return readFile(
-    join(dir, ".code-pact", "state", "progress.yaml"),
-    "utf8",
-  );
+  return readFile(join(dir, ".code-pact", "state", "progress.yaml"), "utf8");
 }
 
 let dir: string;
@@ -196,10 +193,12 @@ describe("runTaskPrepare — planned state", () => {
       context: "code-pact task context P1-T1 --agent claude-code",
       start: "code-pact task start P1-T1 --agent claude-code",
       verify: "code-pact verify --phase P1 --task P1-T1 --json --detail agent",
-      complete: "code-pact task complete P1-T1 --agent claude-code --json --detail agent",
+      complete:
+        "code-pact task complete P1-T1 --agent claude-code --json --detail agent",
       finalize: "code-pact task finalize P1-T1 --write --json",
       // P40 — additive, always present; the one non-runnable template.
-      "record-done": 'code-pact task record-done P1-T1 --agent claude-code --evidence "<verification you ran>"',
+      "record-done":
+        'code-pact task record-done P1-T1 --agent claude-code --evidence "<verification you ran>"',
     });
   });
 });
@@ -317,8 +316,16 @@ describe("runTaskPrepare — P48 contextFit", () => {
 
   it("does NOT auto-apply the recommended budget — pack bytes match a no-flag prepare", async () => {
     await setupProject(dir);
-    const a = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
-    const b = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    const a = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+    const b = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
     // contextFit recommends 'tight' (30000), but no budget is applied: the pack
     // is built with no budgetBytes, so its size is stable and unreduced.
     expect(a.context_pack_bytes).toBeGreaterThan(0);
@@ -452,7 +459,9 @@ describe("runTaskPrepare — P48 contextFit", () => {
       dryRun: true,
     });
     expect(result.recommendation!.contextFit?.recommendedProfile).toBe("tight");
-    expect(result.recommendation!.contextFit?.recommendedBudgetBytes).toBe(28000);
+    expect(result.recommendation!.contextFit?.recommendedBudgetBytes).toBe(
+      28000,
+    );
     expect(result.applied_context_budget).toEqual({
       source: "recommended_agent_profile",
       profile: "tight",
@@ -523,9 +532,7 @@ describe("runTaskPrepare — dry-run", () => {
     expect(result.would_write_context_pack_path).toBeDefined();
     expect(result.context_pack_bytes).toBeGreaterThan(0);
 
-    expect(
-      await fileExists(result.would_write_context_pack_path!),
-    ).toBe(false);
+    expect(await fileExists(result.would_write_context_pack_path!)).toBe(false);
   });
 });
 
@@ -752,9 +759,9 @@ describe("runTaskPrepare — budget enforcement (P24)", () => {
       join(dir, ".context", "custom-prepare", "P1-T1.md"),
     );
     expect(await fileExists(result.context_pack_path!)).toBe(true);
-    expect(await fileExists(join(dir, ".context", "claude-code", "P1-T1.md"))).toBe(
-      false,
-    );
+    expect(
+      await fileExists(join(dir, ".context", "claude-code", "P1-T1.md")),
+    ).toBe(false);
   });
 
   it("normal recommended prepare writes to the same custom profile context_dir", async () => {
@@ -781,9 +788,9 @@ describe("runTaskPrepare — budget enforcement (P24)", () => {
       join(dir, ".context", "custom-recommended", "P1-T1.md"),
     );
     expect(await fileExists(result.context_pack_path!)).toBe(true);
-    expect(await fileExists(join(dir, ".context", "claude-code", "P1-T1.md"))).toBe(
-      false,
-    );
+    expect(
+      await fileExists(join(dir, ".context", "claude-code", "P1-T1.md")),
+    ).toBe(false);
   });
 
   it("respects --budget-bytes and returns post-elision context_pack_bytes", async () => {
@@ -950,14 +957,18 @@ describe("runTaskPrepare — budget enforcement (P24)", () => {
 
     let stdout = "";
     let stderr = "";
-    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
-      stdout += chunk.toString();
-      return true;
-    });
-    vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
-      stderr += chunk.toString();
-      return true;
-    });
+    vi.spyOn(process.stdout, "write").mockImplementation(
+      (chunk: string | Uint8Array) => {
+        stdout += chunk.toString();
+        return true;
+      },
+    );
+    vi.spyOn(process.stderr, "write").mockImplementation(
+      (chunk: string | Uint8Array) => {
+        stderr += chunk.toString();
+        return true;
+      },
+    );
     const originalCwd = process.cwd();
     process.chdir(dir);
     try {
@@ -1024,14 +1035,18 @@ describe("runTaskPrepare — budget enforcement (P24)", () => {
 
     let stdout = "";
     let stderr = "";
-    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
-      stdout += chunk.toString();
-      return true;
-    });
-    vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
-      stderr += chunk.toString();
-      return true;
-    });
+    vi.spyOn(process.stdout, "write").mockImplementation(
+      (chunk: string | Uint8Array) => {
+        stdout += chunk.toString();
+        return true;
+      },
+    );
+    vi.spyOn(process.stderr, "write").mockImplementation(
+      (chunk: string | Uint8Array) => {
+        stderr += chunk.toString();
+        return true;
+      },
+    );
     const originalCwd = process.cwd();
     process.chdir(dir);
     try {
@@ -1075,9 +1090,11 @@ describe("runTaskPrepare — lifecycle-aware next_action + record-done (P40)", (
   // A single-task phase whose one task drives a given lifecycleMode.
   // full_loop: type feature; record_only: type docs + low/low/strong;
   // decision_loop: requires_decision (extra task line).
-  function phaseYaml(opts: { type?: string; extraTaskLines?: string[] } = {}): string {
+  function phaseYaml(
+    opts: { type?: string; extraTaskLines?: string[] } = {},
+  ): string {
     const type = opts.type ?? "feature";
-    const extra = (opts.extraTaskLines ?? []).map((l) => `    ${l}`).join("\n");
+    const extra = (opts.extraTaskLines ?? []).map(l => `    ${l}`).join("\n");
     return `id: P1
 name: Foundation
 weight: 12
@@ -1106,7 +1123,11 @@ ${extra}
 
   it("full_loop: message keeps the complete wording; record-done present", async () => {
     await setupProject(dir, { phaseYaml: phaseYaml() });
-    const result = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
     expect(result.recommendation?.lifecycleMode).toBe("full_loop");
     expect(result.recommendation?.repairPolicy).toEqual(BOUNDED_POLICY);
     expect(result.next_action.message).toContain("complete");
@@ -1117,7 +1138,11 @@ ${extra}
   it("record_only: message points at task record-done, not task complete", async () => {
     // type: docs + low/low/strong → record_only per the deterministic switch.
     await setupProject(dir, { phaseYaml: phaseYaml({ type: "docs" }) });
-    const result = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
     expect(result.recommendation?.lifecycleMode).toBe("record_only");
     expect(result.recommendation?.repairPolicy).toEqual({
       mode: "disabled",
@@ -1130,27 +1155,178 @@ ${extra}
   });
 
   it("decision_loop: message says resolve the ADR first; does not decide complete-vs-record-done", async () => {
-    await setupProject(dir, { phaseYaml: phaseYaml({ extraTaskLines: ["requires_decision: true"] }) });
-    const result = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    await setupProject(dir, {
+      phaseYaml: phaseYaml({ extraTaskLines: ["requires_decision: true"] }),
+    });
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
     expect(result.recommendation?.lifecycleMode).toBe("decision_loop");
     expect(result.recommendation?.repairPolicy).toEqual({
       mode: "disabled",
       reasonCode: "decision_loop",
     });
-    expect(result.next_action.message).toContain("Resolve/accept the gating ADR first");
+    expect(result.next_action.message).toContain(
+      "Resolve/accept the gating ADR first",
+    );
     expect(result.next_action.message).not.toContain("task record-done");
     expect(result.next_action.message).not.toContain("complete the task");
     expect(result.commands["record-done"]).toContain("task record-done");
   });
 
   it("record-done is present in every mode (the lookup table stays complete)", async () => {
-    const cases = [phaseYaml(), phaseYaml({ extraTaskLines: ["requires_decision: true"] })];
+    const cases = [
+      phaseYaml(),
+      phaseYaml({ extraTaskLines: ["requires_decision: true"] }),
+    ];
     for (const py of cases) {
       await setupProject(dir, { phaseYaml: py });
-      const result = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+      const result = await runTaskPrepare({
+        cwd: dir,
+        taskId: "P1-T1",
+        agent: "claude-code",
+      });
       expect(result.commands["record-done"]).toContain("task record-done");
       expect(result.commands.complete).toContain("task complete");
       expect(result.commands.finalize).toContain("task finalize");
+    }
+  });
+});
+
+describe("runTaskPrepare — minimal detail contract", () => {
+  it("minimal envelope omits recommendation and supplies actionable state/scope/retrieval", async () => {
+    await setupProject(dir);
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      detail: "minimal",
+    });
+    expect(result.minimal).toBeDefined();
+    const m = result.minimal!;
+    expect(m.detail).toBe("minimal");
+    expect(m.task_id).toBe("P1-T1");
+    expect(m.phase_id).toBe("P1");
+    expect(m.current_state).toBe("planned");
+    expect(m.next_action.type).toBe("start_task");
+    expect(m.commands.start).toContain("task start P1-T1");
+    expect(m.state.requires_decision).toBe(false);
+    expect(m.retrieval.context.command).toContain("task context P1-T1");
+    expect(m.retrieval.runbook.command).toContain("task runbook P1-T1");
+    expect(m.retrieval.memory.command).toContain("memory status");
+    expect(m.retrieval.full_detail.command).toContain("--detail full");
+  });
+
+  it("minimal context pack drops heavy sections and adds a retrieval section", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_YAML_DEFERRABLE });
+    await writeFile(
+      join(dir, "design", "constitution.md"),
+      "project constitution text\n".repeat(100),
+      "utf8",
+    );
+
+    const full = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      detail: "full",
+    });
+    const minimal = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      detail: "minimal",
+    });
+
+    expect(minimal.context_pack_bytes).toBeGreaterThan(0);
+    expect(minimal.context_pack_bytes).toBeLessThan(full.context_pack_bytes);
+
+    const minimalPack = await readFile(minimal.context_pack_path!, "utf8");
+    expect(minimalPack).toContain("## Retrieval");
+    expect(minimalPack).not.toContain("## Project Constitution");
+    expect(minimalPack).not.toContain("## Rules");
+  });
+
+  it("deterministic: repeated minimal runs produce the same context pack bytes", async () => {
+    await setupProject(dir);
+    const a = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      detail: "minimal",
+    });
+    const b = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      detail: "minimal",
+    });
+    expect(a.context_pack_bytes).toBe(b.context_pack_bytes);
+    expect(a.minimal?.context_pack_bytes).toBe(b.minimal?.context_pack_bytes);
+  });
+});
+
+describe("cmdTask prepare — default minimal vs full", () => {
+  it("cmd task prepare --json emits the minimal envelope by default", async () => {
+    await setupProject(dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    let stdout = "";
+    const spy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        stdout += chunk.toString();
+        return true;
+      });
+    try {
+      const exit = await cmdTask(
+        ["prepare", "P1-T1", "--json"],
+        "en-US",
+        false,
+      );
+      expect(exit).toBe(0);
+      const parsed = JSON.parse(stdout) as {
+        ok: boolean;
+        data: { detail: string };
+      };
+      expect(parsed.ok).toBe(true);
+      expect(parsed.data.detail).toBe("minimal");
+    } finally {
+      spy.mockRestore();
+      process.chdir(originalCwd);
+    }
+  });
+
+  it("cmd task prepare --detail full --json returns the full recommendation", async () => {
+    await setupProject(dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    let stdout = "";
+    const spy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        stdout += chunk.toString();
+        return true;
+      });
+    try {
+      const exit = await cmdTask(
+        ["prepare", "P1-T1", "--detail", "full", "--json"],
+        "en-US",
+        false,
+      );
+      expect(exit).toBe(0);
+      const parsed = JSON.parse(stdout) as {
+        ok: boolean;
+        data: { detail?: string; recommendation: unknown };
+      };
+      expect(parsed.ok).toBe(true);
+      expect(parsed.data.detail).toBeUndefined();
+      expect(parsed.data.recommendation).toBeDefined();
+    } finally {
+      spy.mockRestore();
+      process.chdir(originalCwd);
     }
   });
 });

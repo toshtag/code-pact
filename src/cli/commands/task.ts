@@ -9,7 +9,13 @@
 
 import { parseArgs } from "node:util";
 import { strictParse, strictParseAlias, ConfigError } from "../../lib/argv.ts";
-import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
+import {
+  clusterUsage,
+  emitUsage,
+  hasHelpFlag,
+  isHelpToken,
+  subcommandUsage,
+} from "../usage.ts";
 import { toParseOptions } from "../spec/render.ts";
 import { TASK_SPECS } from "../spec/task.ts";
 import { isInteractive } from "../../lib/tty.ts";
@@ -82,9 +88,7 @@ import {
   projectVerifySummaryForAgent,
   stringifyBoundedAgentEnvelope,
 } from "../../core/evidence/failure-capsule.ts";
-import {
-  formatRepairPolicySummary,
-} from "../../core/recommend/repair-policy.ts";
+import { formatRepairPolicySummary } from "../../core/recommend/repair-policy.ts";
 
 function wantsAgentDetail(argv: string[], globalJson: boolean): boolean {
   const detailIndex = argv.indexOf("--detail");
@@ -136,7 +140,11 @@ function messageForAgentError(code: string): string {
   }
 }
 
-export async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
+export async function cmdTask(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
   const subcommand = argv[0];
   const rest = argv.slice(1);
 
@@ -334,7 +342,12 @@ function emitContextLikeError(
   // Failure detail goes in a TOP-LEVEL `data` (the documented envelope
   // convention, matching doctor / validate and the cli-contract recovery prose
   // `data.minimum_achievable_bytes`), not under `error.data`.
-  emitError(json, outCode, msg, envelopeData !== undefined ? { data: envelopeData } : {});
+  emitError(
+    json,
+    outCode,
+    msg,
+    envelopeData !== undefined ? { data: envelopeData } : {},
+  );
   return exitCode;
 }
 
@@ -414,7 +427,9 @@ function validateTaskPrepareBudgetFlags(
   const hasBudgetBytes = typeof budgetRaw === "string";
   const hasContextBudget = typeof profileRaw === "string";
   const hasRecommended = values["recommended-context-budget"] === true;
-  const modeCount = [hasBudgetBytes, hasContextBudget, hasRecommended].filter(Boolean).length;
+  const modeCount = [hasBudgetBytes, hasContextBudget, hasRecommended].filter(
+    Boolean,
+  ).length;
 
   if (modeCount > 1) {
     emitConfigError(
@@ -433,7 +448,10 @@ function validateTaskPrepareBudgetFlags(
       );
       return { kind: "error", exitCode: 2 };
     }
-    return { kind: "ok", selection: { kind: "explicit_bytes", budgetBytes: n } };
+    return {
+      kind: "ok",
+      selection: { kind: "explicit_bytes", budgetBytes: n },
+    };
   }
 
   if (hasContextBudget) {
@@ -527,7 +545,7 @@ async function cmdTaskAdd(
 
   // Detect any non-interactive-only flag that was passed.
   const nonInteractiveFlagsSeen = TASK_ADD_NON_INTERACTIVE_ONLY_FLAGS.filter(
-    (flag) => {
+    flag => {
       if (flag === "description") return false; // handled separately
       const v = values[flag];
       if (Array.isArray(v)) return v.length > 0;
@@ -545,8 +563,10 @@ async function cmdTaskAdd(
   if (description === undefined && nonInteractiveFlagsSeen.length > 0) {
     emitConfigError(
       `task add: non-interactive flag(s) provided without --description: ${nonInteractiveFlagsSeen
-        .map((f) => `--${f}`)
-        .join(", ")}. Pass --description "<text>" to use the non-interactive path, or omit the flags to use the wizard.`,
+        .map(f => `--${f}`)
+        .join(
+          ", ",
+        )}. Pass --description "<text>" to use the non-interactive path, or omit the flags to use the wizard.`,
       json,
     );
     return 2;
@@ -583,7 +603,11 @@ async function cmdTaskAdd(
       return 2;
     }
 
-    const parseEnum = <T extends { safeParse: (v: unknown) => { success: boolean; data?: unknown } }>(
+    const parseEnum = <
+      T extends {
+        safeParse: (v: unknown) => { success: boolean; data?: unknown };
+      },
+    >(
       schema: T,
       raw: unknown,
       flagName: string,
@@ -601,13 +625,28 @@ async function cmdTaskAdd(
       return { ok: true, value: parsed.data };
     };
 
-    const ambiguity = parseEnum(AmbiguityLevel, values.ambiguity, "ambiguity", AmbiguityLevel.options);
+    const ambiguity = parseEnum(
+      AmbiguityLevel,
+      values.ambiguity,
+      "ambiguity",
+      AmbiguityLevel.options,
+    );
     if (!ambiguity.ok) return 2;
     const risk = parseEnum(RiskLevel, values.risk, "risk", RiskLevel.options);
     if (!risk.ok) return 2;
-    const contextSize = parseEnum(ContextSize, values["context-size"], "context-size", ContextSize.options);
+    const contextSize = parseEnum(
+      ContextSize,
+      values["context-size"],
+      "context-size",
+      ContextSize.options,
+    );
     if (!contextSize.ok) return 2;
-    const writeSurface = parseEnum(WriteSurface, values["write-surface"], "write-surface", WriteSurface.options);
+    const writeSurface = parseEnum(
+      WriteSurface,
+      values["write-surface"],
+      "write-surface",
+      WriteSurface.options,
+    );
     if (!writeSurface.ok) return 2;
     const verificationStrength = parseEnum(
       VerificationStrength,
@@ -626,7 +665,8 @@ async function cmdTaskAdd(
 
     const asStringArray = (raw: unknown): string[] | undefined => {
       if (raw === undefined) return undefined;
-      if (Array.isArray(raw)) return raw.filter((v): v is string => typeof v === "string");
+      if (Array.isArray(raw))
+        return raw.filter((v): v is string => typeof v === "string");
       return undefined;
     };
 
@@ -653,17 +693,54 @@ async function cmdTaskAdd(
     nonInteractiveSpec = {
       description,
       type: typeParsed.data,
-      ...(ambiguity.value !== undefined ? { ambiguity: ambiguity.value as TaskAddNonInteractiveSpec["ambiguity"] } : {}),
-      ...(risk.value !== undefined ? { risk: risk.value as TaskAddNonInteractiveSpec["risk"] } : {}),
-      ...(contextSize.value !== undefined ? { context_size: contextSize.value as TaskAddNonInteractiveSpec["context_size"] } : {}),
-      ...(writeSurface.value !== undefined ? { write_surface: writeSurface.value as TaskAddNonInteractiveSpec["write_surface"] } : {}),
-      ...(verificationStrength.value !== undefined ? { verification_strength: verificationStrength.value as TaskAddNonInteractiveSpec["verification_strength"] } : {}),
-      ...(expectedDuration.value !== undefined ? { expected_duration: expectedDuration.value as TaskAddNonInteractiveSpec["expected_duration"] } : {}),
-      ...(asStringArray(values["depends-on"]) ? { depends_on: asStringArray(values["depends-on"])! } : {}),
-      ...(asStringArray(values["decision-ref"]) ? { decision_refs: asStringArray(values["decision-ref"])! } : {}),
-      ...(asStringArray(values.read) ? { reads: asStringArray(values.read)! } : {}),
-      ...(asStringArray(values.write) ? { writes: asStringArray(values.write)! } : {}),
-      ...(asStringArray(values["acceptance-ref"]) ? { acceptance_refs: asStringArray(values["acceptance-ref"])! } : {}),
+      ...(ambiguity.value !== undefined
+        ? {
+            ambiguity:
+              ambiguity.value as TaskAddNonInteractiveSpec["ambiguity"],
+          }
+        : {}),
+      ...(risk.value !== undefined
+        ? { risk: risk.value as TaskAddNonInteractiveSpec["risk"] }
+        : {}),
+      ...(contextSize.value !== undefined
+        ? {
+            context_size:
+              contextSize.value as TaskAddNonInteractiveSpec["context_size"],
+          }
+        : {}),
+      ...(writeSurface.value !== undefined
+        ? {
+            write_surface:
+              writeSurface.value as TaskAddNonInteractiveSpec["write_surface"],
+          }
+        : {}),
+      ...(verificationStrength.value !== undefined
+        ? {
+            verification_strength:
+              verificationStrength.value as TaskAddNonInteractiveSpec["verification_strength"],
+          }
+        : {}),
+      ...(expectedDuration.value !== undefined
+        ? {
+            expected_duration:
+              expectedDuration.value as TaskAddNonInteractiveSpec["expected_duration"],
+          }
+        : {}),
+      ...(asStringArray(values["depends-on"])
+        ? { depends_on: asStringArray(values["depends-on"])! }
+        : {}),
+      ...(asStringArray(values["decision-ref"])
+        ? { decision_refs: asStringArray(values["decision-ref"])! }
+        : {}),
+      ...(asStringArray(values.read)
+        ? { reads: asStringArray(values.read)! }
+        : {}),
+      ...(asStringArray(values.write)
+        ? { writes: asStringArray(values.write)! }
+        : {}),
+      ...(asStringArray(values["acceptance-ref"])
+        ? { acceptance_refs: asStringArray(values["acceptance-ref"])! }
+        : {}),
     };
   }
 
@@ -688,7 +765,9 @@ async function cmdTaskAdd(
         if (json) {
           emitOk(result);
         } else {
-          process.stderr.write(`${m.task.added(result.taskId, result.phaseId, result.phasePath)}\n`);
+          process.stderr.write(
+            `${m.task.added(result.taskId, result.phaseId, result.phasePath)}\n`,
+          );
         }
         return 0;
       } catch (err: unknown) {
@@ -772,7 +851,11 @@ async function cmdTaskContext(
       budgetBytes = budget.budgetBytes;
     } else if (budget.kind === "profile") {
       try {
-        budgetBytes = await resolveContextBudgetFlag(cwd, agent, budget.profileName);
+        budgetBytes = await resolveContextBudgetFlag(
+          cwd,
+          agent,
+          budget.profileName,
+        );
       } catch (err) {
         if (err instanceof ContextBudgetProfileError) {
           emitConfigError(`task context: ${err.message}`, json);
@@ -823,7 +906,7 @@ async function cmdTaskContext(
           data.deferred_bytes = em.deferredBytes;
           data.saved_ratio = em.savedRatio;
           data.minimum_achievable_bytes = em.minimumAchievableBytes;
-          data.elided_sections = em.elidedSections.map((e) => ({
+          data.elided_sections = em.elidedSections.map(e => ({
             name: e.name,
             bytes: e.bytes,
           }));
@@ -891,6 +974,13 @@ async function cmdTaskPrepare(
   }
   const agent = values.agent as string | undefined;
   const dryRun = values["dry-run"] === true;
+  const detail = values.detail as string | undefined;
+  if (detail !== undefined && detail !== "minimal" && detail !== "full") {
+    const msg = `task prepare: --detail must be "minimal" or "full" (got "${detail}").`;
+    emitError(json, "CONFIG_ERROR", msg);
+    return 2;
+  }
+  let taskPrepareDetail: "minimal" | "full" = detail ?? "minimal";
 
   const cwd = process.cwd();
 
@@ -899,6 +989,17 @@ async function cmdTaskPrepare(
   // CONFIG_ERROR and returns before pack/profile reads.
   const budget = validateTaskPrepareBudgetFlags(values, json);
   if (budget.kind === "error") return budget.exitCode;
+
+  // Explicit budget flags imply full detail: budgeting is about how much of the
+  // full context pack to retain, not about suppressing it. If the user did not
+  // request --detail, an explicit budget selection switches the default to full.
+  if (
+    detail === undefined &&
+    budget.kind === "ok" &&
+    budget.selection.kind !== "none"
+  ) {
+    taskPrepareDetail = "full";
+  }
 
   try {
     // Budget resolution is handled inside the runner on the pack-build path,
@@ -911,9 +1012,63 @@ async function cmdTaskPrepare(
       agent,
       dryRun,
       budgetSelection: budget.selection,
+      detail: taskPrepareDetail,
     });
     if (json) {
-      emitOk(result);
+      if (taskPrepareDetail === "minimal" && result.minimal !== undefined) {
+        emitOk(result.minimal);
+      } else {
+        emitOk(result);
+      }
+    } else if (
+      taskPrepareDetail === "minimal" &&
+      result.minimal !== undefined
+    ) {
+      const m = result.minimal;
+      const lines: string[] = [];
+      lines.push(`Task:           ${m.phase_id} / ${m.task_id}`);
+      lines.push(`Agent:          ${m.agent}`);
+      lines.push(`Current state:  ${m.current_state}`);
+      lines.push(`Next action:    ${m.next_action.type}`);
+      lines.push(`                ${m.next_action.message}`);
+      if (m.blocked_by.length > 0) {
+        lines.push(`Blocked by:     ${m.blocked_by.join(", ")}`);
+      }
+      if (m.context_pack_path) {
+        lines.push(
+          `Context pack:   ${m.context_pack_path} (${m.context_pack_bytes} bytes)`,
+        );
+      } else if (m.would_write_context_pack_path) {
+        lines.push(
+          `Context pack:   (dry-run) would write to ${m.would_write_context_pack_path} (${m.context_pack_bytes} bytes)`,
+        );
+      }
+      lines.push(`State:`);
+      lines.push(`  requires_decision: ${m.state.requires_decision}`);
+      if (m.state.failure_fingerprint !== undefined) {
+        lines.push(`  failure_fingerprint: ${m.state.failure_fingerprint}`);
+        lines.push(
+          `  prior_exact_match: ${m.state.prior_exact_match ?? false}`,
+        );
+      }
+      lines.push("");
+      lines.push("Retrieval commands:");
+      lines.push(
+        `  context:       ${m.retrieval.context.command} (${m.retrieval.context.bytes} bytes)`,
+      );
+      lines.push(`  runbook:       ${m.retrieval.runbook.command}`);
+      lines.push(`  memory:        ${m.retrieval.memory.command}`);
+      lines.push(`  recommendation:${m.retrieval.recommendation.command}`);
+      lines.push(`  full detail:   ${m.retrieval.full_detail.command}`);
+      lines.push("");
+      lines.push("Commands:");
+      lines.push(`  context:  ${m.commands.context}`);
+      lines.push(`  start:    ${m.commands.start}`);
+      lines.push(`  verify:   ${m.commands.verify}`);
+      lines.push(`  complete: ${m.commands.complete}`);
+      lines.push(`  finalize: ${m.commands.finalize}`);
+      lines.push(`  record-done: ${m.commands["record-done"]}`);
+      process.stdout.write(`${lines.join("\n")}\n`);
     } else {
       const lines: string[] = [];
       lines.push(`Task:           ${result.phase_id} / ${result.task_id}`);
@@ -1016,9 +1171,13 @@ async function cmdTaskComplete(
     );
     return 2;
   }
-  const parsedTimeout = parseTimeoutArg(values.timeout as string | undefined, json, {
-    emit: detail !== "agent",
-  });
+  const parsedTimeout = parseTimeoutArg(
+    values.timeout as string | undefined,
+    json,
+    {
+      emit: detail !== "agent",
+    },
+  );
   if (!parsedTimeout.ok) {
     if (detail === "agent") {
       emitAgentTaskCompleteError(
@@ -1051,7 +1210,9 @@ async function cmdTaskComplete(
           agent: result.agent,
         };
         if (detail === "agent") {
-          process.stdout.write(stringifyBoundedAgentEnvelope({ ok: true, data }));
+          process.stdout.write(
+            stringifyBoundedAgentEnvelope({ ok: true, data }),
+          );
         } else {
           emitOk(data);
         }
@@ -1071,7 +1232,9 @@ async function cmdTaskComplete(
           would_append: result.would_append,
         };
         if (detail === "agent") {
-          process.stdout.write(stringifyBoundedAgentEnvelope({ ok: true, data }));
+          process.stdout.write(
+            stringifyBoundedAgentEnvelope({ ok: true, data }),
+          );
         } else {
           emitOk(data);
         }
@@ -1099,7 +1262,9 @@ async function cmdTaskComplete(
         emitOk(data);
       }
     } else {
-      process.stdout.write(`${m.task.complete.success(taskId, result.agent)}\n`);
+      process.stdout.write(
+        `${m.task.complete.success(taskId, result.agent)}\n`,
+      );
     }
     return 0;
   } catch (error: unknown) {
@@ -1125,16 +1290,21 @@ async function cmdTaskComplete(
               data: {
                 task_id: taskId,
                 aborted: true,
-                ...projectPreflightFailureForAgent("aborted", m.task.complete.aborted(taskId)),
+                ...projectPreflightFailureForAgent(
+                  "aborted",
+                  m.task.complete.aborted(taskId),
+                ),
               },
             }),
           );
         } else {
-          process.stdout.write(`${JSON.stringify({
-            ok: false,
-            error: errorObj,
-            data: { task_id: taskId, aborted: true },
-          })}\n`);
+          process.stdout.write(
+            `${JSON.stringify({
+              ok: false,
+              error: errorObj,
+              data: { task_id: taskId, aborted: true },
+            })}\n`,
+          );
         }
       } else {
         process.stderr.write(`${errorObj.message}\n`);
@@ -1144,15 +1314,21 @@ async function cmdTaskComplete(
 
     if (code === "VERIFICATION_FAILED") {
       const checks =
-        (error as NodeJS.ErrnoException & { checks?: FailureCheckLike[] }).checks ?? [];
+        (error as NodeJS.ErrnoException & { checks?: FailureCheckLike[] })
+          .checks ?? [];
       const warnings =
-        (error as NodeJS.ErrnoException & { warnings?: unknown[] }).warnings ?? undefined;
+        (error as NodeJS.ErrnoException & { warnings?: unknown[] }).warnings ??
+        undefined;
       const priorLocalSignal =
-        (error as NodeJS.ErrnoException & { priorLocalSignal?: PriorLocalSignal })
-          .priorLocalSignal ?? undefined;
+        (
+          error as NodeJS.ErrnoException & {
+            priorLocalSignal?: PriorLocalSignal;
+          }
+        ).priorLocalSignal ?? undefined;
       const summary = buildFailureSummaryFromChecks(checks, taskId);
       const wasAborted = checks.some(
-        check => (check as FailureCheckLike & { aborted?: boolean }).aborted === true,
+        check =>
+          (check as FailureCheckLike & { aborted?: boolean }).aborted === true,
       );
       let errorObj: { code: string; cause_code?: string; message: string };
       if (wasAborted) {
@@ -1199,8 +1375,12 @@ async function cmdTaskComplete(
               ok: false,
               error: {
                 code: "VERIFICATION_FAILED",
-                ...(errorObj.cause_code ? { cause_code: errorObj.cause_code } : {}),
-                message: wasAborted ? "Verification aborted" : "Verification failed",
+                ...(errorObj.cause_code
+                  ? { cause_code: errorObj.cause_code }
+                  : {}),
+                message: wasAborted
+                  ? "Verification aborted"
+                  : "Verification failed",
               },
               data: {
                 task_id: taskId,
@@ -1318,7 +1498,8 @@ async function cmdTaskRecordDone(
   const dryRun = values["dry-run"] === true;
   const taskId = positionals[0];
   if (!taskId) {
-    const msg = "task record-done requires a task id (e.g. `task record-done P1-T1`).";
+    const msg =
+      "task record-done requires a task id (e.g. `task record-done P1-T1`).";
     emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
@@ -1382,7 +1563,9 @@ async function cmdTaskRecordDone(
         event: result.event,
       });
     } else {
-      process.stdout.write(`${m.task.recordDone.success(taskId, result.agent)}\n`);
+      process.stdout.write(
+        `${m.task.recordDone.success(taskId, result.agent)}\n`,
+      );
     }
     return 0;
   } catch (err: unknown) {
@@ -1390,9 +1573,16 @@ async function cmdTaskRecordDone(
     const code = (err as NodeJS.ErrnoException).code;
 
     if (code === "DECISION_REQUIRED") {
-      const data = (err as NodeJS.ErrnoException & { data?: DecisionRequiredData }).data;
+      const data = (
+        err as NodeJS.ErrnoException & { data?: DecisionRequiredData }
+      ).data;
       const msg = m.task.recordDone.decisionRequired(taskId);
-      emitError(json, "DECISION_REQUIRED", msg, data !== undefined ? { data } : {});
+      emitError(
+        json,
+        "DECISION_REQUIRED",
+        msg,
+        data !== undefined ? { data } : {},
+      );
       return 2;
     }
 
@@ -1477,11 +1667,13 @@ async function cmdTaskFinalize(
 
   const json = globalJson || values.json === true;
   const write = values.write === true;
-  const baseRef = typeof values["base-ref"] === "string" ? values["base-ref"] : undefined;
+  const baseRef =
+    typeof values["base-ref"] === "string" ? values["base-ref"] : undefined;
   const auditStrict = values["audit-strict"] === true;
   const taskId = positionals[0];
   if (!taskId) {
-    const aliasNote = invokedAs === "task finalize" ? "" : " (alias for `task finalize`)";
+    const aliasNote =
+      invokedAs === "task finalize" ? "" : " (alias for `task finalize`)";
     const msg = `${invokedAs} requires a task id (e.g. \`${invokedAs} P1-T1\`)${aliasNote}.`;
     emitError(json, "CONFIG_ERROR", msg);
     return 2;
@@ -1491,7 +1683,8 @@ async function cmdTaskFinalize(
   // audit field always lands in a machine-readable envelope. Silent ignore
   // would mislead users into thinking the branch-level audit ran when it did not.
   if (baseRef !== undefined && !json) {
-    const msg = "task finalize --base-ref requires --json because write_audit is emitted only in JSON output.";
+    const msg =
+      "task finalize --base-ref requires --json because write_audit is emitted only in JSON output.";
     process.stderr.write(`CONFIG_ERROR: ${msg}\n`);
     return 2;
   }
@@ -1500,7 +1693,8 @@ async function cmdTaskFinalize(
   // runs in JSON mode, so a strict gate without --json would silently degrade
   // to a no-op.
   if (auditStrict && !json) {
-    const msg = "task finalize --audit-strict requires --json because it gates the JSON write_audit.";
+    const msg =
+      "task finalize --audit-strict requires --json because it gates the JSON write_audit.";
     process.stderr.write(`CONFIG_ERROR: ${msg}\n`);
     return 2;
   }
@@ -1509,46 +1703,70 @@ async function cmdTaskFinalize(
   const includeWriteAudit = json;
 
   const runImpl = async (): Promise<number> => {
-  try {
-    const result = await runTaskFinalize({
-      cwd,
-      taskId,
-      write,
-      baseRef,
-      includeWriteAudit,
-      auditStrict,
-    });
+    try {
+      const result = await runTaskFinalize({
+        cwd,
+        taskId,
+        write,
+        baseRef,
+        includeWriteAudit,
+        auditStrict,
+      });
 
-    if (result.kind === "already_finalized") {
-      if (json) {
-        emitOk({
-          kind: "already_finalized",
-          task_id: result.task_id,
-          phase_id: result.phase_id,
-          file: result.file,
-          current_status: result.current_status,
-          target_status: result.target_status,
-          acceptance_refs_check: result.acceptance_refs_check,
-          declared_writes: result.declared_writes,
-          depends_on_check: result.depends_on_check,
-          write_audit: result.write_audit,
-        });
-      } else {
-        process.stdout.write(`${m.task.finalize.alreadyFinalized(taskId)}\n`);
+      if (result.kind === "already_finalized") {
+        if (json) {
+          emitOk({
+            kind: "already_finalized",
+            task_id: result.task_id,
+            phase_id: result.phase_id,
+            file: result.file,
+            current_status: result.current_status,
+            target_status: result.target_status,
+            acceptance_refs_check: result.acceptance_refs_check,
+            declared_writes: result.declared_writes,
+            depends_on_check: result.depends_on_check,
+            write_audit: result.write_audit,
+          });
+        } else {
+          process.stdout.write(`${m.task.finalize.alreadyFinalized(taskId)}\n`);
+        }
+        return 0;
       }
-      return 0;
-    }
 
-    if (result.kind === "would_finalize") {
+      if (result.kind === "would_finalize") {
+        if (json) {
+          emitOk({
+            kind: "would_finalize",
+            task_id: result.task_id,
+            phase_id: result.phase_id,
+            file: result.file,
+            current_status: result.current_status,
+            target_status: result.target_status,
+            planned_writes: result.planned_writes,
+            acceptance_refs_check: result.acceptance_refs_check,
+            declared_writes: result.declared_writes,
+            depends_on_check: result.depends_on_check,
+            write_audit: result.write_audit,
+          });
+        } else {
+          process.stdout.write(
+            `${m.task.finalize.wouldFinalize(taskId, result.file)}\n`,
+          );
+        }
+        return 0;
+      }
+
+      // result.kind === "finalized"
       if (json) {
         emitOk({
-          kind: "would_finalize",
+          kind: "finalized",
           task_id: result.task_id,
           phase_id: result.phase_id,
           file: result.file,
           current_status: result.current_status,
           target_status: result.target_status,
-          planned_writes: result.planned_writes,
+          applied_writes: result.applied_writes,
+          skipped_writes: result.skipped_writes,
           acceptance_refs_check: result.acceptance_refs_check,
           declared_writes: result.declared_writes,
           depends_on_check: result.depends_on_check,
@@ -1556,166 +1774,140 @@ async function cmdTaskFinalize(
         });
       } else {
         process.stdout.write(
-          `${m.task.finalize.wouldFinalize(taskId, result.file)}\n`,
+          `${m.task.finalize.success(taskId, result.file)}\n`,
         );
       }
       return 0;
-    }
+    } catch (err: unknown) {
+      if (!(err instanceof Error)) throw err;
 
-    // result.kind === "finalized"
-    if (json) {
-      emitOk({
-        kind: "finalized",
-        task_id: result.task_id,
-        phase_id: result.phase_id,
-        file: result.file,
-        current_status: result.current_status,
-        target_status: result.target_status,
-        applied_writes: result.applied_writes,
-        skipped_writes: result.skipped_writes,
-        acceptance_refs_check: result.acceptance_refs_check,
-        declared_writes: result.declared_writes,
-        depends_on_check: result.depends_on_check,
-        write_audit: result.write_audit,
-      });
-    } else {
-      process.stdout.write(`${m.task.finalize.success(taskId, result.file)}\n`);
-    }
-    return 0;
-  } catch (err: unknown) {
-    if (!(err instanceof Error)) throw err;
+      // Strict-audit failure surfaces as WRITES_AUDIT_STRICT_FAILED with
+      // exit 1 (NOT 2 — this is not a CONFIG_ERROR; the invocation was
+      // well-formed but the audit gate refused to proceed). The envelope
+      // carries the full audit result so consumers see the same `write_audit`
+      // shape they would on the success path, plus `applied: false` to make
+      // the no-mutation guarantee machine-readable.
+      if (err instanceof TaskFinalizeAuditStrictError) {
+        const summary = buildFailureSummaryFromFinalizeCode(
+          "WRITES_AUDIT_STRICT_FAILED",
+          err.task_id,
+          err.message,
+        );
+        if (json) {
+          emitError(json, "WRITES_AUDIT_STRICT_FAILED", err.message, {
+            data: {
+              task_id: err.task_id,
+              phase_id: err.phase_id,
+              applied: err.applied,
+              write_audit: err.write_audit,
+              failed_checks: summary.failed_checks,
+              first_failure: summary.first_failure,
+              suggested_next_command: summary.suggested_next_command,
+            },
+          });
+        } else {
+          process.stderr.write(`${err.message}\n`);
+          const lines = renderFailureSummaryLines(m.task.failure, summary);
+          if (lines.length > 0) process.stderr.write(`${lines.join("\n")}\n`);
+        }
+        return 1;
+      }
 
-    // Strict-audit failure surfaces as WRITES_AUDIT_STRICT_FAILED with
-    // exit 1 (NOT 2 — this is not a CONFIG_ERROR; the invocation was
-    // well-formed but the audit gate refused to proceed). The envelope
-    // carries the full audit result so consumers see the same `write_audit`
-    // shape they would on the success path, plus `applied: false` to make
-    // the no-mutation guarantee machine-readable.
-    if (err instanceof TaskFinalizeAuditStrictError) {
-      const summary = buildFailureSummaryFromFinalizeCode(
-        "WRITES_AUDIT_STRICT_FAILED",
-        err.task_id,
-        err.message,
-      );
-      if (json) {
-        emitError(json, "WRITES_AUDIT_STRICT_FAILED", err.message, {
-          data: {
-            task_id: err.task_id,
-            phase_id: err.phase_id,
-            applied: err.applied,
-            write_audit: err.write_audit,
+      const code = (err as NodeJS.ErrnoException).code;
+
+      let msg: string;
+      let outCode: string;
+      let extraData: Record<string, unknown> | undefined;
+      // Set only for the finalize failure codes that map to a clarity summary
+      // (NOT_ELIGIBLE / WRITE_REFUSED). TASK_NOT_FOUND / AMBIGUOUS_TASK_ID are
+      // resolution errors, not finalize-gate failures, so they get no summary.
+      let summary: FailureSummary | null = null;
+
+      switch (code) {
+        case "TASK_NOT_FOUND":
+          msg = m.task.finalize.taskNotFound(taskId);
+          outCode = "TASK_NOT_FOUND";
+          break;
+        case "AMBIGUOUS_TASK_ID": {
+          const phases =
+            (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+          msg = m.task.finalize.ambiguous(taskId, phases);
+          outCode = "AMBIGUOUS_TASK_ID";
+          break;
+        }
+        case "TASK_FINALIZE_NOT_ELIGIBLE": {
+          const current =
+            (err as NodeJS.ErrnoException & { current?: string }).current ?? "";
+          const phase_id =
+            (err as NodeJS.ErrnoException & { phase_id?: string }).phase_id ??
+            "";
+          msg = m.task.finalize.notEligible(taskId, current);
+          outCode = "TASK_FINALIZE_NOT_ELIGIBLE";
+          summary = buildFailureSummaryFromFinalizeCode(
+            "TASK_FINALIZE_NOT_ELIGIBLE",
+            taskId,
+            err.message,
+          );
+          extraData = {
+            task_id: taskId,
+            phase_id,
+            current,
             failed_checks: summary.failed_checks,
             first_failure: summary.first_failure,
             suggested_next_command: summary.suggested_next_command,
-          },
-        });
+          };
+          break;
+        }
+        case "TASK_FINALIZE_WRITE_REFUSED": {
+          const reason =
+            (err as NodeJS.ErrnoException & { reason?: string }).reason ?? "";
+          const file =
+            (err as NodeJS.ErrnoException & { file?: string }).file ?? "";
+          msg = m.task.finalize.writeRefused(taskId, err.message);
+          outCode = "TASK_FINALIZE_WRITE_REFUSED";
+          summary = buildFailureSummaryFromFinalizeCode(
+            "TASK_FINALIZE_WRITE_REFUSED",
+            taskId,
+            err.message,
+          );
+          extraData = {
+            task_id: taskId,
+            file,
+            reason,
+            failed_checks: summary.failed_checks,
+            first_failure: summary.first_failure,
+            suggested_next_command: summary.suggested_next_command,
+          };
+          break;
+        }
+        case "PHASE_SNAPSHOT_INVALID":
+          msg = err.message;
+          outCode = "PHASE_SNAPSHOT_INVALID";
+          break;
+        // Contained control-plane loader refusal → structured (exit 2), not exit 3.
+        case "CONFIG_ERROR":
+          msg = err.message;
+          outCode = "CONFIG_ERROR";
+          break;
+        default:
+          throw err;
+      }
+      if (json) {
+        emitError(json, outCode, msg, extraData ? { data: extraData } : {});
       } else {
-        process.stderr.write(`${err.message}\n`);
-        const lines = renderFailureSummaryLines(m.task.failure, summary);
-        if (lines.length > 0) process.stderr.write(`${lines.join("\n")}\n`);
+        process.stderr.write(`${msg}\n`);
+        if (summary) {
+          const lines = renderFailureSummaryLines(m.task.failure, summary);
+          if (lines.length > 0) process.stderr.write(`${lines.join("\n")}\n`);
+        }
       }
-      return 1;
+      return 2;
     }
-
-    const code = (err as NodeJS.ErrnoException).code;
-
-    let msg: string;
-    let outCode: string;
-    let extraData: Record<string, unknown> | undefined;
-    // Set only for the finalize failure codes that map to a clarity summary
-    // (NOT_ELIGIBLE / WRITE_REFUSED). TASK_NOT_FOUND / AMBIGUOUS_TASK_ID are
-    // resolution errors, not finalize-gate failures, so they get no summary.
-    let summary: FailureSummary | null = null;
-
-    switch (code) {
-      case "TASK_NOT_FOUND":
-        msg = m.task.finalize.taskNotFound(taskId);
-        outCode = "TASK_NOT_FOUND";
-        break;
-      case "AMBIGUOUS_TASK_ID": {
-        const phases =
-          (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
-        msg = m.task.finalize.ambiguous(taskId, phases);
-        outCode = "AMBIGUOUS_TASK_ID";
-        break;
-      }
-      case "TASK_FINALIZE_NOT_ELIGIBLE": {
-        const current =
-          (err as NodeJS.ErrnoException & { current?: string }).current ?? "";
-        const phase_id =
-          (err as NodeJS.ErrnoException & { phase_id?: string }).phase_id ?? "";
-        msg = m.task.finalize.notEligible(taskId, current);
-        outCode = "TASK_FINALIZE_NOT_ELIGIBLE";
-        summary = buildFailureSummaryFromFinalizeCode(
-          "TASK_FINALIZE_NOT_ELIGIBLE",
-          taskId,
-          err.message,
-        );
-        extraData = {
-          task_id: taskId,
-          phase_id,
-          current,
-          failed_checks: summary.failed_checks,
-          first_failure: summary.first_failure,
-          suggested_next_command: summary.suggested_next_command,
-        };
-        break;
-      }
-      case "TASK_FINALIZE_WRITE_REFUSED": {
-        const reason =
-          (err as NodeJS.ErrnoException & { reason?: string }).reason ?? "";
-        const file =
-          (err as NodeJS.ErrnoException & { file?: string }).file ?? "";
-        msg = m.task.finalize.writeRefused(taskId, err.message);
-        outCode = "TASK_FINALIZE_WRITE_REFUSED";
-        summary = buildFailureSummaryFromFinalizeCode(
-          "TASK_FINALIZE_WRITE_REFUSED",
-          taskId,
-          err.message,
-        );
-        extraData = {
-          task_id: taskId,
-          file,
-          reason,
-          failed_checks: summary.failed_checks,
-          first_failure: summary.first_failure,
-          suggested_next_command: summary.suggested_next_command,
-        };
-        break;
-      }
-      case "PHASE_SNAPSHOT_INVALID":
-        msg = err.message;
-        outCode = "PHASE_SNAPSHOT_INVALID";
-        break;
-      // Contained control-plane loader refusal → structured (exit 2), not exit 3.
-      case "CONFIG_ERROR":
-        msg = err.message;
-        outCode = "CONFIG_ERROR";
-        break;
-      default:
-        throw err;
-    }
-    if (json) {
-      emitError(json, outCode, msg, extraData ? { data: extraData } : {});
-    } else {
-      process.stderr.write(`${msg}\n`);
-      if (summary) {
-        const lines = renderFailureSummaryLines(m.task.failure, summary);
-        if (lines.length > 0) process.stderr.write(`${lines.join("\n")}\n`);
-      }
-    }
-    return 2;
-  }
   };
 
   // Only --write mutates phase YAML; dry-run is lock-free.
   if (write) {
-    return withWriteLock(
-      cwd,
-      `task finalize ${taskId} --write`,
-      json,
-      runImpl,
-    );
+    return withWriteLock(cwd, `task finalize ${taskId} --write`, json, runImpl);
   }
   return runImpl();
 }
@@ -1749,7 +1941,8 @@ async function cmdTaskRunbook(
   const json = globalJson || values.json === true;
   const taskId = positionals[0];
   if (!taskId) {
-    const aliasNote = invokedAs === "task runbook" ? "" : " (alias for `task runbook`)";
+    const aliasNote =
+      invokedAs === "task runbook" ? "" : " (alias for `task runbook`)";
     const msg = `${invokedAs} requires a task id (e.g. \`${invokedAs} P1-T1\`)${aliasNote}.`;
     emitError(json, "CONFIG_ERROR", msg);
     return 2;
@@ -1762,14 +1955,16 @@ async function cmdTaskRunbook(
     if (json) {
       emitOk(result);
     } else {
-      process.stdout.write(`${m.task.runbook.header(taskId, result.phase_id)}\n`);
-      process.stdout.write(`${m.task.runbook.stateSummary(result.state_summary)}\n`);
+      process.stdout.write(
+        `${m.task.runbook.header(taskId, result.phase_id)}\n`,
+      );
+      process.stdout.write(
+        `${m.task.runbook.stateSummary(result.state_summary)}\n`,
+      );
       if (result.state_summary.depends_on.length > 0) {
         process.stdout.write("  depends_on:\n");
         for (const dep of result.state_summary.depends_on) {
-          const locator = dep.phase_id
-            ? ` (cross-phase: ${dep.phase_id})`
-            : "";
+          const locator = dep.phase_id ? ` (cross-phase: ${dep.phase_id})` : "";
           const satisfied = dep.satisfied ? "satisfied" : "unsatisfied";
           process.stdout.write(
             `    - ${dep.task_id}${locator}: derived=${dep.current} (${satisfied})\n`,
@@ -1795,7 +1990,8 @@ async function cmdTaskRunbook(
       outCode = "TASK_NOT_FOUND";
     } else if (code === "AMBIGUOUS_TASK_ID") {
       outCode = "AMBIGUOUS_TASK_ID";
-      const phases = (err as NodeJS.ErrnoException & { phases?: string[] }).phases;
+      const phases = (err as NodeJS.ErrnoException & { phases?: string[] })
+        .phases;
       if (phases) extraData = { phases };
     } else if (code === "CONFIG_ERROR") {
       outCode = "CONFIG_ERROR";
@@ -1974,7 +2170,8 @@ async function cmdTaskBlock(
   const json = globalJson || values.json === true;
   const taskId = positionals[0];
   if (!taskId) {
-    const msg = "task block requires a task id (e.g. `task block P1-T1 --reason ...`).";
+    const msg =
+      "task block requires a task id (e.g. `task block P1-T1 --reason ...`).";
     emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
@@ -2113,7 +2310,9 @@ async function cmdTaskStatus(
         history: result.history,
       });
     } else {
-      process.stdout.write(`${m.task.status.headline(taskId, result.current)}\n`);
+      process.stdout.write(
+        `${m.task.status.headline(taskId, result.current)}\n`,
+      );
       if (result.history.length === 0) {
         process.stdout.write(`${m.task.status.noEvents(taskId)}\n`);
       } else {

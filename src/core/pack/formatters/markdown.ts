@@ -3,6 +3,8 @@ import type { Task } from "../../schemas/task.ts";
 import type { ProgressEvent } from "../../schemas/progress-event.ts";
 import type { TaskCurrentState } from "../../progress/task-state.ts";
 
+export type DetailMode = "minimal" | "full";
+
 export type PackContext = {
   phase: Phase;
   task: Task;
@@ -22,6 +24,8 @@ export type PackContext = {
   writeGlobs?: string[];
   declaredDecisions?: DecisionDoc[];
   acceptanceRefs?: string[];
+  /** Output detail mode. Defaults to "full" for backward compatibility. */
+  detail?: DetailMode;
 };
 
 export type RuleDoc = {
@@ -123,14 +127,18 @@ function compareStablePath(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-function groupReadMatchesByDirectory(matches: readonly string[]): Map<string, number> {
+function groupReadMatchesByDirectory(
+  matches: readonly string[],
+): Map<string, number> {
   const uniqueMatches = [...new Set(matches)];
   const groups = new Map<string, number>();
   for (const match of uniqueMatches) {
     const dir = parentDirectory(match);
     groups.set(dir, (groups.get(dir) ?? 0) + 1);
   }
-  return new Map([...groups.entries()].sort(([a], [b]) => compareStablePath(a, b)));
+  return new Map(
+    [...groups.entries()].sort(([a], [b]) => compareStablePath(a, b)),
+  );
 }
 
 export function makeReadDirectoryCountsProjection(
@@ -158,7 +166,10 @@ export function makeReadDirectoryCountsProjection(
     }
 
     const grouped = groupReadMatchesByDirectory(entry.matches);
-    const matchCount = [...grouped.values()].reduce((sum, count) => sum + count, 0);
+    const matchCount = [...grouped.values()].reduce(
+      (sum, count) => sum + count,
+      0,
+    );
     if (matchCount !== new Set(entry.matches).size) return null;
     totalMatches += matchCount;
     for (const dir of grouped.keys()) allDirectories.add(dir);
@@ -217,16 +228,13 @@ export function makeRelatedDecisionCommitmentsProjection(
   const projectedDecisionCount = relatedDecisions.filter(
     decision => decision.projection,
   ).length;
-  if (relatedDecisions.length === 0 || projectedDecisionCount === 0) return null;
+  if (relatedDecisions.length === 0 || projectedDecisionCount === 0)
+    return null;
 
   const projectionIntro =
     "Accepted decisions with explicit implementation commitments are shown structurally. " +
     "The exact original content is represented by Deferred Context and can be retrieved after materialization.";
-  const lines: string[] = [
-    `## Related Decisions`,
-    ``,
-    projectionIntro,
-  ];
+  const lines: string[] = [`## Related Decisions`, ``, projectionIntro];
   for (const decision of relatedDecisions) {
     lines.push(``, `### ${decisionHeading(decision.filename)}`, ``);
     if (decision.projection) {
@@ -277,6 +285,7 @@ export function makeRelatedDecisionCommitmentsProjection(
  */
 export function renderSections(ctx: PackContext): RenderedSection[] {
   const sections: RenderedSection[] = [];
+  const detail = ctx.detail ?? "full";
 
   // 1. Header
   sections.push({
@@ -292,7 +301,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   });
 
   // 2. Constitution (context_size: large | ambiguity: high)
-  if (ctx.constitution) {
+  if (detail === "full" && ctx.constitution) {
     sections.push({
       name: "constitution",
       lines: [`## Project Constitution`, ``, ctx.constitution.trim(), ``],
@@ -300,7 +309,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   }
 
   // 3. Applicable rules
-  if (ctx.rules.length > 0) {
+  if (detail === "full" && ctx.rules.length > 0) {
     const lines: string[] = [`## Rules`];
     for (const rule of ctx.rules) {
       lines.push(``, `### ${rule.filename}`, ``, rule.body.trim());
@@ -313,25 +322,37 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
     });
   }
 
-  // 4. Phase contract
-  const phaseContractLines: string[] = [
-    `## Phase Contract`,
-    ``,
-    `**Objective:** ${ctx.phase.objective.trim()}`,
-    ``,
-    `**Definition of Done:**`,
-    ...ctx.phase.definition_of_done.map((d) => `- ${d}`),
-    ``,
-  ];
-
-  if (ctx.phase.non_goals && ctx.phase.non_goals.length > 0) {
-    phaseContractLines.push(
-      `**Non-Goals:**`,
-      ...ctx.phase.non_goals.map((g) => `- ${g}`),
+  // 4. Phase contract / acceptance criteria
+  if (detail === "minimal") {
+    sections.push({
+      name: "phase_contract",
+      lines: [
+        `## Acceptance`,
+        ``,
+        ...ctx.phase.definition_of_done.map(d => `- ${d}`),
+        ``,
+      ],
+    });
+  } else {
+    const phaseContractLines: string[] = [
+      `## Phase Contract`,
       ``,
-    );
+      `**Objective:** ${ctx.phase.objective.trim()}`,
+      ``,
+      `**Definition of Done:**`,
+      ...ctx.phase.definition_of_done.map(d => `- ${d}`),
+      ``,
+    ];
+
+    if (ctx.phase.non_goals && ctx.phase.non_goals.length > 0) {
+      phaseContractLines.push(
+        `**Non-Goals:**`,
+        ...ctx.phase.non_goals.map(g => `- ${g}`),
+        ``,
+      );
+    }
+    sections.push({ name: "phase_contract", lines: phaseContractLines });
   }
-  sections.push({ name: "phase_contract", lines: phaseContractLines });
 
   // 5. Task definition
   const taskDefinitionLines: string[] = [
@@ -376,7 +397,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   // (declaration-only). An empty matches list is rendered as a
   // visible "no matches" line so the agent sees the lint warning's
   // counterpart in pack form.
-  if (ctx.readMatches && ctx.readMatches.length > 0) {
+  if (detail === "full" && ctx.readMatches && ctx.readMatches.length > 0) {
     const lines: string[] = [`## Declared read surface`, ``];
     let totalMatches = 0;
     for (const entry of ctx.readMatches) {
@@ -421,17 +442,26 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   // regardless of context_size. The context_size:large
   // allDecisions path (rendered in section 6e) is filtered to avoid
   // re-printing files already shown here.
-  if (ctx.declaredDecisions && ctx.declaredDecisions.length > 0) {
+  if (
+    detail === "full" &&
+    ctx.declaredDecisions &&
+    ctx.declaredDecisions.length > 0
+  ) {
     const lines: string[] = [`## Declared decisions`];
     for (const dec of ctx.declaredDecisions) {
-      lines.push(``, `### ${decisionHeading(dec.filename)}`, ``, dec.body.trim());
+      lines.push(
+        ``,
+        `### ${decisionHeading(dec.filename)}`,
+        ``,
+        dec.body.trim(),
+      );
     }
     lines.push(``);
     sections.push({
       name: "declared_decisions",
       details: {
         count: ctx.declaredDecisions.length,
-        filenames: ctx.declaredDecisions.map((d) => d.filename),
+        filenames: ctx.declaredDecisions.map(d => d.filename),
       },
       lines,
     });
@@ -439,7 +469,11 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
 
   // 6e. Acceptance references. Path list only; no content
   // excerpt and no semantic validation (deferred to reconcile).
-  if (ctx.acceptanceRefs && ctx.acceptanceRefs.length > 0) {
+  if (
+    detail === "full" &&
+    ctx.acceptanceRefs &&
+    ctx.acceptanceRefs.length > 0
+  ) {
     const lines: string[] = [`## Acceptance references`, ``];
     for (const p of ctx.acceptanceRefs) {
       lines.push(`- \`${p}\``);
@@ -455,28 +489,35 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   // 6. Related decisions (task-id filename match and the
   // context_size:large allDecisions case). Deduped against
   // declared decisions so content is not printed twice when a file is
-  // both referenced and matched.
-  const declaredNames = new Set(
-    (ctx.declaredDecisions ?? []).map((d) => d.filename),
-  );
-  const relatedDecisions = ctx.decisions.filter(
-    (d) => !declaredNames.has(d.filename),
-  );
-  if (relatedDecisions.length > 0) {
-    const lines: string[] = [`## Related Decisions`];
-    for (const dec of relatedDecisions) {
-      lines.push(``, `### ${decisionHeading(dec.filename)}`, ``, dec.body.trim());
+  // both referenced and matched. Skipped in minimal mode.
+  if (detail === "full") {
+    const declaredNames = new Set(
+      (ctx.declaredDecisions ?? []).map(d => d.filename),
+    );
+    const relatedDecisions = ctx.decisions.filter(
+      d => !declaredNames.has(d.filename),
+    );
+    if (relatedDecisions.length > 0) {
+      const lines: string[] = [`## Related Decisions`];
+      for (const dec of relatedDecisions) {
+        lines.push(
+          ``,
+          `### ${decisionHeading(dec.filename)}`,
+          ``,
+          dec.body.trim(),
+        );
+      }
+      lines.push(``);
+      sections.push({
+        name: "related_decisions",
+        details: { count: relatedDecisions.length },
+        lines,
+      });
     }
-    lines.push(``);
-    sections.push({
-      name: "related_decisions",
-      details: { count: relatedDecisions.length },
-      lines,
-    });
   }
 
   // 7. Completed tasks in this phase (ambiguity: high)
-  if (ctx.doneEvents && ctx.doneEvents.length > 0) {
+  if (detail === "full" && ctx.doneEvents && ctx.doneEvents.length > 0) {
     const lines: string[] = [`## Completed Tasks in This Phase`, ``];
     for (const ev of ctx.doneEvents) {
       const agent = ev.agent ? ` by ${ev.agent}` : "";
@@ -500,35 +541,68 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
     lines: [
       `## Verification Commands`,
       ``,
-      ...ctx.phase.verification.commands.map((c) => `\`\`\`\n${c}\n\`\`\``),
+      ...ctx.phase.verification.commands.map(c => `\`\`\`\n${c}\n\`\`\``),
       ``,
     ],
   });
 
+  // Retrieval section — minimal mode only. Points the agent at explicit
+  // commands to fetch the full context, runbook, memory, and recommendation.
+  if (detail === "minimal") {
+    sections.push({
+      name: "retrieval",
+      lines: [
+        `## Retrieval`,
+        ``,
+        `The following commands fetch additional detail when needed:`,
+        ``,
+        `- Full task context: \`code-pact task context ${ctx.task.id} --agent ${ctx.agentName}\``,
+        `- Task runbook: \`code-pact task runbook ${ctx.task.id} --json\``,
+        `- Memory status: \`code-pact memory status --json\``,
+        `- Full recommendation: \`code-pact recommend --phase ${ctx.phase.id} --task ${ctx.task.id} --json\``,
+        `- Full detail prepare: \`code-pact task prepare ${ctx.task.id} --agent ${ctx.agentName} --detail full --json\``,
+        ``,
+      ],
+    });
+  }
+
   // 9. Progress recording hint — command-guided. The ledger is a set of
   // per-event files under .code-pact/state/events/; agents record via the CLI,
   // never by hand-editing the ledger.
-  sections.push({
-    name: "progress_event_schema",
-    lines: [
-      `## Recording progress`,
-      ``,
-      `Do NOT hand-write the ledger. When this task is complete, record it with:`,
-      ``,
-      `\`\`\`sh`,
-      `code-pact task complete ${ctx.task.id} --agent <agent>`,
-      `\`\`\``,
-      ``,
-      `If the work was completed outside the loop, record it with evidence instead:`,
-      ``,
-      `\`\`\`sh`,
-      `code-pact task record-done ${ctx.task.id} --evidence "<verification command or artifact>"`,
-      `\`\`\``,
-      ``,
-      `Either writes one merge-safe event file under \`.code-pact/state/events/\`.`,
-      ``,
-    ],
-  });
+  if (detail === "minimal") {
+    sections.push({
+      name: "progress_event_schema",
+      lines: [
+        `## Recording progress`,
+        ``,
+        `- \`code-pact task complete ${ctx.task.id} --agent ${ctx.agentName}\``,
+        `- \`code-pact task record-done ${ctx.task.id} --evidence "..."\``,
+        ``,
+      ],
+    });
+  } else {
+    sections.push({
+      name: "progress_event_schema",
+      lines: [
+        `## Recording progress`,
+        ``,
+        `Do NOT hand-write the ledger. When this task is complete, record it with:`,
+        ``,
+        `\`\`\`sh`,
+        `code-pact task complete ${ctx.task.id} --agent <agent>`,
+        `\`\`\``,
+        ``,
+        `If the work was completed outside the loop, record it with evidence instead:`,
+        ``,
+        `\`\`\`sh`,
+        `code-pact task record-done ${ctx.task.id} --evidence "<verification command or artifact>"`,
+        `\`\`\``,
+        ``,
+        `Either writes one merge-safe event file under \`.code-pact/state/events/\`.`,
+        ``,
+      ],
+    });
+  }
 
   return sections;
 }
@@ -569,5 +643,5 @@ export const ELISION_ORDER: ReadonlyArray<string> = [
  */
 export function renderMarkdown(ctx: PackContext): string {
   const sections = renderSections(ctx);
-  return sections.flatMap((s) => s.lines).join("\n");
+  return sections.flatMap(s => s.lines).join("\n");
 }
