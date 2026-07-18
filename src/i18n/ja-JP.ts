@@ -310,13 +310,15 @@ export const messages = {
         `タスク "${taskId}" は ${current} 状態です。先に \`code-pact task resume ${taskId}\` を実行してください。`,
     },
     failure: {
-      cause: (name: string, reason: string): string => `  原因: ${name} — ${reason}`,
-      otherChecks: (names: string[]): string => `  他に失敗: ${names.join(", ")}`,
+      cause: (name: string, reason: string): string =>
+        `  原因: ${name} — ${reason}`,
+      otherChecks: (names: string[]): string =>
+        `  他に失敗: ${names.join(", ")}`,
       rerunAfterFixing: (cmd: string): string => `  修正後に再実行: ${cmd}`,
     },
     recordDone: {
       evidenceRequired:
-        "task record-done には、完了の根拠（PR、CI 結果、または実行した検証）を示す --evidence \"<text>\" が必要です。",
+        'task record-done には、完了の根拠（PR、CI 結果、または実行した検証）を示す --evidence "<text>" が必要です。',
       decisionRequired: (taskId: string): string =>
         `タスク "${taskId}" を done にするには decision ADR が必要です。`,
       alreadyDone: (taskId: string): string =>
@@ -486,9 +488,9 @@ export const messages = {
         "「プロジェクト固有」とマークされたセクションを編集して、プロジェクトの規約を反映させてください。",
       workflowHeader: "タスクの進め方",
       step0:
-        "タスクを prepare する — タスク単位の単一の入口。1 回の呼び出しで現在の状態、実行推奨 (モデル階層、エフォート、計画姿勢、バジェット)、コンテキストパックのメタデータ、構造化された `next_action`、そして次に実行すべき正確なコマンドの `commands` 辞書がまとめて返る:",
+        "タスクを prepare する — タスク単位の単一の入口。デフォルト (minimal) では現在の状態、goal、宣言された読み書きスコープ、完了条件、検証コマンド、`next` アクション、そして full envelope を取得するための `more` コマンドを含むコンパクトな作業指示を返す。`--detail full` またはいずれかの budget flag を使うと、実行推奨 (モデル階層、エフォート、計画姿勢、バジェット)、コンテキストパックのメタデータ、構造化された `next_action`、そして次に実行すべき正確なコマンドの `commands` 辞書も返る:",
       step0Detail:
-        "`recommend` と `task context` は単体の診断コマンドとして引き続き使えるが、`task prepare` は両者を内部で実行して結果を 1 つの envelope で返す。以降のライフサイクルは返ってきた `commands` 辞書をそのまま使って進める。",
+        "minimal モードではコンテキストパックを書き込まず、重い取得処理も行わない。`next.type` が `inspect_decision` の場合、推奨情報が必要な場合、またはコンテキストパックの具体化が指示された場合に限り full detail を取得する。full モードでは返された `commands` 辞書をそのまま使ってライフサイクルを進める。",
       step1:
         "`task prepare` の外でコンテキストパックが必要な場合のみ、直接取得する (診断用 — `task prepare` は既にそのメタデータを返している):",
       step2: "タスクを実装する。",
@@ -522,7 +524,7 @@ export const messages = {
         intro:
           "code-pact の正規ワークフローには 3 つの軸があります。準拠するエージェントは 3 軸すべてを尊重します。完全な envelope 仕様は [`docs/cli-contract.md`](https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md) を参照してください。",
         contextCommandBody:
-          "`task prepare` が返した `data.commands.context` をそのまま使ってください。解決済み context budget を再構築したり、広げたり、置き換えたりしないでください。budget 付き context には決定論的な構造 projection が含まれる場合があります。まず projected form を使用してください。具体的な不足が作業を妨げ、かつ `data.deferred_context.retrieve_command` が non-null の場合だけ正確な原文 section を取得してください。`null` の場合は manifest reference から取得 command を組み立てないでください。",
+          "`data.commands.context` は `task prepare` を `--detail full` または full detail を強制する明示的な budget flag で実行した場合にのみ存在します。存在する場合は返されたまま使ってください。解決済み context budget を再構築したり、広げたり、置き換えたりしないでください。budget 付き context には決定論的な構造 projection が含まれる場合があります。まず projected form を使用してください。minimal モードで context が必要な場合は `data.more.command` で full envelope を取得してください。具体的な不足が作業を妨げ、かつ `data.deferred_context.retrieve_command` が non-null の場合だけ正確な原文 section を取得してください。`null` の場合は manifest reference から取得 command を組み立てないでください。",
         whenBody: [
           "プロジェクト初期化（CI / 非対話可）:",
           "",
@@ -542,10 +544,14 @@ export const messages = {
           "タスクごと (推奨入口: `task prepare`):",
           "",
           "```sh",
-          "# 単一エントリーポイント — 現在状態、推薦、context pack メタデータ、",
-          "# 構造化された next_action、タスクごとの全 verb を含む commands",
-          "# 辞書を 1 つの envelope で返します。",
+          "# デフォルト minimal — context pack の build/取得なしのコンパクトな作業指示",
           "code-pact task prepare <task-id> --agent claude-code --json",
+          "",
+          "# Full detail — 推薦、context pack メタデータ、next_action、commands",
+          "code-pact task prepare <task-id> --agent claude-code --detail full --json",
+          "",
+          "# 明示的な budget flag は full detail を強制する（context pack をサイジングする用途）",
+          "code-pact task prepare <task-id> --agent claude-code --budget-bytes 100000 --json",
           "",
           "# prepare の応答に応じてエージェントが呼び出す lifecycle verb:",
           "code-pact task start    <task-id> --agent claude-code",
@@ -566,21 +572,27 @@ export const messages = {
           "",
           "起動ルール (エージェントの振る舞い):",
           "",
-          "- ユーザーがタスクを指定して実装を依頼したら (例: 「P1-T1 をやって」)、まず `task prepare` から始める。",
-          "- `next_action.type` が `wait_for_dependencies` の場合は実装しない — ブロックしているタスクを解消するか `task prepare` を再実行する。",
+          "- ユーザーがタスクを指定して実装を依頼したら (例: 「P1-T1 をやって」)、まずデフォルト minimal の `task prepare` から始める。",
+          "- デフォルトの minimal 出力は bounded な作業指示である。context pack を構築せず、重い取得も行わない。",
+          "- 明示的な budget flag (`--budget-bytes`, `--context-budget`, `--recommended-context-budget`) は `--detail minimal` を無視して `--detail full` を強制する。",
+          "- `next.type` (minimal) または `next_action.type` (full) を読む。可能な値は `start_task`, `continue_implementation`, `wait_for_dependencies`, `resolve_block`, `inspect_decision`, `noop_already_done`, `investigate_failure` である。",
+          "- next action が `wait_for_dependencies` の場合は実装しない — ブロックしている依存タスクを解消してから `task prepare` を再実行する。",
+          "- next action が `resolve_block` (manual block) の場合は `block.summary` (512 UTF-8 bytes 以内に bounded) の理由を解消してから `task prepare` を再実行する。",
+          "- next action が `inspect_decision` (`planned` 状態の `requires_decision` タスク) の場合、開始前に `next.command` の full-detail `task prepare` を実行して decision commitments を取得する。",
+          "- next action が `investigate_failure` の場合、`failure.summary` (512 UTF-8 bytes 以内に bounded) から原因を調査し、修正後に `task start` (または `task prepare`) を再実行する。",
           "- `CONTEXT_OVER_BUDGET` のときは勝手にコンテキストを広げず、バジェット・タスク分割・達成可能な最小バイト数を報告する。",
           "- `task finalize --write` は `task complete` が `done` イベントを記録した後にのみ実行する。",
         ].join("\n"),
         verifyBody: [
           "実装前:",
           "",
-          "- `task prepare --json` の後は `data.recommendation` を読みます。",
+          "- `data.recommendation` は `task prepare` を `--detail full` または full detail を強制する明示的な budget flag で実行した場合にのみ存在します。実行プロファイルが必要な場合は `task prepare --detail full --json` または `recommend --json` から読みます。",
           "- `recommend --json` の後は `data` を読みます。",
           "- その recommendation object を、レポートではなく実行プロファイルとして扱ってください:",
           "  - `tier` / `modelId` → 継続 / モデル切替 / runtime が **cannot switch model**（モデルを切り替えられない）場合は無視せず限界として報告する。",
           "  - `effort` → 推論の深さ。`planningRequired` が true なら編集前に plan を書く。",
           "  - `lifecycleMode` → ループを選ぶ: `full_loop`（prepare→start→complete→finalize）/ `decision_loop`（先に decision ADR を解決）/ `record_only`。",
-          "- `record_only` は**ループを軽くするだけで、検証を省くものではない**: プロジェクトの検証コマンドを省略せず実行し、その後 `task record-done --evidence \"...\"` で正直に記録する（evidence 必須・decision gate も honor）。",
+          '- `record_only` は**ループを軽くするだけで、検証を省くものではない**: プロジェクトの検証コマンドを省略せず実行し、その後 `task record-done --evidence "..."` で正直に記録する（evidence 必須・decision gate も honor）。',
           "- タスクの `writes` field を読み、実際の意図を正確に反映させます。これにより `write_audit` advisory が有効な signal を出せます。",
           "",
           "`task finalize --write` の前:",
@@ -596,7 +608,10 @@ export const messages = {
           "- `code-pact plan lint --json` は advisory; `--strict` で warning が exit-relevant に昇格します（`--audit-strict` とは別 flag）。",
         ].join("\n"),
         failBody: [
-          "- **blocked dependency** (`task prepare` から) — `next_action.type` が `wait_for_dependencies` で、`blocked_by` に未完の上流タスク id が並びます。実際にブロックされている場合は依存タスクを先に解消し、`task block` の手動ブロックなら理由解消後に `code-pact task resume <task-id>` を実行してください。",
+          "- **dependency block** (`task prepare` から) — `next.type` (full detail では `next_action.type`) が `wait_for_dependencies` で、`blocked_by` に未完の上流タスク id が並びます。依存タスクを先に解消してから `task prepare` を再実行してください。",
+          "- **manual block** (`task prepare` から) — `next.type` が `resolve_block` で、`blocked_by` は省略されます。`block.summary` の理由 (512 UTF-8 bytes 以内に bounded) を解消してから `task prepare` を再実行してください。手動 `task block` の理由が解消されていれば、`code-pact task resume <task-id>` してから `task prepare` を再実行することもできます。",
+          "- **decision-required planned task** (`task prepare` から) — `next.type` が `inspect_decision` です。開始前に `next.command` の full-detail `task prepare` を実行して decision commitments を取得してください。",
+          "- **failed task prepare** (`task prepare` から) — `next.type` が `investigate_failure` です。`failure.summary` (512 UTF-8 bytes 以内に bounded) にある最後の verify/finalize 失敗の理由を調査し、修正後に `task start` (または `task prepare`) を再実行してください。",
           "- **task complete の verification failure** (`task complete --json --detail agent` から) — `error.code` は `VERIFICATION_FAILED`（exit 1）。まず `error.cause_code` を確認: `COMMANDS_FAILED` → 失敗した検証コマンドを修正; `DECISION_REQUIRED` → `requires_decision` タスクに accepted な ADR が必要（作成・accept する）; `ABORTED` → 中断要因を解消してから retry。",
           "- **standalone verify failure** (`verify --json --detail agent` から) — `error.cause_code` が保証されるのは cancellation (`ABORTED`) のみです。通常の失敗は `data.failure.kind` で分岐します: `command_failed` → 失敗したコマンドを修正; `timed_out` → timeout または hang したコマンドを調査; `decision_required` → required ADR を解決; `invalid_state` → `data.failure.check` と `data.failure.reason` を読む。",
           "- `invalid_state` の代表的な check は `progress_event`（done event がない、または ledger consistency を確認すべき状態。通常は正規の `task complete` 経路を確認）と `task_status`（progress 上は完了しているが design task status が `done` ではない状態。`task finalize` 経路を確認）です。行動を選ぶ前に必ず `data.failure.reason` を読んでください。",

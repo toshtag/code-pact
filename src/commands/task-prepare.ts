@@ -63,6 +63,8 @@ export type NextActionType =
   | "start_task"
   | "continue_implementation"
   | "wait_for_dependencies"
+  | "resolve_block"
+  | "inspect_decision"
   | "noop_already_done"
   | "investigate_failure";
 
@@ -98,6 +100,7 @@ export type TaskPrepareMinimalResult = {
   next: TaskPrepareMinimalNextAction;
   more: { command: string };
   blocked_by?: string[];
+  block?: { summary: string };
   failure?: TaskPrepareMinimalFailure;
 };
 
@@ -239,6 +242,10 @@ function messageFor(
       }
     case "wait_for_dependencies":
       return "Resolve blocking dependencies, then re-run task prepare.";
+    case "resolve_block":
+      return "Resolve the manual block reason, then re-run task prepare.";
+    case "inspect_decision":
+      return "Inspect the gating decision before starting; run the full-detail prepare command.";
     case "noop_already_done":
       return "Task is already done; no action required.";
     case "investigate_failure":
@@ -254,7 +261,7 @@ function nextActionTypeFor(state: TaskCurrentState): NextActionType {
     case "resumed":
       return "continue_implementation";
     case "blocked":
-      return "wait_for_dependencies";
+      return "resolve_block";
     case "done":
       return "noop_already_done";
     case "failed":
@@ -267,15 +274,57 @@ function minimalNextCommand(
   agentName: string,
   taskId: string,
 ): string | null {
+  const fullPrepare = `code-pact task prepare ${taskId} --agent ${agentName} --detail full --json`;
   switch (actionType) {
     case "start_task":
       return `code-pact task start ${taskId} --agent ${agentName}`;
+    case "inspect_decision":
+      return fullPrepare;
     case "continue_implementation":
     case "wait_for_dependencies":
+    case "resolve_block":
     case "noop_already_done":
     case "investigate_failure":
       return null;
   }
+}
+
+const MAX_REASON_BYTES = 512;
+
+function utf8Truncate(text: string, maxBytes: number): string {
+  if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
+  const buf = Buffer.from(text, "utf8");
+  let end = Math.min(maxBytes, buf.length);
+  while (end > 0) {
+    const byte = buf[end] ?? 0;
+    if ((byte & 0b11000000) !== 0b10000000) break;
+    end--;
+  }
+  if (end === 0) {
+    return Buffer.from(buf.subarray(0, maxBytes)).toString("utf8");
+  }
+  return Buffer.from(buf.subarray(0, end)).toString("utf8");
+}
+
+function boundedReason(
+  reason: string | null | undefined,
+  maxBytes: number = MAX_REASON_BYTES,
+): string | null {
+  if (reason == null) return null;
+  return utf8Truncate(reason, maxBytes);
+}
+
+function resolveMinimalNextAction(
+  currentState: TaskCurrentState,
+  blockedBy: string[],
+  decisionRequired: boolean,
+): NextActionType {
+  if (currentState === "done") return "noop_already_done";
+  if (blockedBy.length > 0) return "wait_for_dependencies";
+  if (currentState === "blocked") return "resolve_block";
+  if (currentState === "failed") return "investigate_failure";
+  if (currentState === "planned" && decisionRequired) return "inspect_decision";
+  return nextActionTypeFor(currentState);
 }
 
 function buildMinimalResult(opts: {
@@ -299,24 +348,36 @@ function buildMinimalResult(opts: {
     blockedBy,
   } = opts;
 
-  const nextType: NextActionType =
-    currentState === "blocked" || blockedBy.length > 0
-      ? "wait_for_dependencies"
-      : nextActionTypeFor(currentState);
+  const decisionRequired = isDecisionRequiredForTask(phase, task);
+  const nextType = resolveMinimalNextAction(
+    currentState,
+    blockedBy,
+    decisionRequired,
+  );
+
+  const taskPayload: TaskPrepareMinimalTask = {
+    id: taskId,
+    phase_id: phaseId,
+    state: currentState,
+    goal: (task.description ?? "").trim() || phase.objective.trim(),
+    read_scope: task.reads ?? [],
+    write_scope: task.writes ?? [],
+    done_when: phase.definition_of_done,
+    verify: phase.verification.commands,
+    decision_required: decisionRequired,
+  };
+
+  if (task.acceptance_refs && task.acceptance_refs.length > 0) {
+    taskPayload.acceptance_refs = task.acceptance_refs;
+  }
+
+  if (decisionRequired && task.decision_refs && task.decision_refs.length > 0) {
+    taskPayload.decision_refs = task.decision_refs;
+  }
 
   const result: TaskPrepareMinimalResult = {
     detail: "minimal",
-    task: {
-      id: taskId,
-      phase_id: phaseId,
-      state: currentState,
-      goal: (task.description ?? "").trim() || phase.objective.trim(),
-      read_scope: task.reads ?? [],
-      write_scope: task.writes ?? [],
-      done_when: phase.definition_of_done,
-      verify: phase.verification.commands,
-      decision_required: isDecisionRequiredForTask(phase, task),
-    },
+    task: taskPayload,
     next: {
       type: nextType,
       command: minimalNextCommand(nextType, agentName, taskId),
@@ -324,24 +385,19 @@ function buildMinimalResult(opts: {
     more: {
       command: `code-pact task prepare ${taskId} --agent ${agentName} --detail full --json`,
     },
-    blocked_by: blockedBy,
   };
 
-  if (task.acceptance_refs && task.acceptance_refs.length > 0) {
-    result.task.acceptance_refs = task.acceptance_refs;
+  if (nextType === "wait_for_dependencies") {
+    result.blocked_by = blockedBy;
   }
 
-  if (
-    result.task.decision_required &&
-    task.decision_refs &&
-    task.decision_refs.length > 0
-  ) {
-    result.task.decision_refs = task.decision_refs;
+  if (nextType === "resolve_block") {
+    result.block = { summary: boundedReason(lastEvent?.reason) ?? "" };
   }
 
   if (currentState === "failed") {
     result.failure = {
-      summary: lastEvent?.reason ?? null,
+      summary: boundedReason(lastEvent?.reason),
       fingerprint: null,
       command: null,
       exit_code: null,
@@ -380,9 +436,7 @@ export async function runTaskPrepare(
   // Explicit budget implies full detail — budgeting is about sizing the full
   // context pack, not about the minimal work-order mode.
   const detail: "minimal" | "full" =
-    opts.detail === undefined && budgetSelection.kind !== "none"
-      ? "full"
-      : (opts.detail ?? "minimal");
+    budgetSelection.kind !== "none" ? "full" : (opts.detail ?? "minimal");
 
   // 1. Agent validation (mirrors task context / task start order).
   const project = await loadProject(cwd);
@@ -464,6 +518,10 @@ export async function runTaskPrepare(
 
   // 8b. Early return — blocked state OR unmet dependencies.
   if (currentState === "blocked" || blockedBy.length > 0) {
+    const isManualBlock = currentState === "blocked";
+    const nextType: NextActionType = isManualBlock
+      ? "resolve_block"
+      : "wait_for_dependencies";
     return {
       task_id: taskId,
       phase_id: phaseId,
@@ -475,8 +533,8 @@ export async function runTaskPrepare(
       detail: "full",
       dry_run: opts.dryRun ?? false,
       next_action: {
-        type: "wait_for_dependencies",
-        message: messageFor("wait_for_dependencies"),
+        type: nextType,
+        message: messageFor(nextType),
       },
       commands,
       blocked_by: blockedBy,

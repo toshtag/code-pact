@@ -991,13 +991,9 @@ async function cmdTaskPrepare(
   if (budget.kind === "error") return budget.exitCode;
 
   // Explicit budget flags imply full detail: budgeting is about how much of the
-  // full context pack to retain, not about suppressing it. If the user did not
-  // request --detail, an explicit budget selection switches the default to full.
-  if (
-    detail === undefined &&
-    budget.kind === "ok" &&
-    budget.selection.kind !== "none"
-  ) {
+  // full context pack to retain, not about suppressing it. An explicit budget
+  // selection overrides --detail minimal and switches the output to full.
+  if (budget.kind === "ok" && budget.selection.kind !== "none") {
     taskPrepareDetail = "full";
   }
 
@@ -1069,6 +1065,11 @@ async function cmdTaskPrepare(
         for (const b of result.blocked_by) {
           lines.push(`- ${b}`);
         }
+      }
+
+      if (result.block) {
+        lines.push("");
+        lines.push(`Block summary: ${result.block.summary}`);
       }
 
       if (result.failure) {

@@ -2447,12 +2447,16 @@ discrimination:
   pack, resolve `recommendation`, read decision bodies, or scan memory. The
   `more.command` is the single explicit fallback to fetch the full detail
   envelope.
-- `blocked_by` is always present. It is empty for `done`, `blocked`, and
-  `failed` states; for `planned` tasks with unmet `depends_on` it lists the
-  unfinished dependency task ids.
-- `failure` is present only when `task.state === "failed"`. `summary` comes from
-  the last progress event's `reason` when available; `fingerprint`, `command`,
-  and `exit_code` are always `null` in minimal mode. No synthetic failure
+- `blocked_by` is always present. It lists unfinished dependency task ids only
+  for `planned` tasks with unmet `depends_on`; for `done`, manual `blocked`
+  (`resolve_block`), and `failed` states it is empty.
+- `block` is present only when `next.type === "resolve_block"` (a manual block
+  with no unmet dependency). `block.summary` is the `reason` from the last
+  `blocked` progress event, bounded to 512 UTF-8 bytes.
+- `failure` is present only when `next.type === "investigate_failure"` (the task
+  `state` is `failed`). `summary` comes from the last progress event's `reason`
+  when available, bounded to 512 UTF-8 bytes; `fingerprint`, `command`, and
+  `exit_code` are always `null` in minimal mode. No synthetic failure
   fingerprints or memory recall is performed.
 - In `--detail full`, `would_write_context_pack_path` is present only in
   `--dry-run` mode when a pack would have been written.
@@ -2475,17 +2479,24 @@ discrimination:
 
 ### `next` / `next_action` type enum (closed)
 
-| `type`                    | Reached when                                                      | minimal `next` `command`   | full `next_action.message`                  |
-| ------------------------- | ----------------------------------------------------------------- | -------------------------- | ------------------------------------------- |
-| `start_task`              | `current_state === "planned"` and no unmet `depends_on`           | `code-pact task start ...` | "Start the task."                           |
-| `continue_implementation` | `current_state ∈ {"started", "resumed"}`                          | `null`                     | "Continue implementation."                  |
-| `wait_for_dependencies`   | `current_state === "blocked"` OR any `depends_on` is not `"done"` | `null`                     | "Waiting for dependencies or block reason." |
-| `noop_already_done`       | `current_state === "done"`                                        | `null`                     | "Task already done."                        |
-| `investigate_failure`     | `current_state === "failed"`                                      | `null`                     | "Investigate the failure and try again."    |
+| `type`                    | Reached when                                                                       | minimal `next` `command`                          | full `next_action.message`                       |
+| ------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------ |
+| `start_task`              | `current_state === "planned"`, no unmet `depends_on`, and no `requires_decision`   | `code-pact task start ...`                        | "Start the task."                                |
+| `continue_implementation` | `current_state ∈ {"started", "resumed"}`                                           | `null`                                            | "Continue implementation."                       |
+| `wait_for_dependencies`   | `current_state !== "blocked"` and any `depends_on` is not `"done"`                 | `null`                                            | "Waiting for dependencies or block reason."      |
+| `resolve_block`           | `current_state === "blocked"` (manual block, not a dependency block)               | `null`                                            | "Resolve the block before continuing."           |
+| `inspect_decision`        | `current_state === "planned"`, task `requires_decision`, and no unmet `depends_on` | `code-pact task prepare ... --detail full --json` | "Inspect the required decision before starting." |
+| `noop_already_done`       | `current_state === "done"`                                                         | `null`                                            | "Task already done."                             |
+| `investigate_failure`     | `current_state === "failed"`                                                       | `null`                                            | "Investigate the failure and try again."         |
 
 In `--detail minimal` the action is delivered as `next.type` and `next.command`.
 In `--detail full` it is delivered as `next_action.type` with a human-friendly
 `message`.
+
+- `blocked_by` is present in full detail for `wait_for_dependencies`.
+- `block` (with `summary`) is present in minimal detail for `resolve_block`. The summary is bounded to 512 UTF-8 bytes.
+- `failure.summary` is bounded to 512 UTF-8 bytes for `investigate_failure`.
+- `next.command` for `inspect_decision` points to the full-detail `task prepare` command that returns `decision_commitments`.
 
 The `commands` dictionary is populated in `--detail full` only (and when a
 budget is applied). In `--detail minimal` the single `more.command` is the

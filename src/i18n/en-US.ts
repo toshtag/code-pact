@@ -57,21 +57,26 @@ export const messages = {
     result: {
       init: (n: number): string =>
         `created ${n} files (project.yaml, roadmap.yaml, TUTORIAL phase)`,
-      prepare: (state: string, next: string): string => `state: ${state} · next: ${next}`,
+      prepare: (state: string, next: string): string =>
+        `state: ${state} · next: ${next}`,
       started: "started",
       blocked: (deps: string): string => `blocked · waiting on: ${deps}`,
-      completed: (n: number): string => `verify passed (${n} checks) · done event recorded`,
+      completed: (n: number): string =>
+        `verify passed (${n} checks) · done event recorded`,
       finalized: "finalized",
     },
     done: "Done. The sandbox was deleted — nothing was written to your project.",
     keptNote: (dir: string): string => `Done. Sandbox kept at: ${dir}`,
-    realNextSteps: "When you're ready, run `code-pact init` in your own project.",
+    realNextSteps:
+      "When you're ready, run `code-pact init` in your own project.",
   },
   phase: {
-    added: (id: string, path: string): string => `Phase "${id}" added at ${path}`,
+    added: (id: string, path: string): string =>
+      `Phase "${id}" added at ${path}`,
     duplicateId: (id: string): string =>
       `Phase "${id}" already exists. Choose a different ID.`,
-    notFound: (id: string): string => `Phase "${id}" not found in roadmap.yaml.`,
+    notFound: (id: string): string =>
+      `Phase "${id}" not found in roadmap.yaml.`,
     noPhases: "No phases found.",
     importDone: (
       phaseCount: number,
@@ -81,7 +86,8 @@ export const messages = {
       const parts = [
         `Imported ${phaseCount} phase${phaseCount === 1 ? "" : "s"}`,
       ];
-      if (taskCount > 0) parts.push(`and ${taskCount} task${taskCount === 1 ? "" : "s"}`);
+      if (taskCount > 0)
+        parts.push(`and ${taskCount} task${taskCount === 1 ? "" : "s"}`);
       if (skippedCount > 0) parts.push(`(skipped ${skippedCount} existing)`);
       return `${parts.join(" ")}.`;
     },
@@ -141,7 +147,9 @@ export const messages = {
       ): string => {
         const action = step.command ?? `MANUAL: ${step.manual_action}`;
         const prefix = step.blocking ? "[blocking] " : "";
-        const safety = step.safety_note ? `\n      safety: ${step.safety_note}` : "";
+        const safety = step.safety_note
+          ? `\n      safety: ${step.safety_note}`
+          : "";
         const expected = step.expected_result
           ? `\n      expected: ${step.expected_result}`
           : "";
@@ -154,7 +162,8 @@ export const messages = {
       `Baseline "${name}" not found in .code-pact/state/baselines/.`,
   },
   pack: {
-    phaseNotFound: (id: string): string => `Phase "${id}" not found in roadmap.yaml.`,
+    phaseNotFound: (id: string): string =>
+      `Phase "${id}" not found in roadmap.yaml.`,
     taskNotFound: (taskId: string, phaseId: string): string =>
       `Task "${taskId}" not found in phase "${phaseId}".`,
     written: (path: string, chars: number): string =>
@@ -162,14 +171,16 @@ export const messages = {
   },
   verify: {
     aborted: "Verification was aborted.",
-    phaseNotFound: (id: string): string => `Phase "${id}" not found in roadmap.yaml.`,
+    phaseNotFound: (id: string): string =>
+      `Phase "${id}" not found in roadmap.yaml.`,
     taskNotFound: (taskId: string, phaseId: string): string =>
       `Task "${taskId}" not found in phase "${phaseId}".`,
   },
   adapter: {
     agentNotFound: (name: string): string =>
       `Agent "${name}" not found. Run "code-pact init --agent ${name}" first.`,
-    done: (name: string): string => `Agent adapter for "${name}" generated successfully.`,
+    done: (name: string): string =>
+      `Agent adapter for "${name}" generated successfully.`,
   },
   doctor: {
     healthy: "No issues found. Project is healthy.",
@@ -177,7 +188,8 @@ export const messages = {
       `Found ${errors} error(s) and ${warnings} warning(s).`,
   },
   recommend: {
-    phaseNotFound: (id: string): string => `Phase "${id}" not found in roadmap.yaml.`,
+    phaseNotFound: (id: string): string =>
+      `Phase "${id}" not found in roadmap.yaml.`,
     taskNotFound: (taskId: string, phaseId: string): string =>
       `Task "${taskId}" not found in phase "${phaseId}".`,
     agentNotFound: (name: string): string =>
@@ -228,7 +240,8 @@ export const messages = {
     brief: {
       whatPrompt: "What are you building? (1–3 sentences)",
       whoPrompt: "Who is it for? (primary users or stakeholders)",
-      differentiatorPrompt: "What makes it different? (optional — press Enter to skip)",
+      differentiatorPrompt:
+        "What makes it different? (optional — press Enter to skip)",
     },
     constitution: {
       descriptionPrompt:
@@ -241,12 +254,15 @@ export const messages = {
     briefDone: (path: string): string => `Project brief written to ${path}`,
     briefSkipped: (path: string): string =>
       `${path} already exists. Use --force to overwrite.`,
-    constitutionDone: (path: string): string => `Project constitution written to ${path}`,
+    constitutionDone: (path: string): string =>
+      `Project constitution written to ${path}`,
     constitutionSkipped: (path: string): string =>
       `${path} already exists. Use --force to overwrite.`,
     promptClipboardCopied: "Prompt copied to clipboard.",
-    promptClipboardFailed: "Could not copy to clipboard — piped pbcopy/xclip command failed.",
-    promptNoBrief: "Tip: run `code-pact plan brief` first to add a project description.",
+    promptClipboardFailed:
+      "Could not copy to clipboard — piped pbcopy/xclip command failed.",
+    promptNoBrief:
+      "Tip: run `code-pact plan brief` first to add a project description.",
   },
   task: {
     added: (taskId: string, phaseId: string, path: string): string =>
@@ -292,13 +308,15 @@ export const messages = {
         `Task "${taskId}" is ${current}. Run \`code-pact task resume ${taskId}\` before completing.`,
     },
     failure: {
-      cause: (name: string, reason: string): string => `  cause: ${name} — ${reason}`,
-      otherChecks: (names: string[]): string => `  also failed: ${names.join(", ")}`,
+      cause: (name: string, reason: string): string =>
+        `  cause: ${name} — ${reason}`,
+      otherChecks: (names: string[]): string =>
+        `  also failed: ${names.join(", ")}`,
       rerunAfterFixing: (cmd: string): string => `  rerun after fixing: ${cmd}`,
     },
     recordDone: {
       evidenceRequired:
-        "task record-done requires --evidence \"<text>\" — the proof of completion (a PR, a CI result, or the verification you ran).",
+        'task record-done requires --evidence "<text>" — the proof of completion (a PR, a CI result, or the verification you ran).',
       decisionRequired: (taskId: string): string =>
         `Task "${taskId}" requires a decision ADR before it can be marked done.`,
       alreadyDone: (taskId: string): string =>
@@ -335,8 +353,7 @@ export const messages = {
         drift_kind: string | null;
       }): string =>
         `  state: design=${summary.design_status}, derived=${summary.derived_state}${summary.drift_kind ? `, drift=${summary.drift_kind}` : ""}`,
-      noSteps:
-        "  (no next steps — task is consistent)",
+      noSteps: "  (no next steps — task is consistent)",
       step: (
         index: number,
         step: {
@@ -350,7 +367,9 @@ export const messages = {
       ): string => {
         const action = step.command ?? `MANUAL: ${step.manual_action}`;
         const prefix = step.blocking ? "[blocking] " : "";
-        const safety = step.safety_note ? `\n      safety: ${step.safety_note}` : "";
+        const safety = step.safety_note
+          ? `\n      safety: ${step.safety_note}`
+          : "";
         const expected = step.expected_result
           ? `\n      expected: ${step.expected_result}`
           : "";
@@ -369,7 +388,7 @@ export const messages = {
       success: (taskId: string, reason: string): string =>
         `Recorded blocked event for "${taskId}" (reason: ${reason}).`,
       reasonRequired:
-        "task block requires --reason \"<text>\" describing why the task is blocked.",
+        'task block requires --reason "<text>" describing why the task is blocked.',
       invalidTransition: (taskId: string, current: string): string =>
         `Cannot block task "${taskId}" from state "${current}". Block is allowed from started or resumed.`,
     },
@@ -402,7 +421,8 @@ export const messages = {
         "Planning decisions must be captured in `design/decisions/`.",
         "Completion criteria must be deterministically verifiable.",
       ],
-      editHint: "Edit this file to reflect the actual principles of your project.",
+      editHint:
+        "Edit this file to reflect the actual principles of your project.",
     },
     codingStyle: {
       header: "Coding style rules",
@@ -464,12 +484,15 @@ export const messages = {
       editNotice:
         'Edit the sections marked "Project-specific" to reflect your project\'s conventions.',
       workflowHeader: "How to work on a task",
-      step0: "Prepare the task — the single per-task entry point. One call returns the current state, the execution recommendation (model tier, effort, planning posture, budget), the context pack metadata, a structured `next_action`, and a `commands` dictionary with the exact next commands to run:",
+      step0:
+        "Prepare the task — the single per-task entry point. The default (minimal) call returns a compact work order: current state, goal, declared read/write scope, done-when criteria, verification commands, the `next` action, and a `more` command to fetch the full envelope. Use `--detail full` or any budget flag to also receive the recommendation, context pack metadata, a structured `next_action`, and a `commands` dictionary:",
       step0Detail:
-        "`recommend` and `task context` remain available as standalone diagnostics, but `task prepare` runs both for you and returns their results in one envelope. Drive the rest of the lifecycle from the returned `commands` dictionary.",
-      step1: "Fetch the context pack directly only if you need it outside `task prepare` (diagnostic — `task prepare` already reports its metadata):",
+        "In minimal mode, no context pack is written and no heavy retrieval is performed. Fetch the full detail only when `next.type` is `inspect_decision`, you need the recommendation, or you are instructed to materialize the context pack. In full mode, drive the lifecycle from the returned `commands` dictionary.",
+      step1:
+        "Fetch the context pack directly only if you need it outside `task prepare` (diagnostic — `task prepare` already reports its metadata):",
       step2: "Implement the task.",
-      step3: "Mark the task complete. This runs verify and, on pass, records a `done` event under `.code-pact/state/events/`:",
+      step3:
+        "Mark the task complete. This runs verify and, on pass, records a `done` event under `.code-pact/state/events/`:",
       step3FailDetail:
         "If verify fails, this command exits 1 and no progress event is recorded.",
       step3IdempotentDetail:
@@ -486,7 +509,8 @@ export const messages = {
         "Replace this section with your project's actual conventions.",
       projectConventionsSource:
         "See `design/constitution.md` and `design/rules/` for the source of truth.",
-      projectConventionsDefault: "Follow `design/rules/coding-style.md` for code style.",
+      projectConventionsDefault:
+        "Follow `design/rules/coding-style.md` for code style.",
       agentContract: {
         // Heading strings are English-locked per
         // design/decisions/agent-contract-rfc.md so the conformance
@@ -498,7 +522,7 @@ export const messages = {
         intro:
           "The canonical code-pact workflow has three axes. A conforming agent honors all three. See [`docs/cli-contract.md`](https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md) for the full envelope reference.",
         contextCommandBody:
-          "Use `data.commands.context` exactly as returned by `task prepare`. Do not reconstruct, widen, or replace the resolved context budget. Budgeted context may contain deterministic structural projections. Use the projected form first. Retrieve an exact original section only when a specific missing detail blocks the task and `data.deferred_context.retrieve_command` is non-null; otherwise do not construct a retrieval command from the manifest reference.",
+          "`data.commands.context` is only present when `task prepare` is run with `--detail full` or an explicit budget flag that forces full detail. When present, use it exactly as returned. Do not reconstruct, widen, or replace the resolved context budget. Budgeted context may contain deterministic structural projections. Use the projected form first. In minimal mode, fetch the full envelope with `data.more.command` when you need context. Retrieve an exact original section only when a specific missing detail blocks the task and `data.deferred_context.retrieve_command` is non-null; otherwise do not construct a retrieval command from the manifest reference.",
         whenBody: [
           "Bootstrap once (CI-friendly, all non-interactive):",
           "",
@@ -508,20 +532,24 @@ export const messages = {
           "# plan brief: three pairwise-mutually-exclusive modes",
           "code-pact plan brief --from-file brief.yaml --json",
           "# OR: cat brief.yaml | code-pact plan brief --stdin --json",
-          "# OR: code-pact plan brief --what \"...\" --who \"...\" --differentiator \"...\" --json",
+          '# OR: code-pact plan brief --what "..." --who "..." --differentiator "..." --json',
           "",
           "# plan constitution: same three-mode shape",
           "code-pact plan constitution --from-file constitution.yaml --json",
-          "# OR: code-pact plan constitution --description \"...\" --principle \"...\" --principle \"...\" --json",
+          '# OR: code-pact plan constitution --description "..." --principle "..." --principle "..." --json',
           "```",
           "",
           "Per task (recommended entry point: `task prepare`):",
           "",
           "```sh",
-          "# Single entry point — returns current state, recommendation,",
-          "# context pack metadata, structured next_action, and a commands",
-          "# dictionary listing every per-task verb.",
+          "# Minimal default — a compact work order without context pack build/retrieval.",
           "code-pact task prepare <task-id> --agent claude-code --json",
+          "",
+          "# Full detail — recommendation, context pack metadata, next_action, commands.",
+          "code-pact task prepare <task-id> --agent claude-code --detail full --json",
+          "",
+          "# Any explicit budget flag forces full detail (use it to size the context pack).",
+          "code-pact task prepare <task-id> --agent claude-code --budget-bytes 100000 --json",
           "",
           "# Lifecycle verbs the agent invokes based on the prepare response:",
           "code-pact task start    <task-id> --agent claude-code",
@@ -542,21 +570,27 @@ export const messages = {
           "",
           "Activation rules (how the agent should behave):",
           "",
-          "- When the user names a task to implement (e.g. \"work on P1-T1\"), start with `task prepare`.",
-          "- If `next_action.type` is `wait_for_dependencies`, do not implement — resolve the blocking tasks or re-run `task prepare`.",
+          '- When the user names a task to implement (e.g. "work on P1-T1"), start with the default minimal `task prepare`.',
+          "- The default minimal output is a bounded work order. It does not build a context pack and does not perform heavy retrieval.",
+          "- Any explicit budget flag (`--budget-bytes`, `--context-budget`, `--recommended-context-budget`) forces `--detail full`, ignoring `--detail minimal`.",
+          "- Read `next.type` (minimal) or `next_action.type` (full). The possible values are `start_task`, `continue_implementation`, `wait_for_dependencies`, `resolve_block`, `inspect_decision`, `noop_already_done`, and `investigate_failure`.",
+          "- If the next action is `wait_for_dependencies`, do not implement — resolve the blocking dependencies and re-run `task prepare`.",
+          "- If the next action is `resolve_block` (manual block), resolve the `block.summary` reason (bounded to 512 UTF-8 bytes) and re-run `task prepare`.",
+          "- If the next action is `inspect_decision` (a `requires_decision` task in `planned` state), run the full-detail `task prepare` command in `next.command` to fetch decision commitments before starting.",
+          "- If the next action is `investigate_failure`, diagnose the failure from `failure.summary` (bounded to 512 UTF-8 bytes) and re-run `task start` after fixing.",
           "- On `CONTEXT_OVER_BUDGET`, do not widen context unasked; report the budget, a task split, or the minimum achievable bytes.",
           "- Run `task finalize --write` only after `task complete` has recorded the `done` event.",
         ].join("\n"),
         verifyBody: [
           "Before implementing:",
           "",
-          "- After `task prepare --json`, read `data.recommendation`.",
+          "- `data.recommendation` is present only when `task prepare` is run with `--detail full` or an explicit budget flag that forces full detail. Read it from `task prepare --detail full --json` or `recommend --json` when you need the execution profile.",
           "- After `recommend --json`, read `data`.",
           "- Treat that recommendation object as an execution profile, not a report:",
           "  - `tier` / `modelId` → continue, switch model, or — when the runtime **cannot switch model** — report the limitation rather than silently ignoring the recommendation.",
           "  - `effort` → reasoning depth. `planningRequired` → write a plan before editing when true.",
           "  - `lifecycleMode` → choose the loop: `full_loop` (prepare→start→complete→finalize), `decision_loop` (resolve the decision ADR first), or `record_only`.",
-          "- `record_only` is a lighter *loop*, not lighter verification: do **not** skip the project verification commands. Implement normally, run verification, then record honest completion with `task record-done --evidence \"...\"` (which still requires evidence and honors the decision gate).",
+          '- `record_only` is a lighter *loop*, not lighter verification: do **not** skip the project verification commands. Implement normally, run verification, then record honest completion with `task record-done --evidence "..."` (which still requires evidence and honors the decision gate).',
           "- Read the task's `writes` field. Mirror real intent into it so the `write_audit` advisory has a useful signal.",
           "",
           "Before `task finalize --write`:",
@@ -572,7 +606,10 @@ export const messages = {
           "- `code-pact plan lint --json` for advisory; `--strict` promotes warnings to exit-relevant (distinct from `--audit-strict`).",
         ].join("\n"),
         failBody: [
-          "- **blocked dependency** (from `task prepare`) — `next_action.type` is `wait_for_dependencies` and `blocked_by` lists the upstream task ids. Either resolve those tasks first (a real block) or `code-pact task resume <task-id>` if the block was a manual `task block` whose reason is resolved.",
+          "- **dependency block** (from `task prepare`) — `next.type` (or `next_action.type` in full detail) is `wait_for_dependencies` and `blocked_by` lists the upstream task ids. Resolve those tasks first, then re-run `task prepare`.",
+          "- **manual block** (from `task prepare`) — `next.type` is `resolve_block`; `blocked_by` is omitted. Resolve the `block.summary` reason (bounded to 512 UTF-8 bytes) and re-run `task prepare`. A manual `task block` whose reason is resolved can also be lifted with `code-pact task resume <task-id>` before re-running `task prepare`.",
+          "- **decision-required planned task** (from `task prepare`) — `next.type` is `inspect_decision`. Run the full-detail `task prepare` command in `next.command` to fetch decision commitments before starting.",
+          "- **failed task prepare** (from `task prepare`) — `next.type` is `investigate_failure`; `failure.summary` is the last verify/finalize failure reason bounded to 512 UTF-8 bytes. Diagnose and re-run `task start` (or `task prepare`) after fixing.",
           "- **task complete verification failure** (from `task complete --json --detail agent`) — `error.code` is `VERIFICATION_FAILED` (exit 1). Read `error.cause_code` first: `COMMANDS_FAILED` → fix the failing verification command; `DECISION_REQUIRED` → a `requires_decision` task needs an accepted ADR (write/accept it); `ABORTED` → retry only after the interruption is resolved.",
           "- **standalone verify failure** (from `verify --json --detail agent`) — `error.cause_code` is guaranteed only for cancellation (`ABORTED`). For ordinary failures, branch on `data.failure.kind`: `command_failed` → fix the failing command; `timed_out` → investigate timeout or a hanging command; `decision_required` → resolve the required ADR; `invalid_state` → read `data.failure.check` and `data.failure.reason`.",
           "- For `invalid_state`, representative checks are `progress_event` (a done event is missing or the ledger consistency needs attention; usually inspect the proper `task complete` path) and `task_status` (progress indicates completion but the design task status is not `done`; inspect the `task finalize` path). Read `data.failure.reason` before choosing an action.",

@@ -92,7 +92,9 @@ describe("runGenerateAdapter — claude-code", () => {
       locale: "en-US",
     });
     const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
-    expect(content).toContain("Use `data.commands.context` exactly");
+    expect(content).toContain(
+      "`data.commands.context` is only present when `task prepare`",
+    );
     expect(content).toContain("Do not reconstruct, widen, or replace");
   });
 
@@ -314,7 +316,9 @@ describe("runGenerateAdapter — codex", () => {
       locale: "en-US",
     });
     const content = await readFile(join(dir, "AGENTS.md"), "utf8");
-    expect(content).toContain("Use `data.commands.context` exactly");
+    expect(content).toContain(
+      "`data.commands.context` is only present when `task prepare`",
+    );
     expect(content).toContain("Do not reconstruct, widen, or replace");
   });
 });

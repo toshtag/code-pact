@@ -3,8 +3,6 @@ import type { Task } from "../../schemas/task.ts";
 import type { ProgressEvent } from "../../schemas/progress-event.ts";
 import type { TaskCurrentState } from "../../progress/task-state.ts";
 
-export type DetailMode = "minimal" | "full";
-
 export type PackContext = {
   phase: Phase;
   task: Task;
@@ -24,8 +22,6 @@ export type PackContext = {
   writeGlobs?: string[];
   declaredDecisions?: DecisionDoc[];
   acceptanceRefs?: string[];
-  /** Output detail mode. Defaults to "full" for backward compatibility. */
-  detail?: DetailMode;
 };
 
 export type RuleDoc = {
@@ -285,7 +281,6 @@ export function makeRelatedDecisionCommitmentsProjection(
  */
 export function renderSections(ctx: PackContext): RenderedSection[] {
   const sections: RenderedSection[] = [];
-  const detail = ctx.detail ?? "full";
 
   // 1. Header
   sections.push({
@@ -301,7 +296,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   });
 
   // 2. Constitution (context_size: large | ambiguity: high)
-  if (detail === "full" && ctx.constitution) {
+  if (ctx.constitution) {
     sections.push({
       name: "constitution",
       lines: [`## Project Constitution`, ``, ctx.constitution.trim(), ``],
@@ -309,7 +304,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   }
 
   // 3. Applicable rules
-  if (detail === "full" && ctx.rules.length > 0) {
+  if (ctx.rules.length > 0) {
     const lines: string[] = [`## Rules`];
     for (const rule of ctx.rules) {
       lines.push(``, `### ${rule.filename}`, ``, rule.body.trim());
@@ -323,36 +318,24 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   }
 
   // 4. Phase contract / acceptance criteria
-  if (detail === "minimal") {
-    sections.push({
-      name: "phase_contract",
-      lines: [
-        `## Acceptance`,
-        ``,
-        ...ctx.phase.definition_of_done.map(d => `- ${d}`),
-        ``,
-      ],
-    });
-  } else {
-    const phaseContractLines: string[] = [
-      `## Phase Contract`,
-      ``,
-      `**Objective:** ${ctx.phase.objective.trim()}`,
-      ``,
-      `**Definition of Done:**`,
-      ...ctx.phase.definition_of_done.map(d => `- ${d}`),
-      ``,
-    ];
+  const phaseContractLines: string[] = [
+    `## Phase Contract`,
+    ``,
+    `**Objective:** ${ctx.phase.objective.trim()}`,
+    ``,
+    `**Definition of Done:**`,
+    ...ctx.phase.definition_of_done.map(d => `- ${d}`),
+    ``,
+  ];
 
-    if (ctx.phase.non_goals && ctx.phase.non_goals.length > 0) {
-      phaseContractLines.push(
-        `**Non-Goals:**`,
-        ...ctx.phase.non_goals.map(g => `- ${g}`),
-        ``,
-      );
-    }
-    sections.push({ name: "phase_contract", lines: phaseContractLines });
+  if (ctx.phase.non_goals && ctx.phase.non_goals.length > 0) {
+    phaseContractLines.push(
+      `**Non-Goals:**`,
+      ...ctx.phase.non_goals.map(g => `- ${g}`),
+      ``,
+    );
   }
+  sections.push({ name: "phase_contract", lines: phaseContractLines });
 
   // 5. Task definition
   const taskDefinitionLines: string[] = [
@@ -397,7 +380,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   // (declaration-only). An empty matches list is rendered as a
   // visible "no matches" line so the agent sees the lint warning's
   // counterpart in pack form.
-  if (detail === "full" && ctx.readMatches && ctx.readMatches.length > 0) {
+  if (ctx.readMatches && ctx.readMatches.length > 0) {
     const lines: string[] = [`## Declared read surface`, ``];
     let totalMatches = 0;
     for (const entry of ctx.readMatches) {
@@ -442,11 +425,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   // regardless of context_size. The context_size:large
   // allDecisions path (rendered in section 6e) is filtered to avoid
   // re-printing files already shown here.
-  if (
-    detail === "full" &&
-    ctx.declaredDecisions &&
-    ctx.declaredDecisions.length > 0
-  ) {
+  if (ctx.declaredDecisions && ctx.declaredDecisions.length > 0) {
     const lines: string[] = [`## Declared decisions`];
     for (const dec of ctx.declaredDecisions) {
       lines.push(
@@ -469,11 +448,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
 
   // 6e. Acceptance references. Path list only; no content
   // excerpt and no semantic validation (deferred to reconcile).
-  if (
-    detail === "full" &&
-    ctx.acceptanceRefs &&
-    ctx.acceptanceRefs.length > 0
-  ) {
+  if (ctx.acceptanceRefs && ctx.acceptanceRefs.length > 0) {
     const lines: string[] = [`## Acceptance references`, ``];
     for (const p of ctx.acceptanceRefs) {
       lines.push(`- \`${p}\``);
@@ -489,35 +464,33 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   // 6. Related decisions (task-id filename match and the
   // context_size:large allDecisions case). Deduped against
   // declared decisions so content is not printed twice when a file is
-  // both referenced and matched. Skipped in minimal mode.
-  if (detail === "full") {
-    const declaredNames = new Set(
-      (ctx.declaredDecisions ?? []).map(d => d.filename),
-    );
-    const relatedDecisions = ctx.decisions.filter(
-      d => !declaredNames.has(d.filename),
-    );
-    if (relatedDecisions.length > 0) {
-      const lines: string[] = [`## Related Decisions`];
-      for (const dec of relatedDecisions) {
-        lines.push(
-          ``,
-          `### ${decisionHeading(dec.filename)}`,
-          ``,
-          dec.body.trim(),
-        );
-      }
-      lines.push(``);
-      sections.push({
-        name: "related_decisions",
-        details: { count: relatedDecisions.length },
-        lines,
-      });
+  // both referenced and matched.
+  const declaredNames = new Set(
+    (ctx.declaredDecisions ?? []).map(d => d.filename),
+  );
+  const relatedDecisions = ctx.decisions.filter(
+    d => !declaredNames.has(d.filename),
+  );
+  if (relatedDecisions.length > 0) {
+    const lines: string[] = [`## Related Decisions`];
+    for (const dec of relatedDecisions) {
+      lines.push(
+        ``,
+        `### ${decisionHeading(dec.filename)}`,
+        ``,
+        dec.body.trim(),
+      );
     }
+    lines.push(``);
+    sections.push({
+      name: "related_decisions",
+      details: { count: relatedDecisions.length },
+      lines,
+    });
   }
 
   // 7. Completed tasks in this phase (ambiguity: high)
-  if (detail === "full" && ctx.doneEvents && ctx.doneEvents.length > 0) {
+  if (ctx.doneEvents && ctx.doneEvents.length > 0) {
     const lines: string[] = [`## Completed Tasks in This Phase`, ``];
     for (const ev of ctx.doneEvents) {
       const agent = ev.agent ? ` by ${ev.agent}` : "";
@@ -546,63 +519,30 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
     ],
   });
 
-  // Retrieval section — minimal mode only. Points the agent at explicit
-  // commands to fetch the full context, runbook, memory, and recommendation.
-  if (detail === "minimal") {
-    sections.push({
-      name: "retrieval",
-      lines: [
-        `## Retrieval`,
-        ``,
-        `The following commands fetch additional detail when needed:`,
-        ``,
-        `- Full task context: \`code-pact task context ${ctx.task.id} --agent ${ctx.agentName}\``,
-        `- Task runbook: \`code-pact task runbook ${ctx.task.id} --json\``,
-        `- Memory status: \`code-pact memory status --json\``,
-        `- Full recommendation: \`code-pact recommend --phase ${ctx.phase.id} --task ${ctx.task.id} --json\``,
-        `- Full detail prepare: \`code-pact task prepare ${ctx.task.id} --agent ${ctx.agentName} --detail full --json\``,
-        ``,
-      ],
-    });
-  }
-
-  // 9. Progress recording hint — command-guided. The ledger is a set of
+  // 8. Progress recording hint — command-guided. The ledger is a set of
   // per-event files under .code-pact/state/events/; agents record via the CLI,
   // never by hand-editing the ledger.
-  if (detail === "minimal") {
-    sections.push({
-      name: "progress_event_schema",
-      lines: [
-        `## Recording progress`,
-        ``,
-        `- \`code-pact task complete ${ctx.task.id} --agent ${ctx.agentName}\``,
-        `- \`code-pact task record-done ${ctx.task.id} --evidence "..."\``,
-        ``,
-      ],
-    });
-  } else {
-    sections.push({
-      name: "progress_event_schema",
-      lines: [
-        `## Recording progress`,
-        ``,
-        `Do NOT hand-write the ledger. When this task is complete, record it with:`,
-        ``,
-        `\`\`\`sh`,
-        `code-pact task complete ${ctx.task.id} --agent <agent>`,
-        `\`\`\``,
-        ``,
-        `If the work was completed outside the loop, record it with evidence instead:`,
-        ``,
-        `\`\`\`sh`,
-        `code-pact task record-done ${ctx.task.id} --evidence "<verification command or artifact>"`,
-        `\`\`\``,
-        ``,
-        `Either writes one merge-safe event file under \`.code-pact/state/events/\`.`,
-        ``,
-      ],
-    });
-  }
+  sections.push({
+    name: "progress_event_schema",
+    lines: [
+      `## Recording progress`,
+      ``,
+      `Do NOT hand-write the ledger. When this task is complete, record it with:`,
+      ``,
+      `\`\`\`sh`,
+      `code-pact task complete ${ctx.task.id} --agent <agent>`,
+      `\`\`\``,
+      ``,
+      `If the work was completed outside the loop, record it with evidence instead:`,
+      ``,
+      `\`\`\`sh`,
+      `code-pact task record-done ${ctx.task.id} --evidence "<verification command or artifact>"`,
+      `\`\`\``,
+      ``,
+      `Either writes one merge-safe event file under \`.code-pact/state/events/\`.`,
+      ``,
+    ],
+  });
 
   return sections;
 }

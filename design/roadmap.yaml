@@ -206,3 +206,6 @@ phases:
   - id: P75
     path: design/phases/P75-minimum-sufficient-agent-work-order.yaml
     weight: 4
+  - id: P76
+    path: design/phases/P76-complete-the-minimum-work-order-contract.yaml
+    weight: 4

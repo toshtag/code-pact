@@ -88,13 +88,6 @@ export type BuildContextPackOptions = {
    * `tests/integration/pack-byte-identical.test.ts`).
    */
   budgetBytes?: number;
-  /**
-   * Output detail mode. `"minimal"` omits large optional sections
-   * (rules, constitution, decision bodies, runbook prose, memory
-   * details) and adds explicit retrieval commands. `"full"` (default)
-   * retains the existing context pack surface.
-   */
-  detail?: "minimal" | "full";
 };
 
 export type ContextPackResult = {
@@ -220,7 +213,6 @@ export async function buildContextPack(
   opts: BuildContextPackOptions,
 ): Promise<ContextPackResult> {
   const { cwd, phaseId, taskId, agentName } = opts;
-  const detail = opts.detail ?? "full";
 
   const ref = await resolvePhaseInRoadmap(cwd, phaseId);
 
@@ -238,12 +230,9 @@ export async function buildContextPack(
   const isHighAmbiguity = task.ambiguity === "high";
   const isLargeWriteSurface = task.write_surface === "high";
 
-  // In minimal detail mode, all heavy content loaders are skipped. The
-  // render path still receives empty arrays so it can compute section
-  // names and explain rows consistently.
-  const includeConstitution = detail === "full" && (isLarge || isHighAmbiguity);
-  const allDecisions = detail === "full" && isLarge;
-  const allRules = detail === "full" && isLargeWriteSurface;
+  const includeConstitution = isLarge || isHighAmbiguity;
+  const allDecisions = isLarge;
+  const allRules = isLargeWriteSurface;
 
   // Task Readiness Schema declared sections. Each branch is a
   // no-op when the corresponding field is absent or empty, so the pack
@@ -264,21 +253,15 @@ export async function buildContextPack(
     declaredDecisions,
     readMatches,
   ] = await Promise.all([
-    isSmall || detail === "minimal"
-      ? Promise.resolve([])
-      : loadRules(cwd, task.type, allRules),
-    isSmall || detail === "minimal"
-      ? Promise.resolve([])
-      : loadDecisions(cwd, taskId, allDecisions),
+    isSmall ? Promise.resolve([]) : loadRules(cwd, task.type, allRules),
+    isSmall ? Promise.resolve([]) : loadDecisions(cwd, taskId, allDecisions),
     includeConstitution ? loadConstitution(cwd) : Promise.resolve(null),
-    detail === "full" && isHighAmbiguity
-      ? loadDoneEventsInPhase(cwd, phase)
-      : Promise.resolve([]),
+    isHighAmbiguity ? loadDoneEventsInPhase(cwd, phase) : Promise.resolve([]),
     dependsOnIds.length > 0 ? loadAllProgressEvents(cwd) : Promise.resolve([]),
-    detail === "full" && decisionRefs.length > 0
+    decisionRefs.length > 0
       ? loadDeclaredDecisions(cwd, decisionRefs)
       : Promise.resolve([]),
-    detail === "full" && readGlobs.length > 0
+    readGlobs.length > 0
       ? loadReadMatches(cwd, readGlobs)
       : Promise.resolve([]),
   ]);
@@ -299,17 +282,14 @@ export async function buildContextPack(
     decisions,
     constitution,
     doneEvents,
-    detail,
     // Only attach the field on the render context when the task
     // actually declared the corresponding optional. Passing undefined
     // (vs an empty array) preserves byte-identical output for tasks
     // that declare none.
     ...(dependsOn !== undefined ? { dependsOn } : {}),
-    ...(detail === "full" && readMatches.length > 0 ? { readMatches } : {}),
+    ...(readMatches.length > 0 ? { readMatches } : {}),
     ...(writeGlobsList.length > 0 ? { writeGlobs: writeGlobsList } : {}),
-    ...(detail === "full" && declaredDecisions.length > 0
-      ? { declaredDecisions }
-      : {}),
+    ...(declaredDecisions.length > 0 ? { declaredDecisions } : {}),
     ...(acceptanceRefsList.length > 0
       ? { acceptanceRefs: acceptanceRefsList }
       : {}),

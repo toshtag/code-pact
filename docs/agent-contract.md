@@ -339,7 +339,9 @@ agent has been told about every verb in it.
 ```
 task prepare ─┬─► (planned) ──► task start ──► implement ──► verify ──► task complete ──► task finalize
               ├─► (started) ──► implement ──► verify ──► task complete ──► task finalize
-              ├─► (blocked) ──► resolve dependencies ──► task prepare (retry)
+              ├─► (blocked, dep) ──► resolve dependencies ──► task prepare (retry)
+              ├─► (blocked, manual) ──► resolve block reason ──► task prepare (retry)
+              ├─► (requires_decision) ──► inspect decision (full-detail prepare) ──► task start
               └─► (done)    ──► noop
 ```
 
@@ -349,20 +351,22 @@ The verbs in detail:
   Default (`--detail minimal`) returns a **Minimum Sufficient Work Order**:
   the task's `goal`, `read_scope`, `write_scope`, `done_when`, `verify`,
   `decision_required`/`decision_refs`, a single `next` action (`start_task` /
-  `continue_implementation` / `wait_for_dependencies` / `noop_already_done` /
-  `investigate_failure`), `blocked_by`, honest `failure` info for `failed`
-  states, and a `more` command that fetches the full detail envelope. It does
-  **not** build or write a context pack, resolve the recommendation, read
-  decision bodies, or scan memory. Progress-read-only.
+  `continue_implementation` / `wait_for_dependencies` / `resolve_block` /
+  `inspect_decision` / `noop_already_done` / `investigate_failure`), `blocked_by`,
+  honest `failure` info for `failed` states, `block.summary` for manual blocks
+  (bounded to 512 UTF-8 bytes), and a `more` command that fetches the full detail
+  envelope. It does **not** build or write a context pack, resolve the
+  recommendation, read decision bodies, or scan memory. Progress-read-only.
+  Any explicit budget flag (`--budget-bytes`, `--context-budget`, `--recommended-context-budget`)
+  forces `--detail full`, ignoring `--detail minimal`.
   Use `--detail full` (or any explicit budget flag) to receive the historical
   contract: `recommendation`, full `commands` dictionary, context pack
   metadata, `decision_commitments`, and `applied_context_budget`/`deferred_context`.
   `--dry-run` is honored only in `--detail full`; in minimal mode there is
   nothing to preview.
-  For a `requires_decision` task the full detail also returns `decision_commitments`:
-  the parsed `## Implementation commitments` of each **accepted considered** ADR.
-  Read it as **advisory implementation context** — not a gate; enforcement stays
-  with `verify` / `task complete`.
+  For a `requires_decision` task the default minimal output returns `next.type:
+inspect_decision` with a `next.command` that points to the full-detail
+  `task prepare`; run it to fetch `decision_commitments` before starting.
   `commands.verify` and `commands.complete` include `--json --detail agent`;
   use those strings verbatim so verification failures arrive as compact
   capsules instead of duplicated raw stdout/stderr.

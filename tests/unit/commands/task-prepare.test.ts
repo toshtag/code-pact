@@ -293,7 +293,7 @@ describe("runTaskPrepare — minimal mode state matrix", () => {
     expect(result.blocked_by).toEqual(["P1-T1"]);
   });
 
-  it("manual blocked state: wait_for_dependencies with empty blocked_by", async () => {
+  it("manual blocked state: resolve_block with bounded block summary", async () => {
     await setupProject(dir, {
       progressYaml: `events:\n${atEvent("blocked", "manual block reason")}`,
     });
@@ -301,9 +301,10 @@ describe("runTaskPrepare — minimal mode state matrix", () => {
       await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
     );
     expect(result.task.state).toBe("blocked");
-    expect(result.next.type).toBe("wait_for_dependencies");
+    expect(result.next.type).toBe("resolve_block");
     expect(result.next.command).toBeNull();
-    expect(result.blocked_by).toEqual([]);
+    expect(result).not.toHaveProperty("blocked_by");
+    expect(result.block).toEqual({ summary: "manual block reason" });
   });
 
   it("done state: noop_already_done with no command", async () => {
@@ -334,6 +335,48 @@ describe("runTaskPrepare — minimal mode state matrix", () => {
       command: null,
       exit_code: null,
     });
+  });
+
+  it("decision-required planned state: inspect_decision with full-detail command", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_YAML_WITH_SCOPE });
+    const result = minimalResult(
+      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    );
+    expect(result.task.state).toBe("planned");
+    expect(result.task.decision_required).toBe(true);
+    expect(result.next.type).toBe("inspect_decision");
+    expect(result.next.command).toBe(
+      "code-pact task prepare P1-T1 --agent claude-code --detail full --json",
+    );
+  });
+
+  it("failed state truncates long reason to 512 UTF-8 bytes", async () => {
+    const longReason = "x".repeat(1000);
+    await setupProject(dir, {
+      progressYaml: `events:\n${atEvent("failed", longReason)}`,
+    });
+    const result = minimalResult(
+      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    );
+    expect(result.failure?.summary).not.toBeNull();
+    expect(
+      Buffer.byteLength(result.failure!.summary!, "utf8"),
+    ).toBeLessThanOrEqual(512);
+  });
+
+  it("manual block truncates long reason to 512 UTF-8 bytes without breaking", async () => {
+    const longReason = "テスト".repeat(200); // 3-byte chars, total > 512 bytes
+    await setupProject(dir, {
+      progressYaml: `events:\n${atEvent("blocked", longReason)}`,
+    });
+    const result = minimalResult(
+      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    );
+    expect(result.next.type).toBe("resolve_block");
+    expect(result.block).toBeDefined();
+    expect(
+      Buffer.byteLength(result.block!.summary, "utf8"),
+    ).toBeLessThanOrEqual(512);
   });
 });
 
@@ -505,6 +548,20 @@ describe("runTaskPrepare — full detail compatibility", () => {
     expect(result.recommendation).not.toBeNull();
     expect(result.context_pack_path).not.toBeNull();
   });
+
+  it("explicit budget with --detail minimal still returns full detail", async () => {
+    await setupProject(dir);
+    const result = fullResult(
+      await runTaskPrepare({
+        cwd: dir,
+        taskId: "P1-T1",
+        agent: "claude-code",
+        detail: "minimal",
+        budgetSelection: { kind: "explicit_bytes", budgetBytes: 100000 },
+      }),
+    );
+    expect(result.detail).toBe("full");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -542,6 +599,7 @@ describe("runTaskPrepare — minimal byte reduction", () => {
     minimalBytes: number;
     fullPrepareBytes: number;
     contextPackBytes: number;
+    materializedBytes: number;
   }> {
     await setupProject(dir, { phaseYaml, progressYaml });
     const minimal = await runTaskPrepare({
@@ -562,10 +620,14 @@ describe("runTaskPrepare — minimal byte reduction", () => {
       agentName: "claude-code",
     });
 
+    const materializedBytes =
+      Buffer.byteLength(JSON.stringify(full), "utf8") + pack.totalBytes;
+
     return {
       minimalBytes: Buffer.byteLength(JSON.stringify(minimal), "utf8"),
       fullPrepareBytes: Buffer.byteLength(JSON.stringify(full), "utf8"),
-      contextPackBytes: Buffer.byteLength(pack.content, "utf8"),
+      contextPackBytes: pack.totalBytes,
+      materializedBytes,
     };
   }
 
@@ -607,6 +669,28 @@ describe("runTaskPrepare — minimal byte reduction", () => {
     // Default minimal does not build a pack, so context-pack reduction vs
     // minimal JSON is a less meaningful metric for failed early returns.
     expect(minimalBytes).toBeLessThan(contextPackBytes + 1);
+  });
+
+  it("D. reports serialized byte sizes for minimal, full, context pack, and combined materialized output", async () => {
+    const a = await minimalAndFullBytes(PHASE_YAML);
+    const b = await minimalAndFullBytes(PHASE_YAML_WITH_SCOPE);
+    const c = await minimalAndFullBytes(
+      PHASE_YAML_FAILED,
+      `events:\n${atEvent("failed", "unit test failure")}`,
+    );
+
+    const table = [
+      { fixture: "small", ...a },
+      { fixture: "declared-scope", ...b },
+      { fixture: "failed", ...c },
+    ];
+    // eslint-disable-next-line no-console
+    console.table(table);
+
+    for (const row of table) {
+      expect(row.minimalBytes).toBeLessThan(row.fullPrepareBytes);
+      expect(row.fullPrepareBytes).toBeLessThan(row.materializedBytes);
+    }
   });
 
   it("median reduction across fixtures is at least 50%", async () => {

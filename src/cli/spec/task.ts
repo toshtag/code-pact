@@ -11,11 +11,14 @@ const prepare: CommandSpec = {
   command: "prepare",
   positional: "<task-id>",
   summary: [
-    "The single per-task entry point. Returns the current state, the execution",
-    "recommendation (tier/model/effort/budget), context-pack metadata, a",
-    "structured next_action, and a commands dictionary with the exact next",
-    "commands to run. Progress-read-only — never records a progress event, but",
-    "writes the context pack unless --dry-run is passed.",
+    "The single per-task entry point. Default (minimal) returns a compact work",
+    "order: current state, goal, declared read/write scope, done-when criteria,",
+    "verification commands, the next action, and a command to fetch the full",
+    "envelope. Use --detail full or any budget flag to also receive the",
+    "execution recommendation, context-pack metadata, a structured next_action,",
+    "and a commands dictionary. Progress-read-only — never records a progress",
+    "event and writes the context pack only in --detail full (or when a budget",
+    "flag forces full detail) unless --dry-run is passed.",
   ].join("\n"),
   // NOT `readOnly: true`: prepare records no progress event but DOES write
   // the context pack (unless --dry-run), so the generic "Read-only — never
@@ -48,7 +51,7 @@ const prepare: CommandSpec = {
       name: "detail",
       value: "<mode>",
       description:
-        "Output detail mode: minimal (default) or full. Minimal omits context bodies, runbook prose, memory details, and advisory guidance from the output and context pack.",
+        "Output detail mode: minimal (default) or full. Minimal returns a compact work order and does not build or write a context pack. Any explicit budget flag forces full detail. Full returns the historical contract with recommendation, context-pack metadata, next_action, and commands.",
     },
     {
       name: "dry-run",
@@ -56,7 +59,11 @@ const prepare: CommandSpec = {
     },
     { name: "json", description: "Emit JSON." },
   ],
-  examples: ["code-pact task prepare P1-T1 --agent claude-code --json"],
+  examples: [
+    "code-pact task prepare P1-T1 --agent claude-code --json",
+    "code-pact task prepare P1-T1 --agent claude-code --detail full --json",
+    "code-pact task prepare P1-T1 --agent claude-code --budget-bytes 100000 --json",
+  ],
 };
 
 const complete: CommandSpec = {

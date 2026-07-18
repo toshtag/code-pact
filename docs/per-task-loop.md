@@ -99,8 +99,12 @@ in `--evidence`: a PR number, a CI result, or the verification command you ran.
 ## A worked example
 
 ```sh
-# 1. Prepare — read state + recommendation + the exact next commands.
+# 1. Prepare — default minimal returns a compact work order (goal, scope, next action).
+#    Use --detail full (or any budget flag) to also get the recommendation + commands.
 code-pact task prepare P1-T1 --agent claude-code --json
+
+# 1b. If you need the recommendation, context-pack metadata, or decision commitments:
+code-pact task prepare P1-T1 --agent claude-code --detail full --json
 
 # 2. Start, then implement the task.
 code-pact task start P1-T1 --agent claude-code

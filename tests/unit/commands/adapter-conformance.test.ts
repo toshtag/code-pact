@@ -66,7 +66,8 @@ Activation rules:
 
 ### How to handle failures
 
-- **blocked dependency** — wait or resume.
+- **dependency block** — resolve dependencies and re-run prepare.
+- **manual block** — resolve the block reason and re-run prepare.
 - **verification failure** — fix and re-run.
 - **adapter drift** — re-upgrade.
 - **missing context pack** — task prepare rebuilds it.
@@ -118,7 +119,8 @@ Activation rules:
 
 ### How to handle failures
 
-- **blocked dependency** — wait or resume.
+- **dependency block** — resolve dependencies and re-run prepare.
+- **manual block** — resolve the block reason and re-run prepare.
 - **verification failure** — fix and re-run.
 - **adapter drift** — re-upgrade.
 - **missing context pack** — task prepare rebuilds it.
@@ -384,7 +386,7 @@ describe("runAdapterConformance — required CLI surface mentions", () => {
 describe("runAdapterConformance — required failure guidance", () => {
   it("fails when a required failure keyword is missing", async () => {
     const body = VALID_CONTRACT_BODY.replace(
-      /blocked dependency/g,
+      /dependency block/g,
       "blocked deps",
     );
     await setupAdapter(dir, { instructionContent: body });
@@ -397,7 +399,7 @@ describe("runAdapterConformance — required failure guidance", () => {
     );
     expect(guidanceCheck?.status).toBe("fail");
     expect((guidanceCheck?.details?.missing as string[]) ?? []).toContain(
-      "blocked dependency",
+      "dependency block",
     );
   });
 });
@@ -614,7 +616,9 @@ describe("runAdapterConformance — structural projection guidance", () => {
     ]);
     expect(
       ((incompleteEnglish.details.missing as string[]) ?? []).every(anchor =>
-        ((incompleteEnglish.details.anchors as string[]) ?? []).includes(anchor),
+        ((incompleteEnglish.details.anchors as string[]) ?? []).includes(
+          anchor,
+        ),
       ),
     ).toBe(true);
 
