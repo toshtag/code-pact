@@ -1002,10 +1002,6 @@ async function cmdTaskPrepare(
   }
 
   try {
-    // Budget resolution is handled inside the runner on the pack-build path,
-    // after early returns and using the already-loaded agent profile and
-    // recommendation. The returned commands dictionary carries resolved bytes
-    // when a budget was actually applied.
     const result = await runTaskPrepare({
       cwd,
       taskId,
@@ -1014,98 +1010,121 @@ async function cmdTaskPrepare(
       budgetSelection: budget.selection,
       detail: taskPrepareDetail,
     });
+
     if (json) {
-      if (taskPrepareDetail === "minimal" && result.minimal !== undefined) {
-        emitOk(result.minimal);
-      } else {
-        emitOk(result);
-      }
-    } else if (
-      taskPrepareDetail === "minimal" &&
-      result.minimal !== undefined
-    ) {
-      const m = result.minimal;
-      const lines: string[] = [];
-      lines.push(`Task:           ${m.phase_id} / ${m.task_id}`);
-      lines.push(`Agent:          ${m.agent}`);
-      lines.push(`Current state:  ${m.current_state}`);
-      lines.push(`Next action:    ${m.next_action.type}`);
-      lines.push(`                ${m.next_action.message}`);
-      if (m.blocked_by.length > 0) {
-        lines.push(`Blocked by:     ${m.blocked_by.join(", ")}`);
-      }
-      if (m.context_pack_path) {
-        lines.push(
-          `Context pack:   ${m.context_pack_path} (${m.context_pack_bytes} bytes)`,
-        );
-      } else if (m.would_write_context_pack_path) {
-        lines.push(
-          `Context pack:   (dry-run) would write to ${m.would_write_context_pack_path} (${m.context_pack_bytes} bytes)`,
-        );
-      }
-      lines.push(`State:`);
-      lines.push(`  requires_decision: ${m.state.requires_decision}`);
-      if (m.state.failure_fingerprint !== undefined) {
-        lines.push(`  failure_fingerprint: ${m.state.failure_fingerprint}`);
-        lines.push(
-          `  prior_exact_match: ${m.state.prior_exact_match ?? false}`,
-        );
-      }
-      lines.push("");
-      lines.push("Retrieval commands:");
-      lines.push(
-        `  context:       ${m.retrieval.context.command} (${m.retrieval.context.bytes} bytes)`,
-      );
-      lines.push(`  runbook:       ${m.retrieval.runbook.command}`);
-      lines.push(`  memory:        ${m.retrieval.memory.command}`);
-      lines.push(`  recommendation:${m.retrieval.recommendation.command}`);
-      lines.push(`  full detail:   ${m.retrieval.full_detail.command}`);
-      lines.push("");
-      lines.push("Commands:");
-      lines.push(`  context:  ${m.commands.context}`);
-      lines.push(`  start:    ${m.commands.start}`);
-      lines.push(`  verify:   ${m.commands.verify}`);
-      lines.push(`  complete: ${m.commands.complete}`);
-      lines.push(`  finalize: ${m.commands.finalize}`);
-      lines.push(`  record-done: ${m.commands["record-done"]}`);
-      process.stdout.write(`${lines.join("\n")}\n`);
-    } else {
-      const lines: string[] = [];
-      lines.push(`Task:           ${result.phase_id} / ${result.task_id}`);
-      lines.push(`Agent:          ${result.agent}`);
-      lines.push(`Current state:  ${result.current_state}`);
-      lines.push(`Next action:    ${result.next_action.type}`);
-      lines.push(`                ${result.next_action.message}`);
-      if (result.recommendation) {
-        lines.push(
-          `Recommendation: tier=${result.recommendation.tier} model=${result.recommendation.modelId} effort=${result.recommendation.effort}`,
-        );
-        lines.push(
-          `Repair:         ${formatRepairPolicySummary(result.recommendation.repairPolicy)}`,
-        );
-      }
-      if (result.blocked_by.length > 0) {
-        lines.push(`Blocked by:     ${result.blocked_by.join(", ")}`);
-      }
-      if (result.context_pack_path) {
-        lines.push(
-          `Context pack:   ${result.context_pack_path} (${result.context_pack_bytes} bytes)`,
-        );
-      } else if (result.would_write_context_pack_path) {
-        lines.push(
-          `Context pack:   (dry-run) would write to ${result.would_write_context_pack_path} (${result.context_pack_bytes} bytes)`,
-        );
-      }
-      lines.push("");
-      lines.push("Commands:");
-      lines.push(`  context:  ${result.commands.context}`);
-      lines.push(`  start:    ${result.commands.start}`);
-      lines.push(`  verify:   ${result.commands.verify}`);
-      lines.push(`  complete: ${result.commands.complete}`);
-      lines.push(`  finalize: ${result.commands.finalize}`);
-      lines.push(`  record-done: ${result.commands["record-done"]}`);
-      process.stdout.write(`${lines.join("\n")}\n`);
+      emitOk(result);
+      return 0;
     }
+
+    if (result.detail === "minimal") {
+      const lines: string[] = [];
+      lines.push(`Task: ${result.task.id}`);
+      lines.push(`State: ${result.task.state}`);
+      lines.push(`Goal: ${result.task.goal}`);
+
+      if (result.task.read_scope.length > 0) {
+        lines.push("");
+        lines.push("Read:");
+        for (const r of result.task.read_scope) {
+          lines.push(`- ${r}`);
+        }
+      }
+
+      if (result.task.write_scope.length > 0) {
+        lines.push("");
+        lines.push("Write:");
+        for (const w of result.task.write_scope) {
+          lines.push(`- ${w}`);
+        }
+      }
+
+      if (result.task.done_when.length > 0) {
+        lines.push("");
+        lines.push("Done when:");
+        for (const d of result.task.done_when) {
+          lines.push(`- ${d}`);
+        }
+      }
+
+      if (result.task.verify.length > 0) {
+        lines.push("");
+        lines.push("Verify:");
+        for (const v of result.task.verify) {
+          lines.push(`- ${v}`);
+        }
+      }
+
+      lines.push("");
+      lines.push(`Decision required: ${result.task.decision_required}`);
+      if (result.task.decision_refs && result.task.decision_refs.length > 0) {
+        lines.push("Decision refs:");
+        for (const d of result.task.decision_refs) {
+          lines.push(`- ${d}`);
+        }
+      }
+
+      if (result.blocked_by && result.blocked_by.length > 0) {
+        lines.push("");
+        lines.push("Blocked by:");
+        for (const b of result.blocked_by) {
+          lines.push(`- ${b}`);
+        }
+      }
+
+      if (result.failure) {
+        lines.push("");
+        lines.push(`Failure summary: ${result.failure.summary ?? "(none)"}`);
+      }
+
+      lines.push("");
+      lines.push(`Next: ${result.next.type}`);
+      if (result.next.command) {
+        lines.push(`  ${result.next.command}`);
+      }
+
+      lines.push("");
+      lines.push("More:");
+      lines.push(`  ${result.more.command}`);
+
+      process.stdout.write(`${lines.join("\n")}\n`);
+      return 0;
+    }
+
+    const lines: string[] = [];
+    lines.push(`Task:           ${result.phase_id} / ${result.task_id}`);
+    lines.push(`Agent:          ${result.agent}`);
+    lines.push(`Current state:  ${result.current_state}`);
+    lines.push(`Next action:    ${result.next_action.type}`);
+    lines.push(`                ${result.next_action.message}`);
+    if (result.recommendation) {
+      lines.push(
+        `Recommendation: tier=${result.recommendation.tier} model=${result.recommendation.modelId} effort=${result.recommendation.effort}`,
+      );
+      lines.push(
+        `Repair:         ${formatRepairPolicySummary(result.recommendation.repairPolicy)}`,
+      );
+    }
+    if (result.blocked_by.length > 0) {
+      lines.push(`Blocked by:     ${result.blocked_by.join(", ")}`);
+    }
+    if (result.context_pack_path) {
+      lines.push(
+        `Context pack:   ${result.context_pack_path} (${result.context_pack_bytes} bytes)`,
+      );
+    } else if (result.would_write_context_pack_path) {
+      lines.push(
+        `Context pack:   (dry-run) would write to ${result.would_write_context_pack_path} (${result.context_pack_bytes} bytes)`,
+      );
+    }
+    lines.push("");
+    lines.push("Commands:");
+    lines.push(`  context:  ${result.commands.context}`);
+    lines.push(`  start:    ${result.commands.start}`);
+    lines.push(`  verify:   ${result.commands.verify}`);
+    lines.push(`  complete: ${result.commands.complete}`);
+    lines.push(`  finalize: ${result.commands.finalize}`);
+    lines.push(`  record-done: ${result.commands["record-done"]}`);
+    process.stdout.write(`${lines.join("\n")}\n`);
     return 0;
   } catch (err: unknown) {
     if (!(err instanceof Error)) throw err;

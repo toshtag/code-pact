@@ -1,0 +1,82 @@
+id: P75
+name: Minimum Sufficient Agent Work Order
+weight: 4
+confidence: medium
+risk: medium
+status: planned
+objective: >
+  Correct the P74 default `task prepare` contract so it is a compact, actionable
+  work order rather than a small context pack. Preserve full detail as an
+  explicit opt-in and keep the implementation changes within existing surfaces.
+non_goals:
+  - Add a new benchmark, telemetry system, or model integration.
+  - Change package version or cut a release.
+  - Modify memory schema or storage.
+  - Modify unrelated public CLI behavior.
+definition_of_done:
+  - Default `task prepare --json` returns one stable minimal schema for every
+    task state.
+  - The minimal JSON includes the task goal, declared read/write scope, done
+    criteria, verification commands, decision state, and exactly one next action
+    command.
+  - The minimal JSON does not include a recommendation, lifecycle commands
+    dictionary, context pack metadata, or a retrieval menu.
+  - Full detail remains available via `task prepare --detail full --json` and
+    produces the existing contract.
+  - Minimal mode does not build or write a context pack, resolve
+    recommendations, read decision bodies, or search memory.
+  - State matrix tests, actionable-completeness tests, no-hidden-retrieval
+    tests, failure-honesty tests, determinism tests, and byte-reduction tests
+    pass.
+  - Public documentation matches the new default behavior.
+  - All repository verification commands pass.
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm build
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+    - pnpm check:docs
+    - node dist/cli.js validate --json
+    - node dist/cli.js plan lint --include-quality --strict --json
+    - git diff --check
+tasks:
+  - id: P75-T1
+    type: refactor
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: >
+      Rework the default `task prepare` JSON contract into a minimum sufficient
+      work order, remove hidden context-pack generation from minimal mode, and
+      keep full detail behind an explicit opt-in.
+    reads:
+      - src/cli.ts
+      - src/cli/commands/task.ts
+      - src/cli/spec/task.ts
+      - src/commands/task-prepare.ts
+      - src/core/pack/formatters/markdown.ts
+      - src/core/pack/index.ts
+      - src/core/progress/task-state.ts
+      - src/core/schemas/phase.ts
+      - src/core/schemas/task.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/per-task-loop.md
+      - README.md
+    writes:
+      - src/cli/commands/task.ts
+      - src/commands/task-prepare.ts
+      - src/commands/tutorial.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/integration/cli.test.ts
+      - tests/integration/task-context-budget.test.ts
+      - tests/integration/task-prepare-commands-contract.test.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/per-task-loop.md
+      - README.md

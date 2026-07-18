@@ -203,3 +203,6 @@ phases:
   - id: P74
     path: design/phases/P74-default-agent-contract-minimization.yaml
     weight: 5
+  - id: P75
+    path: design/phases/P75-minimum-sufficient-agent-work-order.yaml
+    weight: 4
