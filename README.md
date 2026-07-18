@@ -22,7 +22,7 @@ Want to drive the loop yourself in a real project? Scaffold the sample `TUTORIAL
 ```sh
 npx code-pact init --non-interactive --agent claude-code --locale en-US --sample-phase
 code-pact adapter install claude-code --json
-code-pact task prepare TUTORIAL-T1 --agent claude-code --json  # single per-task entry: state + recommendation + the exact commands to run
+code-pact task prepare TUTORIAL-T1 --agent claude-code --json  # single per-task entry: minimal work order + fallback for full detail
 code-pact task start TUTORIAL-T1
 # ... agent implements ...
 code-pact verify --phase TUTORIAL --task TUTORIAL-T1           # run the phase's verification commands
@@ -35,7 +35,7 @@ code-pact validate                                            # CI-friendly heal
 > [!IMPORTANT]
 > Verification commands are trusted project shell configuration. Review imported or agent-generated plans before running `verify` or `task complete`. Each command is bounded to five minutes by default; use `--timeout <milliseconds>` with a decimal integer when a reviewed command legitimately needs a different limit. If `SIGINT`/`SIGTERM` is observed before the documented event-write commit point, Code Pact cancels the active verification process tree and does not record task completion. Programmatic signal delivery is platform-dependent; Windows CI verifies timeout/AbortSignal cancellation and `taskkill` cleanup rather than synthetic `SIGINT` delivery.
 
-`task prepare` is the recommended per-task entry point: one call returns the current state, the execution recommendation, the context pack metadata, and a `commands` dictionary with the exact next commands. `recommend` and `task context` remain available as standalone diagnostics. (A plain `init` without `--sample-phase` starts with an empty roadmap — you add your own phases; see [getting-started](docs/getting-started.md).)
+`task prepare` is the recommended per-task entry point: by default it returns a minimal work order (goal, read/write scope, done criteria, verification commands, decision status, one `next` action, and a fallback for full detail). Use `--detail full` to also receive the recommendation, context pack metadata, and the full lifecycle `commands` dictionary. `recommend` and `task context` remain available as standalone diagnostics. (A plain `init` without `--sample-phase` starts with an empty roadmap — you add your own phases; see [getting-started](docs/getting-started.md).)
 
 ## Status
 
@@ -68,7 +68,7 @@ Contributors can also run from a clone with `pnpm link --global`, or install a l
 - **Code-pact-first** — capture a brief + constitution, then `plan prompt` and have your agent draft the full roadmap from them.
 - **Manual** — write the roadmap by hand with a mix of interactive wizards and flag-based commands.
 
-They all converge on the same per-task agent loop, entered through `task prepare` (`task prepare` → `task start` → implement → `verify` → `task complete` → `task finalize`). `task prepare` also returns a `lifecycleMode` (`full_loop` / `record_only` / `decision_loop`) recommending how heavy that loop should be — e.g. `record_only` lets a small, strongly-verified task record completion via `task record-done` instead of the full loop. See [`docs/per-task-loop.md`](docs/per-task-loop.md) for the lifecycle diagram and a worked example. `recommend` and `task context` remain available as standalone diagnostics — `task prepare` surfaces both for you in one call.
+They all converge on the same per-task agent loop, entered through `task prepare` (`task prepare` → `task start` → implement → `verify` → `task complete` → `task finalize`). Default `task prepare --json` returns a compact minimal work order (`data.task`, `data.next`, `data.more.command`). Use `task prepare --detail full` (or any explicit budget flag) to also receive the execution recommendation, context-pack metadata, `next_action`, and `commands` dictionary. `recommend` and `task context` remain available as standalone diagnostics.
 
 New to the terms used here (context pack, envelope, derived state, …)? The [`docs/glossary.md`](docs/glossary.md) defines them in plain language.
 
@@ -76,17 +76,17 @@ New to the terms used here (context pack, envelope, derived state, …)? The [`d
 
 ## Reference docs
 
-| Doc | What it covers |
-| --- | --- |
-| [`docs/per-task-loop.md`](docs/per-task-loop.md) | The canonical per-task lifecycle — state diagram, the verbs, and a worked example. |
-| [`docs/glossary.md`](docs/glossary.md) | Plain-language definitions for every `code-pact` term used in the docs. |
-| [`docs/positioning.md`](docs/positioning.md) | What `code-pact` is, what it deliberately is not, the core CLI surfaces, and the success metrics the project measures itself against. |
-| [`docs/agent-contract.md`](docs/agent-contract.md) | The agent contract: what `code-pact` guarantees, what `adapter conformance` requires of each agent integration, and the recommended per-task lifecycle. |
-| [`docs/getting-started.md`](docs/getting-started.md) | First-thirty-minutes guide (onboarding approaches + the per-task loop). |
-| [`docs/cli-reference.generated.md`](docs/cli-reference.generated.md) | Generated command usage, flags, and examples. |
-| [`docs/cli-contract.md`](docs/cli-contract.md) | Exit codes, JSON envelopes, error codes, semantic guarantees, and the Stability taxonomy. |
-| [`docs/upgrading.md`](docs/upgrading.md) | How to upgrade — additive within a major, with a migration note per major bump; pointers for coming from an earlier alpha. |
-| [`docs/troubleshooting.md`](docs/troubleshooting.md) | Diagnostic code → recovery action for the most common error codes. |
+| Doc                                                                  | What it covers                                                                                                                                          |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`docs/per-task-loop.md`](docs/per-task-loop.md)                     | The canonical per-task lifecycle — state diagram, the verbs, and a worked example.                                                                      |
+| [`docs/glossary.md`](docs/glossary.md)                               | Plain-language definitions for every `code-pact` term used in the docs.                                                                                 |
+| [`docs/positioning.md`](docs/positioning.md)                         | What `code-pact` is, what it deliberately is not, the core CLI surfaces, and the success metrics the project measures itself against.                   |
+| [`docs/agent-contract.md`](docs/agent-contract.md)                   | The agent contract: what `code-pact` guarantees, what `adapter conformance` requires of each agent integration, and the recommended per-task lifecycle. |
+| [`docs/getting-started.md`](docs/getting-started.md)                 | First-thirty-minutes guide (onboarding approaches + the per-task loop).                                                                                 |
+| [`docs/cli-reference.generated.md`](docs/cli-reference.generated.md) | Generated command usage, flags, and examples.                                                                                                           |
+| [`docs/cli-contract.md`](docs/cli-contract.md)                       | Exit codes, JSON envelopes, error codes, semantic guarantees, and the Stability taxonomy.                                                               |
+| [`docs/upgrading.md`](docs/upgrading.md)                             | How to upgrade — additive within a major, with a migration note per major bump; pointers for coming from an earlier alpha.                              |
+| [`docs/troubleshooting.md`](docs/troubleshooting.md)                 | Diagnostic code → recovery action for the most common error codes.                                                                                      |
 
 Maintainers: see [`docs/dogfood.md`](docs/dogfood.md) (quick guide) and [`docs/maintainers/operations.md`](docs/maintainers/operations.md) (deeper operations) for running `code-pact` on `code-pact` itself.
 
