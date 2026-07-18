@@ -68,7 +68,8 @@ export const DIAGNOSTIC_REQUIRED_SURFACES: ReadonlyArray<string> = [
  * guidance under any heading they like, provided the keyword appears.
  */
 export const REQUIRED_FAILURE_GUIDANCE: ReadonlyArray<string> = [
-  "blocked dependency",
+  "dependency block",
+  "manual block",
   "verification failure",
   "adapter drift",
   "missing context pack",
@@ -214,15 +215,12 @@ export const BOUNDED_REPAIR_GUIDANCE_ANCHORS: ReadonlyArray<{
 }> = [
   {
     id: "repair_policy_guidance_present",
-    anchors: [
-      "repairPolicy",
-      "maxRepairAttempts",
-      "command_failed",
-    ],
+    anchors: ["repairPolicy", "maxRepairAttempts", "command_failed"],
   },
   {
     id: "repair_policy_json_paths_present",
     anchors: [
+      "task prepare --detail full",
       "data.recommendation.repairPolicy",
       "data.repairPolicy",
       "data.recommendation.allowedEscalation",
@@ -231,17 +229,11 @@ export const BOUNDED_REPAIR_GUIDANCE_ANCHORS: ReadonlyArray<{
   },
   {
     id: "bounded_repair_runtime_constraints_present",
-    anchors: [
-      "same_model_same_effort_same_context",
-      "failure_delta",
-    ],
+    anchors: ["same_model_same_effort_same_context", "failure_delta"],
   },
   {
     id: "bounded_repair_stop_guidance_present",
-    anchors: [
-      "stopOnRepeatedFingerprint",
-      "use_allowed_escalation",
-    ],
+    anchors: ["stopOnRepeatedFingerprint", "use_allowed_escalation"],
   },
   {
     id: "bounded_repair_nonretryable_guidance_present",
@@ -274,9 +266,8 @@ export const BOUNDED_REPAIR_GUIDANCE_ANCHORS: ReadonlyArray<{
  */
 export const STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION = "2.5.0";
 
-export const STRUCTURAL_PROJECTION_GUIDANCE_COMMON_ANCHORS: ReadonlyArray<string> = [
-  "data.deferred_context.retrieve_command",
-];
+export const STRUCTURAL_PROJECTION_GUIDANCE_COMMON_ANCHORS: ReadonlyArray<string> =
+  ["data.deferred_context.retrieve_command"];
 
 export const STRUCTURAL_PROJECTION_GUIDANCE_VARIANTS: ReadonlyArray<{
   id: string;

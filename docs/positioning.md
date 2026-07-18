@@ -86,15 +86,13 @@ a fixed flag surface within a major line.
   budget profile, preflight steps, and `lifecycleMode`
   (`full_loop` / `record_only` / `decision_loop`).
 - **`code-pact task prepare`** — single
-  progress-read-only entry point per task. Returns current
-  state, recommendation, context pack metadata, a structured
-  `next_action`, and a `commands` dictionary listing every
-  per-task verb. As the primary entry point it also writes the
-  deterministic context pack to the agent profile's
-  `context_dir` (default `.context/<agent>/<task-id>.md`)
-  unless `--dry-run`. Replaces the older pattern of agents
-  stitching `recommend` + `task context` + state inspection
-  manually.
+  progress-read-only entry point per task. Default `--json` returns a
+  compact minimal work order (`data.task`, `data.next`, `data.more.command`).
+  Use `--detail full` (or any explicit budget flag) to also receive the
+  execution recommendation, context pack metadata, a structured `next_action`,
+  and a `commands` dictionary; only the full-detail path writes the deterministic
+  context pack to the agent profile's `context_dir` (default
+  `.context/<agent>/<task-id>.md`) unless `--dry-run`.
 - **`code-pact task context`** — builds the deterministic
   Markdown context pack for a task and returns/prints it; it is
   a read-only diagnostic and does not write the pack file

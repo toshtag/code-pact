@@ -29,6 +29,8 @@ import {
 import { loadPhase } from "../core/plan/load-phase.ts";
 import { loadProject, resolveEnabledAgent } from "../core/project.ts";
 import type { Task as TaskT } from "../core/schemas/task.ts";
+import type { Phase } from "../core/schemas/phase.ts";
+import type { ProgressEvent } from "../core/schemas/progress-event.ts";
 import {
   appliedBudgetBytes,
   resolveAppliedContextBudget,
@@ -40,6 +42,8 @@ import {
 // Public types
 // ---------------------------------------------------------------------------
 
+export type TaskPrepareDetail = "minimal" | "full";
+
 export type TaskPrepareOptions = {
   cwd: string;
   taskId: string;
@@ -48,14 +52,57 @@ export type TaskPrepareOptions = {
   /** When true, build the context pack but do not write it to disk. */
   dryRun?: boolean;
   budgetSelection?: TaskPrepareBudgetSelection;
+  /**
+   * Output detail level. `"minimal"` returns a compact work order;
+   * `"full"` (or an explicit budget) preserves the existing detailed contract.
+   */
+  detail?: TaskPrepareDetail;
 };
 
 export type NextActionType =
   | "start_task"
   | "continue_implementation"
   | "wait_for_dependencies"
+  | "resolve_block"
+  | "inspect_decision"
   | "noop_already_done"
   | "investigate_failure";
+
+export type TaskPrepareMinimalNextAction = {
+  type: NextActionType;
+  command: string | null;
+};
+
+export type TaskPrepareMinimalFailure = {
+  summary: string | null;
+  fingerprint: string | null;
+  command: string | null;
+  exit_code: number | null;
+};
+
+export type TaskPrepareMinimalTask = {
+  id: string;
+  phase_id: string;
+  state: TaskCurrentState;
+  goal: string;
+  read_scope: string[];
+  write_scope: string[];
+  done_when: string[];
+  verify: string[];
+  acceptance_refs?: string[];
+  decision_required: boolean;
+  decision_refs?: string[];
+};
+
+export type TaskPrepareMinimalResult = {
+  detail: "minimal";
+  task: TaskPrepareMinimalTask;
+  next: TaskPrepareMinimalNextAction;
+  more: { command: string };
+  blocked_by?: string[];
+  block?: { summary: string };
+  failure?: TaskPrepareMinimalFailure;
+};
 
 export type TaskPrepareCommands = {
   context: string;
@@ -72,7 +119,8 @@ export type TaskPrepareCommands = {
   "record-done": string;
 };
 
-export type TaskPrepareResult = {
+export type TaskPrepareFullResult = {
+  detail: "full";
   task_id: string;
   phase_id: string;
   agent: string;
@@ -98,13 +146,7 @@ export type TaskPrepareResult = {
   /**
    * Parsed `## Implementation commitments` of each ACCEPTED ADR the
    * decision gate considered for this task. Present (possibly `[]`) only for a
-   * `requires_decision` task; omitted entirely otherwise. It is `[]` only when
-   * the resolver found no accepted ADR entries — note an unresolved explicit
-   * `decision_refs` gate may still surface its accepted refs (this surface is
-   * advisory context, NOT gate enforcement; unlike the `ADR_COMMITMENTS_EMPTY`
-   * lint advisory it does not require the gate to resolve). Additive.
-   * Entries follow the resolver's `considered[]` order — no
-   * chronological/priority/dependency meaning.
+   * `requires_decision` task; omitted entirely otherwise.
    */
   decision_commitments?: {
     adr: string;
@@ -115,6 +157,9 @@ export type TaskPrepareResult = {
   /** Present only on the context-pack build path; omitted for early returns. */
   applied_context_budget?: AppliedContextBudget;
 };
+
+/** Backward-compatible alias for the full-detail result. */
+export type TaskPrepareResult = TaskPrepareFullResult;
 
 // ---------------------------------------------------------------------------
 // Loaders
@@ -133,10 +178,6 @@ async function loadAgentProfile(
     (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
     throw err;
   }
-  // A malformed profile (e.g. an explicitly-configured but invalid
-  // context_budget block) surfaces as CONFIG_ERROR rather than an
-  // unclassified YAML/Zod throw, so `task prepare --context-budget …` matches
-  // the documented error contract and the CLI renders a clean envelope.
   try {
     const profile = AgentProfile.parse(parseYaml(raw) as unknown);
     assertAgentProfileNameMatches(profile, agentName, path);
@@ -164,28 +205,18 @@ function buildCommands(
 ): TaskPrepareCommands {
   return {
     context: `code-pact task context ${taskId} --agent ${agent}${
-      contextBudgetBytes !== undefined ? ` --budget-bytes ${contextBudgetBytes}` : ""
+      contextBudgetBytes !== undefined
+        ? ` --budget-bytes ${contextBudgetBytes}`
+        : ""
     }`,
     start: `code-pact task start ${taskId} --agent ${agent}`,
     verify: `code-pact verify --phase ${phaseId} --task ${taskId} --json --detail agent`,
     complete: `code-pact task complete ${taskId} --agent ${agent} --json --detail agent`,
     finalize: `code-pact task finalize ${taskId} --write --json`,
-    // Template, not ready-to-run: `--evidence` is the agent's completion proof.
     "record-done": `code-pact task record-done ${taskId} --agent ${agent} --evidence "<verification you ran>"`,
   };
 }
 
-/**
- * The one mode-aware guidance surface. `mode` is consulted ONLY for the two
- * workable, pre-completion states (`start_task` / `continue_implementation`); the
- * early-return states pass no mode (recommendation is null there by construction)
- * and keep their static, mode-agnostic messages. The mode→message wording restates
- * `lifecycle.ts` / `per-task-loop.md` semantics, inventing nothing. The
- * `decision_loop` message states only the gate fact + a generic implement/verify
- * step — it does NOT decide complete-vs-record-done (lifecycle.ts returns
- * decision_loop whenever requires_decision is true, independent of ADR acceptance,
- * so the mode never implies the post-gate completion path).
- */
 function messageFor(
   actionType: NextActionType,
   mode?: RecommendResult["lifecycleMode"],
@@ -211,6 +242,10 @@ function messageFor(
       }
     case "wait_for_dependencies":
       return "Resolve blocking dependencies, then re-run task prepare.";
+    case "resolve_block":
+      return "Resolve the manual block reason, then re-run task prepare.";
+    case "inspect_decision":
+      return "Inspect the gating decision before starting; run the full-detail prepare command.";
     case "noop_already_done":
       return "Task is already done; no action required.";
     case "investigate_failure":
@@ -226,12 +261,150 @@ function nextActionTypeFor(state: TaskCurrentState): NextActionType {
     case "resumed":
       return "continue_implementation";
     case "blocked":
-      return "wait_for_dependencies";
+      return "resolve_block";
     case "done":
       return "noop_already_done";
     case "failed":
       return "investigate_failure";
   }
+}
+
+function minimalNextCommand(
+  actionType: NextActionType,
+  agentName: string,
+  taskId: string,
+): string | null {
+  const fullPrepare = `code-pact task prepare ${taskId} --agent ${agentName} --detail full --json`;
+  switch (actionType) {
+    case "start_task":
+      return `code-pact task start ${taskId} --agent ${agentName}`;
+    case "inspect_decision":
+      return fullPrepare;
+    case "continue_implementation":
+    case "wait_for_dependencies":
+    case "resolve_block":
+    case "noop_already_done":
+    case "investigate_failure":
+      return null;
+  }
+}
+
+const MAX_REASON_BYTES = 512;
+
+function utf8Truncate(text: string, maxBytes: number): string {
+  if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
+  const buf = Buffer.from(text, "utf8");
+  let end = Math.min(maxBytes, buf.length);
+  while (end > 0) {
+    const byte = buf[end] ?? 0;
+    if ((byte & 0b11000000) !== 0b10000000) break;
+    end--;
+  }
+  if (end === 0) {
+    return Buffer.from(buf.subarray(0, maxBytes)).toString("utf8");
+  }
+  return Buffer.from(buf.subarray(0, end)).toString("utf8");
+}
+
+function boundedReason(
+  reason: string | null | undefined,
+  maxBytes: number = MAX_REASON_BYTES,
+): string | null {
+  if (reason == null) return null;
+  return utf8Truncate(reason, maxBytes);
+}
+
+function resolveMinimalNextAction(
+  currentState: TaskCurrentState,
+  blockedBy: string[],
+  decisionRequired: boolean,
+): NextActionType {
+  if (currentState === "done") return "noop_already_done";
+  if (blockedBy.length > 0) return "wait_for_dependencies";
+  if (currentState === "blocked") return "resolve_block";
+  if (currentState === "failed") return "investigate_failure";
+  if (currentState === "planned" && decisionRequired) return "inspect_decision";
+  return nextActionTypeFor(currentState);
+}
+
+function buildMinimalResult(opts: {
+  phase: Phase;
+  task: TaskT;
+  currentState: TaskCurrentState;
+  lastEvent: ProgressEvent | undefined;
+  agentName: string;
+  taskId: string;
+  phaseId: string;
+  blockedBy: string[];
+}): TaskPrepareMinimalResult {
+  const {
+    phase,
+    task,
+    currentState,
+    lastEvent,
+    agentName,
+    taskId,
+    phaseId,
+    blockedBy,
+  } = opts;
+
+  const decisionRequired = isDecisionRequiredForTask(phase, task);
+  const nextType = resolveMinimalNextAction(
+    currentState,
+    blockedBy,
+    decisionRequired,
+  );
+
+  const taskPayload: TaskPrepareMinimalTask = {
+    id: taskId,
+    phase_id: phaseId,
+    state: currentState,
+    goal: (task.description ?? "").trim() || phase.objective.trim(),
+    read_scope: task.reads ?? [],
+    write_scope: task.writes ?? [],
+    done_when: phase.definition_of_done,
+    verify: phase.verification.commands,
+    decision_required: decisionRequired,
+  };
+
+  if (task.acceptance_refs && task.acceptance_refs.length > 0) {
+    taskPayload.acceptance_refs = task.acceptance_refs;
+  }
+
+  if (decisionRequired && task.decision_refs && task.decision_refs.length > 0) {
+    taskPayload.decision_refs = task.decision_refs;
+  }
+
+  const result: TaskPrepareMinimalResult = {
+    detail: "minimal",
+    task: taskPayload,
+    next: {
+      type: nextType,
+      command: minimalNextCommand(nextType, agentName, taskId),
+    },
+    more: {
+      command: `code-pact task prepare ${taskId} --agent ${agentName} --detail full --json`,
+    },
+  };
+
+  if (nextType === "wait_for_dependencies") {
+    result.blocked_by = blockedBy;
+  }
+
+  if (nextType === "resolve_block") {
+    result.block = { summary: boundedReason(lastEvent?.reason) ?? "" };
+  }
+
+  if (currentState === "failed") {
+    result.failure = {
+      summary: boundedReason(lastEvent?.reason),
+      fingerprint: null,
+      command: null,
+      exit_code: null,
+    };
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,25 +413,30 @@ function nextActionTypeFor(state: TaskCurrentState): NextActionType {
 
 /**
  * `code-pact task prepare <task-id>` — single progress-read-only entry
- * point per task. Returns current state, recommendation, context pack
- * metadata, a structured `next_action`, and a `commands` dictionary.
+ * point per task.
  *
  * Progress invariant: this function MUST NOT record a progress event
- * (the ledger is left unchanged). It MAY write the deterministic
- * context pack at the agent profile's `context_dir/<task-id>.md`
- * (default `.context/<agent>/<task-id>.md`) unless `dryRun` is passed.
+ * (the ledger is left unchanged).
  *
- * Early-return states (`done`, `blocked`, unmet dependencies) skip
- * the context pack build entirely; their envelope returns
- * `recommendation: null`, `context_pack_path: null`,
- * `context_pack_bytes: 0`.
+ * - `detail: "minimal"` (default CLI): returns a compact work-order JSON.
+ *   Does not build or write a context pack, resolve recommendations, read ADR
+ *   bodies, or search memory. The result contains the task goal, declared
+ *   read/write scope, completion criteria, verification commands, decision
+ *   state, a single next action, and one explicit full-detail fallback command.
+ *
+ * - `detail: "full"` / explicit budget: preserves the existing detailed
+ *   contract, including recommendation, context pack build/write, decision
+ *   commitments, and lifecycle commands dictionary.
  */
 export async function runTaskPrepare(
   opts: TaskPrepareOptions,
-): Promise<TaskPrepareResult> {
+): Promise<TaskPrepareMinimalResult | TaskPrepareFullResult> {
   const { cwd, taskId } = opts;
-  const dryRun = opts.dryRun ?? false;
   const budgetSelection = opts.budgetSelection ?? { kind: "none" };
+  // Explicit budget implies full detail — budgeting is about sizing the full
+  // context pack, not about the minimal work-order mode.
+  const detail: "minimal" | "full" =
+    budgetSelection.kind !== "none" ? "full" : (opts.detail ?? "minimal");
 
   // 1. Agent validation (mirrors task context / task start order).
   const project = await loadProject(cwd);
@@ -276,20 +454,47 @@ export async function runTaskPrepare(
   // 4. Find task entry within the phase.
   const task: TaskT | undefined = phase.tasks?.find(t => t.id === taskId);
   if (!task) {
-    // This should be unreachable because resolveTaskInRoadmap already
-    // confirmed the task exists in this phase, but guard anyway so a
-    // future schema divergence does not silently produce a null result.
     const err = new Error(`Task "${taskId}" not found in phase "${phaseId}".`);
     (err as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
     throw err;
   }
 
   // 5. Derive current state.
-  const currentState = deriveTaskState(progress.log.events, taskId).current;
+  const { current: currentState, last_event: lastEvent } = deriveTaskState(
+    progress.log.events,
+    taskId,
+  );
+
+  // 6. Compute blocked-by (used by both modes).
+  const blockedBy: string[] = [];
+  if (currentState !== "blocked") {
+    const dependsOn = task.depends_on ?? [];
+    for (const depId of dependsOn) {
+      const depState = deriveTaskState(progress.log.events, depId).current;
+      if (depState !== "done") blockedBy.push(depId);
+    }
+  }
+
+  // 7. Minimal mode: return compact work order without heavy loaders.
+  if (detail === "minimal") {
+    return buildMinimalResult({
+      phase,
+      task,
+      currentState,
+      lastEvent,
+      agentName,
+      taskId,
+      phaseId,
+      blockedBy,
+    });
+  }
+
+  // 8. Full-detail mode below. Keep early-return shape identical to the
+  // historical contract so existing consumers / tests remain stable.
 
   const commands = buildCommands(agentName, phaseId, taskId);
 
-  // 6. Early return — done.
+  // 8a. Early return — done.
   if (currentState === "done") {
     return {
       task_id: taskId,
@@ -299,7 +504,8 @@ export async function runTaskPrepare(
       recommendation: null,
       context_pack_path: null,
       context_pack_bytes: 0,
-      dry_run: dryRun,
+      detail: "full",
+      dry_run: opts.dryRun ?? false,
       next_action: {
         type: "noop_already_done",
         message: messageFor("noop_already_done"),
@@ -310,20 +516,12 @@ export async function runTaskPrepare(
     };
   }
 
-  // 7. Early return — blocked state OR unmet dependencies.
-  const blockedBy: string[] = [];
-  if (currentState === "blocked") {
-    // The state itself is blocked. We do not list specific dependency
-    // ids in this branch — the block is a manual `task block` reason.
-  } else {
-    const dependsOn = task.depends_on ?? [];
-    for (const depId of dependsOn) {
-      const depState = deriveTaskState(progress.log.events, depId).current;
-      if (depState !== "done") blockedBy.push(depId);
-    }
-  }
-
+  // 8b. Early return — blocked state OR unmet dependencies.
   if (currentState === "blocked" || blockedBy.length > 0) {
+    const isManualBlock = currentState === "blocked";
+    const nextType: NextActionType = isManualBlock
+      ? "resolve_block"
+      : "wait_for_dependencies";
     return {
       task_id: taskId,
       phase_id: phaseId,
@@ -332,17 +530,18 @@ export async function runTaskPrepare(
       recommendation: null,
       context_pack_path: null,
       context_pack_bytes: 0,
-      dry_run: dryRun,
+      detail: "full",
+      dry_run: opts.dryRun ?? false,
       next_action: {
-        type: "wait_for_dependencies",
-        message: messageFor("wait_for_dependencies"),
+        type: nextType,
+        message: messageFor(nextType),
       },
       commands,
       blocked_by: blockedBy,
     };
   }
 
-  // 8. Recommendation (pure function).
+  // 8c. Recommendation (pure function).
   const agentProfile = await loadAgentProfile(cwd, agentName);
   const recommendation = resolveRecommendation({
     phaseId,
@@ -355,15 +554,7 @@ export async function runTaskPrepare(
     },
   });
 
-  // 8b. Decision commitments. For a requires_decision task, resolve the
-  // gate (read-only — preserves the progress-read-only invariant) and surface
-  // the parsed `## Implementation commitments` of each ACCEPTED ADR in
-  // resolution.considered[], in considered[] order. Present (possibly []) only
-  // for gated tasks; it is [] only when the resolver found no accepted ADR
-  // entries. An unresolved explicit decision_refs gate may still surface
-  // accepted refs — task prepare is advisory implementation context, NOT gate
-  // enforcement (task complete / verify own that). Unlike the
-  // ADR_COMMITMENTS_EMPTY lint advisory, this does NOT require res.resolved.
+  // 8d. Decision commitments (full mode only).
   let decisionCommitments:
     | {
         adr: string;
@@ -380,12 +571,6 @@ export async function runTaskPrepare(
     decisionCommitments = [];
     for (const considered of resolution.considered) {
       if (!considered.accepted) continue;
-      // The gate already classified this accepted ADR by reading it; re-read to
-      // parse commitments. If it vanished in between (a TOCTOU race), skip it
-      // rather than failing the whole prepare — commitments are advisory context,
-      // and the gate's accepted verdict already stands. `considered.path` is the
-      // gate's repo-root-relative, safety-checked path (an unsafe path is never
-      // `accepted`), so this read cannot escape the project root.
       let adrContent: string;
       try {
         adrContent = await readOwnedText(
@@ -403,9 +588,7 @@ export async function runTaskPrepare(
     }
   }
 
-  // 9. Context pack — build always, write unless dry-run. The budget is
-  // resolved here, on the build path, so the done / blocked / unmet-deps early
-  // returns above never trigger budget resolution or extra profile I/O.
+  // 8e. Context pack.
   const appliedContextBudget = resolveAppliedContextBudget({
     selection: budgetSelection,
     agentName,
@@ -425,10 +608,8 @@ export async function runTaskPrepare(
   let contextPackPath: string | null = null;
   let wouldWritePath: string | undefined;
   let deferredContext: DeferredContextProjection | undefined;
+  const dryRun = opts.dryRun ?? false;
   if (dryRun) {
-    // Use the same resolver as the actual write so the would-write hint
-    // matches what an actual write would produce, and the same .context/**
-    // namespace + symlink-free containment rules apply.
     wouldWritePath = await resolveProfileContextOutputPath(
       cwd,
       agentProfile.context_dir,
@@ -457,10 +638,10 @@ export async function runTaskPrepare(
     }
   }
 
-  // 10. Map state → next_action.
   const nextActionType = nextActionTypeFor(currentState);
 
-  const result: TaskPrepareResult = {
+  const result: TaskPrepareFullResult = {
+    detail: "full",
     task_id: taskId,
     phase_id: phaseId,
     agent: agentName,

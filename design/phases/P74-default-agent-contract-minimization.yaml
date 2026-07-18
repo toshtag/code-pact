@@ -1,0 +1,67 @@
+id: P74
+name: Default Agent Contract Minimization
+weight: 5
+confidence: high
+risk: medium
+status: done
+objective: >
+  Minimize the default Agent-facing contract after paired replay did not
+  demonstrate a completion or repair benefit and consumed more tokens than the
+  baseline variant.
+non_goals:
+  - Add a new benchmark, telemetry system, or model integration.
+  - Re-run P73 or the Nova replay.
+  - Claim measured token savings from byte-count reductions.
+  - Implement P64, P65, P67, or P68.
+  - Remove explicit access to detailed context when requested.
+  - Change unrelated public CLI behavior.
+definition_of_done:
+  - Default Agent output contains only actionable task and verification data.
+  - Large context, runbook prose, memory, and advisory details require an
+    explicit request.
+  - Existing detailed output remains available through one explicit option.
+  - Default output is materially smaller on fixed repository fixtures.
+  - Default execution performs no hidden context or memory retrieval.
+  - JSON and human-readable output remain deterministic and documented.
+verification:
+  commands:
+    - pnpm check:docs
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+requires_decision: false
+tasks:
+  - id: P74-T1
+    type: refactor
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: >
+      Reduce the default Agent-facing task contract to actionable task,
+      write-scope, verification, failure, next-action, and explicit retrieval
+      information while preserving detailed context as an opt-in.
+    reads:
+      - src/cli.ts
+      - src/cli/commands/task.ts
+      - src/cli/spec/task.ts
+      - src/commands/task-prepare.ts
+      - src/core/agents.ts
+      - src/core/loop-memory/recall.ts
+      - src/core/pack/formatters/markdown.ts
+      - src/core/pack/index.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+    writes:
+      - src/cli/commands/task.ts
+      - src/cli/spec/task.ts
+      - src/commands/task-prepare.ts
+      - src/core/pack/formatters/markdown.ts
+      - src/core/pack/index.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - docs/cli-reference.generated.md
+      - design/roadmap.yaml
+      - design/phases/P74-default-agent-contract-minimization.yaml
