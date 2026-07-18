@@ -3,7 +3,7 @@ name: Default Agent Contract Minimization
 weight: 5
 confidence: high
 risk: medium
-status: planned
+status: done
 objective: >
   Minimize the default Agent-facing contract after paired replay did not
   demonstrate a completion or repair benefit and consumed more tokens than the
