@@ -45,31 +45,20 @@ function toArgv(command: string): string[] {
 }
 
 /** Add phase P1 (deterministic verify) + a single planned task P1-T1. */
-async function setupTask(
-  project: Awaited<ReturnType<typeof createTempProject>>,
-): Promise<void> {
+async function setupTask(project: Awaited<ReturnType<typeof createTempProject>>): Promise<void> {
   const add = project.run([
-    "phase",
-    "add",
-    "--id",
-    "P1",
-    "--name",
-    "Foundation",
-    "--objective",
-    "Foundation phase for the prepare-commands contract test",
-    "--weight",
-    "10",
-    "--verify-command",
-    "node --version",
+    "phase", "add",
+    "--id", "P1",
+    "--name", "Foundation",
+    "--objective", "Foundation phase for the prepare-commands contract test",
+    "--weight", "10",
+    "--verify-command", "node --version",
     "--json",
   ]);
   expectJsonOk(add);
 
   const phasePath = join(project.dir, "design", "phases", "P1-foundation.yaml");
-  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
-    string,
-    unknown
-  >;
+  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
   doc.tasks = [
     {
       id: "P1-T1",
@@ -118,14 +107,7 @@ function prepareCommands(
   project: Awaited<ReturnType<typeof createTempProject>>,
 ): Commands {
   const res = project.run([
-    "task",
-    "prepare",
-    "P1-T1",
-    "--agent",
-    "claude-code",
-    "--detail",
-    "full",
-    "--json",
+    "task", "prepare", "P1-T1", "--agent", "claude-code", "--json",
   ]);
   const env = expectJsonOk<{ commands: Commands }>(res);
   return env.data.commands;
@@ -174,14 +156,7 @@ describe("task prepare — emitted commands are accepted by the CLI parser", () 
 
   it("P48 — the --json envelope surfaces recommendation.contextFit (suggestion only)", () => {
     const res = project.run([
-      "task",
-      "prepare",
-      "P1-T1",
-      "--agent",
-      "claude-code",
-      "--detail",
-      "full",
-      "--json",
+      "task", "prepare", "P1-T1", "--agent", "claude-code", "--json",
     ]);
     const env = expectJsonOk<{
       recommendation: {
@@ -195,24 +170,13 @@ describe("task prepare — emitted commands are accepted by the CLI parser", () 
     // P1-T1: context_size=small, ambiguity=low, write_surface=low -> tight.
     expect(env.data.recommendation).not.toBeNull();
     expect(env.data.recommendation!.contextFit).toBeDefined();
-    expect(env.data.recommendation!.contextFit!.recommendedProfile).toBe(
-      "tight",
-    );
-    expect(env.data.recommendation!.contextFit!.recommendedBudgetBytes).toBe(
-      30000,
-    );
+    expect(env.data.recommendation!.contextFit!.recommendedProfile).toBe("tight");
+    expect(env.data.recommendation!.contextFit!.recommendedBudgetBytes).toBe(30000);
   });
 
   it("P51 — recommendation carries repairPolicy and commands stay unchanged", () => {
     const res = project.run([
-      "task",
-      "prepare",
-      "P1-T1",
-      "--agent",
-      "claude-code",
-      "--detail",
-      "full",
-      "--json",
+      "task", "prepare", "P1-T1", "--agent", "claude-code", "--json",
     ]);
     const env = expectJsonOk<{
       recommendation: { repairPolicy: unknown } | null;
@@ -225,11 +189,9 @@ describe("task prepare — emitted commands are accepted by the CLI parser", () 
       context: "code-pact task context P1-T1 --agent claude-code",
       start: "code-pact task start P1-T1 --agent claude-code",
       verify: "code-pact verify --phase P1 --task P1-T1 --json --detail agent",
-      complete:
-        "code-pact task complete P1-T1 --agent claude-code --json --detail agent",
+      complete: "code-pact task complete P1-T1 --agent claude-code --json --detail agent",
       finalize: "code-pact task finalize P1-T1 --write --json",
-      "record-done":
-        'code-pact task record-done P1-T1 --agent claude-code --evidence "<verification you ran>"',
+      "record-done": 'code-pact task record-done P1-T1 --agent claude-code --evidence "<verification you ran>"',
     });
     for (const [name, command] of Object.entries(env.data.commands)) {
       expect(name).not.toMatch(/repair|retry/i);
@@ -239,7 +201,7 @@ describe("task prepare — emitted commands are accepted by the CLI parser", () 
     expect(env.data.commands.complete).toContain("--json --detail agent");
   });
 
-  it('commands["record-done"] is a correct template (P40): task record-done + --evidence placeholder', () => {
+  it("commands[\"record-done\"] is a correct template (P40): task record-done + --evidence placeholder", () => {
     const commands = prepareCommands(project);
     const rd = commands["record-done"];
     // The one non-runnable entry: --evidence is agent-supplied, so it is a
@@ -259,9 +221,7 @@ describe("task prepare — emitted commands are accepted by the CLI parser", () 
     // commands.finalize already includes --write --json.
     const fin = project.run(toArgv(commands.finalize));
     const env = expectJsonOk<{ kind: string }>(fin);
-    expect(["would_finalize", "finalized", "already_finalized"]).toContain(
-      env.data.kind,
-    );
+    expect(["would_finalize", "finalized", "already_finalized"]).toContain(env.data.kind);
   });
 });
 
@@ -284,54 +244,23 @@ describe("CONTEXT_OVER_BUDGET envelope — budget detail is top-level data", () 
   });
 
   it.each([
-    [
-      "task context",
-      [
-        "task",
-        "context",
-        "P1-T1",
-        "--agent",
-        "claude-code",
-        "--budget-bytes",
-        "1",
-        "--json",
-      ],
-    ],
-    [
-      "task prepare",
-      [
-        "task",
-        "prepare",
-        "P1-T1",
-        "--agent",
-        "claude-code",
-        "--budget-bytes",
-        "1",
-        "--json",
-      ],
-    ],
-  ])(
-    "%s emits budget fields under top-level data, not error.data",
-    (_label, argv) => {
-      const res = project.run(argv);
-      const env = JSON.parse(res.stdout.trim()) as {
-        ok: boolean;
-        error: { code: string; data?: unknown };
-        data?: {
-          budget_bytes?: number;
-          minimum_achievable_bytes?: number;
-          unelidable_sections?: unknown;
-        };
-      };
-      expect(env.ok).toBe(false);
-      expect(env.error.code).toBe("CONTEXT_OVER_BUDGET");
-      expect(env.error.data).toBeUndefined();
-      expect(env.data?.budget_bytes).toBe(1);
-      expect(typeof env.data?.minimum_achievable_bytes).toBe("number");
-      expect(Array.isArray(env.data?.unelidable_sections)).toBe(true);
-      expect(res.code).toBe(2);
-    },
-  );
+    ["task context", ["task", "context", "P1-T1", "--agent", "claude-code", "--budget-bytes", "1", "--json"]],
+    ["task prepare", ["task", "prepare", "P1-T1", "--agent", "claude-code", "--budget-bytes", "1", "--json"]],
+  ])("%s emits budget fields under top-level data, not error.data", (_label, argv) => {
+    const res = project.run(argv);
+    const env = JSON.parse(res.stdout.trim()) as {
+      ok: boolean;
+      error: { code: string; data?: unknown };
+      data?: { budget_bytes?: number; minimum_achievable_bytes?: number; unelidable_sections?: unknown };
+    };
+    expect(env.ok).toBe(false);
+    expect(env.error.code).toBe("CONTEXT_OVER_BUDGET");
+    expect(env.error.data).toBeUndefined();
+    expect(env.data?.budget_bytes).toBe(1);
+    expect(typeof env.data?.minimum_achievable_bytes).toBe("number");
+    expect(Array.isArray(env.data?.unelidable_sections)).toBe(true);
+    expect(res.code).toBe(2);
+  });
 });
 
 // P43: task prepare surfaces an accepted gating ADR's `## Implementation
@@ -361,39 +290,17 @@ describe("task prepare — decision_commitments (P43)", () => {
 
   /** Add phase P1 + a single task, optionally requires_decision, optionally with extra task fields. */
   async function writeTask(
-    opts: {
-      requiresDecision?: boolean;
-      phaseRequiresDecision?: boolean;
-      decisionRefs?: string[];
-    } = {},
+    opts: { requiresDecision?: boolean; phaseRequiresDecision?: boolean; decisionRefs?: string[] } = {},
   ): Promise<void> {
     expectJsonOk(
       project.run([
-        "phase",
-        "add",
-        "--id",
-        "P1",
-        "--name",
-        "Foundation",
-        "--objective",
-        "Foundation phase for the decision_commitments test",
-        "--weight",
-        "10",
-        "--verify-command",
-        "node --version",
-        "--json",
+        "phase", "add", "--id", "P1", "--name", "Foundation",
+        "--objective", "Foundation phase for the decision_commitments test",
+        "--weight", "10", "--verify-command", "node --version", "--json",
       ]),
     );
-    const phasePath = join(
-      project.dir,
-      "design",
-      "phases",
-      "P1-foundation.yaml",
-    );
-    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
-      string,
-      unknown
-    >;
+    const phasePath = join(project.dir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
     if (opts.phaseRequiresDecision) doc.requires_decision = true;
     const task: Record<string, unknown> = {
       id: "P1-T1",
@@ -419,16 +326,7 @@ describe("task prepare — decision_commitments (P43)", () => {
   }
 
   function prepare(): Envelope {
-    const res = project.run([
-      "task",
-      "prepare",
-      "P1-T1",
-      "--agent",
-      "claude-code",
-      "--detail",
-      "full",
-      "--json",
-    ]);
+    const res = project.run(["task", "prepare", "P1-T1", "--agent", "claude-code", "--json"]);
     return JSON.parse(res.stdout.trim()) as Envelope;
   }
 
@@ -454,10 +352,7 @@ describe("task prepare — decision_commitments (P43)", () => {
 
   it("gated task + accepted ADR with no commitments section → has_section false, items []", async () => {
     await writeTask({ requiresDecision: true });
-    await writeAdr(
-      "P1-T1-rfc.md",
-      "**Status:** accepted\n\n## Decision\n\nChose X.\n",
-    );
+    await writeAdr("P1-T1-rfc.md", "**Status:** accepted\n\n## Decision\n\nChose X.\n");
     const env = prepare();
     expect(env.data.decision_commitments).toEqual([
       { adr: "design/decisions/P1-T1-rfc.md", has_section: false, items: [] },
@@ -466,10 +361,7 @@ describe("task prepare — decision_commitments (P43)", () => {
 
   it("gated task + accepted ADR with an empty section → has_section true, items []", async () => {
     await writeTask({ requiresDecision: true });
-    await writeAdr(
-      "P1-T1-rfc.md",
-      "**Status:** accepted\n\n## Implementation commitments\n\nTBD.\n",
-    );
+    await writeAdr("P1-T1-rfc.md", "**Status:** accepted\n\n## Implementation commitments\n\nTBD.\n");
     const env = prepare();
     expect(env.data.decision_commitments).toEqual([
       { adr: "design/decisions/P1-T1-rfc.md", has_section: true, items: [] },
@@ -478,37 +370,24 @@ describe("task prepare — decision_commitments (P43)", () => {
 
   it("gated task with no accepted ADR → decision_commitments is present as []", async () => {
     await writeTask({ requiresDecision: true });
-    await writeAdr(
-      "P1-T1-rfc.md",
-      "**Status:** proposed\n\n## Implementation commitments\n\n- [ ] x\n",
-    );
+    await writeAdr("P1-T1-rfc.md", "**Status:** proposed\n\n## Implementation commitments\n\n- [ ] x\n");
     const env = prepare();
     expect(env.data.decision_commitments).toEqual([]);
   });
 
   it("non-gated task → decision_commitments omitted entirely", async () => {
     await writeTask({ requiresDecision: false });
-    await writeAdr(
-      "P1-T1-rfc.md",
-      "**Status:** accepted\n\n## Implementation commitments\n\n- [ ] x\n",
-    );
+    await writeAdr("P1-T1-rfc.md", "**Status:** accepted\n\n## Implementation commitments\n\n- [ ] x\n");
     const env = prepare();
     expect(env.data.decision_commitments).toBeUndefined();
   });
 
   it("phase-level requires_decision also surfaces commitments", async () => {
     await writeTask({ phaseRequiresDecision: true });
-    await writeAdr(
-      "P1-T1-rfc.md",
-      "**Status:** accepted\n\n## Implementation commitments\n\n- [x] done\n",
-    );
+    await writeAdr("P1-T1-rfc.md", "**Status:** accepted\n\n## Implementation commitments\n\n- [x] done\n");
     const env = prepare();
     expect(env.data.decision_commitments).toEqual([
-      {
-        adr: "design/decisions/P1-T1-rfc.md",
-        has_section: true,
-        items: [{ text: "done", done: true }],
-      },
+      { adr: "design/decisions/P1-T1-rfc.md", has_section: true, items: [{ text: "done", done: true }] },
     ]);
   });
 
@@ -517,24 +396,14 @@ describe("task prepare — decision_commitments (P43)", () => {
       requiresDecision: true,
       decisionRefs: ["design/decisions/a-rfc.md", "design/decisions/b-rfc.md"],
     });
-    await writeAdr(
-      "a-rfc.md",
-      "**Status:** accepted\n\n## Implementation commitments\n\n- [ ] from a\n",
-    );
-    await writeAdr(
-      "b-rfc.md",
-      "**Status:** accepted\n\n## Implementation commitments\n\n- [ ] from b\n",
-    );
+    await writeAdr("a-rfc.md", "**Status:** accepted\n\n## Implementation commitments\n\n- [ ] from a\n");
+    await writeAdr("b-rfc.md", "**Status:** accepted\n\n## Implementation commitments\n\n- [ ] from b\n");
     const env = prepare();
-    expect(env.data.decision_commitments?.map(c => c.adr)).toEqual([
+    expect(env.data.decision_commitments?.map((c) => c.adr)).toEqual([
       "design/decisions/a-rfc.md",
       "design/decisions/b-rfc.md",
     ]);
-    expect(env.data.decision_commitments?.[0]?.items).toEqual([
-      { text: "from a", done: false },
-    ]);
-    expect(env.data.decision_commitments?.[1]?.items).toEqual([
-      { text: "from b", done: false },
-    ]);
+    expect(env.data.decision_commitments?.[0]?.items).toEqual([{ text: "from a", done: false }]);
+    expect(env.data.decision_commitments?.[1]?.items).toEqual([{ text: "from b", done: false }]);
   });
 });

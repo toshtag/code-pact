@@ -123,18 +123,14 @@ function compareStablePath(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-function groupReadMatchesByDirectory(
-  matches: readonly string[],
-): Map<string, number> {
+function groupReadMatchesByDirectory(matches: readonly string[]): Map<string, number> {
   const uniqueMatches = [...new Set(matches)];
   const groups = new Map<string, number>();
   for (const match of uniqueMatches) {
     const dir = parentDirectory(match);
     groups.set(dir, (groups.get(dir) ?? 0) + 1);
   }
-  return new Map(
-    [...groups.entries()].sort(([a], [b]) => compareStablePath(a, b)),
-  );
+  return new Map([...groups.entries()].sort(([a], [b]) => compareStablePath(a, b)));
 }
 
 export function makeReadDirectoryCountsProjection(
@@ -162,10 +158,7 @@ export function makeReadDirectoryCountsProjection(
     }
 
     const grouped = groupReadMatchesByDirectory(entry.matches);
-    const matchCount = [...grouped.values()].reduce(
-      (sum, count) => sum + count,
-      0,
-    );
+    const matchCount = [...grouped.values()].reduce((sum, count) => sum + count, 0);
     if (matchCount !== new Set(entry.matches).size) return null;
     totalMatches += matchCount;
     for (const dir of grouped.keys()) allDirectories.add(dir);
@@ -224,13 +217,16 @@ export function makeRelatedDecisionCommitmentsProjection(
   const projectedDecisionCount = relatedDecisions.filter(
     decision => decision.projection,
   ).length;
-  if (relatedDecisions.length === 0 || projectedDecisionCount === 0)
-    return null;
+  if (relatedDecisions.length === 0 || projectedDecisionCount === 0) return null;
 
   const projectionIntro =
     "Accepted decisions with explicit implementation commitments are shown structurally. " +
     "The exact original content is represented by Deferred Context and can be retrieved after materialization.";
-  const lines: string[] = [`## Related Decisions`, ``, projectionIntro];
+  const lines: string[] = [
+    `## Related Decisions`,
+    ``,
+    projectionIntro,
+  ];
   for (const decision of relatedDecisions) {
     lines.push(``, `### ${decisionHeading(decision.filename)}`, ``);
     if (decision.projection) {
@@ -317,21 +313,21 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
     });
   }
 
-  // 4. Phase contract / acceptance criteria
+  // 4. Phase contract
   const phaseContractLines: string[] = [
     `## Phase Contract`,
     ``,
     `**Objective:** ${ctx.phase.objective.trim()}`,
     ``,
     `**Definition of Done:**`,
-    ...ctx.phase.definition_of_done.map(d => `- ${d}`),
+    ...ctx.phase.definition_of_done.map((d) => `- ${d}`),
     ``,
   ];
 
   if (ctx.phase.non_goals && ctx.phase.non_goals.length > 0) {
     phaseContractLines.push(
       `**Non-Goals:**`,
-      ...ctx.phase.non_goals.map(g => `- ${g}`),
+      ...ctx.phase.non_goals.map((g) => `- ${g}`),
       ``,
     );
   }
@@ -428,19 +424,14 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   if (ctx.declaredDecisions && ctx.declaredDecisions.length > 0) {
     const lines: string[] = [`## Declared decisions`];
     for (const dec of ctx.declaredDecisions) {
-      lines.push(
-        ``,
-        `### ${decisionHeading(dec.filename)}`,
-        ``,
-        dec.body.trim(),
-      );
+      lines.push(``, `### ${decisionHeading(dec.filename)}`, ``, dec.body.trim());
     }
     lines.push(``);
     sections.push({
       name: "declared_decisions",
       details: {
         count: ctx.declaredDecisions.length,
-        filenames: ctx.declaredDecisions.map(d => d.filename),
+        filenames: ctx.declaredDecisions.map((d) => d.filename),
       },
       lines,
     });
@@ -466,20 +457,15 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   // declared decisions so content is not printed twice when a file is
   // both referenced and matched.
   const declaredNames = new Set(
-    (ctx.declaredDecisions ?? []).map(d => d.filename),
+    (ctx.declaredDecisions ?? []).map((d) => d.filename),
   );
   const relatedDecisions = ctx.decisions.filter(
-    d => !declaredNames.has(d.filename),
+    (d) => !declaredNames.has(d.filename),
   );
   if (relatedDecisions.length > 0) {
     const lines: string[] = [`## Related Decisions`];
     for (const dec of relatedDecisions) {
-      lines.push(
-        ``,
-        `### ${decisionHeading(dec.filename)}`,
-        ``,
-        dec.body.trim(),
-      );
+      lines.push(``, `### ${decisionHeading(dec.filename)}`, ``, dec.body.trim());
     }
     lines.push(``);
     sections.push({
@@ -514,12 +500,12 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
     lines: [
       `## Verification Commands`,
       ``,
-      ...ctx.phase.verification.commands.map(c => `\`\`\`\n${c}\n\`\`\``),
+      ...ctx.phase.verification.commands.map((c) => `\`\`\`\n${c}\n\`\`\``),
       ``,
     ],
   });
 
-  // 8. Progress recording hint — command-guided. The ledger is a set of
+  // 9. Progress recording hint — command-guided. The ledger is a set of
   // per-event files under .code-pact/state/events/; agents record via the CLI,
   // never by hand-editing the ledger.
   sections.push({
@@ -583,5 +569,5 @@ export const ELISION_ORDER: ReadonlyArray<string> = [
  */
 export function renderMarkdown(ctx: PackContext): string {
   const sections = renderSections(ctx);
-  return sections.flatMap(s => s.lines).join("\n");
+  return sections.flatMap((s) => s.lines).join("\n");
 }

@@ -1,6 +1,6 @@
 # Agent contract
 
-> **Audience: agent integrators and maintainers.** If you just want to _use_
+> **Audience: agent integrators and maintainers.** If you just want to *use*
 > code-pact with an already-supported agent, you can skip this — start with
 > [getting-started.md](getting-started.md). Read on if you are integrating a
 > new agent, reviewing an adapter, or judging whether a feature is in scope.
@@ -61,12 +61,12 @@ The full per-command envelope reference is
 
 ### Exit code contract
 
-| Exit code | Meaning                                                                                                            |
-| --------- | ------------------------------------------------------------------------------------------------------------------ |
-| 0         | Success, or diagnostic finished with no error-severity issues                                                      |
-| 1         | Verification failed, or a diagnostic returned at least one error / non-compliant result                            |
-| 2         | Configuration error — bad flag combination, missing positional, agent not found, task not found, ambiguous task id |
-| 3         | Internal error — unexpected exception in the CLI; please file an issue                                             |
+| Exit code | Meaning |
+|---|---|
+| 0 | Success, or diagnostic finished with no error-severity issues |
+| 1 | Verification failed, or a diagnostic returned at least one error / non-compliant result |
+| 2 | Configuration error — bad flag combination, missing positional, agent not found, task not found, ambiguous task id |
+| 3 | Internal error — unexpected exception in the CLI; please file an issue |
 
 Commands that do not return `--json` mirror the same exit codes; the
 human-readable output is informative only.
@@ -114,10 +114,10 @@ corruption is invisible until a check runs. An agent must treat these as
   `started`, an event after a terminal `done`). The reducer stays total, so this
   is advisory by default — but it is a real concurrent edit. It carries a
   structured `details.events[]` (`{ event_id, status, author?, at }`, D3) naming
-  _who_ produced each side, so you do not parse prose: read it from
+  *who* produced each side, so you do not parse prose: read it from
   `code-pact status --json | jq '.data.conflicts[]'` (or `doctor --json`),
   decide which event is correct, and remove/correct the other. `event_id` is the
-  content id — the _suffix_ of a per-event filename `<at-compact>-<event_id>.yaml`,
+  content id — the *suffix* of a per-event filename `<at-compact>-<event_id>.yaml`,
   so locate the file with the `.code-pact/state/events/*-<event_id>.yaml` glob
   (the filename has an `<at-compact>-` prefix, so the id alone is not the name);
   for an event that lives only in a legacy `.code-pact/state/progress.yaml` there
@@ -143,8 +143,14 @@ For the same git SHA and the same inputs:
   and `budget_bytes` (only when a budget was applied) — are byte-based and
   deterministic (no tokenizer, summarization, model, or network), and
   `minimum_achievable_bytes` is the same floor `CONTEXT_OVER_BUDGET` reports.
-- Full-detail `task prepare` (or any explicit budget flag, which forces full detail) writes the same context pack bytes that `task context` produces for the same task. Default minimal `task prepare` does not build or write a pack.
-- When an explicit context budget defers sections, `task context`, full-detail `task prepare`, and `task prepare --dry-run` (in full detail) compute the same rendered Markdown bytes and the same `context:sha256:<digest>` manifest reference for the same task, agent, and resolved byte budget. Only the full-detail `task prepare` materializes the derived manifest and returns a non-null retrieval command; default minimal `task prepare` does not build or write a pack.
+- `task prepare` writes the same context pack bytes that
+  `task context` produces for the same task (`task context` builds and
+  returns the content; `task prepare` writes it to disk).
+- When an explicit context budget defers sections, `task context`, normal
+  `task prepare`, and `task prepare --dry-run` compute the same rendered
+  Markdown bytes and the same `context:sha256:<digest>` manifest reference for
+  the same task, agent, and resolved byte budget. Only normal `task prepare`
+  materializes the derived manifest and returns a non-null retrieval command.
 - When an explicit context budget would otherwise exceed the resolved byte cap,
   the pack may first use deterministic structural projections for safe content
   types before fully deferring sections. Projection is not summarization: read
@@ -156,11 +162,11 @@ For the same git SHA and the same inputs:
   manifest. No-budget packs and budgeted packs that naturally fit stay
   byte-identical to the unprojected form.
 
-| Path                         | Reference calculated | Artifact persisted | `retrieve_command` |
-| ---------------------------- | -------------------: | -----------------: | -----------------: |
-| `task context`               |                  yes |                 no |             `null` |
-| `task prepare --dry-run`     |                  yes |                 no |             `null` |
-| `task prepare --detail full` |                  yes |                yes |           non-null |
+| Path | Reference calculated | Artifact persisted | `retrieve_command` |
+|------|---------------------:|-------------------:|-------------------:|
+| `task context` | yes | no | `null` |
+| `task prepare --dry-run` | yes | no | `null` |
+| normal `task prepare` | yes | yes | non-null |
 
 Agents must not infer retrieval availability from the manifest reference alone.
 Use the returned `deferred_context.retrieve_command` when present.
@@ -269,32 +275,32 @@ manifest's recorded value. Drift is reported per file by
 The `checks[]` array in the conformance envelope uses these ids; new
 ids require an RFC and an entry in `src/core/adapters/conformance-spec.ts`.
 
-| Check id                                       | Asserts                                                                                                                                                                                                                                                                                                                                         |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `manifest_present`                             | Adapter manifest exists and parses                                                                                                                                                                                                                                                                                                              |
-| `instruction_file_present`                     | Manifest declares an `instruction` role file and that file is on disk                                                                                                                                                                                                                                                                           |
-| `contract_section_present`                     | Verbatim `## Agent contract` heading present                                                                                                                                                                                                                                                                                                    |
-| `axis_when_to_invoke`                          | `### When to invoke code-pact` present                                                                                                                                                                                                                                                                                                          |
-| `axis_what_to_verify`                          | `### What to verify first` present                                                                                                                                                                                                                                                                                                              |
-| `axis_how_to_handle`                           | `### How to handle failures` present                                                                                                                                                                                                                                                                                                            |
-| `required_cli_surface_mentions`                | Every lifecycle and diagnostic surface mentioned                                                                                                                                                                                                                                                                                                |
-| `required_failure_guidance`                    | Every failure keyword mentioned                                                                                                                                                                                                                                                                                                                 |
-| `task_prepare_is_primary`                      | `code-pact task prepare` appears and precedes the first `recommend` / `task context` mention (it is the primary per-task entrypoint, not the older diagnostic-first loop)                                                                                                                                                                       |
-| `no_contract_antipatterns`                     | The guidance is free of contract anti-patterns (e.g. `task finalize ... --agent`, which takes no `--agent`)                                                                                                                                                                                                                                     |
-| `activation_rules_documented`                  | The activation rules are documented — `task finalize --write` only after `task complete`, `wait_for_dependencies`, `CONTEXT_OVER_BUDGET`. Verifies **documentation presence, not runtime obedience**                                                                                                                                            |
-| `recommendation_consumption_guidance_present`  | The guidance tells the agent to consume the recommendation (anchored on `data.recommendation`). Verifies **documentation presence, not runtime obedience**                                                                                                                                                                                      |
-| `lifecycle_mode_guidance_present`              | The guidance documents `lifecycleMode` and the `record_only` lane (anchored on `lifecycleMode` + `record_only`)                                                                                                                                                                                                                                 |
-| `cannot_switch_model_fallback_present`         | The guidance tells the agent to report a limitation when it `cannot switch model` rather than ignore the recommendation                                                                                                                                                                                                                         |
-| `repair_policy_guidance_present`               | The guidance documents bounded repair policy basics (`repairPolicy`, `maxRepairAttempts`, `command_failed`)                                                                                                                                                                                                                                     |
-| `repair_policy_json_paths_present`             | The guidance documents the command-specific JSON paths for `repairPolicy` and `allowedEscalation`                                                                                                                                                                                                                                               |
-| `bounded_repair_runtime_constraints_present`   | The guidance says the first bounded repair keeps the same model, effort, and context, and uses the failure delta                                                                                                                                                                                                                                |
-| `bounded_repair_stop_guidance_present`         | The guidance documents repeated-fingerprint stopping and allowed escalation after exhaustion                                                                                                                                                                                                                                                    |
-| `bounded_repair_nonretryable_guidance_present` | The guidance documents the closed list of nonretryable failure kinds                                                                                                                                                                                                                                                                            |
-| `file_checksum_match`                          | Per-file: on-disk sha256 equals manifest                                                                                                                                                                                                                                                                                                        |
-| `adapter_file_path_unowned`                    | Manifest entry names a path this adapter could not have generated (narrow built-in read authority, not the broad write namespace — so `.claude/skills/private.md` is refused), or one resolving through a symlink. Target is not read (no `actual_sha256`, no heading inspection) — forged-manifest content/SHA-oracle guard. Always `required` |
-| `file_checksum_skipped_unverifiable`           | Manifest entry is a dynamic skill in the shared `.claude/skills/` namespace without `ownership: handed_off` — read-ownership cannot be proven, so it is not read/checksummed. Always `advisory`                                                                                                                                                 |
-| `dynamic_handoff_orphan_unverified`            | Manifest entry is `ownership: handed_off` and names a dynamic skill under the adapter's create namespace, but the file is missing. Existing bytes are not read; conformance compares only current desired output hash with manifest hash. Always `advisory`                                                                                     |
-| `dynamic_handoff_manifest_stale`               | Manifest entry is `ownership: handed_off` and names a dynamic skill under the adapter's create namespace, but current desired output hash differs from manifest hash. Existing bytes are not read/checksummed. Always `advisory`                                                                                                                |
+| Check id | Asserts |
+|---|---|
+| `manifest_present` | Adapter manifest exists and parses |
+| `instruction_file_present` | Manifest declares an `instruction` role file and that file is on disk |
+| `contract_section_present` | Verbatim `## Agent contract` heading present |
+| `axis_when_to_invoke` | `### When to invoke code-pact` present |
+| `axis_what_to_verify` | `### What to verify first` present |
+| `axis_how_to_handle` | `### How to handle failures` present |
+| `required_cli_surface_mentions` | Every lifecycle and diagnostic surface mentioned |
+| `required_failure_guidance` | Every failure keyword mentioned |
+| `task_prepare_is_primary` | `code-pact task prepare` appears and precedes the first `recommend` / `task context` mention (it is the primary per-task entrypoint, not the older diagnostic-first loop) |
+| `no_contract_antipatterns` | The guidance is free of contract anti-patterns (e.g. `task finalize ... --agent`, which takes no `--agent`) |
+| `activation_rules_documented` | The activation rules are documented — `task finalize --write` only after `task complete`, `wait_for_dependencies`, `CONTEXT_OVER_BUDGET`. Verifies **documentation presence, not runtime obedience** |
+| `recommendation_consumption_guidance_present` | The guidance tells the agent to consume the recommendation (anchored on `data.recommendation`). Verifies **documentation presence, not runtime obedience** |
+| `lifecycle_mode_guidance_present` | The guidance documents `lifecycleMode` and the `record_only` lane (anchored on `lifecycleMode` + `record_only`) |
+| `cannot_switch_model_fallback_present` | The guidance tells the agent to report a limitation when it `cannot switch model` rather than ignore the recommendation |
+| `repair_policy_guidance_present` | The guidance documents bounded repair policy basics (`repairPolicy`, `maxRepairAttempts`, `command_failed`) |
+| `repair_policy_json_paths_present` | The guidance documents the command-specific JSON paths for `repairPolicy` and `allowedEscalation` |
+| `bounded_repair_runtime_constraints_present` | The guidance says the first bounded repair keeps the same model, effort, and context, and uses the failure delta |
+| `bounded_repair_stop_guidance_present` | The guidance documents repeated-fingerprint stopping and allowed escalation after exhaustion |
+| `bounded_repair_nonretryable_guidance_present` | The guidance documents the closed list of nonretryable failure kinds |
+| `file_checksum_match` | Per-file: on-disk sha256 equals manifest |
+| `adapter_file_path_unowned` | Manifest entry names a path this adapter could not have generated (narrow built-in read authority, not the broad write namespace — so `.claude/skills/private.md` is refused), or one resolving through a symlink. Target is not read (no `actual_sha256`, no heading inspection) — forged-manifest content/SHA-oracle guard. Always `required` |
+| `file_checksum_skipped_unverifiable` | Manifest entry is a dynamic skill in the shared `.claude/skills/` namespace without `ownership: handed_off` — read-ownership cannot be proven, so it is not read/checksummed. Always `advisory` |
+| `dynamic_handoff_orphan_unverified` | Manifest entry is `ownership: handed_off` and names a dynamic skill under the adapter's create namespace, but the file is missing. Existing bytes are not read; conformance compares only current desired output hash with manifest hash. Always `advisory` |
+| `dynamic_handoff_manifest_stale` | Manifest entry is `ownership: handed_off` and names a dynamic skill under the adapter's create namespace, but current desired output hash differs from manifest hash. Existing bytes are not read/checksummed. Always `advisory` |
 
 **Severity.** Each check carries a `severity` of `required`
 or `advisory`. `compliant` is `true` unless a **required** check fails;
@@ -333,34 +339,56 @@ agent has been told about every verb in it.
 ```
 task prepare ─┬─► (planned) ──► task start ──► implement ──► verify ──► task complete ──► task finalize
               ├─► (started) ──► implement ──► verify ──► task complete ──► task finalize
-              ├─► (blocked, dep) ──► resolve dependencies ──► task prepare (retry)
-              ├─► (blocked, manual) ──► resolve block reason ──► task prepare (retry)
-              ├─► (requires_decision) ──► inspect decision (full-detail prepare) ──► task start
+              ├─► (blocked) ──► resolve dependencies ──► task prepare (retry)
               └─► (done)    ──► noop
 ```
 
 The verbs in detail:
 
 - **`task prepare <task-id>`** — single per-task entry point.
-  Default (`--detail minimal`) returns a **Minimum Sufficient Work Order**:
-  the task's `goal`, `read_scope`, `write_scope`, `done_when`, `verify`,
-  `decision_required`/`decision_refs`, a single `next` action (`start_task` /
-  `continue_implementation` / `wait_for_dependencies` / `resolve_block` /
-  `inspect_decision` / `noop_already_done` / `investigate_failure`), `blocked_by`,
-  honest `failure` info for `failed` states, `block.summary` for manual blocks
-  (bounded to 512 UTF-8 bytes), and a `more` command that fetches the full detail
-  envelope. It does **not** build or write a context pack, resolve the
-  recommendation, read decision bodies, or scan memory. Progress-read-only.
-  Any explicit budget flag (`--budget-bytes`, `--context-budget`, `--recommended-context-budget`)
-  forces `--detail full`, ignoring `--detail minimal`.
-  Use `--detail full` (or any explicit budget flag) to receive the historical
-  contract: `recommendation`, full `commands` dictionary, context pack
-  metadata, `decision_commitments`, and `applied_context_budget`/`deferred_context`.
-  `--dry-run` is honored only in `--detail full`; in minimal mode there is
-  nothing to preview.
-  For a `requires_decision` task the default minimal output returns `next.type:
-inspect_decision` with a `next.command` that points to the full-detail
-  `task prepare`; run it to fetch `decision_commitments` before starting.
+  Returns current state, recommendation, context pack metadata, a
+  structured `next_action` (`start_task` / `continue_implementation`
+  / `wait_for_dependencies` / `noop_already_done` /
+  `investigate_failure`), and a `commands` dictionary with every
+  per-task verb pre-formatted (including `commands["record-done"]`, a
+  template whose `--evidence` you supply). Progress-read-only. Optional
+  `--dry-run` skips the context pack write. `next_action.message` is
+  **lifecycle-aware**: on a `record_only` task it points at
+  `task record-done`; on a `decision_loop` task it says to resolve the
+  gating ADR first; `commands` itself stays a complete mode-agnostic table.
+  For a `requires_decision` task it also returns `decision_commitments`:
+  the parsed `## Implementation commitments` of each
+  **accepted considered** ADR. Read it as **advisory implementation
+  context** — the concrete downstream work the decision implies — not as
+  a gate; it never blocks completion. It is `[]` only when the resolver
+  found no accepted ADR entries; an unresolved explicit `decision_refs`
+  gate may still surface commitments for its accepted refs (enforcement
+  stays with `verify` / `task complete`).
+  The embedded `recommendation` carries (additively) an optional
+  `contextFit` — a recommended standard context budget profile (`tight` /
+  `balanced` / `wide`), its byte value, and a reason. In `recommend`, it
+  remains advisory only. `task prepare` may apply that already-produced
+  recommendation only when the caller passes `--recommended-context-budget`
+  or the agent profile explicitly opts in with
+  `context_budget.application_mode: recommended`. Explicit CLI budget flags
+  (`--budget-bytes`, `--context-budget`, `--recommended-context-budget`) always
+  override the profile mode and are mutually exclusive. Use
+  `data.commands.context` exactly as returned; when a budget was applied it
+  contains the resolved `--budget-bytes <N>`, not the profile or recommended
+  flag. Do not reconstruct, widen, or replace that resolved budget.
+  If the applied budget produces `deferred_context`, first work from the
+  rendered pack and the section names already embedded in the result. Budgeted
+  context may contain deterministic structural projections; use the projected
+  form first. Do not fetch every deferred or projected section up front. Fetch
+  only when a concrete missing detail is necessary, only when
+  `deferred_context.retrieve_command` is non-null, and start with the listed
+  command to inspect section names before retrieving one section by name. The
+  retrieval flow is `context show <ref> --list --json` to choose a section, then
+  `context show <ref> --section <name>` for the exact body. When
+  `retrieve_command` is null, do not infer a cache path or construct a
+  retrieval command yourself. Deferred and projected originals are exact
+  original section content, not summaries; the cache is derived and must not be
+  committed.
   `commands.verify` and `commands.complete` include `--json --detail agent`;
   use those strings verbatim so verification failures arrive as compact
   capsules instead of duplicated raw stdout/stderr.
@@ -460,13 +488,13 @@ deterministic repair guidance on the existing recommendation object.
 
 The JSON path depends on the command:
 
-- `task prepare --json --detail full`: `data.recommendation.repairPolicy`
+- `task prepare --json`: `data.recommendation.repairPolicy`
 - `recommend --json`: `data.repairPolicy`
 
 The same distinction applies after repair exhaustion when the policy says to use
 the existing escalation guidance:
 
-- `task prepare --json --detail full`: `data.recommendation.allowedEscalation`
+- `task prepare --json`: `data.recommendation.allowedEscalation`
 - `recommend --json`: `data.allowedEscalation`
 
 The disabled shape is:
@@ -552,14 +580,14 @@ contract shape.
   for the lifecycle explanation (a lighter loop, not lighter verification).
 
 - **`task finalize <task-id> --json [--write] [--audit-strict] [--base-ref
-<ref>]`** — reports the task's design-YAML finalization candidate and
+  <ref>]`** — reports the task's design-YAML finalization candidate and
   emits the declared-writes audit. Without `--write` it is a dry-run that
   reports what would change; add `--write` to flip the task's design YAML
   status to `done` on the clean path. `--audit-strict` makes audit
   warnings exit-relevant, and `--base-ref <ref>` switches the audit from
   working-tree mode to merge-base branch mode. Both `--audit-strict` and
   `--base-ref` require `--json`. In CI, use `--audit-strict --base-ref
-<default-branch> --write --json` when the audit should gate the
+  <default-branch> --write --json` when the audit should gate the
   mutation.
 
 The early-return states in the diagram correspond to `task prepare`
@@ -582,15 +610,15 @@ The compact agent-detail evidence envelope still has a fixed byte fixture at
 [`docs/maintainers/evidence/agent-detail-evidence.json`](maintainers/evidence/agent-detail-evidence.json),
 reproduced with `pnpm exec tsx scripts/measure-agent-detail.ts --write`.
 
-| Metric                        | Definition                                                                                                                                                                                                                                                                                                                                                                 |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Context pack p50 bytes        | Per-task pack size, lower-median percentile across the dogfood corpus                                                                                                                                                                                                                                                                                                      |
-| Context pack p90 bytes        | Per-task pack size, lower 90th percentile                                                                                                                                                                                                                                                                                                                                  |
-| Context pack max bytes        | Largest single task's pack size                                                                                                                                                                                                                                                                                                                                            |
-| First-pass verification rate  | Percentage of `task complete` invocations whose declared verification passes on the first attempt                                                                                                                                                                                                                                                                          |
+| Metric | Definition |
+|---|---|
+| Context pack p50 bytes | Per-task pack size, lower-median percentile across the dogfood corpus |
+| Context pack p90 bytes | Per-task pack size, lower 90th percentile |
+| Context pack max bytes | Largest single task's pack size |
+| First-pass verification rate | Percentage of `task complete` invocations whose declared verification passes on the first attempt |
 | Task lifecycle adherence rate | State-machine adherence: among tasks that have any progress events, the percentage with at least one `started` event before the first `done` event AND no legacy `planned → done` shortcut. `task prepare` emits no progress event, so prepare-adherence is **not** measured. Historical dogfood baselines can sit below 100% because older tasks used the legacy shortcut |
-| Undeclared write rate         | Files changed by a task whose paths are not covered by the task's declared `writes` globs. Currently not computed; historical rationale lives in git history / the archive record for the retired evidence-harness-v2 RFC                                                                                                                                                  |
-| Adapter drift detection rate  | Percentage of enabled agents where `adapter doctor` returns at least one error-severity issue                                                                                                                                                                                                                                                                              |
+| Undeclared write rate | Files changed by a task whose paths are not covered by the task's declared `writes` globs. Currently not computed; historical rationale lives in git history / the archive record for the retired evidence-harness-v2 RFC |
+| Adapter drift detection rate | Percentage of enabled agents where `adapter doctor` returns at least one error-severity issue |
 
 These metrics evaluate the contract — they are not part of the
 contract. A drop in first-pass verification rate, for example, is a

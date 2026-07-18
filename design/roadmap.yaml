@@ -200,15 +200,3 @@ phases:
   - id: P68
     path: design/phases/P68-loop-memory-storage-backend-review.yaml
     weight: 3
-  - id: P74
-    path: design/phases/P74-default-agent-contract-minimization.yaml
-    weight: 5
-  - id: P75
-    path: design/phases/P75-minimum-sufficient-agent-work-order.yaml
-    weight: 4
-  - id: P76
-    path: design/phases/P76-complete-the-minimum-work-order-contract.yaml
-    weight: 4
-  - id: P77
-    path: design/phases/P77-remove-remaining-full-default-contract-residue.yaml
-    weight: 4

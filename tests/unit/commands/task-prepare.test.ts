@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { execSync } from "node:child_process";
-import {
-  runTaskPrepare,
-  type TaskPrepareMinimalResult,
-  type TaskPrepareFullResult,
-} from "../../../src/commands/task-prepare.ts";
+import { runTaskPrepare } from "../../../src/commands/task-prepare.ts";
 import { buildContextPack } from "../../../src/core/pack/index.ts";
 import { cmdTask } from "../../../src/cli/commands/task.ts";
 import {
@@ -78,70 +80,32 @@ tasks:
       - P1-T1
 `;
 
-const PHASE_YAML_WITH_SCOPE = `id: P1
-name: Foundation
-weight: 12
-confidence: high
-risk: low
-status: in_progress
-objective: test phase with declared scope
-definition_of_done:
-  - acceptance criteria met
-verification:
-  commands:
-    - pnpm typecheck
-    - pnpm test:unit
-tasks:
-  - id: P1-T1
-    type: feature
-    ambiguity: low
-    risk: low
-    context_size: small
-    write_surface: medium
-    verification_strength: strong
-    expected_duration: short
-    status: planned
-    description: task with explicit read write and acceptance scope
-    reads:
-      - src/commands/task-prepare.ts
-      - tests/unit/commands/task-prepare.test.ts
-    writes:
-      - src/commands/task-prepare.ts
-      - tests/unit/commands/task-prepare.test.ts
-    acceptance_refs:
-      - design/decisions/P1-T1-rfc.md
-    requires_decision: true
-    decision_refs:
-      - design/decisions/P1-T1-rfc.md
-`;
+const PHASE_YAML_DEFERRABLE = PHASE_YAML.replace(
+  "context_size: small",
+  "context_size: large",
+);
 
-const PHASE_YAML_FAILED = `id: P1
-name: Foundation
-weight: 12
-confidence: high
-risk: low
-status: in_progress
-objective: test phase
-definition_of_done:
-  - tests pass
-verification:
-  commands:
-    - echo ok
-tasks:
-  - id: P1-T1
-    type: feature
-    ambiguity: low
-    risk: low
-    context_size: small
-    write_surface: low
-    verification_strength: strong
-    expected_duration: short
-    status: planned
-`;
+const BOUNDED_POLICY = {
+  mode: "bounded",
+  maxRepairAttempts: 1,
+  retryableFailureKinds: ["command_failed"],
+  nonRetryableFailureKinds: [
+    "timed_out",
+    "aborted",
+    "decision_required",
+    "unsafe_write",
+    "invalid_state",
+    "unknown",
+  ],
+  retryContext: "failure_delta",
+  firstRetry: "same_model_same_effort_same_context",
+  stopOnRepeatedFingerprint: true,
+  afterExhaustion: "use_allowed_escalation",
+} as const;
 
 async function setupProject(
   dir: string,
-  opts: { phaseYaml?: string; progressYaml?: string } = {},
+  opts: { progressYaml?: string; phaseYaml?: string } = {},
 ): Promise<void> {
   await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
   await mkdir(join(dir, ".code-pact", "agent-profiles"), { recursive: true });
@@ -167,10 +131,6 @@ async function setupProject(
     opts.phaseYaml ?? PHASE_YAML,
     "utf8",
   );
-  // `buildContextPack` enumerates declared `reads` against the Git index.
-  // Most minimal tests do not need it, but byte-reduction tests call it and
-  // must not fail on untracked-file resolution.
-  execSync("git init -q && git add -A", { cwd: dir });
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -182,25 +142,11 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
-function atEvent(status: string, reason?: string): string {
-  const lines = [
-    `  - task_id: P1-T1`,
-    `    status: ${status}`,
-    `    at: "2026-07-18T12:00:00+09:00"`,
-    `    actor: agent`,
-    `    agent: claude-code`,
-  ];
-  if (reason) {
-    lines.push(`    reason: ${reason}`);
-  }
-  if (status === "done") {
-    lines.push(`    source: loop`);
-  }
-  return lines.join("\n");
-}
-
-function contextPackPath(dir: string, taskId: string): string {
-  return join(dir, ".context", "claude-code", `${taskId}.md`);
+async function readProgress(dir: string): Promise<string> {
+  return readFile(
+    join(dir, ".code-pact", "state", "progress.yaml"),
+    "utf8",
+  );
 }
 
 let dir: string;
@@ -216,633 +162,995 @@ afterEach(async () => {
   if (dir) await rm(dir, { recursive: true, force: true });
 });
 
-function minimalResult(
-  result: Awaited<ReturnType<typeof runTaskPrepare>>,
-): TaskPrepareMinimalResult {
-  expect(result.detail).toBe("minimal");
-  return result as TaskPrepareMinimalResult;
-}
-
-function fullResult(
-  result: Awaited<ReturnType<typeof runTaskPrepare>>,
-): TaskPrepareFullResult {
-  expect(result.detail).toBe("full");
-  return result as TaskPrepareFullResult;
-}
-
-// ---------------------------------------------------------------------------
-// Minimal mode — stable work order across all states
-// ---------------------------------------------------------------------------
-
-describe("runTaskPrepare — minimal mode state matrix", () => {
-  it("planned state: start_task with the start command", async () => {
+describe("runTaskPrepare — planned state", () => {
+  it("returns start_task next_action and writes the context pack", async () => {
     await setupProject(dir);
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
-    );
-
-    expect(result.task.id).toBe("P1-T1");
-    expect(result.task.phase_id).toBe("P1");
-    expect(result.task.state).toBe("planned");
-    expect(result.task.goal).toBe("test phase");
-    expect(result.task.read_scope).toEqual([]);
-    expect(result.task.write_scope).toEqual([]);
-    expect(result.task.done_when).toEqual(["tests pass"]);
-    expect(result.task.verify).toEqual(["echo ok"]);
-    expect(result.task.decision_required).toBe(false);
-
-    expect(result.next.type).toBe("start_task");
-    expect(result.next.command).toBe(
-      "code-pact task start P1-T1 --agent claude-code",
-    );
-    expect(result.more.command).toBe(
-      "code-pact task prepare P1-T1 --agent claude-code --detail full --json",
-    );
-  });
-
-  it.each([
-    ["started", "continue_implementation"],
-    ["resumed", "continue_implementation"],
-  ] as const)(
-    "%s state: next action is %s with no command",
-    async (status, nextType) => {
-      await setupProject(dir, {
-        progressYaml: `events:\n${atEvent(status)}`,
-      });
-      const result = minimalResult(
-        await runTaskPrepare({
-          cwd: dir,
-          taskId: "P1-T1",
-          agent: "claude-code",
-        }),
-      );
-      expect(result.task.state).toBe(status);
-      expect(result.next.type).toBe(nextType);
-      expect(result.next.command).toBeNull();
-    },
-  );
-
-  it("dependency blocked state: wait_for_dependencies with blocked_by", async () => {
-    await setupProject(dir);
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T2", agent: "claude-code" }),
-    );
-    expect(result.task.state).toBe("planned");
-    expect(result.next.type).toBe("wait_for_dependencies");
-    expect(result.next.command).toBeNull();
-    expect(result.blocked_by).toEqual(["P1-T1"]);
-  });
-
-  it("manual blocked state: resolve_block with bounded block summary", async () => {
-    await setupProject(dir, {
-      progressYaml: `events:\n${atEvent("blocked", "manual block reason")}`,
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
     });
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
-    );
-    expect(result.task.state).toBe("blocked");
-    expect(result.next.type).toBe("resolve_block");
-    expect(result.next.command).toBeNull();
-    expect(result).not.toHaveProperty("blocked_by");
-    expect(result.block).toEqual({ summary: "manual block reason" });
-  });
-
-  it("done state: noop_already_done with no command", async () => {
-    await setupProject(dir, {
-      progressYaml: `events:\n${atEvent("done")}`,
-    });
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
-    );
-    expect(result.task.state).toBe("done");
-    expect(result.next.type).toBe("noop_already_done");
-    expect(result.next.command).toBeNull();
-  });
-
-  it("failed state: investigate_failure with honest failure summary", async () => {
-    await setupProject(dir, {
-      progressYaml: `events:\n${atEvent("failed", "pnpm test:unit failed")}`,
-    });
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
-    );
-    expect(result.task.state).toBe("failed");
-    expect(result.next.type).toBe("investigate_failure");
-    expect(result.next.command).toBeNull();
-    expect(result.failure).toEqual({
-      summary: "pnpm test:unit failed",
-      fingerprint: null,
-      command: null,
-      exit_code: null,
-    });
-  });
-
-  it("decision-required planned state: inspect_decision with full-detail command", async () => {
-    await setupProject(dir, { phaseYaml: PHASE_YAML_WITH_SCOPE });
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
-    );
-    expect(result.task.state).toBe("planned");
-    expect(result.task.decision_required).toBe(true);
-    expect(result.next.type).toBe("inspect_decision");
-    expect(result.next.command).toBe(
-      "code-pact task prepare P1-T1 --agent claude-code --detail full --json",
-    );
-  });
-
-  it("failed state truncates long reason to 512 UTF-8 bytes", async () => {
-    const longReason = "x".repeat(1000);
-    await setupProject(dir, {
-      progressYaml: `events:\n${atEvent("failed", longReason)}`,
-    });
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
-    );
-    expect(result.failure?.summary).not.toBeNull();
-    expect(
-      Buffer.byteLength(result.failure!.summary!, "utf8"),
-    ).toBeLessThanOrEqual(512);
-  });
-
-  it("manual block truncates long reason to 512 UTF-8 bytes without breaking", async () => {
-    const longReason = "テスト".repeat(200); // 3-byte chars, total > 512 bytes
-    await setupProject(dir, {
-      progressYaml: `events:\n${atEvent("blocked", longReason)}`,
-    });
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
-    );
-    expect(result.next.type).toBe("resolve_block");
-    expect(result.block).toBeDefined();
-    expect(
-      Buffer.byteLength(result.block!.summary, "utf8"),
-    ).toBeLessThanOrEqual(512);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Minimal mode — actionable completeness
-// ---------------------------------------------------------------------------
-
-describe("runTaskPrepare — minimal mode actionable completeness", () => {
-  it("goal comes from task.description when present, else phase.objective", async () => {
-    await setupProject(dir, { phaseYaml: PHASE_YAML_WITH_SCOPE });
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
-    );
-    expect(result.task.goal).toBe(
-      "task with explicit read write and acceptance scope",
-    );
-  });
-
-  it("goal falls back to phase.objective when task.description is absent", async () => {
-    await setupProject(dir);
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
-    );
-    expect(result.task.goal).toBe("test phase");
-  });
-
-  it("read_scope, write_scope, done_when, verify, acceptance_refs, and decision state are surfaced unchanged", async () => {
-    await setupProject(dir, { phaseYaml: PHASE_YAML_WITH_SCOPE });
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
-    );
-
-    expect(result.task.read_scope).toEqual([
-      "src/commands/task-prepare.ts",
-      "tests/unit/commands/task-prepare.test.ts",
-    ]);
-    expect(result.task.write_scope).toEqual([
-      "src/commands/task-prepare.ts",
-      "tests/unit/commands/task-prepare.test.ts",
-    ]);
-    expect(result.task.done_when).toEqual(["acceptance criteria met"]);
-    expect(result.task.verify).toEqual(["pnpm typecheck", "pnpm test:unit"]);
-    expect(result.task.acceptance_refs).toEqual([
-      "design/decisions/P1-T1-rfc.md",
-    ]);
-    expect(result.task.decision_required).toBe(true);
-    expect(result.task.decision_refs).toEqual([
-      "design/decisions/P1-T1-rfc.md",
-    ]);
-  });
-
-  it("decision_required false omits decision_refs", async () => {
-    await setupProject(dir);
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
-    );
-    expect(result.task.decision_required).toBe(false);
-    expect(result.task).not.toHaveProperty("decision_refs");
-  });
-
-  it("empty acceptance_refs are omitted", async () => {
-    await setupProject(dir);
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
-    );
-    expect(result.task).not.toHaveProperty("acceptance_refs");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Minimal mode — no hidden retrieval or heavy I/O
-// ---------------------------------------------------------------------------
-
-describe("runTaskPrepare — minimal mode does not trigger heavy work", () => {
-  it("does not build or write a context pack", async () => {
-    await setupProject(dir);
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
-    );
-    expect(result).not.toHaveProperty("context_pack_path");
-    expect(result).not.toHaveProperty("context_pack_bytes");
-    expect(result).not.toHaveProperty("commands");
-    expect(result).not.toHaveProperty("recommendation");
-    expect(await fileExists(contextPackPath(dir, "P1-T1"))).toBe(false);
-  });
-
-  it("does not read ADR bodies for requires_decision tasks", async () => {
-    await setupProject(dir, { phaseYaml: PHASE_YAML_WITH_SCOPE });
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
-    );
-    expect(result.task.decision_required).toBe(true);
-    expect(result.task.decision_refs).toEqual([
-      "design/decisions/P1-T1-rfc.md",
-    ]);
-    expect(result).not.toHaveProperty("decision_commitments");
-  });
-
-  it("does not surface recommendation or applied_context_budget", async () => {
-    await setupProject(dir);
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
-    );
-    expect(result).not.toHaveProperty("recommendation");
-    expect(result).not.toHaveProperty("applied_context_budget");
-    expect(result).not.toHaveProperty("deferred_context");
-    expect(result).not.toHaveProperty("commands");
-  });
-
-  it("does not search memory or synthesize failure metadata for failed tasks", async () => {
-    await setupProject(dir, {
-      progressYaml: `events:\n${atEvent("failed", "verify failed")}`,
-    });
-    const result = minimalResult(
-      await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
-    );
-    expect(result.failure?.summary).toBe("verify failed");
-    expect(result.failure?.fingerprint).toBeNull();
-    expect(result.failure?.command).toBeNull();
-    expect(result.failure?.exit_code).toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Full detail compatibility
-// ---------------------------------------------------------------------------
-
-describe("runTaskPrepare — full detail compatibility", () => {
-  it("--detail full returns the historical contract with recommendation, commands, and context pack", async () => {
-    await setupProject(dir);
-    const result = fullResult(
-      await runTaskPrepare({
-        cwd: dir,
-        taskId: "P1-T1",
-        agent: "claude-code",
-        detail: "full",
-      }),
-    );
 
     expect(result.current_state).toBe("planned");
+    expect(result.next_action.type).toBe("start_task");
     expect(result.recommendation).not.toBeNull();
-    expect(result.recommendation?.tier).toBe("balanced_coding");
+    expect(result.recommendation!.repairPolicy).toEqual(BOUNDED_POLICY);
     expect(result.context_pack_path).not.toBeNull();
     expect(result.context_pack_bytes).toBeGreaterThan(0);
+    expect(result.dry_run).toBe(false);
+    expect(result.blocked_by).toEqual([]);
+    expect(result.would_write_context_pack_path).toBeUndefined();
+
+    // Context pack actually written.
+    expect(await fileExists(result.context_pack_path!)).toBe(true);
+  });
+
+  it("emits a fully-populated commands dictionary", async () => {
+    await setupProject(dir);
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
     expect(result.commands).toEqual({
       context: "code-pact task context P1-T1 --agent claude-code",
       start: "code-pact task start P1-T1 --agent claude-code",
       verify: "code-pact verify --phase P1 --task P1-T1 --json --detail agent",
-      complete:
-        "code-pact task complete P1-T1 --agent claude-code --json --detail agent",
+      complete: "code-pact task complete P1-T1 --agent claude-code --json --detail agent",
       finalize: "code-pact task finalize P1-T1 --write --json",
-      "record-done":
-        'code-pact task record-done P1-T1 --agent claude-code --evidence "<verification you ran>"',
+      // P40 — additive, always present; the one non-runnable template.
+      "record-done": 'code-pact task record-done P1-T1 --agent claude-code --evidence "<verification you ran>"',
     });
-    expect(await fileExists(result.context_pack_path!)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recommendation observability (regression) — locks the v1.20 cost fixes so
+// `task prepare` callers can trust tier selection without a second
+// `recommend` call. The recommend unit tests cover the tier logic itself;
+// these assert it survives the prepare round-trip.
+// ---------------------------------------------------------------------------
+
+const PHASE_YAML_RECO = `id: P1
+name: Foundation
+weight: 12
+confidence: high
+risk: low
+status: in_progress
+objective: test phase
+definition_of_done:
+  - tests pass
+verification:
+  commands:
+    - echo ok
+tasks:
+  - id: P1-DOCS
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+    expected_duration: short
+    status: planned
+  - id: P1-WEAK
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: weak
+    expected_duration: medium
+    status: planned
+`;
+
+describe("runTaskPrepare — recommendation observability (regression)", () => {
+  it("planned task carries a non-null recommendation with tier/effort/modelId present", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_YAML_RECO });
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-DOCS",
+      agent: "claude-code",
+    });
+    expect(result.recommendation).not.toBeNull();
+    const rec = result.recommendation!;
+    expect(typeof rec.tier).toBe("string");
+    expect(typeof rec.effort).toBe("string");
+    expect(typeof rec.modelId).toBe("string");
+    expect(rec.repairPolicy).toEqual({
+      mode: "disabled",
+      reasonCode: "weak_verification",
+    });
+    expect(rec.modelId.length).toBeGreaterThan(0);
   });
 
-  it("explicit budget flags imply full detail", async () => {
+  it("a small/low-risk docs task resolves to cheap_mechanical (haiku) even with weak verification", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_YAML_RECO });
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-DOCS",
+      agent: "claude-code",
+    });
+    const rec = result.recommendation!;
+    expect(rec.tier).toBe("cheap_mechanical");
+    expect(rec.modelId).toBe("claude-haiku-4-5");
+  });
+
+  it("weak verification alone does NOT escalate a balanced task to highest_reasoning", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_YAML_RECO });
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-WEAK",
+      agent: "claude-code",
+    });
+    const rec = result.recommendation!;
+    expect(rec.tier).not.toBe("highest_reasoning");
+    expect(rec.tier).toBe("balanced_coding");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P48 — Context Fit recommendation (layer b). `task prepare` surfaces
+// recommendation.contextFit through the shared resolveRecommendation path. It
+// is a SUGGESTION only: no auto-apply, no extra reads, the commands dictionary
+// is unchanged, and the context pack bytes are unchanged without an explicit
+// --context-budget.
+// ---------------------------------------------------------------------------
+
+describe("runTaskPrepare — P48 contextFit", () => {
+  it("surfaces recommendation.contextFit on a planned task (small -> tight, built-in fallback)", async () => {
     await setupProject(dir);
-    const result = fullResult(
-      await runTaskPrepare({
-        cwd: dir,
-        taskId: "P1-T1",
-        agent: "claude-code",
-        budgetSelection: { kind: "explicit_bytes", budgetBytes: 100000 },
-      }),
-    );
-    expect(result.detail).toBe("full");
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
     expect(result.recommendation).not.toBeNull();
+    const cf = result.recommendation!.contextFit;
+    expect(result.recommendation!.repairPolicy).toEqual(BOUNDED_POLICY);
+    expect(cf).toBeDefined();
+    // P1-T1: context_size=small, ambiguity=low, write_surface=low -> tight.
+    expect(cf?.recommendedProfile).toBe("tight");
+    expect(cf?.recommendedBudgetBytes).toBe(30000);
+    expect(cf?.reason).toContain("built-in fallback");
+  });
+
+  it("does NOT auto-apply the recommended budget — pack bytes match a no-flag prepare", async () => {
+    await setupProject(dir);
+    const a = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    const b = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    // contextFit recommends 'tight' (30000), but no budget is applied: the pack
+    // is built with no budgetBytes, so its size is stable and unreduced.
+    expect(a.context_pack_bytes).toBeGreaterThan(0);
+    expect(b.context_pack_bytes).toBe(a.context_pack_bytes);
+    expect(a.recommendation!.contextFit?.recommendedProfile).toBe("tight");
+  });
+
+  it("the commands dictionary does NOT echo --context-budget", async () => {
+    await setupProject(dir);
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+    for (const cmd of Object.values(result.commands)) {
+      expect(cmd).not.toContain("--context-budget");
+    }
+    expect(result.commands.context).toBe(
+      "code-pact task context P1-T1 --agent claude-code",
+    );
+  });
+
+  it("reports source none on the no-budget build path", async () => {
+    await setupProject(dir);
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+    expect(result.applied_context_budget).toEqual({ source: "none" });
+    expect(result.commands.context).toBe(
+      "code-pact task context P1-T1 --agent claude-code",
+    );
+  });
+
+  it("applies the same recommended contextFit when recommended_cli is selected", async () => {
+    await setupProject(dir);
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      budgetSelection: { kind: "recommended_cli" },
+    });
+    expect(result.recommendation).not.toBeNull();
+    expect(result.applied_context_budget).toEqual({
+      source: "recommended_cli",
+      profile: result.recommendation!.contextFit!.recommendedProfile,
+      budget_bytes: result.recommendation!.contextFit!.recommendedBudgetBytes,
+    });
+    expect(result.commands.context).toBe(
+      `code-pact task context P1-T1 --agent claude-code --budget-bytes ${result.recommendation!.contextFit!.recommendedBudgetBytes}`,
+    );
+  });
+
+  it("keeps --context-budget auto as an explicit custom profile, not recommended mode", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      `${AGENT_PROFILE_YAML}context_budget:\n  profiles:\n    auto:\n      max_bytes: 45000\n`,
+      "utf8",
+    );
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      budgetSelection: { kind: "explicit_profile", profileName: "auto" },
+      dryRun: true,
+    });
+    expect(result.applied_context_budget).toEqual({
+      source: "explicit_profile",
+      profile: "auto",
+      budget_bytes: 45000,
+    });
+    expect(result.commands.context).toBe(
+      "code-pact task context P1-T1 --agent claude-code --budget-bytes 45000",
+    );
+  });
+
+  it("applies recommended_agent_profile when the agent profile opts in", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      `${AGENT_PROFILE_YAML}context_budget:\n  application_mode: recommended\n`,
+      "utf8",
+    );
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+    });
+    expect(result.recommendation).not.toBeNull();
+    expect(result.applied_context_budget).toEqual({
+      source: "recommended_agent_profile",
+      profile: result.recommendation!.contextFit!.recommendedProfile,
+      budget_bytes: result.recommendation!.contextFit!.recommendedBudgetBytes,
+    });
+  });
+
+  it("explicit CLI bytes override agent profile recommended mode", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      `${AGENT_PROFILE_YAML}context_budget:\n  application_mode: recommended\n`,
+      "utf8",
+    );
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+      budgetSelection: { kind: "explicit_bytes", budgetBytes: 45000 },
+    });
+    expect(result.applied_context_budget).toEqual({
+      source: "explicit_bytes",
+      budget_bytes: 45000,
+    });
+  });
+
+  it("recommended mode uses same-name standard overrides but not custom defaults", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      `${AGENT_PROFILE_YAML}context_budget:\n  application_mode: recommended\n  default_profile: custom\n  profiles:\n    tight:\n      max_bytes: 28000\n    custom:\n      max_bytes: 90000\n`,
+      "utf8",
+    );
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+    });
+    expect(result.recommendation!.contextFit?.recommendedProfile).toBe("tight");
+    expect(result.recommendation!.contextFit?.recommendedBudgetBytes).toBe(28000);
+    expect(result.applied_context_budget).toEqual({
+      source: "recommended_agent_profile",
+      profile: "tight",
+      budget_bytes: 28000,
+    });
+  });
+
+  it("early-return done state stays unchanged — null recommendation, no contextFit", async () => {
+    const progressWithDone = `events:
+  - task_id: P1-T1
+    status: done
+    at: "2026-05-18T10:00:00+00:00"
+    actor: agent
+    agent: claude-code
+`;
+    await setupProject(dir, { progressYaml: progressWithDone });
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+    expect(result.current_state).toBe("done");
+    expect(result.recommendation).toBeNull();
+    expect(result.context_pack_bytes).toBe(0);
+    expect(result.applied_context_budget).toBeUndefined();
+  });
+});
+
+describe("runTaskPrepare — progress-read-only invariant", () => {
+  it("does not mutate progress.yaml on any path", async () => {
+    await setupProject(dir);
+    const before = await readProgress(dir);
+
+    await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+
+    const after = await readProgress(dir);
+    expect(after).toBe(before);
+  });
+
+  it("does not mutate progress.yaml even in dry-run mode", async () => {
+    await setupProject(dir);
+    const before = await readProgress(dir);
+
+    await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+    });
+
+    const after = await readProgress(dir);
+    expect(after).toBe(before);
+  });
+});
+
+describe("runTaskPrepare — dry-run", () => {
+  it("does not write the context pack and returns would_write_context_pack_path", async () => {
+    await setupProject(dir);
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+    });
+
+    expect(result.dry_run).toBe(true);
+    expect(result.context_pack_path).toBeNull();
+    expect(result.would_write_context_pack_path).toBeDefined();
+    expect(result.context_pack_bytes).toBeGreaterThan(0);
+
+    expect(
+      await fileExists(result.would_write_context_pack_path!),
+    ).toBe(false);
+  });
+});
+
+describe("runTaskPrepare — done state early return", () => {
+  it("returns noop_already_done without writing the context pack", async () => {
+    const progressWithDone = `events:
+  - task_id: P1-T1
+    status: started
+    at: "2026-05-18T09:00:00+00:00"
+    actor: agent
+    agent: claude-code
+  - task_id: P1-T1
+    status: done
+    at: "2026-05-18T10:00:00+00:00"
+    actor: agent
+    agent: claude-code
+`;
+    await setupProject(dir, { progressYaml: progressWithDone });
+
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+
+    expect(result.current_state).toBe("done");
+    expect(result.next_action.type).toBe("noop_already_done");
+    expect(result.already_done).toBe(true);
+    expect(result.recommendation).toBeNull();
+    expect(result.context_pack_path).toBeNull();
+    expect(result.context_pack_bytes).toBe(0);
+    expect(result.blocked_by).toEqual([]);
+    expect(result.applied_context_budget).toBeUndefined();
+    expect(result.commands.context).toBe(
+      "code-pact task context P1-T1 --agent claude-code",
+    );
+  });
+});
+
+describe("runTaskPrepare — blocked state early return", () => {
+  it("returns wait_for_dependencies on blocked task without writing the pack", async () => {
+    const progressWithBlocked = `events:
+  - task_id: P1-T1
+    status: started
+    at: "2026-05-18T09:00:00+00:00"
+    actor: agent
+    agent: claude-code
+  - task_id: P1-T1
+    status: blocked
+    at: "2026-05-18T10:00:00+00:00"
+    actor: agent
+    agent: claude-code
+    reason: waiting on external dependency
+`;
+    await setupProject(dir, { progressYaml: progressWithBlocked });
+
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+
+    expect(result.current_state).toBe("blocked");
+    expect(result.next_action.type).toBe("wait_for_dependencies");
+    expect(result.recommendation).toBeNull();
+    expect(result.context_pack_path).toBeNull();
+    expect(result.context_pack_bytes).toBe(0);
+    expect(result.applied_context_budget).toBeUndefined();
+  });
+});
+
+describe("runTaskPrepare — unmet dependencies", () => {
+  it("returns wait_for_dependencies with blocked_by populated when a dep is not done", async () => {
+    await setupProject(dir);
+
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T2",
+      agent: "claude-code",
+    });
+
+    expect(result.current_state).toBe("planned");
+    expect(result.next_action.type).toBe("wait_for_dependencies");
+    expect(result.blocked_by).toEqual(["P1-T1"]);
+    expect(result.recommendation).toBeNull();
+    expect(result.context_pack_path).toBeNull();
+    expect(result.context_pack_bytes).toBe(0);
+    expect(result.applied_context_budget).toBeUndefined();
+  });
+
+  it("proceeds to start_task when all deps are done", async () => {
+    const progressWithDoneDep = `events:
+  - task_id: P1-T1
+    status: started
+    at: "2026-05-18T09:00:00+00:00"
+    actor: agent
+    agent: claude-code
+  - task_id: P1-T1
+    status: done
+    at: "2026-05-18T10:00:00+00:00"
+    actor: agent
+    agent: claude-code
+`;
+    await setupProject(dir, { progressYaml: progressWithDoneDep });
+
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T2",
+      agent: "claude-code",
+    });
+
+    expect(result.current_state).toBe("planned");
+    expect(result.next_action.type).toBe("start_task");
+    expect(result.blocked_by).toEqual([]);
     expect(result.context_pack_path).not.toBeNull();
   });
+});
 
-  it("explicit budget with --detail minimal still returns full detail", async () => {
+describe("runTaskPrepare — started / resumed states", () => {
+  it("returns continue_implementation from started state", async () => {
+    const progressWithStarted = `events:
+  - task_id: P1-T1
+    status: started
+    at: "2026-05-18T09:00:00+00:00"
+    actor: agent
+    agent: claude-code
+`;
+    await setupProject(dir, { progressYaml: progressWithStarted });
+
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+
+    expect(result.current_state).toBe("started");
+    expect(result.next_action.type).toBe("continue_implementation");
+    expect(result.recommendation).not.toBeNull();
+    expect(result.recommendation!.repairPolicy).toEqual(BOUNDED_POLICY);
+    expect(result.context_pack_path).not.toBeNull();
+  });
+});
+
+describe("runTaskPrepare — failed state", () => {
+  it("returns investigate_failure from failed state", async () => {
+    const progressWithFailed = `events:
+  - task_id: P1-T1
+    status: started
+    at: "2026-05-18T09:00:00+00:00"
+    actor: agent
+    agent: claude-code
+  - task_id: P1-T1
+    status: failed
+    at: "2026-05-18T10:00:00+00:00"
+    actor: agent
+    agent: claude-code
+    reason: verify failed
+`;
+    await setupProject(dir, { progressYaml: progressWithFailed });
+
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+
+    expect(result.current_state).toBe("failed");
+    expect(result.next_action.type).toBe("investigate_failure");
+    expect(result.recommendation).not.toBeNull();
+    expect(result.recommendation!.repairPolicy).toEqual(BOUNDED_POLICY);
+  });
+});
+
+describe("runTaskPrepare — agent validation", () => {
+  it("throws AGENT_NOT_FOUND for an unknown agent", async () => {
     await setupProject(dir);
-    const result = fullResult(
+    await expect(
+      runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "nonexistent" }),
+    ).rejects.toMatchObject({ code: "AGENT_NOT_FOUND" });
+  });
+
+  it("throws AGENT_NOT_ENABLED for a disabled agent", async () => {
+    await setupProject(dir);
+    await expect(
+      runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "codex" }),
+    ).rejects.toMatchObject({ code: "AGENT_NOT_ENABLED" });
+  });
+
+  it("uses default_agent when --agent is omitted", async () => {
+    await setupProject(dir);
+    const result = await runTaskPrepare({ cwd: dir, taskId: "P1-T1" });
+    expect(result.agent).toBe("claude-code");
+  });
+});
+
+describe("runTaskPrepare — task resolution errors", () => {
+  it("throws TASK_NOT_FOUND for an unknown task", async () => {
+    await setupProject(dir);
+    await expect(
+      runTaskPrepare({ cwd: dir, taskId: "P9-T99", agent: "claude-code" }),
+    ).rejects.toMatchObject({ code: "TASK_NOT_FOUND" });
+  });
+});
+
+describe("runTaskPrepare — budget enforcement (P24)", () => {
+  it("normal prepare writes to the validated custom profile context_dir", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      AGENT_PROFILE_YAML.replace(
+        "context_dir: .context/claude-code",
+        "context_dir: .context/custom-prepare",
+      ),
+      "utf8",
+    );
+
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+
+    expect(result.context_pack_path).toBe(
+      join(dir, ".context", "custom-prepare", "P1-T1.md"),
+    );
+    expect(await fileExists(result.context_pack_path!)).toBe(true);
+    expect(await fileExists(join(dir, ".context", "claude-code", "P1-T1.md"))).toBe(
+      false,
+    );
+  });
+
+  it("normal recommended prepare writes to the same custom profile context_dir", async () => {
+    await setupProject(dir);
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      `${AGENT_PROFILE_YAML.replace(
+        "context_dir: .context/claude-code",
+        "context_dir: .context/custom-recommended",
+      )}context_budget:\n  application_mode: recommended\n`,
+      "utf8",
+    );
+
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+
+    expect(result.applied_context_budget).toMatchObject({
+      source: "recommended_agent_profile",
+    });
+    expect(result.context_pack_path).toBe(
+      join(dir, ".context", "custom-recommended", "P1-T1.md"),
+    );
+    expect(await fileExists(result.context_pack_path!)).toBe(true);
+    expect(await fileExists(join(dir, ".context", "claude-code", "P1-T1.md"))).toBe(
+      false,
+    );
+  });
+
+  it("respects --budget-bytes and returns post-elision context_pack_bytes", async () => {
+    await setupProject(dir);
+    const baseline = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+    });
+    // P1-T1 in this fixture has small context_size with no elidable
+    // sections (no rules loaded because of small). So the only path is
+    // either generous budget (unchanged) or CONTEXT_OVER_BUDGET.
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+      budgetSelection: {
+        kind: "explicit_bytes",
+        budgetBytes: baseline.context_pack_bytes + 10000,
+      },
+    });
+    expect(result.context_pack_bytes).toBe(baseline.context_pack_bytes);
+    expect(result.applied_context_budget).toEqual({
+      source: "explicit_bytes",
+      budget_bytes: baseline.context_pack_bytes + 10000,
+    });
+    expect(result.commands.context).toBe(
+      `code-pact task context P1-T1 --agent claude-code --budget-bytes ${baseline.context_pack_bytes + 10000}`,
+    );
+  });
+
+  it("throws CONTEXT_OVER_BUDGET when budget is unachievable", async () => {
+    await setupProject(dir);
+    await expect(
+      runTaskPrepare({
+        cwd: dir,
+        taskId: "P1-T1",
+        agent: "claude-code",
+        budgetSelection: { kind: "explicit_bytes", budgetBytes: 1 },
+      }),
+    ).rejects.toMatchObject({ code: "CONTEXT_OVER_BUDGET" });
+  });
+
+  it("preserves progress-read-only invariant on the CONTEXT_OVER_BUDGET failure path", async () => {
+    await setupProject(dir);
+    const before = await readProgress(dir);
+
+    let threw = false;
+    try {
       await runTaskPrepare({
         cwd: dir,
         taskId: "P1-T1",
         agent: "claude-code",
-        detail: "minimal",
-        budgetSelection: { kind: "explicit_bytes", budgetBytes: 100000 },
-      }),
+        budgetSelection: { kind: "explicit_bytes", budgetBytes: 1 },
+      });
+    } catch (err) {
+      threw = true;
+      expect((err as { code?: string }).code).toBe("CONTEXT_OVER_BUDGET");
+    }
+    expect(threw).toBe(true);
+
+    const after = await readProgress(dir);
+    expect(after).toBe(before);
+  });
+
+  it("normal prepare persists deferred context before writing the context pack", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_YAML_DEFERRABLE });
+    await writeFile(
+      join(dir, "design", "constitution.md"),
+      `# Constitution\n${"contract text\n".repeat(400)}`,
+      "utf8",
     );
-    expect(result.detail).toBe("full");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Determinism
-// ---------------------------------------------------------------------------
-
-describe("runTaskPrepare — determinism", () => {
-  it("produces byte-identical minimal JSON across repeated calls", async () => {
-    await setupProject(dir);
-    const first = await runTaskPrepare({
-      cwd: dir,
-      taskId: "P1-T1",
-      agent: "claude-code",
-    });
-    const second = await runTaskPrepare({
-      cwd: dir,
-      taskId: "P1-T1",
-      agent: "claude-code",
-    });
-    expect(first).toEqual(second);
-    expect(JSON.stringify(first)).toBe(JSON.stringify(second));
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Byte reduction on fixed fixtures
-// ---------------------------------------------------------------------------
-
-describe("runTaskPrepare — minimal byte reduction", () => {
-  async function minimalAndFullBytes(
-    phaseYaml: string,
-    progressYaml?: string,
-    taskId = "P1-T1",
-  ): Promise<{
-    minimalBytes: number;
-    fullPrepareBytes: number;
-    contextPackBytes: number;
-    materializedBytes: number;
-  }> {
-    await setupProject(dir, { phaseYaml, progressYaml });
-    const minimal = await runTaskPrepare({
-      cwd: dir,
-      taskId,
-      agent: "claude-code",
-    });
-    const full = await runTaskPrepare({
-      cwd: dir,
-      taskId,
-      agent: "claude-code",
-      detail: "full",
-    });
-    const pack = await buildContextPack({
+    const baseline = await buildContextPack({
       cwd: dir,
       phaseId: "P1",
-      taskId,
+      taskId: "P1-T1",
       agentName: "claude-code",
     });
 
-    const materializedBytes =
-      Buffer.byteLength(JSON.stringify(full), "utf8") + pack.totalBytes;
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      budgetSelection: {
+        kind: "explicit_bytes",
+        budgetBytes: baseline.totalBytes - 1000,
+      },
+    });
 
-    return {
-      minimalBytes: Buffer.byteLength(JSON.stringify(minimal), "utf8"),
-      fullPrepareBytes: Buffer.byteLength(JSON.stringify(full), "utf8"),
-      contextPackBytes: pack.totalBytes,
-      materializedBytes,
-    };
-  }
-
-  function reduction(smaller: number, larger: number): number {
-    return larger === 0 ? 0 : (larger - smaller) / larger;
-  }
-
-  it("A. small runtime task: minimal JSON is much smaller than full prepare and materialized output", async () => {
-    const {
-      minimalBytes,
-      fullPrepareBytes,
-      contextPackBytes,
-      materializedBytes,
-    } = await minimalAndFullBytes(PHASE_YAML);
-
-    const prepareReduction = reduction(minimalBytes, fullPrepareBytes);
-    const contextReduction = reduction(minimalBytes, contextPackBytes);
-    const materializedReduction = reduction(minimalBytes, materializedBytes);
-
-    expect(prepareReduction).toBeGreaterThan(0.3);
-    expect(contextReduction).toBeGreaterThan(0.3);
-    expect(materializedReduction).toBeGreaterThan(0.5);
-  });
-
-  it("B. declared scope task: minimal JSON stays small even with read/write lists", async () => {
-    const {
-      minimalBytes,
-      fullPrepareBytes,
-      contextPackBytes,
-      materializedBytes,
-    } = await minimalAndFullBytes(PHASE_YAML_WITH_SCOPE);
-
-    const prepareReduction = reduction(minimalBytes, fullPrepareBytes);
-    const contextReduction = reduction(minimalBytes, contextPackBytes);
-    const materializedReduction = reduction(minimalBytes, materializedBytes);
-
-    expect(prepareReduction).toBeGreaterThan(0.3);
-    expect(contextReduction).toBeGreaterThan(0.3);
-    expect(materializedReduction).toBeGreaterThan(0.5);
-  });
-
-  it("C. failed task: minimal JSON is still smaller than full prepare output", async () => {
-    const {
-      minimalBytes,
-      fullPrepareBytes,
-      contextPackBytes,
-      materializedBytes,
-    } = await minimalAndFullBytes(
-      PHASE_YAML_FAILED,
-      `events:\n${atEvent("failed", "unit test failure")}`,
+    expect(result.deferred_context).toMatchObject({
+      persisted: true,
+      retrieve_command: expect.stringContaining("code-pact context show"),
+    });
+    const ref = result.deferred_context!.manifest_ref;
+    const digest = ref.replace("context:sha256:", "");
+    const artifactPath = join(
+      dir,
+      ".code-pact",
+      "cache",
+      "context",
+      `${digest}.json`,
     );
-
-    const prepareReduction = reduction(minimalBytes, fullPrepareBytes);
-    const materializedReduction = reduction(minimalBytes, materializedBytes);
-    expect(prepareReduction).toBeGreaterThan(0.2);
-    expect(materializedReduction).toBeGreaterThan(0.2);
-    // Default minimal does not build a pack, so context-pack reduction vs
-    // minimal JSON is a less meaningful metric for failed early returns.
-    expect(minimalBytes).toBeLessThan(contextPackBytes + 1);
+    expect(await fileExists(artifactPath)).toBe(true);
+    expect(await fileExists(result.context_pack_path!)).toBe(true);
+    const packContent = await readFile(result.context_pack_path!, "utf8");
+    expect(packContent).toContain("## Deferred Context");
+    expect(packContent).toContain(ref);
   });
 
-  it("D. byte sizes for minimal, full, context pack, and combined materialized output stay ordered", async () => {
-    const a = await minimalAndFullBytes(PHASE_YAML);
-    const b = await minimalAndFullBytes(PHASE_YAML_WITH_SCOPE);
-    const c = await minimalAndFullBytes(
-      PHASE_YAML_FAILED,
-      `events:\n${atEvent("failed", "unit test failure")}`,
+  it("dry-run prepare computes deferred metadata without writing cache or pack", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_YAML_DEFERRABLE });
+    await writeFile(
+      join(dir, "design", "constitution.md"),
+      `# Constitution\n${"contract text\n".repeat(400)}`,
+      "utf8",
     );
+    const baseline = await buildContextPack({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      agentName: "claude-code",
+    });
 
-    const table = [
-      { fixture: "small", ...a },
-      { fixture: "declared-scope", ...b },
-      { fixture: "failed", ...c },
-    ];
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+      budgetSelection: {
+        kind: "explicit_bytes",
+        budgetBytes: baseline.totalBytes - 1000,
+      },
+    });
 
-    for (const row of table) {
-      expect(row.minimalBytes).toBeLessThan(row.fullPrepareBytes);
-      expect(row.fullPrepareBytes).toBeLessThan(row.materializedBytes);
-    }
-  });
-
-  it("median reduction across fixtures is at least 50% for full and materialized outputs", async () => {
-    const a = await minimalAndFullBytes(PHASE_YAML);
-    const b = await minimalAndFullBytes(PHASE_YAML_WITH_SCOPE);
-    const c = await minimalAndFullBytes(
-      PHASE_YAML_FAILED,
-      `events:\n${atEvent("failed", "unit test failure")}`,
+    expect(result.deferred_context).toMatchObject({
+      persisted: false,
+      retrieve_command: null,
+    });
+    expect(result.context_pack_path).toBeNull();
+    expect(await fileExists(result.would_write_context_pack_path!)).toBe(false);
+    expect(await fileExists(join(dir, ".code-pact", "cache", "context"))).toBe(
+      false,
     );
-
-    const fullPrepareReductions = [
-      reduction(a.minimalBytes, a.fullPrepareBytes),
-      reduction(b.minimalBytes, b.fullPrepareBytes),
-      reduction(c.minimalBytes, c.fullPrepareBytes),
-    ].sort((x, y) => x - y);
-
-    const materializedReductions = [
-      reduction(a.minimalBytes, a.materializedBytes),
-      reduction(b.minimalBytes, b.materializedBytes),
-      reduction(c.minimalBytes, c.materializedBytes),
-    ].sort((x, y) => x - y);
-
-    expect(fullPrepareReductions[1]!).toBeGreaterThanOrEqual(0.5);
-    expect(materializedReductions[1]!).toBeGreaterThanOrEqual(0.5);
   });
-});
 
-// ---------------------------------------------------------------------------
-// CLI output
-// ---------------------------------------------------------------------------
+  it("maps deferred artifact write failure to a public context error", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_YAML_DEFERRABLE });
+    await writeFile(
+      join(dir, "design", "constitution.md"),
+      `# Constitution\n${"contract text\n".repeat(400)}`,
+      "utf8",
+    );
+    const baseline = await buildContextPack({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      agentName: "claude-code",
+    });
+    const writeError = new Error("disk full");
+    (writeError as NodeJS.ErrnoException).code = "ENOSPC";
+    __setAtomicWriteFailAfterOpenForTests(() => writeError);
 
-describe("cmdTask prepare — default minimal vs full", () => {
-  function captureStdout(): { stdout: () => string; restore: () => void } {
-    const out: string[] = [];
-    const spy = vi
-      .spyOn(process.stdout, "write")
-      .mockImplementation((chunk: string | Uint8Array) => {
-        out.push(chunk.toString());
-        return true;
-      });
-    return {
-      stdout: () => out.join(""),
-      restore: () => spy.mockRestore(),
-    };
-  }
-
-  it("cmd task prepare --json emits the minimal envelope by default", async () => {
-    await setupProject(dir);
+    let stdout = "";
+    let stderr = "";
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+      stdout += chunk.toString();
+      return true;
+    });
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
+      stderr += chunk.toString();
+      return true;
+    });
     const originalCwd = process.cwd();
     process.chdir(dir);
-    const capture = captureStdout();
-    try {
-      const exit = await cmdTask(
-        ["prepare", "P1-T1", "--agent", "claude-code", "--json"],
-        "en-US",
-        false,
-      );
-      expect(exit).toBe(0);
-      const parsed = JSON.parse(capture.stdout());
-      expect(parsed.ok).toBe(true);
-      expect(parsed.data.detail).toBe("minimal");
-      expect(parsed.data.task.id).toBe("P1-T1");
-      expect(parsed.data.task.state).toBe("planned");
-      expect(parsed.data.next.type).toBe("start_task");
-      expect(parsed.data.next.command).toContain("task start");
-      expect(parsed.data.more.command).toContain("--detail full");
-      expect(parsed.data).not.toHaveProperty("recommendation");
-      expect(parsed.data).not.toHaveProperty("commands");
-      expect(parsed.data).not.toHaveProperty("context_pack_path");
-    } finally {
-      capture.restore();
-      process.chdir(originalCwd);
-    }
-  });
-
-  it("cmd task prepare --detail full --json returns the full contract", async () => {
-    await setupProject(dir);
-    const originalCwd = process.cwd();
-    process.chdir(dir);
-    const capture = captureStdout();
     try {
       const exit = await cmdTask(
         [
           "prepare",
           "P1-T1",
-          "--detail",
-          "full",
           "--agent",
           "claude-code",
+          "--budget-bytes",
+          String(baseline.totalBytes - 1000),
           "--json",
         ],
         "en-US",
         false,
       );
-      expect(exit).toBe(0);
-      const parsed = JSON.parse(capture.stdout());
-      expect(parsed.ok).toBe(true);
-      expect(parsed.data.detail).toBe("full");
-      expect(parsed.data.recommendation).toBeDefined();
-      expect(parsed.data.commands).toBeDefined();
-      expect(parsed.data.context_pack_path).toBeDefined();
-      expect(parsed.data.context_pack_bytes).toBeGreaterThan(0);
+      expect(exit).toBe(1);
     } finally {
-      capture.restore();
       process.chdir(originalCwd);
     }
+
+    const parsed = JSON.parse(stdout) as {
+      ok: false;
+      error: { code: string };
+      data: { system_code: string };
+    };
+    expect(stderr).toBe("");
+    expect(parsed.error.code).toBe("CONTEXT_WRITE_FAILED");
+    expect(parsed.data.system_code).toBe("ENOSPC");
+    expect(
+      await fileExists(join(dir, ".context", "claude-code", "P1-T1.md")),
+    ).toBe(false);
   });
 
-  it("human-readable default output is a concise work order", async () => {
-    await setupProject(dir);
+  it("maps deferred artifact readback disappearance to CONTEXT_NOT_FOUND", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_YAML_DEFERRABLE });
+    await writeFile(
+      join(dir, "design", "constitution.md"),
+      `# Constitution\n${"contract text\n".repeat(400)}`,
+      "utf8",
+    );
+    const baseline = await buildContextPack({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      agentName: "claude-code",
+    });
+    const budgetBytes = baseline.totalBytes - 1000;
+    const budgeted = await buildContextPack({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      agentName: "claude-code",
+      budgetBytes,
+    });
+    const digest = budgeted.pendingContextManifest!.digest;
+    const contextDir = join(dir, ".code-pact", "cache", "context");
+    const token = "context-readback-missing";
+    await mkdir(contextDir, { recursive: true });
+    const tempPath = join(contextDir, `${digest}.json.tmp-${token}`);
+    await writeFile(tempPath, "pre-existing temp", "utf8");
+    __setAtomicTempTokenForTests(() => token);
+    const beforeProgress = await readProgress(dir);
+
+    let stdout = "";
+    let stderr = "";
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+      stdout += chunk.toString();
+      return true;
+    });
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
+      stderr += chunk.toString();
+      return true;
+    });
     const originalCwd = process.cwd();
     process.chdir(dir);
-    const capture = captureStdout();
     try {
       const exit = await cmdTask(
-        ["prepare", "P1-T1", "--agent", "claude-code"],
+        [
+          "prepare",
+          "P1-T1",
+          "--agent",
+          "claude-code",
+          "--budget-bytes",
+          String(budgetBytes),
+          "--json",
+        ],
         "en-US",
         false,
       );
-      expect(exit).toBe(0);
-      const output = capture.stdout();
-      expect(output).toContain("Task: P1-T1");
-      expect(output).toContain("State: planned");
-      expect(output).toContain("Goal: test phase");
-      expect(output).toContain("Done when:");
-      expect(output).toContain("- tests pass");
-      expect(output).toContain("Verify:");
-      expect(output).toContain("- echo ok");
-      expect(output).toContain("Next: start_task");
-      expect(output).toContain("More:");
-      expect(output).toContain("--detail full");
-      expect(output).not.toContain("Recommendation:");
-      expect(output).not.toContain("Commands:");
+      expect(exit).toBe(1);
     } finally {
-      capture.restore();
       process.chdir(originalCwd);
+    }
+
+    const parsed = JSON.parse(stdout) as {
+      ok: false;
+      error: { code: string };
+      data?: { system_code?: string };
+    };
+    expect(stderr).toBe("");
+    expect(parsed.error.code).toBe("CONTEXT_NOT_FOUND");
+    expect(parsed.error.code).not.toBe("INTERNAL_ERROR");
+    expect(parsed.data?.system_code).toBe("ENOENT");
+    expect(await readProgress(dir)).toBe(beforeProgress);
+    expect(
+      await fileExists(join(dir, ".context", "claude-code", "P1-T1.md")),
+    ).toBe(false);
+    expect(await fileExists(join(contextDir, `${digest}.json`))).toBe(false);
+    expect(await fileExists(tempPath)).toBe(true);
+  });
+});
+
+describe("runTaskPrepare — lifecycle-aware next_action + record-done (P40)", () => {
+  // A single-task phase whose one task drives a given lifecycleMode.
+  // full_loop: type feature; record_only: type docs + low/low/strong;
+  // decision_loop: requires_decision (extra task line).
+  function phaseYaml(opts: { type?: string; extraTaskLines?: string[] } = {}): string {
+    const type = opts.type ?? "feature";
+    const extra = (opts.extraTaskLines ?? []).map((l) => `    ${l}`).join("\n");
+    return `id: P1
+name: Foundation
+weight: 12
+confidence: high
+risk: low
+status: in_progress
+objective: test phase
+definition_of_done:
+  - tests pass
+verification:
+  commands:
+    - echo ok
+tasks:
+  - id: P1-T1
+    type: ${type}
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+${extra}
+`;
+  }
+
+  it("full_loop: message keeps the complete wording; record-done present", async () => {
+    await setupProject(dir, { phaseYaml: phaseYaml() });
+    const result = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    expect(result.recommendation?.lifecycleMode).toBe("full_loop");
+    expect(result.recommendation?.repairPolicy).toEqual(BOUNDED_POLICY);
+    expect(result.next_action.message).toContain("complete");
+    expect(result.commands["record-done"]).toContain("task record-done");
+    expect(result.commands["record-done"]).toContain("--evidence");
+  });
+
+  it("record_only: message points at task record-done, not task complete", async () => {
+    // type: docs + low/low/strong → record_only per the deterministic switch.
+    await setupProject(dir, { phaseYaml: phaseYaml({ type: "docs" }) });
+    const result = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    expect(result.recommendation?.lifecycleMode).toBe("record_only");
+    expect(result.recommendation?.repairPolicy).toEqual({
+      mode: "disabled",
+      reasonCode: "record_only",
+    });
+    expect(result.next_action.message).toContain("task record-done --evidence");
+    expect(result.next_action.message).toContain("not lighter verification");
+    expect(result.next_action.message).not.toContain("complete the task");
+    expect(result.commands["record-done"]).toContain("task record-done");
+  });
+
+  it("decision_loop: message says resolve the ADR first; does not decide complete-vs-record-done", async () => {
+    await setupProject(dir, { phaseYaml: phaseYaml({ extraTaskLines: ["requires_decision: true"] }) });
+    const result = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    expect(result.recommendation?.lifecycleMode).toBe("decision_loop");
+    expect(result.recommendation?.repairPolicy).toEqual({
+      mode: "disabled",
+      reasonCode: "decision_loop",
+    });
+    expect(result.next_action.message).toContain("Resolve/accept the gating ADR first");
+    expect(result.next_action.message).not.toContain("task record-done");
+    expect(result.next_action.message).not.toContain("complete the task");
+    expect(result.commands["record-done"]).toContain("task record-done");
+  });
+
+  it("record-done is present in every mode (the lookup table stays complete)", async () => {
+    const cases = [phaseYaml(), phaseYaml({ extraTaskLines: ["requires_decision: true"] })];
+    for (const py of cases) {
+      await setupProject(dir, { phaseYaml: py });
+      const result = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+      expect(result.commands["record-done"]).toContain("task record-done");
+      expect(result.commands.complete).toContain("task complete");
+      expect(result.commands.finalize).toContain("task finalize");
     }
   });
 });

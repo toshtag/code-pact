@@ -2,23 +2,11 @@
 // `spawnSync`. The integration test script builds dist once before Vitest
 // starts so files can run in parallel without racing tsup cleanup.
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
-import {
-  mkdtemp,
-  mkdir,
-  rm,
-  readFile,
-  readdir,
-  writeFile,
-  symlink,
-} from "node:fs/promises";
+import { mkdtemp, mkdir, rm, readFile, readdir, writeFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import {
-  run as cliRun,
-  ensureCliBuilt,
-  type RunResult,
-} from "../helpers/cli.ts";
+import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
 import { loadMergedProgress } from "../../src/core/progress/io.ts";
 
 let tmpDir: string;
@@ -52,26 +40,12 @@ function expectJsonOk(res: { code: number; stdout: string; stderr: string }) {
 
 describe("CLI: post-command --json (BUG-001)", () => {
   it("--json before init returns JSON-only stdout", () => {
-    const res = run([
-      "--json",
-      "init",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-    ]);
+    const res = run(["--json", "init", "--locale", "en-US", "--agent", "claude-code"]);
     expectJsonOk(res);
   });
 
   it("init ... --json (post-command) returns JSON-only stdout", () => {
-    const res = run([
-      "init",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    const res = run(["init", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     expectJsonOk(res);
   });
 
@@ -150,49 +124,19 @@ describe("CLI: post-command --json (BUG-001)", () => {
     // let it fall through to a top-level internal error / exit 3 — and the foreign
     // phase's contents must never reach the agent-facing pack.
     run(["init", "--locale", "en-US", "--agent", "claude-code", "--json"]);
-    run([
-      "phase",
-      "add",
-      "--id",
-      "P1",
-      "--name",
-      "Foundation",
-      "--objective",
-      "Foundation phase",
-      "--weight",
-      "10",
-      "--json",
-    ]);
-    const roadmap = parseYaml(
-      await readFile(join(tmpDir, "design", "roadmap.yaml"), "utf8"),
-    ) as {
+    run(["phase", "add", "--id", "P1", "--name", "Foundation", "--objective", "Foundation phase", "--weight", "10", "--json"]);
+    const roadmap = parseYaml(await readFile(join(tmpDir, "design", "roadmap.yaml"), "utf8")) as {
       phases: Array<{ id: string; path: string }>;
     };
     const phasePath = roadmap.phases[0]!.path; // e.g. design/phases/P1-foundation.yaml
     const outside = await mkdtemp(join(tmpdir(), "code-pact-pack-out-"));
     try {
-      await writeFile(
-        join(outside, "leak.yaml"),
-        "objective: SECRET_PHASE_MARKER\n",
-        "utf8",
-      );
+      await writeFile(join(outside, "leak.yaml"), "objective: SECRET_PHASE_MARKER\n", "utf8");
       await rm(join(tmpDir, phasePath), { force: true });
       await symlink(join(outside, "leak.yaml"), join(tmpDir, phasePath)); // phase file → outside
-      const res = run([
-        "pack",
-        "--phase",
-        "P1",
-        "--task",
-        "P1-T1",
-        "--agent",
-        "claude-code",
-        "--json",
-      ]);
+      const res = run(["pack", "--phase", "P1", "--task", "P1-T1", "--agent", "claude-code", "--json"]);
       expect(res.code).toBe(2);
-      const parsed = JSON.parse(res.stdout) as {
-        ok: false;
-        error: { code: string };
-      };
+      const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
       expect(parsed.ok).toBe(false);
       expect(parsed.error.code).toBe("CONFIG_ERROR");
       expect(`${res.stdout}${res.stderr}`).not.toMatch(/internal error/i);
@@ -209,19 +153,7 @@ describe("CLI: post-command --json (BUG-001)", () => {
     // design/roadmap.yaml must not be read as the control plane, and must surface as
     // a structured exit-2 envelope across these commands — never an internal exit-3.
     run(["init", "--locale", "en-US", "--agent", "claude-code", "--json"]);
-    run([
-      "phase",
-      "add",
-      "--id",
-      "P1",
-      "--name",
-      "Foundation",
-      "--objective",
-      "Foundation phase",
-      "--weight",
-      "10",
-      "--json",
-    ]);
+    run(["phase", "add", "--id", "P1", "--name", "Foundation", "--objective", "Foundation phase", "--weight", "10", "--json"]);
     const outside = await mkdtemp(join(tmpdir(), "code-pact-roadmap-out-"));
     try {
       // A valid-shaped outside roadmap carrying a marker (loadRoadmap refuses it
@@ -232,10 +164,7 @@ describe("CLI: post-command --json (BUG-001)", () => {
         "utf8",
       );
       await rm(join(tmpDir, "design", "roadmap.yaml"), { force: true });
-      await symlink(
-        join(outside, "roadmap.yaml"),
-        join(tmpDir, "design", "roadmap.yaml"),
-      );
+      await symlink(join(outside, "roadmap.yaml"), join(tmpDir, "design", "roadmap.yaml"));
 
       for (const args of [
         ["task", "complete", "P1-T1", "--dry-run", "--json"], // resolveTaskInRoadmap
@@ -247,19 +176,11 @@ describe("CLI: post-command --json (BUG-001)", () => {
         const res = run(args);
         const label = args.join(" ");
         expect(res.code, `${label} exit`).toBe(2);
-        const parsed = JSON.parse(res.stdout) as {
-          ok: false;
-          error: { code: string };
-        };
+        const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
         expect(parsed.ok, `${label} ok`).toBe(false);
         expect(parsed.error.code, `${label} code`).toBe("CONFIG_ERROR");
-        expect(
-          `${res.stdout}${res.stderr}`,
-          `${label} no internal error`,
-        ).not.toMatch(/internal error/i);
-        expect(`${res.stdout}${res.stderr}`, `${label} no leak`).not.toContain(
-          "SECRET_ROADMAP_MARKER",
-        );
+        expect(`${res.stdout}${res.stderr}`, `${label} no internal error`).not.toMatch(/internal error/i);
+        expect(`${res.stdout}${res.stderr}`, `${label} no leak`).not.toContain("SECRET_ROADMAP_MARKER");
       }
     } finally {
       await rm(outside, { recursive: true, force: true });
@@ -271,19 +192,7 @@ describe("CLI: post-command --json (BUG-001)", () => {
     // structured CONFIG_ERROR / exit 2 at the CLI boundary, never the exit-3
     // internal fault a downstream Phase.parse ZodError would otherwise become.
     run(["init", "--locale", "en-US", "--agent", "claude-code", "--json"]);
-    run([
-      "phase",
-      "add",
-      "--id",
-      "P1",
-      "--name",
-      "Foundation",
-      "--objective",
-      "Foundation phase",
-      "--weight",
-      "10",
-      "--json",
-    ]);
+    run(["phase", "add", "--id", "P1", "--name", "Foundation", "--objective", "Foundation phase", "--weight", "10", "--json"]);
     const phaseFile = join(tmpDir, "design", "phases", "P1-foundation.yaml");
     const before = await readFile(phaseFile, "utf8").catch(async () => {
       // phase file name may differ; read whatever single phase file exists
@@ -291,31 +200,16 @@ describe("CLI: post-command --json (BUG-001)", () => {
       return readFile(join(tmpDir, "design", "phases", dirents[0]!), "utf8");
     });
 
-    const res = run([
-      "task",
-      "add",
-      "P1",
-      "--description",
-      "x",
-      "--decision-ref",
-      ".env",
-      "--json",
-    ]);
+    const res = run(["task", "add", "P1", "--description", "x", "--decision-ref", ".env", "--json"]);
     expect(res.code).toBe(2);
-    const parsed = JSON.parse(res.stdout) as {
-      ok: false;
-      error: { code: string };
-    };
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
     expect(parsed.ok).toBe(false);
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(`${res.stdout}${res.stderr}`).not.toMatch(/internal error/i);
 
     // Phase YAML byte-identical: nothing was written, no task added.
     const dirents = await readdir(join(tmpDir, "design", "phases"));
-    const after = await readFile(
-      join(tmpDir, "design", "phases", dirents[0]!),
-      "utf8",
-    );
+    const after = await readFile(join(tmpDir, "design", "phases", dirents[0]!), "utf8");
     expect(after).toBe(before);
   });
 
@@ -389,10 +283,7 @@ describe("CLI: P51 repairPolicy recommendation contract", () => {
       "--json",
     ]);
     const phaseFile = join(tmpDir, "design", "phases", "P1-foundation.yaml");
-    const doc = parseYaml(await readFile(phaseFile, "utf8")) as Record<
-      string,
-      unknown
-    >;
+    const doc = parseYaml(await readFile(phaseFile, "utf8")) as Record<string, unknown>;
     doc.tasks = [
       {
         id: "P1-T1",
@@ -429,8 +320,6 @@ describe("CLI: P51 repairPolicy recommendation contract", () => {
       "P1-T1",
       "--agent",
       "claude-code",
-      "--detail",
-      "full",
       "--json",
     ]);
     const recEnv = JSON.parse(rec.stdout) as {
@@ -439,18 +328,14 @@ describe("CLI: P51 repairPolicy recommendation contract", () => {
     };
     const prepEnv = JSON.parse(prep.stdout) as {
       ok: true;
-      data: {
-        recommendation: { repairPolicy: unknown; repair_policy?: unknown };
-      };
+      data: { recommendation: { repairPolicy: unknown; repair_policy?: unknown } };
     };
 
     expect(recEnv.ok).toBe(true);
     expect(prepEnv.ok).toBe(true);
     expect(recEnv.data.repairPolicy).toEqual(boundedPolicy);
     expect(prepEnv.data.recommendation.repairPolicy).toEqual(boundedPolicy);
-    expect(prepEnv.data.recommendation.repairPolicy).toEqual(
-      recEnv.data.repairPolicy,
-    );
+    expect(prepEnv.data.recommendation.repairPolicy).toEqual(recEnv.data.repairPolicy);
     expect(recEnv.data.repair_policy).toBeUndefined();
     expect(prepEnv.data.recommendation.repair_policy).toBeUndefined();
   });
@@ -473,8 +358,6 @@ describe("CLI: P51 repairPolicy recommendation contract", () => {
       "P1-T1",
       "--agent",
       "claude-code",
-      "--detail",
-      "full",
     ]);
 
     expect(rec.stdout).toContain(
@@ -696,7 +579,7 @@ describe("CLI: init non-interactive contract (RC BUG-003)", () => {
       agents: { name: string }[];
     };
     expect(project.default_agent).toBe("claude-code");
-    expect(project.agents.map(a => a.name)).toEqual(["claude-code", "generic"]);
+    expect(project.agents.map((a) => a.name)).toEqual(["claude-code", "generic"]);
   });
 });
 
@@ -924,12 +807,7 @@ describe("CLI: task complete (v0.2)", () => {
     expect(first.code).toBe(0);
     const firstParsed = JSON.parse(first.stdout) as {
       ok: boolean;
-      data: {
-        task_id: string;
-        phase_id: string;
-        agent: string;
-        event: { agent: string };
-      };
+      data: { task_id: string; phase_id: string; agent: string; event: { agent: string } };
     };
     expect(firstParsed.ok).toBe(true);
     expect(firstParsed.data.task_id).toBe("P1-T1");
@@ -1071,9 +949,7 @@ describe("CLI: task complete (v0.2)", () => {
     expect(res.stderr).toMatch(/P1-T1: a verification command failed/);
     // ...with the new clarity lines below it.
     expect(res.stderr).toMatch(/cause: commands —/);
-    expect(res.stderr).toMatch(
-      /rerun after fixing: code-pact task complete P1-T1/,
-    );
+    expect(res.stderr).toMatch(/rerun after fixing: code-pact task complete P1-T1/);
   });
 
   it("dry-run leaves progress.yaml byte-identical and returns would_append", async () => {
@@ -1194,45 +1070,15 @@ describe("CLI: task complete (v0.2)", () => {
 
 describe("CLI: status (v1.32)", () => {
   async function setupWithTask(): Promise<void> {
-    run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
-    run([
-      "phase",
-      "add",
-      "--id",
-      "P1",
-      "--name",
-      "Foundation",
-      "--objective",
-      "Foundation",
-      "--weight",
-      "10",
-      "--json",
-    ]);
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    run(["phase", "add", "--id", "P1", "--name", "Foundation", "--objective", "Foundation", "--weight", "10", "--json"]);
     const phasePath = join(tmpDir, "design", "phases", "P1-foundation.yaml");
-    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
-      string,
-      unknown
-    >;
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
     doc.tasks = [
       {
-        id: "P1-T1",
-        type: "feature",
-        ambiguity: "low",
-        risk: "low",
-        context_size: "small",
-        write_surface: "low",
-        verification_strength: "weak",
-        expected_duration: "short",
-        status: "planned",
-        description: "t",
+        id: "P1-T1", type: "feature", ambiguity: "low", risk: "low",
+        context_size: "small", write_surface: "low", verification_strength: "weak",
+        expected_duration: "short", status: "planned", description: "t",
       },
     ];
     await writeFile(phasePath, stringifyYaml(doc), "utf8");
@@ -1247,7 +1093,7 @@ describe("CLI: status (v1.32)", () => {
       data: { available: { task_id: string }[]; in_flight: unknown[] };
     };
     expect(b.ok).toBe(true);
-    expect(b.data.available.map(e => e.task_id)).toContain("P1-T1");
+    expect(b.data.available.map((e) => e.task_id)).toContain("P1-T1");
     expect(b.data.in_flight).toEqual([]);
 
     const startRes = run(["task", "start", "P1-T1", "--agent", "claude-code"], {
@@ -1257,14 +1103,11 @@ describe("CLI: status (v1.32)", () => {
 
     const after = run(["status", "--json"]);
     const a = JSON.parse(after.stdout) as {
-      data: {
-        in_flight: { task_id: string; author?: string }[];
-        available: { task_id: string }[];
-      };
+      data: { in_flight: { task_id: string; author?: string }[]; available: { task_id: string }[] };
     };
-    expect(a.data.in_flight.map(e => e.task_id)).toEqual(["P1-T1"]);
+    expect(a.data.in_flight.map((e) => e.task_id)).toEqual(["P1-T1"]);
     expect(a.data.in_flight[0]?.author).toBe("Ada Lovelace");
-    expect(a.data.available.map(e => e.task_id)).not.toContain("P1-T1");
+    expect(a.data.available.map((e) => e.task_id)).not.toContain("P1-T1");
   });
 
   it("is agent-neutral — runs with no agent setup (like doctor/validate)", async () => {
@@ -1272,10 +1115,7 @@ describe("CLI: status (v1.32)", () => {
     // Pure read: no --agent needed; succeeds and returns the envelope.
     const res = run(["status", "--json"]);
     expect(res.code).toBe(0);
-    const parsed = JSON.parse(res.stdout) as {
-      ok: boolean;
-      data: { filter: unknown };
-    };
+    const parsed = JSON.parse(res.stdout) as { ok: boolean; data: { filter: unknown } };
     expect(parsed.ok).toBe(true);
     expect(parsed.data.filter).toEqual({ mine: false });
   });
@@ -1295,32 +1135,17 @@ describe("CLI: status (v1.32)", () => {
   it("rejects malformed args as CONFIG_ERROR (exit 2), not a silent run", async () => {
     await setupWithTask();
     // value-less --phase must NOT silently degrade to a whole-project status.
-    for (const args of [
-      ["status", "--phase", "--json"],
-      ["status", "--bogus", "--json"],
-      ["status", "P1", "--json"],
-    ]) {
+    for (const args of [["status", "--phase", "--json"], ["status", "--bogus", "--json"], ["status", "P1", "--json"]]) {
       const res = run(args);
       expect(res.code).toBe(2);
-      const parsed = JSON.parse(res.stdout) as {
-        ok: boolean;
-        error: { code: string };
-      };
+      const parsed = JSON.parse(res.stdout) as { ok: boolean; error: { code: string } };
       expect(parsed.ok).toBe(false);
       expect(parsed.error.code).toBe("CONFIG_ERROR");
     }
   });
 
   it("--phase with a duplicate phase id fails closed (AMBIGUOUS_PHASE_ID, exit 2)", async () => {
-    run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     await writeFile(
       join(tmpDir, "design", "roadmap.yaml"),
       "phases:\n  - id: P2\n    path: design/phases/P2-a.yaml\n    weight: 10\n  - id: P2\n    path: design/phases/P2-b.yaml\n    weight: 10\n",
@@ -1328,16 +1153,8 @@ describe("CLI: status (v1.32)", () => {
     );
     const body = (n: string) =>
       `id: P2\nname: ${n}\nweight: 10\nconfidence: high\nrisk: low\nstatus: planned\nobjective: phase objective long enough\ndefinition_of_done:\n  - done\nverification:\n  commands:\n    - echo ok\n`;
-    await writeFile(
-      join(tmpDir, "design", "phases", "P2-a.yaml"),
-      body("A"),
-      "utf8",
-    );
-    await writeFile(
-      join(tmpDir, "design", "phases", "P2-b.yaml"),
-      body("B"),
-      "utf8",
-    );
+    await writeFile(join(tmpDir, "design", "phases", "P2-a.yaml"), body("A"), "utf8");
+    await writeFile(join(tmpDir, "design", "phases", "P2-b.yaml"), body("B"), "utf8");
 
     const res = run(["status", "--phase", "P2", "--json"]);
     expect(res.code).toBe(2);
@@ -1365,9 +1182,7 @@ describe("CLI: status (v1.32)", () => {
       CODE_PACT_AUTHOR: "Ada Lovelace",
     });
     expect(res.code).toBe(0);
-    expect(res.stdout).toContain(
-      "Totals are for the selected scope, not only --mine results.",
-    );
+    expect(res.stdout).toContain("Totals are for the selected scope, not only --mine results.");
     expect(res.stdout).not.toContain("whole project");
   });
 
@@ -1406,18 +1221,17 @@ describe("CLI: status (v1.32)", () => {
         conflicts: {
           task_id: string;
           code: string;
-          details: {
-            events: { author?: string; status: string; event_id: string }[];
-          };
+          details: { events: { author?: string; status: string; event_id: string }[] };
         }[];
       };
     };
     expect(parsed.data.conflicts).toHaveLength(1);
     expect(parsed.data.conflicts[0]?.task_id).toBe("P1-T1");
     expect(parsed.data.conflicts[0]?.code).toBe("PROGRESS_EVENT_CONFLICT");
-    expect(parsed.data.conflicts[0]?.details.events.map(e => e.author)).toEqual(
-      ["Ada", "Bo"],
-    );
+    expect(parsed.data.conflicts[0]?.details.events.map((e) => e.author)).toEqual([
+      "Ada",
+      "Bo",
+    ]);
     for (const e of parsed.data.conflicts[0]!.details.events) {
       expect(e.event_id).toMatch(/^[0-9a-f]{64}$/);
     }
@@ -1762,7 +1576,7 @@ describe("CLI: task state machine (v0.6)", () => {
 
     const { events } = await readProgress();
     expect(events).toHaveLength(4);
-    expect((events as { status: string }[]).map(e => e.status)).toEqual([
+    expect((events as { status: string }[]).map((e) => e.status)).toEqual([
       "started",
       "blocked",
       "resumed",
@@ -1816,7 +1630,14 @@ describe("CLI: task state machine (v0.6)", () => {
   it("blocked → complete: INVALID_TASK_TRANSITION with byte-identical progress.yaml", async () => {
     await setupWithTask();
     run(["task", "start", "P1-T1", "--json"]);
-    run(["task", "block", "P1-T1", "--reason", "still blocked", "--json"]);
+    run([
+      "task",
+      "block",
+      "P1-T1",
+      "--reason",
+      "still blocked",
+      "--json",
+    ]);
     const before = await readFile(
       join(tmpDir, ".code-pact", "state", "progress.yaml"),
       "utf8",
@@ -1938,7 +1759,7 @@ describe("CLI: phase import (v0.2)", () => {
       };
     };
     expect(importParsed.ok).toBe(true);
-    expect(importParsed.data.imported_phases.map(p => p.id)).toEqual([
+    expect(importParsed.data.imported_phases.map((p) => p.id)).toEqual([
       "P1",
       "P2",
     ]);
@@ -1947,14 +1768,7 @@ describe("CLI: phase import (v0.2)", () => {
 
     // task context must succeed for the just-imported task — this is the
     // core "phase import closes the dogfood loop" guarantee.
-    const ctxRes = run([
-      "task",
-      "context",
-      "P1-T1",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    const ctxRes = run(["task", "context", "P1-T1", "--agent", "claude-code", "--json"]);
     expect(ctxRes.code).toBe(0);
     const ctxParsed = JSON.parse(ctxRes.stdout) as {
       ok: boolean;
@@ -2092,15 +1906,7 @@ describe("CLI: --scaffold-decisions (RFC §3-D)", () => {
 `;
 
   async function initEmpty(): Promise<void> {
-    const res = run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    const res = run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     expect(res.code).toBe(0);
   }
 
@@ -2118,18 +1924,11 @@ describe("CLI: --scaffold-decisions (RFC §3-D)", () => {
     expect(noFlagData.data.scaffold_skipped).toEqual([]);
 
     // record-done is blocked (no accepted ADR).
-    const blocked = run([
-      "task",
-      "record-done",
-      "P1-T1",
-      "--evidence",
-      "PR #1",
-      "--json",
-    ]);
+    const blocked = run(["task", "record-done", "P1-T1", "--evidence", "PR #1", "--json"]);
     expect(blocked.code).toBe(2);
-    expect(
-      (JSON.parse(blocked.stdout) as { error: { code: string } }).error.code,
-    ).toBe("DECISION_REQUIRED");
+    expect((JSON.parse(blocked.stdout) as { error: { code: string } }).error.code).toBe(
+      "DECISION_REQUIRED",
+    );
 
     // With the flag, on a fresh project: stub scaffolded.
     const originalTmpDir = tmpDir;
@@ -2169,8 +1968,7 @@ describe("CLI: --scaffold-decisions (RFC §3-D)", () => {
       ]);
       expect(stillBlocked.code).toBe(2);
       expect(
-        (JSON.parse(stillBlocked.stdout) as { error: { code: string } }).error
-          .code,
+        (JSON.parse(stillBlocked.stdout) as { error: { code: string } }).error.code,
       ).toBe("DECISION_REQUIRED");
     } finally {
       tmpDir = originalTmpDir;
@@ -2181,14 +1979,7 @@ describe("CLI: --scaffold-decisions (RFC §3-D)", () => {
   it("plan adopt --write --scaffold-decisions scaffolds for a requires_decision task", async () => {
     await initEmpty();
     await writeFile(join(tmpDir, "plan.yaml"), DRAFT, "utf8");
-    const res = run([
-      "plan",
-      "adopt",
-      "plan.yaml",
-      "--write",
-      "--scaffold-decisions",
-      "--json",
-    ]);
+    const res = run(["plan", "adopt", "plan.yaml", "--write", "--scaffold-decisions", "--json"]);
     expect(res.code).toBe(0);
     const parsed = JSON.parse(res.stdout) as {
       ok: boolean;
@@ -2255,7 +2046,7 @@ describe("CLI: adapter --agent cursor (v0.2 experimental)", () => {
       agents: { name: string }[];
     };
     expect(project.default_agent).toBe("claude-code");
-    expect(project.agents.map(a => a.name).sort()).toEqual([
+    expect(project.agents.map((a) => a.name).sort()).toEqual([
       "claude-code",
       "cursor",
     ]);
@@ -2313,7 +2104,7 @@ describe("CLI: adapter --agent gemini-cli (v0.2 experimental)", () => {
       agents: { name: string }[];
     };
     expect(project.default_agent).toBe("claude-code");
-    expect(project.agents.map(a => a.name).sort()).toEqual([
+    expect(project.agents.map((a) => a.name).sort()).toEqual([
       "claude-code",
       "gemini-cli",
     ]);
@@ -2331,36 +2122,17 @@ describe("CLI: adapter --agent gemini-cli (v0.2 experimental)", () => {
 
 describe("CLI: validate", () => {
   it("validate --json on a clean project returns {ok:true,data} and exit 0", () => {
-    run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     const res = run(["validate", "--json"]);
     expect(res.code).toBe(0);
-    const parsed = JSON.parse(res.stdout) as {
-      ok: boolean;
-      data: { ok: boolean; issues: unknown[] };
-    };
+    const parsed = JSON.parse(res.stdout) as { ok: boolean; data: { ok: boolean; issues: unknown[] } };
     expect(parsed.ok).toBe(true);
     expect(parsed.data.ok).toBe(true);
     expect(Array.isArray(parsed.data.issues)).toBe(true);
   });
 
   it("validate (human output) on a clean project prints success and exits 0", () => {
-    run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     const res = run(["validate"]);
     expect(res.code).toBe(0);
     expect(res.stdout).toContain("Project validation passed.");
@@ -2371,15 +2143,7 @@ describe("CLI: validate", () => {
     // manifest/model_version → ADAPTER_MISSING + ADAPTER_STALE warnings.
     // (BRIEF_MISSING is gated on a real phase, so it does not fire here.)
     // Under --strict, any warning should trip exit 1.
-    run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     const res = run(["validate", "--strict", "--json"]);
     expect(res.code).toBe(1);
     const parsed = JSON.parse(res.stdout) as {
@@ -2412,15 +2176,7 @@ describe("CLI: validate", () => {
 
 describe("CLI: task add (no-TTY)", () => {
   it("task add <phase> --json in a non-TTY subprocess returns {ok:false,error:CONFIG_ERROR} exit 2", () => {
-    run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     run([
       "phase",
       "add",
@@ -2449,15 +2205,7 @@ describe("CLI: task add (no-TTY)", () => {
   });
 
   it("task add without a phase id returns {ok:false,error:CONFIG_ERROR} exit 2", () => {
-    run([
-      "init",
-      "--non-interactive",
-      "--locale",
-      "en-US",
-      "--agent",
-      "claude-code",
-      "--json",
-    ]);
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     const res = run(["task", "add", "--json"]);
     expect(res.code).toBe(2);
     const parsed = JSON.parse(res.stdout) as {

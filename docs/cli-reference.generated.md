@@ -150,9 +150,8 @@ code-pact task add P1 --description "Add X" --type feature --json
 
 `code-pact task context <task-id> [options]`
 
-Build and print the task's context pack. It is an explicit diagnostic and is
-not included in default minimal `task prepare`. Use `task prepare --detail full`
-when the full prepare envelope and materialized context pack are both required. Read-only — never records a progress event.
+Build and print the task's context pack. `task prepare` bundles this with
+the recommendation; call `task context` directly when you only need the pack. Read-only — never records a progress event.
 
 | Flag | Value | Description |
 | --- | --- | --- |
@@ -171,14 +170,11 @@ code-pact task context P1-T1 --explain
 
 `code-pact task prepare <task-id> [options]`
 
-The single per-task entry point. Default (minimal) returns a compact work
-order: current state, goal, declared read/write scope, done-when criteria,
-verification commands, the next action, and a command to fetch the full
-envelope. Use --detail full or any budget flag to also receive the
-execution recommendation, context-pack metadata, a structured next_action,
-and a commands dictionary. Progress-read-only — never records a progress
-event and writes the context pack only in --detail full (or when a budget
-flag forces full detail) unless --dry-run is passed.
+The single per-task entry point. Returns the current state, the execution
+recommendation (tier/model/effort/budget), context-pack metadata, a
+structured next_action, and a commands dictionary with the exact next
+commands to run. Progress-read-only — never records a progress event, but
+writes the context pack unless --dry-run is passed.
 
 | Flag | Value | Description |
 | --- | --- | --- |
@@ -186,14 +182,11 @@ flag forces full detail) unless --dry-run is passed.
 | `--budget-bytes` | `<N>` | Cap the rendered context pack at N bytes. |
 | `--context-budget` | `<profile>` | Use a named context budget profile (tight, balanced, wide, or an agent-defined profile). Resolves to a byte budget. Mutually exclusive with --budget-bytes. |
 | `--recommended-context-budget` | — | Apply the deterministic context budget recommended in this same task prepare call. Mutually exclusive with --budget-bytes and --context-budget. |
-| `--detail` | `<mode>` | Output detail mode: minimal (default) or full. Minimal returns a compact work order and does not build or write a context pack. Any explicit budget flag forces full detail. Full returns the historical contract with recommendation, context-pack metadata, next_action, and commands. |
-| `--dry-run` | — | Full detail only: report the would-write pack path without writing it. It has no pack effect in minimal mode. |
+| `--dry-run` | — | Report the would-write pack path without writing it. |
 | `--json` | — | Emit JSON. |
 
 ```sh
 code-pact task prepare P1-T1 --agent claude-code --json
-code-pact task prepare P1-T1 --agent claude-code --detail full --json
-code-pact task prepare P1-T1 --agent claude-code --budget-bytes 100000 --json
 ```
 
 ### `task start`

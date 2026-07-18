@@ -53,13 +53,13 @@ flowchart TD
     H --> Z
 ```
 
-| Approach                                                                         | When to use it                                                                                                                         | Time to first `task complete` |
-| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| **Smoke test** ([tutorial](#path-1--tutorial))                                   | You just want to watch the loop run end to end — `code-pact tutorial` writes nothing to your repo.                                     | ~1 minute                     |
-| **Agent-first** ([schema-only prompt](#path-3--ai-assisted))                     | Your agent (Claude Code, …) already holds the project context and can emit a roadmap YAML directly.                                    | ~10 minutes                   |
-| **Existing-plan adoption** ([`plan adopt`](#existing-plan-adoption--plan-adopt)) | You already have a structured plan — a `roadmap.md`, `TODO.md`, `tasks.md`, or a draft YAML — and want to ingest it deterministically. | ~5 minutes                    |
-| **Code-pact-first** ([brief → prompt](#path-3--ai-assisted))                     | Starting from scratch: capture a brief + constitution, then have an agent draft the full roadmap from them.                            | ~20 minutes                   |
-| **Manual** ([by hand](#path-2--manual))                                          | You want precise control and prefer to type each phase and task yourself.                                                              | ~15 minutes                   |
+| Approach | When to use it | Time to first `task complete` |
+| --- | --- | --- |
+| **Smoke test** ([tutorial](#path-1--tutorial)) | You just want to watch the loop run end to end — `code-pact tutorial` writes nothing to your repo. | ~1 minute |
+| **Agent-first** ([schema-only prompt](#path-3--ai-assisted)) | Your agent (Claude Code, …) already holds the project context and can emit a roadmap YAML directly. | ~10 minutes |
+| **Existing-plan adoption** ([`plan adopt`](#existing-plan-adoption--plan-adopt)) | You already have a structured plan — a `roadmap.md`, `TODO.md`, `tasks.md`, or a draft YAML — and want to ingest it deterministically. | ~5 minutes |
+| **Code-pact-first** ([brief → prompt](#path-3--ai-assisted)) | Starting from scratch: capture a brief + constitution, then have an agent draft the full roadmap from them. | ~20 minutes |
+| **Manual** ([by hand](#path-2--manual)) | You want precise control and prefer to type each phase and task yourself. | ~15 minutes |
 
 Most agent users want **Agent-first** or **Existing-plan adoption**: the agent (or a plan it already produced) does the planning, and code-pact ingests the result deterministically — no second AI round-trip just to reshape it.
 
@@ -145,14 +145,14 @@ If `pnpm test` is not the right verification command for your repo, pass a diffe
 control plane** for your project. Nothing else is generated; everything below is
 meant to be edited or deleted as your project takes shape.
 
-| Path                           | What it is                                                                                              | Edit or delete?                               |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `design/roadmap.yaml`          | The ordered list of phases. Starts empty; `phase add` / `phase import` fill it.                         | Edit (grows as you plan)                      |
-| `design/phases/`               | One YAML file per phase, holding its tasks. Empty at init.                                              | Grows with your plan                          |
-| `design/decisions/`            | ADRs for `requires_decision` tasks. Empty until you need one.                                           | Add when a task needs a recorded decision     |
-| `design/rules/`                | Project conventions injected into agent context packs.                                                  | Edit                                          |
+| Path | What it is | Edit or delete? |
+| --- | --- | --- |
+| `design/roadmap.yaml` | The ordered list of phases. Starts empty; `phase add` / `phase import` fill it. | Edit (grows as you plan) |
+| `design/phases/` | One YAML file per phase, holding its tasks. Empty at init. | Grows with your plan |
+| `design/decisions/` | ADRs for `requires_decision` tasks. Empty until you need one. | Add when a task needs a recorded decision |
+| `design/rules/` | Project conventions injected into agent context packs. | Edit |
 | `design/rules/coding-style.md` | A **starter example** rule, with `tags` / `applies_to` frontmatter showing how rules target task types. | Edit to fit your project, or delete if unused |
-| `design/constitution.md`       | Placeholder principles every decision should respect. `plan constitution` rewrites it.                  | Edit (or run `plan constitution`)             |
+| `design/constitution.md` | Placeholder principles every decision should respect. `plan constitution` rewrites it. | Edit (or run `plan constitution`) |
 
 `design/brief.md` is **not** created by `init`. It is optional — useful when you
 plan with `plan prompt` / `plan brief`, unnecessary when adopting an existing
@@ -338,7 +338,7 @@ Once you have at least one task, every path converges on the same deterministic 
 task prepare → task start → implement → verify → task complete → task finalize
 ```
 
-[`docs/per-task-loop.md`](per-task-loop.md) is the canonical reference — the lifecycle diagram, every verb (and whether it records an event), a worked example, and the invariants (`start` / `complete` are idempotent; a `blocked` task cannot complete until resumed; `task complete` records progress but never mutates `design/`). `task prepare` is the entry point. Default `task prepare --json` is a compact minimal work order; use `--detail full` (or any explicit budget flag) for the full envelope, including `recommend` and `task context` outputs. `recommend` and `task context` also remain available as standalone diagnostics.
+[`docs/per-task-loop.md`](per-task-loop.md) is the canonical reference — the lifecycle diagram, every verb (and whether it records an event), a worked example, and the invariants (`start` / `complete` are idempotent; a `blocked` task cannot complete until resumed; `task complete` records progress but never mutates `design/`). `task prepare` is the entry point; `recommend` and `task context` remain available as standalone diagnostics that `task prepare` bundles for you.
 
 ## Checkpoints at phase / PR boundaries
 

@@ -168,10 +168,7 @@ function assertDeferredPackMaterializationPair(
     );
   }
 
-  const validated = validateContextManifestContent(
-    artifact.content,
-    artifact.digest,
-  );
+  const validated = validateContextManifestContent(artifact.content, artifact.digest);
   const manifestSections = validated.manifest.sections.map(section => ({
     name: section.name,
     bytes: section.bytes,
@@ -310,14 +307,11 @@ export async function buildContextPack(
             ? makeRelatedDecisionCommitmentsProjection(
                 decisions,
                 declaredDecisions,
-                allRendered.find(
-                  section => section.name === "related_decisions",
-                ),
+                allRendered.find(section => section.name === "related_decisions"),
               )
             : null,
-        ].filter(
-          (candidate): candidate is ContextProjectionCandidate =>
-            candidate !== null,
+        ].filter((candidate): candidate is ContextProjectionCandidate =>
+          candidate !== null,
         )
       : [];
 
@@ -479,8 +473,7 @@ export async function writeContextPack(
     // Profile-derived: constrained to .context/** + symlink-free resolution
     // on the FULL path (directory + filename).
     const contextDir =
-      profileContextDir ??
-      (await loadAgentProfile(cwd, agentName))?.context_dir;
+      profileContextDir ?? (await loadAgentProfile(cwd, agentName))?.context_dir;
     const outputPath: OwnedWritePath = await resolveProfileContextOutputPath(
       cwd,
       contextDir ?? `.context/${agentName}`,

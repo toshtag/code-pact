@@ -25,35 +25,35 @@ stateDiagram-v2
 
 `task complete` records `done` only after the phase's verification command
 passes. `task finalize` happens **after** `done` and is a separate surface — it
-flips the task's _design status_ (intent) to match the _operational fact_; it
+flips the task's *design status* (intent) to match the *operational fact*; it
 does not add a progress event.
 
 Full set of allowed transitions (the deterministic state machine):
 
-| From      | Can move to                   | Via                                                      |
-| --------- | ----------------------------- | -------------------------------------------------------- |
-| `planned` | `started`                     | `task start`                                             |
-| `started` | `done` / `blocked` / `failed` | `task complete` / `task block` / failure                 |
-| `blocked` | `resumed` / `failed`          | `task resume` / failure                                  |
-| `resumed` | `done` / `blocked` / `failed` | `task complete` / `task block` / failure                 |
-| `failed`  | `started`                     | `task start` (retry)                                     |
-| `done`    | —                             | terminal (then `task finalize` reconciles design status) |
+| From | Can move to | Via |
+| --- | --- | --- |
+| `planned` | `started` | `task start` |
+| `started` | `done` / `blocked` / `failed` | `task complete` / `task block` / failure |
+| `blocked` | `resumed` / `failed` | `task resume` / failure |
+| `resumed` | `done` / `blocked` / `failed` | `task complete` / `task block` / failure |
+| `failed` | `started` | `task start` (retry) |
+| `done` | — | terminal (then `task finalize` reconciles design status) |
 
 ## The verbs
 
-| Step          | Command                                | What it does                                                                                                                                                                                              | Records an event?                                                                  |
-| ------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| **Prepare**   | `task prepare <id> --agent <a> --json` | The single entry point. Returns a minimal work order: task goal, read/write scope, done criteria, verification commands, decision status, a single `next` action, and a fallback command for full detail. | No — progress-read-only (does **not** write a context pack unless `--detail full`) |
-| **Start**     | `task start <id> --agent <a>`          | Records `started`. Idempotent — a second call returns `already_started`.                                                                                                                                  | `started`                                                                          |
-| _(implement)_ | —                                      | Your agent's own work. code-pact is not running.                                                                                                                                                          | —                                                                                  |
-| **Verify**    | `verify --phase <p> --task <id>`       | Runs the phase's verification commands without recording anything. A pre-flight for `complete`.                                                                                                           | No                                                                                 |
-| **Complete**  | `task complete <id> --agent <a>`       | Re-runs verification; appends `done` on pass. Idempotent — a second call returns `already_done`.                                                                                                          | `done` (on pass)                                                                   |
-| **Finalize**  | `task finalize <id> --write --json`    | Flips the task's design status to `done`, and audits declared vs. actual writes. Run without `--write` first to preview.                                                                                  | No                                                                                 |
+| Step | Command | What it does | Records an event? |
+| --- | --- | --- | --- |
+| **Prepare** | `task prepare <id> --agent <a> --json` | The single entry point. Returns current state, the recommendation, context-pack metadata, a structured `next_action`, and a `commands` dictionary with the exact next commands. | No — progress-read-only (writes the context pack unless `--dry-run`) |
+| **Start** | `task start <id> --agent <a>` | Records `started`. Idempotent — a second call returns `already_started`. | `started` |
+| *(implement)* | — | Your agent's own work. code-pact is not running. | — |
+| **Verify** | `verify --phase <p> --task <id>` | Runs the phase's verification commands without recording anything. A pre-flight for `complete`. | No |
+| **Complete** | `task complete <id> --agent <a>` | Re-runs verification; appends `done` on pass. Idempotent — a second call returns `already_done`. | `done` (on pass) |
+| **Finalize** | `task finalize <id> --write --json` | Flips the task's design status to `done`, and audits declared vs. actual writes. Run without `--write` first to preview. | No |
 
 When `task complete --json --detail agent` fails, the loop remains finite:
 
 1. Read the compact failure capsule.
-2. Read `data.recommendation.repairPolicy` from the earlier `task prepare --json --detail full` result (or `recommend --json`).
+2. Read `data.recommendation.repairPolicy` from the earlier `task prepare --json` result. If you used `recommend --json` separately, its path is `data.repairPolicy`.
 3. If `repairPolicy.mode` is `disabled`, stop bounded repair and use the normal escalation guidance.
 4. If it is `bounded` and the failure kind is `command_failed`, make one minimal repair using the same model, effort, and context.
 5. Re-run the same `task complete` command.
@@ -67,10 +67,10 @@ for repair attempts.
 
 If a task is waiting on something, record it explicitly:
 
-| Command                        | What it does                                  | Records an event? |
-| ------------------------------ | --------------------------------------------- | ----------------- |
-| `task block <id> --reason "…"` | Marks the task `blocked` with a reason.       | `blocked`         |
-| `task resume <id> --agent <a>` | Clears the block; the task becomes `resumed`. | `resumed`         |
+| Command | What it does | Records an event? |
+| --- | --- | --- |
+| `task block <id> --reason "…"` | Marks the task `blocked` with a reason. | `blocked` |
+| `task resume <id> --agent <a>` | Clears the block; the task becomes `resumed`. | `resumed` |
 
 ### Recording a `done` without `task complete`
 
@@ -83,15 +83,15 @@ honest path for two cases:
 2. **The `record_only` lightweight lane** — when `task prepare`
    recommends `lifecycleMode: record_only` (a small, low-risk, strongly-verified
    docs/test task), you run the project's verification **yourself**, then record
-   the result here. `record_only` is a lighter _loop_, **not** lighter
+   the result here. `record_only` is a lighter *loop*, **not** lighter
    verification.
 
-| Command                                                        | What it does                                                                                                                                                                                                                        | Records an event?           |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| Command | What it does | Records an event? |
+| --- | --- | --- |
 | `task record-done <id> --evidence "PR #123 · pnpm test green"` | Records `done` without running verification commands — the proof is `--evidence` (a PR, CI link, or the verification you ran). The event carries `source: external`. The decision gate still applies for `requires_decision` tasks. | `done` (`source: external`) |
 
-When the work can be verified from the working tree and the recommendation's
-`lifecycleMode` is not `record_only`, prefer the normal `complete` path (it runs verification for you).
+When the work can be verified from the working tree and `lifecycleMode` is not
+`record_only`, prefer the normal `complete` path (it runs verification for you).
 `source: external` marks an event that did **not** go through `task complete`'s
 loop verification — so later diagnostics can tell the two apart. Put real proof
 in `--evidence`: a PR number, a CI result, or the verification command you ran.
@@ -99,12 +99,8 @@ in `--evidence`: a PR number, a CI result, or the verification command you ran.
 ## A worked example
 
 ```sh
-# 1. Prepare — default minimal returns a compact work order (goal, scope, next action).
-#    Use --detail full (or any budget flag) to also get the recommendation + commands.
+# 1. Prepare — read state + recommendation + the exact next commands.
 code-pact task prepare P1-T1 --agent claude-code --json
-
-# 1b. If you need the recommendation, context-pack metadata, or decision commitments:
-code-pact task prepare P1-T1 --agent claude-code --detail full --json
 
 # 2. Start, then implement the task.
 code-pact task start P1-T1 --agent claude-code
