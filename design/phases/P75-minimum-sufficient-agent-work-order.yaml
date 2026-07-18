@@ -3,7 +3,7 @@ name: Minimum Sufficient Agent Work Order
 weight: 4
 confidence: medium
 risk: medium
-status: planned
+status: done
 objective: >
   Correct the P74 default `task prepare` contract so it is a compact, actionable
   work order rather than a small context pack. Preserve full detail as an
