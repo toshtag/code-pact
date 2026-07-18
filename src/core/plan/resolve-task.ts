@@ -28,6 +28,7 @@ import { loadRoadmap } from "./roadmap.ts";
 import type { Task as TaskT } from "../schemas/task.ts";
 import type { PlanState } from "./state.ts";
 import { PhaseSnapshotInvalidError } from "./state.ts";
+import { ambiguousPhaseError } from "./resolve-phase.ts";
 import {
   archivedEntriesFromSnapshot,
   discoverUnreferencedSnapshots,
@@ -88,6 +89,20 @@ export async function resolveTaskInRoadmap(
   // surfaces as CONFIG_ERROR rather than an uncoded exit-3.
   const roadmap = await loadRoadmap(cwd);
 
+  // Fail closed on a duplicate phase id in roadmap.yaml, even if the target
+  // task is found unambiguously in one of the files.
+  const phaseIdPaths = new Map<string, string[]>();
+  for (const ref of roadmap.phases) {
+    const paths = phaseIdPaths.get(ref.id) ?? [];
+    paths.push(ref.path);
+    phaseIdPaths.set(ref.id, paths);
+  }
+  for (const [phaseId, paths] of phaseIdPaths) {
+    if (paths.length > 1) {
+      throw ambiguousPhaseError(phaseId, paths);
+    }
+  }
+
   const hits: ResolvedTask[] = [];
   // design-docs-ephemeral (step 4a): collect ALL live task ids + the archived
   // candidates of any tolerated (hand-deleted, snapshotted) COMPLETED phase, so we
@@ -117,7 +132,7 @@ export async function resolveTaskInRoadmap(
       throw err; // no snapshot — fail closed exactly as before
     }
     for (const t of phase.tasks ?? []) liveTaskIds.add(t.id);
-    if (phase.tasks?.some((t) => t.id === taskId)) {
+    if (phase.tasks?.some(t => t.id === taskId)) {
       hits.push({ phaseId: phase.id, phasePath: ref.path });
     }
   }
@@ -130,7 +145,7 @@ export async function resolveTaskInRoadmap(
   // consulted ONLY for the collision below.
   const discovered = await discoverUnreferencedSnapshots(
     cwd,
-    new Set(roadmap.phases.map((r) => r.id)),
+    new Set(roadmap.phases.map(r => r.id)),
   );
   archivedCandidates.push(...discovered.entries);
 
@@ -141,7 +156,7 @@ export async function resolveTaskInRoadmap(
   if (merge.collisions.length > 0) {
     throw new PhaseSnapshotInvalidError(
       `archive snapshot task ids collide with the live plan: ${merge.collisions
-        .map((c) => c.reason)
+        .map(c => c.reason)
         .join("; ")}`,
     );
   }
@@ -150,7 +165,7 @@ export async function resolveTaskInRoadmap(
   if (hits.length > 1) {
     throw ambiguousTaskError(
       taskId,
-      hits.map((h) => h.phaseId),
+      hits.map(h => h.phaseId),
     );
   }
   return hits[0]!;
@@ -171,7 +186,7 @@ export function resolveTaskInPlanState(
 ): ResolvedTaskWithEntry {
   const hits: ResolvedTaskWithEntry[] = [];
   for (const entry of state.phases) {
-    const task = entry.phase.tasks?.find((t) => t.id === taskId);
+    const task = entry.phase.tasks?.find(t => t.id === taskId);
     if (task) {
       hits.push({ phaseId: entry.phase.id, phase: entry.phase, task });
     }
@@ -181,7 +196,7 @@ export function resolveTaskInPlanState(
   if (hits.length > 1) {
     throw ambiguousTaskError(
       taskId,
-      hits.map((h) => h.phaseId),
+      hits.map(h => h.phaseId),
     );
   }
   return hits[0]!;

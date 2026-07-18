@@ -28,7 +28,7 @@ function phaseNotFoundError(phaseId: string): NodeJS.ErrnoException {
   return err as NodeJS.ErrnoException;
 }
 
-function ambiguousPhaseError(
+export function ambiguousPhaseError(
   phaseId: string,
   paths: string[],
 ): NodeJS.ErrnoException {
@@ -48,12 +48,12 @@ function ambiguousPhaseError(
  * one). The ambiguity error carries `.phases: string[]` (the colliding paths).
  */
 export function resolvePhaseRef(roadmap: Roadmap, phaseId: string): PhaseRef {
-  const hits = roadmap.phases.filter((p) => p.id === phaseId);
+  const hits = roadmap.phases.filter(p => p.id === phaseId);
   if (hits.length === 0) throw phaseNotFoundError(phaseId);
   if (hits.length > 1) {
     throw ambiguousPhaseError(
       phaseId,
-      hits.map((h) => h.path),
+      hits.map(h => h.path),
     );
   }
   return hits[0]!;
@@ -79,12 +79,12 @@ export function resolvePhaseInPlanState(
   state: PlanState,
   phaseId: string,
 ): PhaseEntry {
-  const hits = state.phases.filter((e) => e.phase.id === phaseId);
+  const hits = state.phases.filter(e => e.phase.id === phaseId);
   if (hits.length === 0) throw phaseNotFoundError(phaseId);
   if (hits.length > 1) {
     throw ambiguousPhaseError(
       phaseId,
-      hits.map((h) => h.ref.path),
+      hits.map(h => h.ref.path),
     );
   }
   return hits[0]!;
@@ -100,11 +100,11 @@ export function findUniquePhaseInPlanState(
   state: PlanState,
   phaseId: string,
 ): PhaseEntry | undefined {
-  const hits = state.phases.filter((e) => e.phase.id === phaseId);
+  const hits = state.phases.filter(e => e.phase.id === phaseId);
   if (hits.length > 1) {
     throw ambiguousPhaseError(
       phaseId,
-      hits.map((h) => h.ref.path),
+      hits.map(h => h.ref.path),
     );
   }
   return hits[0];

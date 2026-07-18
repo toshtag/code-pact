@@ -1,0 +1,98 @@
+id: P76
+name: Complete the Minimum Work-Order Contract
+weight: 4
+confidence: medium
+risk: medium
+status: done
+objective: Align runtime, CLI help, generated agent guidance, adapter
+  conformance, public docs, and tests for the minimal task prepare contract so
+  no consumer references non-existent full-detail fields by default.
+definition_of_done:
+  - All contract producers and consumers use the same minimal schema; explicit
+    budget always implies full detail; manual block is distinguished from
+    dependency block; bounded failure/block summaries; dead minimal pack code
+    removed; all verification green.
+verification:
+  commands:
+    - pnpm typecheck && pnpm build && pnpm test:unit && pnpm
+      test:integration:smoke && pnpm vitest --config
+      vitest.integration.config.ts run && pnpm check:docs && node dist/cli.js
+      validate --json && node dist/cli.js plan lint --include-quality --strict
+      --json && git diff --check
+tasks:
+  - id: P76-T1
+    type: refactor
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: done
+    description: "Runtime contract correctness for minimal task prepare: budget
+      implies full, manual vs dependency block, bounded failure/block summary,
+      and removal of dead minimal pack code."
+    reads:
+      - src/commands/task-prepare.ts
+      - src/cli/commands/task.ts
+      - src/core/pack/index.ts
+      - src/core/pack/formatters/markdown.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/integration/task-context-budget.test.ts
+    writes:
+      - src/commands/task-prepare.ts
+      - src/cli/commands/task.ts
+      - src/core/pack/index.ts
+      - src/core/pack/formatters/markdown.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/integration/task-context-budget.test.ts
+  - id: P76-T2
+    type: docs
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: done
+    description:
+      Align generated agent guidance, CLI help, adapter conformance, and
+      public documentation with the minimal task prepare contract.
+    depends_on:
+      - P76-T1
+    reads:
+      - src/cli/spec/task.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - src/commands/adapter-conformance.ts
+      - src/core/adapters/conformance-spec.ts
+      - tests/unit/i18n/agent-contract-guidance.test.ts
+      - tests/unit/i18n/agent-contract-consumption.test.ts
+      - tests/unit/commands/adapter.test.ts
+      - tests/unit/commands/adapter-conformance.test.ts
+      - tests/unit/commands/adapter-conformance-hardening.test.ts
+      - tests/unit/security/filesystem-operation-proof.test.ts
+      - README.md
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/per-task-loop.md
+      - docs/dogfood.md
+      - docs/cli-reference.generated.md
+    writes:
+      - src/cli/spec/task.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - src/commands/adapter-conformance.ts
+      - src/core/adapters/conformance-spec.ts
+      - tests/unit/i18n/agent-contract-guidance.test.ts
+      - tests/unit/i18n/agent-contract-consumption.test.ts
+      - tests/unit/commands/adapter.test.ts
+      - tests/unit/commands/adapter-conformance.test.ts
+      - tests/unit/commands/adapter-conformance-hardening.test.ts
+      - tests/unit/security/filesystem-operation-proof.test.ts
+      - README.md
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/per-task-loop.md
+      - docs/dogfood.md
+      - docs/cli-reference.generated.md

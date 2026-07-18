@@ -60,20 +60,22 @@ Activation rules:
 
 - run verify
 - check the audit
-- After \`task prepare --json\`, read \`data.recommendation\`. After \`recommend --json\`, read \`data\`. Let \`lifecycleMode\` pick the loop. When the runtime cannot switch model, report the limitation.
+- The default minimal \`task prepare --json\` output is a bounded work order: \`data.task\`, \`data.next\`, and \`data.more.command\`. It does not build or write a context pack.
+- Use \`task prepare --detail full --json\` (or any explicit budget flag that forces full detail) to also receive \`data.recommendation\`; then read the execution profile. \`recommend --json\` also returns the same recommendation fields. Let \`lifecycleMode\` pick the loop. When the runtime cannot switch model, report the limitation.
 - \`record_only\` is a lighter loop, not lighter verification — run verification, then \`task record-done\`.
 - Budgeted context may contain deterministic structural projections. Use the projected form first. Retrieve an exact original section only when a specific missing detail blocks the task and \`data.deferred_context.retrieve_command\` is non-null; otherwise do not construct a retrieval command from the manifest reference.
 
 ### How to handle failures
 
-- **blocked dependency** — wait or resume.
+- **dependency block** — resolve dependencies and re-run prepare.
+- **manual block** — resolve the block reason and re-run prepare.
 - **verification failure** — fix and re-run.
 - **adapter drift** — re-upgrade.
-- **missing context pack** — task prepare rebuilds it.
-- After a failure, read \`data.recommendation.repairPolicy\` from \`task prepare --json\`, or \`data.repairPolicy\` from \`recommend --json\`. If \`mode\` is \`disabled\`, do not repair. If \`mode\` is \`bounded\`, use \`maxRepairAttempts\` for \`command_failed\` only.
+- **missing context pack** — default minimal \`task prepare --json\` does not build or write a context pack. To materialize the pack, use \`data.more.command\` from the minimal output, or run \`task prepare --detail full --json\`. If you only need the pack body, run \`task context\`.
+- After a failure, read the existing repair policy. If you already have a \`task prepare --detail full\` result (or any explicit budget flag that forces full detail) and \`data.recommendation.repairPolicy\` is present, use it. Otherwise run \`recommend --json\` and read \`data.repairPolicy\`. If \`mode\` is \`disabled\`, do not repair. If \`mode\` is \`bounded\`, use \`maxRepairAttempts\` for \`command_failed\` only.
 - Keep \`same_model_same_effort_same_context\` and use \`failure_delta\`.
 - Stop on \`stopOnRepeatedFingerprint\`; after exhaustion follow \`use_allowed_escalation\`.
-- When \`afterExhaustion\` is \`use_allowed_escalation\`, read \`data.recommendation.allowedEscalation\` from \`task prepare --json\`, or \`data.allowedEscalation\` from \`recommend --json\`.
+- When \`afterExhaustion\` is \`use_allowed_escalation\`, consult \`data.recommendation.allowedEscalation\` from an existing \`task prepare --detail full\` result, or \`data.allowedEscalation\` from \`recommend --json\`.
 - Nonretryable kinds: \`timed_out\`, \`aborted\`, \`decision_required\`, \`unsafe_write\`, \`invalid_state\`, \`unknown\`.
 `;
 
@@ -113,15 +115,17 @@ Activation rules:
 
 - run verify
 - check the audit
-- After \`task prepare --json\`, read \`data.recommendation\`. After \`recommend --json\`, read \`data\`. Let \`lifecycleMode\` pick the loop. When the runtime cannot switch model, report the limitation.
+- The default minimal \`task prepare --json\` output is a bounded work order: \`data.task\`, \`data.next\`, and \`data.more.command\`. It does not build or write a context pack.
+- Use \`task prepare --detail full --json\` (or any explicit budget flag that forces full detail) to also receive \`data.recommendation\`; then read the execution profile. \`recommend --json\` also returns the same recommendation fields. Let \`lifecycleMode\` pick the loop. When the runtime cannot switch model, report the limitation.
 - \`record_only\` is a lighter loop, not lighter verification — run verification, then \`task record-done\`.
 
 ### How to handle failures
 
-- **blocked dependency** — wait or resume.
+- **dependency block** — resolve dependencies and re-run prepare.
+- **manual block** — resolve the block reason and re-run prepare.
 - **verification failure** — fix and re-run.
 - **adapter drift** — re-upgrade.
-- **missing context pack** — task prepare rebuilds it.
+- **missing context pack** — default minimal \`task prepare --json\` does not build or write a context pack. To materialize the pack, use \`data.more.command\` from the minimal output, or run \`task prepare --detail full --json\`. If you only need the pack body, run \`task context\`.
 `;
 
 function sha256(content: string): string {
@@ -384,7 +388,7 @@ describe("runAdapterConformance — required CLI surface mentions", () => {
 describe("runAdapterConformance — required failure guidance", () => {
   it("fails when a required failure keyword is missing", async () => {
     const body = VALID_CONTRACT_BODY.replace(
-      /blocked dependency/g,
+      /dependency block/g,
       "blocked deps",
     );
     await setupAdapter(dir, { instructionContent: body });
@@ -397,7 +401,7 @@ describe("runAdapterConformance — required failure guidance", () => {
     );
     expect(guidanceCheck?.status).toBe("fail");
     expect((guidanceCheck?.details?.missing as string[]) ?? []).toContain(
-      "blocked dependency",
+      "dependency block",
     );
   });
 });
@@ -614,7 +618,9 @@ describe("runAdapterConformance — structural projection guidance", () => {
     ]);
     expect(
       ((incompleteEnglish.details.missing as string[]) ?? []).every(anchor =>
-        ((incompleteEnglish.details.anchors as string[]) ?? []).includes(anchor),
+        ((incompleteEnglish.details.anchors as string[]) ?? []).includes(
+          anchor,
+        ),
       ),
     ).toBe(true);
 
