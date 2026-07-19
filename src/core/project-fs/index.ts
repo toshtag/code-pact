@@ -80,8 +80,10 @@ export {
   resolveRulesDirectoryReadPath,
   resolveDoctorConfigReadPath,
   resolveExplicitUserReadPath,
+  resolveExecuteSourceReadPath,
   // Write resolvers
   resolveDecisionWritePath,
+  resolveExecuteSourceWritePath,
   resolvePhaseWritePath,
   resolveRoadmapWritePath,
   resolveProgressWritePath,

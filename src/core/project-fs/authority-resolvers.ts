@@ -227,11 +227,7 @@ export async function resolvePhaseReadPath(
   cwd: string,
   relPath: string,
 ): Promise<OwnedReadPath> {
-  return resolveAndBrandRead(
-    cwd,
-    relPath,
-    isPhasePath,
-  );
+  return resolveAndBrandRead(cwd, relPath, isPhasePath);
 }
 
 /**
@@ -446,6 +442,29 @@ export async function resolveExplicitUserReadPath(
   return resolveAndBrandExplicitUserRead(cwd, relPath);
 }
 
+/**
+ * Resolve an arbitrary project source file for one-shot execution reads.
+ * The path must be a safe project-relative literal file path and must not
+ * traverse a symlink. The caller is expected to have already verified the
+ * path against task.reads/writes and rejected glob metacharacters.
+ */
+export async function resolveExecuteSourceReadPath(
+  cwd: string,
+  relPath: string,
+): Promise<OwnedReadPath> {
+  return resolveAndBrandRead(cwd, relPath, () => true);
+}
+
+/**
+ * Resolve the same source file for one-shot execution writes.
+ */
+export async function resolveExecuteSourceWritePath(
+  cwd: string,
+  relPath: string,
+): Promise<OwnedWritePath> {
+  return resolveAndBrandWrite(cwd, relPath, () => true);
+}
+
 // ── Write resolvers ──────────────────────────────────────────────────────
 
 /**
@@ -471,11 +490,7 @@ export async function resolvePhaseWritePath(
   cwd: string,
   relPath: string,
 ): Promise<OwnedWritePath> {
-  return resolveAndBrandWrite(
-    cwd,
-    relPath,
-    isPhasePath,
-  );
+  return resolveAndBrandWrite(cwd, relPath, isPhasePath);
 }
 
 /**
@@ -592,9 +607,5 @@ export async function resolvePhaseDeletePath(
   cwd: string,
   relPath: string,
 ): Promise<OwnedDeletePath> {
-  return resolveAndBrandDelete(
-    cwd,
-    relPath,
-    isPhasePath,
-  );
+  return resolveAndBrandDelete(cwd, relPath, isPhasePath);
 }

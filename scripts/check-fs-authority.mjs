@@ -399,8 +399,10 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveRulesDirectoryReadPath", "owned_read"],
       ["resolveDoctorConfigReadPath", "owned_read"],
       ["resolveExplicitUserReadPath", "explicit_user_input"],
+      ["resolveExecuteSourceReadPath", "owned_read"],
       // Write resolvers
       ["resolveDecisionWritePath", "owned_write"],
+      ["resolveExecuteSourceWritePath", "owned_write"],
       ["resolvePhaseWritePath", "owned_write"],
       ["resolveRoadmapWritePath", "owned_write"],
       ["resolveProgressWritePath", "owned_write"],
@@ -446,8 +448,10 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveRulesDirectoryReadPath", "owned_read"],
       ["resolveDoctorConfigReadPath", "owned_read"],
       ["resolveExplicitUserReadPath", "explicit_user_input"],
+      ["resolveExecuteSourceReadPath", "owned_read"],
       // Write resolvers
       ["resolveDecisionWritePath", "owned_write"],
+      ["resolveExecuteSourceWritePath", "owned_write"],
       ["resolvePhaseWritePath", "owned_write"],
       ["resolveRoadmapWritePath", "owned_write"],
       ["resolveProgressWritePath", "owned_write"],
