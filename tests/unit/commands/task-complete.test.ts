@@ -29,7 +29,7 @@ const PROJECT_YAML = (defaultAgent = "claude-code", agents = ["claude-code"]) =>
     "locale: en-US",
     `default_agent: ${defaultAgent}`,
     "agents:",
-    ...agents.flatMap((a) => [
+    ...agents.flatMap(a => [
       `  - name: ${a}`,
       `    profile: agent-profiles/${a}.yaml`,
       `    enabled: true`,
@@ -65,13 +65,13 @@ const PHASE_YAML = (
     "verification:",
     "  commands:",
     // Quote "false" so YAML keeps it as a string (otherwise it parses
-     // as boolean and Phase schema rejects). When spawned, the literal
-     // bin name "false" exits 1 on macOS/Linux.
-     opts.command
-       ? `    - ${opts.command}`
-       : opts.failingCommand
-         ? '    - "false"'
-         : "    - echo ok",
+    // as boolean and Phase schema rejects). When spawned, the literal
+    // bin name "false" exits 1 on macOS/Linux.
+    opts.command
+      ? `    - ${opts.command}`
+      : opts.failingCommand
+        ? '    - "false"'
+        : "    - echo ok",
     "tasks:",
     "  - id: P1-T1",
     "    type: feature",
@@ -94,6 +94,7 @@ async function setupProject(
     projectYaml?: string;
     progressYaml?: string;
     command?: string;
+    phaseYaml?: string;
   } = {},
 ): Promise<void> {
   await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
@@ -111,11 +112,12 @@ async function setupProject(
   await writeFile(join(dir, "design", "roadmap.yaml"), ROADMAP_YAML, "utf8");
   await writeFile(
     join(dir, "design", "phases", "P1-foundation.yaml"),
-    PHASE_YAML({
-      failingCommand: opts.failingCommand,
-      status: opts.taskStatus,
-      command: opts.command,
-    }),
+    opts.phaseYaml ??
+      PHASE_YAML({
+        failingCommand: opts.failingCommand,
+        status: opts.taskStatus,
+        command: opts.command,
+      }),
     "utf8",
   );
 }
@@ -212,7 +214,11 @@ describe("runTaskComplete — happy path", () => {
     const saved = process.env.CODE_PACT_AUTHOR;
     process.env.CODE_PACT_AUTHOR = "Ada Lovelace";
     try {
-      const result = await runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+      const result = await runTaskComplete({
+        cwd: dir,
+        taskId: "P1-T1",
+        agent: "claude-code",
+      });
       if (result.kind !== "done") throw new Error("type narrow");
       expect(result.event.author).toBe("Ada Lovelace");
       const { log } = await readProgress(dir);
@@ -293,9 +299,9 @@ describe("runTaskComplete — verify failure", () => {
       failed_check: "commands",
       failed_command: "false",
     });
-    expect(memory.episodes[0]!.episode.verification.failure_fingerprint).toMatch(
-      /^sha256:[0-9a-f]{64}$/,
-    );
+    expect(
+      memory.episodes[0]!.episode.verification.failure_fingerprint,
+    ).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
   it("omits unsafe absolute-path commands from local memory episodes", async () => {
@@ -309,22 +315,31 @@ describe("runTaskComplete — verify failure", () => {
 
     const memory = await scanLoopMemoryEpisodes(dir);
     expect(memory.episodes).toHaveLength(1);
-    expect(memory.episodes[0]!.episode.verification.failed_command).toBeUndefined();
-    expect(memory.episodes[0]!.episode.verification.failure_fingerprint).toMatch(
-      /^sha256:[0-9a-f]{64}$/,
-    );
+    expect(
+      memory.episodes[0]!.episode.verification.failed_command,
+    ).toBeUndefined();
+    expect(
+      memory.episodes[0]!.episode.verification.failure_fingerprint,
+    ).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
   it("attaches verify checks to the thrown error", async () => {
     await setupProject(dir, { failingCommand: true });
     try {
-      await runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+      await runTaskComplete({
+        cwd: dir,
+        taskId: "P1-T1",
+        agent: "claude-code",
+      });
       throw new Error("should have thrown");
     } catch (err: unknown) {
-      const e = err as Error & { code?: string; checks?: { name: string; ok: boolean }[] };
+      const e = err as Error & {
+        code?: string;
+        checks?: { name: string; ok: boolean }[];
+      };
       expect(e.code).toBe("VERIFICATION_FAILED");
       expect(Array.isArray(e.checks)).toBe(true);
-      const commands = e.checks!.find((c) => c.name === "commands");
+      const commands = e.checks!.find(c => c.name === "commands");
       expect(commands?.ok).toBe(false);
     }
   });
@@ -380,10 +395,17 @@ describe("runTaskComplete — verify failure", () => {
     __setLoopMemoryRecordFailureForTests(() => new Error("disk full"));
 
     try {
-      await runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+      await runTaskComplete({
+        cwd: dir,
+        taskId: "P1-T1",
+        agent: "claude-code",
+      });
       throw new Error("should have thrown");
     } catch (err: unknown) {
-      const e = err as Error & { code?: string; warnings?: Array<{ code: string; affects_exit: boolean }> };
+      const e = err as Error & {
+        code?: string;
+        warnings?: Array<{ code: string; affects_exit: boolean }>;
+      };
       expect(e.code).toBe("VERIFICATION_FAILED");
       expect(e.warnings).toEqual([
         {
@@ -447,7 +469,7 @@ describe("runTaskComplete — dry run", () => {
     // The command never ran → no marker, and the commands check is a preview.
     expect(existsSync(marker)).toBe(false);
     if (result.kind === "dry_run") {
-      const commands = result.verify.checks.find((c) => c.name === "commands");
+      const commands = result.verify.checks.find(c => c.name === "commands");
       expect(commands?.ok).toBe(true);
       expect(commands?.reason ?? "").toContain("dry-run");
     }
@@ -513,7 +535,8 @@ describe("runTaskComplete — dry run", () => {
     expect(result.warnings).toEqual([
       {
         code: "LOCAL_MEMORY_PRUNE_SKIPPED",
-        message: "The local loop-memory episode was recorded, but retention maintenance was skipped.",
+        message:
+          "The local loop-memory episode was recorded, but retention maintenance was skipped.",
         affects_exit: false,
       },
     ]);
@@ -580,6 +603,79 @@ describe("runTaskComplete — error codes", () => {
   });
 });
 
+describe("runTaskComplete — dependencies", () => {
+  const PHASE_WITH_DEPENDENCY = `id: P1
+name: Foundation
+weight: 12
+confidence: high
+risk: low
+status: planned
+objective: test phase
+definition_of_done:
+  - tests pass
+verification:
+  commands:
+    - echo ok
+tasks:
+  - id: P1-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P1-T2
+  - id: P1-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+    expected_duration: short
+    status: planned
+`;
+
+  it("throws TASK_DEPENDENCY_INCOMPLETE when depends_on is not done", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_WITH_DEPENDENCY });
+    await expect(
+      runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    ).rejects.toMatchObject({
+      code: "TASK_DEPENDENCY_INCOMPLETE",
+      deps: ["P1-T2"],
+    });
+    expect((await readProgress(dir)).log.events).toHaveLength(0);
+  });
+
+  it("completes when depends_on task is already done", async () => {
+    const progress = `events:
+  - task_id: P1-T2
+    status: done
+    at: "2026-05-15T10:00:00+09:00"
+    actor: human
+    evidence:
+      - manual review
+`;
+    await setupProject(dir, {
+      phaseYaml: PHASE_WITH_DEPENDENCY,
+      progressYaml: progress,
+    });
+    const result = await runTaskComplete({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+    expect(result.kind).toBe("done");
+    const { log } = await readProgress(dir);
+    expect(log.events).toHaveLength(2);
+    expect(log.events[1]!.task_id).toBe("P1-T1");
+    expect(log.events[1]!.status).toBe("done");
+  });
+});
+
 describe("runTaskComplete — state transitions (v0.6)", () => {
   it("started → done succeeds and appends a done event", async () => {
     const started = `events:
@@ -597,7 +693,7 @@ describe("runTaskComplete — state transitions (v0.6)", () => {
     });
     expect(result.kind).toBe("done");
     const { log } = await readProgress(dir);
-    expect(log.events.map((e) => e.status)).toEqual(["started", "done"]);
+    expect(log.events.map(e => e.status)).toEqual(["started", "done"]);
   });
 
   it("resumed → done succeeds and appends a done event", async () => {
@@ -677,7 +773,9 @@ describe("runTaskComplete — bounded verification and cancellation", () => {
     expect((await loadMergedProgress(dir)).log.events).toHaveLength(0);
     const memory = await scanLoopMemoryEpisodes(dir);
     expect(memory.episodes).toHaveLength(1);
-    expect(memory.episodes[0]!.episode.verification.failure_kind).toBe("timed_out");
+    expect(memory.episodes[0]!.episode.verification.failure_kind).toBe(
+      "timed_out",
+    );
   }, 10_000);
 
   it("rejects an already-aborted operation without recording an event", async () => {

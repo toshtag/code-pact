@@ -80,6 +80,12 @@ export type ApplyExactReplacementResult =
 
 export type BoundedFailureCapsule = FailureCapsule;
 
+export type BoundedPathSummary = {
+  changed_path_count: number;
+  changed_paths: string[];
+  paths_truncated: boolean;
+};
+
 export type TaskExecuteOnceResult =
   | {
       kind: "done";
@@ -93,7 +99,7 @@ export type TaskExecuteOnceResult =
     }
   | {
       kind: "worktree_not_clean";
-      paths: string[];
+      paths: BoundedPathSummary;
     }
   | {
       kind: "blocked";
@@ -109,11 +115,12 @@ export type TaskExecuteOnceResult =
     }
   | {
       kind: "executor_mutated_worktree";
-      changed_paths: string[];
+      paths: BoundedPathSummary;
     }
   | {
       kind: "execution_scope_violation";
-      changed_paths: string[];
+      paths: BoundedPathSummary;
+      rollback: "complete" | "incomplete" | "stale";
     }
   | {
       kind: "verification_failed";
@@ -132,6 +139,6 @@ export type TaskExecuteOnceResult =
     }
   | {
       kind: "rollback_incomplete";
-      changed_paths: string[];
+      paths: BoundedPathSummary;
       failure?: BoundedFailureCapsule;
     };

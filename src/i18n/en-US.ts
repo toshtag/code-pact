@@ -277,6 +277,56 @@ export const messages = {
       agentNotFound: (name: string): string =>
         `Agent "${name}" is not configured in project.yaml.`,
     },
+    execute: {
+      missingTaskId: "task execute requires a task id.",
+      missingExecutorFile: "task execute requires --executor-file <path>.",
+      done: (taskId: string, changed_file: string): string =>
+        `Task ${taskId} done: ${changed_file}`,
+      ineligible: (taskId: string, reasons: string[]): string =>
+        `Task ${taskId} is not eligible for one-shot execution:` +
+        reasons.map(r => `\n  - ${r}`).join(""),
+      worktreeNotClean: (summary: {
+        changed_path_count: number;
+        changed_paths: string[];
+        paths_truncated: boolean;
+      }): string =>
+        `Working tree is not clean before execution (${summary.changed_path_count} path${summary.changed_path_count === 1 ? "" : "s"} changed${summary.paths_truncated ? ", list truncated" : ""}).`,
+      executorMutatedWorktree: (summary: {
+        changed_path_count: number;
+        changed_paths: string[];
+        paths_truncated: boolean;
+      }): string =>
+        `Executor modified ${summary.changed_path_count} file${summary.changed_path_count === 1 ? "" : "s"} outside the source file${summary.paths_truncated ? " (list truncated)" : ""}.`,
+      executionScopeViolation: (
+        summary: {
+          changed_path_count: number;
+          changed_paths: string[];
+          paths_truncated: boolean;
+        },
+        rollback: string,
+      ): string =>
+        `Execution scope violation: ${summary.changed_path_count} file${summary.changed_path_count === 1 ? "" : "s"} changed outside the target source file${summary.paths_truncated ? " (list truncated)" : ""}; rollback=${rollback}.`,
+      blocked: (taskId: string, reason: string): string =>
+        `Task ${taskId} blocked: ${reason}`,
+      editRejected: (taskId: string, reason: string): string =>
+        `Edit rejected for ${taskId}: ${reason}`,
+      executorFailed: (taskId: string, reason: string): string =>
+        `Executor failed for ${taskId}: ${reason}`,
+      verificationFailed: (taskId: string): string =>
+        `Verification failed for ${taskId}; file rolled back.`,
+      rollbackFailed: (taskId: string, reason: string): string =>
+        `Rollback failed for ${taskId}: ${reason}`,
+      rollbackStaleFile: (taskId: string, reason: string): string =>
+        `Rollback stale file for ${taskId}: ${reason}`,
+      rollbackIncomplete: (summary: {
+        changed_path_count: number;
+        changed_paths: string[];
+        paths_truncated: boolean;
+      }): string =>
+        `Rollback incomplete: ${summary.changed_path_count} extra change${summary.changed_path_count === 1 ? "" : "s"} remain${summary.paths_truncated ? " (list truncated)" : ""}.`,
+      unknownResult: (result: string): string =>
+        `Unknown execute result kind: ${result}`,
+    },
     complete: {
       taskNotFound: (taskId: string): string =>
         `Task "${taskId}" not found in any phase.`,
@@ -306,6 +356,8 @@ export const messages = {
         `Dry run: would append done event for "${taskId}". no progress event was recorded.`,
       invalidTransition: (taskId: string, current: string): string =>
         `Task "${taskId}" is ${current}. Run \`code-pact task resume ${taskId}\` before completing.`,
+      dependencyIncomplete: (taskId: string, deps: string[]): string =>
+        `Task "${taskId}" cannot be completed: dependencies are not done: ${deps.join(", ")}.`,
     },
     failure: {
       cause: (name: string, reason: string): string =>
@@ -327,6 +379,8 @@ export const messages = {
         `Dry run: would append external done event for "${taskId}". no progress event was recorded.`,
       invalidTransition: (taskId: string, current: string): string =>
         `Task "${taskId}" is ${current}. Run \`code-pact task resume ${taskId}\` before recording done.`,
+      dependencyIncomplete: (taskId: string, deps: string[]): string =>
+        `Task "${taskId}" cannot be recorded as done: dependencies are not done: ${deps.join(", ")}.`,
     },
     finalize: {
       taskNotFound: (taskId: string): string =>

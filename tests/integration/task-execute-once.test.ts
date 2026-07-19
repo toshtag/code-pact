@@ -350,7 +350,7 @@ describe("runTaskExecuteOnce integration", () => {
     });
   });
 
-  it("detects when the executor mutates files outside the source path", async () => {
+  it("detects when the executor mutates files outside the source path and returns bounded paths", async () => {
     await withTempProject(async cwd => {
       class MutatingExecutor {
         async invoke() {
@@ -371,7 +371,71 @@ describe("runTaskExecuteOnce integration", () => {
       });
 
       expect(result.kind).toBe("executor_mutated_worktree");
+      if (result.kind === "executor_mutated_worktree") {
+        expect(result.paths).toEqual({
+          changed_path_count: 1,
+          changed_paths: ["src/side.ts"],
+          paths_truncated: false,
+        });
+      }
     });
+  });
+
+  it("rejects a non-clean working tree with a bounded path summary", async () => {
+    await withTempProject(async cwd => {
+      await writeFile(join(cwd, "src", "extra.ts"), "extra", "utf8");
+      class NoopExecutor {
+        async invoke() {
+          return {
+            kind: "replace_exact",
+            expected_file_sha256: "unused",
+            old_text: "hello",
+            new_text: "hi",
+          } as import("../../src/core/execute-once/types.ts").OneShotExecutorOutput;
+        }
+      }
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor: new NoopExecutor(),
+      });
+
+      expect(result.kind).toBe("worktree_not_clean");
+      if (result.kind === "worktree_not_clean") {
+        expect(result.paths).toEqual({
+          changed_path_count: 1,
+          changed_paths: ["src/extra.ts"],
+          paths_truncated: false,
+        });
+      }
+
+      const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
+      expect(content).toBe("hello world");
+    });
+  });
+
+  it("detects verification side effects outside the source file and reports rollback status", async () => {
+    await withTempProject(async cwd => {
+      const executor = new ExternalProcessOneShotExecutor({
+        executablePath: fakeExecutorPath,
+      });
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor,
+      });
+
+      expect(result.kind).toBe("execution_scope_violation");
+      if (result.kind === "execution_scope_violation") {
+        expect(result.rollback).toMatch(/^(complete|incomplete|stale)$/);
+        expect(result.paths.changed_path_count).toBeGreaterThanOrEqual(1);
+      }
+
+      const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
+      expect(content).toBe("hello world");
+    }, 'sh -c "touch src/side2.ts && exit 0"');
   });
 
   it("propagates unknown agent to the caller", async () => {

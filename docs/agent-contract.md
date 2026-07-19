@@ -518,9 +518,11 @@ contract shape.
 - **`task complete <task-id>`** — runs verification and, on pass,
   appends a `done` event (`source: loop`). Idempotent — a second call
   from `done` state returns success without appending a duplicate event.
-  On failure it exits 1 with `error.code: VERIFICATION_FAILED`; read
-  `error.cause_code` **first** to know what to fix:
-  `COMMANDS_FAILED` → fix the failing verification command;
+  If any `depends_on` task is not `done`, exits 2 with
+  `error.code: TASK_DEPENDENCY_INCOMPLETE` and lists the incomplete
+  dependency ids in `data.deps`. On verification failure it exits 1 with
+  `error.code: VERIFICATION_FAILED`; read `error.cause_code` **first** to
+  know what to fix: `COMMANDS_FAILED` → fix the failing verification command;
   `DECISION_REQUIRED` → write or accept the required ADR; `ABORTED` →
   retry only after the interruption is resolved. With
   `--json --detail agent`, `error.message` is intentionally short. Read
@@ -543,7 +545,9 @@ contract shape.
   records a `done` event with `source: external` **without** running
   verification commands; the proof is `--evidence`. Two uses: work
   completed **outside** the loop (already merged / not verifiable from
-  the tree), and the `record_only` lane. The decision gate
+  the tree), and the `record_only` lane. If any `depends_on` task is
+  not `done`, exits 2 with `error.code: TASK_DEPENDENCY_INCOMPLETE` and
+  lists the incomplete dependency ids in `data.deps`. The decision gate
   still applies — a `requires_decision` task with no resolvable ADR
   returns `DECISION_REQUIRED` (exit 2) and records no progress event
   (the ledger is unchanged). It is a distinct path from `task complete`, not a way to

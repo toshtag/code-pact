@@ -117,6 +117,28 @@ describe("applyExactReplacement", () => {
     });
   });
 
+  it("rejects overlapping old_text", async () => {
+    await withTempProject(async cwd => {
+      const content = "aaa";
+      await mkdir(join(cwd, "src"), { recursive: true });
+      await writeFile(join(cwd, "src", "example.ts"), content, "utf8");
+
+      const replacement: ExactReplacement = {
+        path: "src/example.ts",
+        expected_file_sha256: sha256(content),
+        old_text: "aa",
+        new_text: "b",
+      };
+
+      const result = await applyExactReplacement(cwd, replacement);
+
+      expect(result.kind).toBe("rejected");
+      if (result.kind === "rejected") {
+        expect(result.reason).toBe("OLD_TEXT_MULTIPLE_MATCHES");
+      }
+    });
+  });
+
   it("rejects empty old_text", async () => {
     await withTempProject(async cwd => {
       const content = "hello world";

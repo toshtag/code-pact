@@ -1465,6 +1465,13 @@ async function cmdTaskComplete(
         message = m.task.complete.agentNotFound(agent ?? "");
         outCode = "AGENT_NOT_FOUND";
         break;
+      case "TASK_DEPENDENCY_INCOMPLETE": {
+        const deps =
+          (error as NodeJS.ErrnoException & { deps?: string[] }).deps ?? [];
+        message = m.task.complete.dependencyIncomplete(taskId, deps);
+        outCode = "TASK_DEPENDENCY_INCOMPLETE";
+        break;
+      }
       case "INVALID_TASK_TRANSITION": {
         const current =
           (error as NodeJS.ErrnoException & { current?: string }).current ?? "";
@@ -1637,6 +1644,13 @@ async function cmdTaskRecordDone(
         msg = m.task.complete.agentNotFound(agent ?? "");
         outCode = "AGENT_NOT_FOUND";
         break;
+      case "TASK_DEPENDENCY_INCOMPLETE": {
+        const deps =
+          (err as NodeJS.ErrnoException & { deps?: string[] }).deps ?? [];
+        msg = m.task.recordDone.dependencyIncomplete(taskId, deps);
+        outCode = "TASK_DEPENDENCY_INCOMPLETE";
+        break;
+      }
       case "INVALID_TASK_TRANSITION": {
         const current =
           (err as NodeJS.ErrnoException & { current?: string }).current ?? "";

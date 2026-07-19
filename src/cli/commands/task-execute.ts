@@ -2,7 +2,7 @@ import { relative, resolve } from "node:path";
 import { strictParse } from "../../lib/argv.ts";
 import { toParseOptions } from "../spec/render.ts";
 import { TASK_SPECS } from "../spec/task.ts";
-import type { Locale } from "../../i18n/index.ts";
+import { messages, type Locale } from "../../i18n/index.ts";
 import {
   withWriteLock,
   emitOk,
@@ -21,9 +21,10 @@ import {
 
 export async function cmdTaskExecute(
   argv: string[],
-  _locale: Locale,
+  locale: Locale,
   globalJson: boolean,
 ): Promise<number> {
+  const m = messages[locale];
   let values: Record<string, unknown>;
   let positionals: string[];
   try {
@@ -54,17 +55,13 @@ export async function cmdTaskExecute(
   const json = globalJson || values.json === true;
   const taskId = positionals[0];
   if (!taskId) {
-    emitError(json, "CONFIG_ERROR", "task execute requires a task id.");
+    emitError(json, "CONFIG_ERROR", m.task.execute.missingTaskId);
     return 2;
   }
 
   const executorFile = values["executor-file"];
   if (typeof executorFile !== "string" || executorFile.length === 0) {
-    emitError(
-      json,
-      "CONFIG_ERROR",
-      "task execute requires --executor-file <path>.",
-    );
+    emitError(json, "CONFIG_ERROR", m.task.execute.missingExecutorFile);
     return 2;
   }
 
@@ -103,7 +100,7 @@ export async function cmdTaskExecute(
             signal,
           }),
         });
-        return emitExecuteResult(result, json, taskId);
+        return emitExecuteResult(result, json, taskId, m);
       },
     );
   } catch (err) {
@@ -134,10 +131,13 @@ export async function cmdTaskExecute(
   }
 }
 
+type LocaleMessages = (typeof messages)[Locale];
+
 function emitExecuteResult(
   result: TaskExecuteOnceResult,
   json: boolean,
   taskId: string,
+  m: LocaleMessages,
 ): number {
   switch (result.kind) {
     case "done":
@@ -150,7 +150,7 @@ function emitExecuteResult(
         });
       } else {
         process.stderr.write(
-          `Task ${result.task_id} done: ${result.changed_file}\n`,
+          `${m.task.execute.done(result.task_id, result.changed_file)}\n`,
         );
       }
       return 0;
@@ -163,10 +163,23 @@ function emitExecuteResult(
           { data: { reasons: result.reasons } },
         );
       } else {
-        process.stderr.write(`Task ${taskId} is not eligible:\n`);
-        for (const reason of result.reasons) {
-          process.stderr.write(`  - ${reason}\n`);
-        }
+        process.stderr.write(
+          `${m.task.execute.ineligible(taskId, result.reasons)}\n`,
+        );
+      }
+      return 1;
+    case "worktree_not_clean":
+      if (json) {
+        emitError(
+          json,
+          "WORKTREE_NOT_CLEAN",
+          "working tree is not clean before one-shot execution",
+          { data: { paths: result.paths } },
+        );
+      } else {
+        process.stderr.write(
+          `${m.task.execute.worktreeNotClean(result.paths)}\n`,
+        );
       }
       return 1;
     case "blocked":
@@ -175,21 +188,27 @@ function emitExecuteResult(
           data: { reason: result.reason },
         });
       } else {
-        process.stderr.write(`Task ${taskId} blocked: ${result.reason}\n`);
+        process.stderr.write(
+          `${m.task.execute.blocked(taskId, result.reason)}\n`,
+        );
       }
       return 1;
     case "executor_failed":
       if (json) {
         emitError(json, "EXECUTOR_FAILED", result.reason);
       } else {
-        process.stderr.write(`Executor failed: ${result.reason}\n`);
+        process.stderr.write(
+          `${m.task.execute.executorFailed(taskId, result.reason)}\n`,
+        );
       }
       return 1;
     case "edit_rejected":
       if (json) {
         emitError(json, "EDIT_REJECTED", result.reason);
       } else {
-        process.stderr.write(`Edit rejected: ${result.reason}\n`);
+        process.stderr.write(
+          `${m.task.execute.editRejected(taskId, result.reason)}\n`,
+        );
       }
       return 1;
     case "verification_failed":
@@ -206,9 +225,7 @@ function emitExecuteResult(
           },
         );
       } else {
-        process.stderr.write(
-          `Verification failed (rolled_back=${result.rolled_back})\n`,
-        );
+        process.stderr.write(`${m.task.execute.verificationFailed(taskId)}\n`);
       }
       return 1;
     case "rollback_failed":
@@ -219,7 +236,9 @@ function emitExecuteResult(
             : {}),
         });
       } else {
-        process.stderr.write(`Rollback failed: ${result.reason}\n`);
+        process.stderr.write(
+          `${m.task.execute.rollbackFailed(taskId, result.reason)}\n`,
+        );
       }
       return 1;
     case "rollback_stale_file":
@@ -230,7 +249,9 @@ function emitExecuteResult(
             : {}),
         });
       } else {
-        process.stderr.write(`Rollback stale: ${result.reason}\n`);
+        process.stderr.write(
+          `${m.task.execute.rollbackStaleFile(taskId, result.reason)}\n`,
+        );
       }
       return 1;
     case "rollback_incomplete":
@@ -241,7 +262,7 @@ function emitExecuteResult(
           "rollback completed but extra changes remain",
           {
             data: {
-              changed_paths: result.changed_paths,
+              paths: result.paths,
               ...(result.failure !== undefined
                 ? { failure: result.failure }
                 : {}),
@@ -250,22 +271,8 @@ function emitExecuteResult(
         );
       } else {
         process.stderr.write(
-          `Rollback incomplete: ${result.changed_paths.join(", ")}\n`,
+          `${m.task.execute.rollbackIncomplete(result.paths)}\n`,
         );
-      }
-      return 1;
-    case "worktree_not_clean":
-      if (json) {
-        emitError(
-          json,
-          "WORKTREE_NOT_CLEAN",
-          "working tree is not clean before one-shot execution",
-          {
-            data: { paths: result.paths },
-          },
-        );
-      } else {
-        process.stderr.write(`Working tree is not clean before execution.\n`);
       }
       return 1;
     case "executor_mutated_worktree":
@@ -274,13 +281,11 @@ function emitExecuteResult(
           json,
           "EXECUTOR_MUTATED_WORKTREE",
           "executor modified files outside the source file",
-          {
-            data: { changed_paths: result.changed_paths },
-          },
+          { data: { paths: result.paths } },
         );
       } else {
         process.stderr.write(
-          `Executor mutated working tree: ${result.changed_paths.join(", ")}\n`,
+          `${m.task.execute.executorMutatedWorktree(result.paths)}\n`,
         );
       }
       return 1;
@@ -291,17 +296,17 @@ function emitExecuteResult(
           "EXECUTION_SCOPE_VIOLATION",
           "verification scope changed outside the source file",
           {
-            data: { changed_paths: result.changed_paths },
+            data: { paths: result.paths, rollback: result.rollback },
           },
         );
       } else {
         process.stderr.write(
-          `Execution scope violation: ${result.changed_paths.join(", ")}\n`,
+          `${m.task.execute.executionScopeViolation(result.paths, result.rollback)}\n`,
         );
       }
       return 1;
     default:
-      throw new Error(`Unknown execute result kind: ${JSON.stringify(result)}`);
+      throw new Error(m.task.execute.unknownResult(JSON.stringify(result)));
   }
 }
 

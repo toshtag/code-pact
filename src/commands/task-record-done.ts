@@ -100,15 +100,15 @@ export async function runTaskRecordDone(
   // callers; the CLI may also pre-check.
   if (
     opts.evidence.length === 0 ||
-    opts.evidence.some((e) => e.trim().length === 0)
+    opts.evidence.some(e => e.trim().length === 0)
   ) {
     const err = new Error(
-      "task record-done requires --evidence \"<text>\" describing the proof of completion — a PR, a CI result, or the verification you ran (no empty or whitespace-only items).",
+      'task record-done requires --evidence "<text>" describing the proof of completion — a PR, a CI result, or the verification you ran (no empty or whitespace-only items).',
     );
     (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw err;
   }
-  const evidence = opts.evidence.map((e) => e.trim());
+  const evidence = opts.evidence.map(e => e.trim());
 
   // ---- Step 2: agent validation (reads project.yaml; before progress mutation) ----
   const project = await loadProject(cwd);
@@ -137,18 +137,35 @@ export async function runTaskRecordDone(
       `Task "${taskId}" is blocked. Run \`task resume ${taskId}\` before recording done.`,
     );
     (err as NodeJS.ErrnoException).code = "INVALID_TASK_TRANSITION";
-    (err as NodeJS.ErrnoException & { current?: string }).current = state.current;
+    (err as NodeJS.ErrnoException & { current?: string }).current =
+      state.current;
     throw err;
   }
   // planned / started / resumed / failed: proceed. Like task complete we do
   // not call assertTransition here (planned→done is a command-layer shortcut).
 
-  // ---- Step 6: decision gate (same gate as verify, no verification commands) ----
+  // ---- Step 6: load phase and task, check dependencies and decision gate ----
   // Resolve once: the same checkDecision call drives both the CheckResult and
   // the structured data, so they cannot drift apart between two reads of the
   // filesystem.
   const phase = await loadPhase(cwd, phasePath);
-  const task = phase.tasks!.find((t) => t.id === taskId)!;
+  const task = phase.tasks!.find(t => t.id === taskId)!;
+
+  const incompleteDeps: string[] = [];
+  for (const depId of task.depends_on ?? []) {
+    if (deriveTaskState(log.events, depId).current !== "done") {
+      incompleteDeps.push(depId);
+    }
+  }
+  if (incompleteDeps.length > 0) {
+    const err = new Error(
+      `Task "${taskId}" cannot be recorded as done: dependencies are not done: ${incompleteDeps.join(", ")}.`,
+    );
+    (err as NodeJS.ErrnoException).code = "TASK_DEPENDENCY_INCOMPLETE";
+    (err as NodeJS.ErrnoException & { deps?: string[] }).deps = incompleteDeps;
+    throw err;
+  }
+
   const { check, resolution } = await checkDecision(cwd, phase, task);
   if (!check.ok) {
     const err = new Error(
@@ -164,7 +181,7 @@ export async function runTaskRecordDone(
       decision_check: check,
       current_resolution: "status-aware",
       via: res.via,
-      considered: res.considered.map((c) => ({
+      considered: res.considered.map(c => ({
         path: c.path,
         status: c.status,
         accepted: c.accepted,
@@ -175,7 +192,8 @@ export async function runTaskRecordDone(
         ? { expected_pattern: `design/decisions/*${taskId}*.md` }
         : {}),
     };
-    (err as NodeJS.ErrnoException & { data?: DecisionRequiredData }).data = data;
+    (err as NodeJS.ErrnoException & { data?: DecisionRequiredData }).data =
+      data;
     throw err;
   }
 

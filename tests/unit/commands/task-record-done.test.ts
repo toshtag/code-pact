@@ -92,6 +92,7 @@ async function setupProject(
     hasAdr?: boolean;
     projectYaml?: string;
     progressYaml?: string;
+    phaseYaml?: string;
   } = {},
 ): Promise<void> {
   await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
@@ -109,10 +110,11 @@ async function setupProject(
   await writeFile(join(dir, "design", "roadmap.yaml"), ROADMAP_YAML, "utf8");
   await writeFile(
     join(dir, "design", "phases", "P1-foundation.yaml"),
-    PHASE_YAML({
-      failingCommand: opts.failingCommand,
-      requiresDecision: opts.requiresDecision,
-    }),
+    opts.phaseYaml ??
+      PHASE_YAML({
+        failingCommand: opts.failingCommand,
+        requiresDecision: opts.requiresDecision,
+      }),
     "utf8",
   );
   if (opts.hasAdr) {
@@ -316,6 +318,80 @@ describe("runTaskRecordDone — idempotency and transitions", () => {
       "utf8",
     );
     expect(after).toBe(before);
+  });
+});
+
+describe("runTaskRecordDone — dependencies", () => {
+  const PHASE_WITH_DEPENDENCY = `id: P1
+name: Foundation
+weight: 12
+confidence: high
+risk: low
+status: planned
+objective: test phase
+definition_of_done:
+  - tests pass
+verification:
+  commands:
+    - echo ok
+tasks:
+  - id: P1-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P1-T2
+  - id: P1-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+    expected_duration: short
+    status: planned
+`;
+
+  it("throws TASK_DEPENDENCY_INCOMPLETE when depends_on is not done", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_WITH_DEPENDENCY });
+    await expect(
+      runTaskRecordDone({ cwd: dir, taskId: "P1-T1", evidence: ["x"] }),
+    ).rejects.toMatchObject({
+      code: "TASK_DEPENDENCY_INCOMPLETE",
+      deps: ["P1-T2"],
+    });
+    const { log } = await readProgress(dir);
+    expect(log.events).toHaveLength(0);
+  });
+
+  it("records done when depends_on task is already done", async () => {
+    const progress = `events:
+  - task_id: P1-T2
+    status: done
+    at: "2026-05-15T10:00:00+09:00"
+    actor: human
+    evidence:
+      - manual review
+`;
+    await setupProject(dir, {
+      phaseYaml: PHASE_WITH_DEPENDENCY,
+      progressYaml: progress,
+    });
+    const result = await runTaskRecordDone({
+      cwd: dir,
+      taskId: "P1-T1",
+      evidence: ["PR #123"],
+    });
+    expect(result.kind).toBe("done");
+    const { log } = await readProgress(dir);
+    expect(log.events).toHaveLength(2);
+    expect(log.events[1]!.task_id).toBe("P1-T1");
+    expect(log.events[1]!.status).toBe("done");
   });
 });
 

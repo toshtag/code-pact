@@ -7,6 +7,7 @@ import { ExecutorError, truncateExecutorReason } from "./executor.ts";
 import { loadPhase } from "../plan/load-phase.ts";
 import { resolveTaskInRoadmap } from "../plan/resolve-task.ts";
 import { loadProgressLog } from "../progress/io.ts";
+import { loadProject, resolveEnabledAgent } from "../project.ts";
 import {
   readOwnedTextBounded,
   resolveExecuteSourceReadPath,
@@ -14,14 +15,17 @@ import {
 } from "../project-fs/index.ts";
 import { applyExactReplacement } from "./exact-replacement.ts";
 import { resolveOneShotEligibility } from "./eligibility.ts";
+import { projectVerifyForAgent } from "../evidence/failure-capsule.ts";
 import {
   MAX_EXECUTOR_INPUT_BYTES,
   MAX_SOURCE_BYTES,
   type BoundedFailureCapsule,
+  type BoundedPathSummary,
   type OneShotExecutor,
   type OneShotExecutorInput,
   type TaskExecuteOnceResult,
 } from "./types.ts";
+import type { CheckResult, VerifyResult } from "../../commands/verify.ts";
 
 export type RunTaskExecuteOnceOptions = {
   cwd: string;
@@ -33,6 +37,8 @@ export type RunTaskExecuteOnceOptions = {
 };
 
 const execFileAsync = promisify(execFile);
+const MAX_PATH_SAMPLE_COUNT = 20;
+const MAX_PATH_SAMPLE_BYTES = 4096;
 
 type WorktreeChanges = { clean: true } | { clean: false; paths: string[] };
 
@@ -61,14 +67,36 @@ async function getWorktreeChanges(cwd: string): Promise<WorktreeChanges> {
   }
 }
 
+function boundedPathSummary(paths: string[]): BoundedPathSummary {
+  const unique = [...new Set(paths)].sort((a, b) => a.localeCompare(b));
+  const sample: string[] = [];
+  let bytes = 0;
+  for (const p of unique) {
+    const pBytes = Buffer.byteLength(p, "utf8");
+    if (
+      sample.length >= MAX_PATH_SAMPLE_COUNT ||
+      (sample.length > 0 && bytes + pBytes > MAX_PATH_SAMPLE_BYTES)
+    ) {
+      break;
+    }
+    sample.push(p);
+    bytes += pBytes;
+  }
+  return {
+    changed_path_count: unique.length,
+    changed_paths: sample,
+    paths_truncated: sample.length < unique.length,
+  };
+}
+
 function onlyPathChanged(status: WorktreeChanges, path: string): boolean {
   if (status.clean) return false;
-  return status.paths.every(p => p === path || p.startsWith(`${path}/`));
+  return status.paths.length === 1 && status.paths[0] === path;
 }
 
 function extraPaths(status: WorktreeChanges, path: string): string[] {
   if (status.clean) return [];
-  return status.paths.filter(p => p !== path && !p.startsWith(`${path}/`));
+  return status.paths.filter(p => p !== path);
 }
 
 function sha256(content: string): string {
@@ -107,8 +135,14 @@ export async function runTaskExecuteOnce(
 
   const worktreeBefore = await getWorktreeChanges(cwd);
   if (!worktreeBefore.clean) {
-    return { kind: "worktree_not_clean", paths: worktreeBefore.paths };
+    return {
+      kind: "worktree_not_clean",
+      paths: boundedPathSummary(worktreeBefore.paths),
+    };
   }
+
+  const project = await loadProject(cwd);
+  const agentName = resolveEnabledAgent(project, opts.agent);
 
   let sourceContent: string;
   try {
@@ -117,7 +151,9 @@ export async function runTaskExecuteOnce(
   } catch (error) {
     return {
       kind: "executor_failed",
-      reason: `source read failed: ${(error as Error).message}`,
+      reason: truncateExecutorReason(
+        `source read failed: ${(error as Error).message}`,
+      ),
     };
   }
 
@@ -143,7 +179,9 @@ export async function runTaskExecuteOnce(
   if (Buffer.byteLength(inputJson, "utf8") > MAX_EXECUTOR_INPUT_BYTES) {
     return {
       kind: "executor_failed",
-      reason: `executor input exceeds ${MAX_EXECUTOR_INPUT_BYTES} bytes`,
+      reason: truncateExecutorReason(
+        `executor input exceeds ${MAX_EXECUTOR_INPUT_BYTES} bytes`,
+      ),
     };
   }
 
@@ -165,7 +203,7 @@ export async function runTaskExecuteOnce(
   if (!worktreeAfterExecutor.clean) {
     return {
       kind: "executor_mutated_worktree",
-      changed_paths: worktreeAfterExecutor.paths,
+      paths: boundedPathSummary(worktreeAfterExecutor.paths),
     };
   }
 
@@ -195,14 +233,23 @@ export async function runTaskExecuteOnce(
       applyResult.appliedContent,
     );
     if (restore.kind === "stale") {
-      return { kind: "rollback_stale_file", reason: restore.reason };
+      return {
+        kind: "execution_scope_violation",
+        paths: boundedPathSummary(extras),
+        rollback: "stale",
+      };
     }
     if (restore.kind === "failed") {
-      return { kind: "rollback_failed", reason: restore.reason };
+      return {
+        kind: "execution_scope_violation",
+        paths: boundedPathSummary(extras),
+        rollback: "incomplete",
+      };
     }
     return {
       kind: "execution_scope_violation",
-      changed_paths: extras,
+      paths: boundedPathSummary(extras),
+      rollback: "complete",
     };
   }
 
@@ -211,7 +258,7 @@ export async function runTaskExecuteOnce(
     completionResult = await runTaskComplete({
       cwd,
       taskId,
-      agent: opts.agent,
+      agent: agentName,
       timeoutMs: opts.timeoutMs,
       signal,
       skipLoopMemory: true,
@@ -231,8 +278,18 @@ export async function runTaskExecuteOnce(
     });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    const failure =
-      code === "VERIFICATION_FAILED" ? buildFailureCapsule(error) : undefined;
+    let failure: BoundedFailureCapsule | undefined;
+    if (code === "VERIFICATION_FAILED") {
+      const checks =
+        (error as NodeJS.ErrnoException & { checks?: CheckResult[] }).checks ??
+        [];
+      const verifyResult: VerifyResult = { ok: false, checks };
+      failure = (
+        await projectVerifyForAgent(cwd, verifyResult, {
+          skipEvidenceStore: true,
+        })
+      ).failure;
+    }
 
     const restore = await restoreOriginalFile(
       cwd,
@@ -240,8 +297,37 @@ export async function runTaskExecuteOnce(
       applyResult.originalContent,
       applyResult.appliedContent,
     );
+
+    const worktreeAfterRollback = await getWorktreeChanges(cwd);
+
+    if (code === "EXECUTION_SCOPE_VIOLATION") {
+      const extras =
+        (error as NodeJS.ErrnoException & { changed_paths?: string[] })
+          .changed_paths ??
+        (worktreeAfterRollback.clean ? [] : worktreeAfterRollback.paths);
+      let rollback: "complete" | "incomplete" | "stale";
+      if (restore.kind === "stale") {
+        rollback = "stale";
+      } else if (restore.kind === "failed") {
+        rollback = "incomplete";
+      } else if (!worktreeAfterRollback.clean) {
+        rollback = "incomplete";
+      } else {
+        rollback = "complete";
+      }
+      return {
+        kind: "execution_scope_violation",
+        paths: boundedPathSummary(extras),
+        rollback,
+      };
+    }
+
     if (restore.kind === "stale") {
-      return { kind: "rollback_stale_file", reason: restore.reason };
+      return {
+        kind: "rollback_stale_file",
+        reason: restore.reason,
+        applied_sha: restore.applied_sha,
+      };
     }
     if (restore.kind === "failed") {
       return {
@@ -251,24 +337,16 @@ export async function runTaskExecuteOnce(
       };
     }
 
-    const worktreeAfterRollback = await getWorktreeChanges(cwd);
+    if (code === "AGENT_NOT_FOUND" || code === "AGENT_NOT_ENABLED") {
+      throw error;
+    }
+
     if (!worktreeAfterRollback.clean) {
       return {
         kind: "rollback_incomplete",
-        changed_paths: worktreeAfterRollback.paths,
+        paths: boundedPathSummary(worktreeAfterRollback.paths),
         failure,
       };
-    }
-
-    if (code === "EXECUTION_SCOPE_VIOLATION") {
-      const changed_paths =
-        (error as NodeJS.ErrnoException & { changed_paths?: string[] })
-          .changed_paths ?? [];
-      return { kind: "execution_scope_violation", changed_paths };
-    }
-
-    if (code === "AGENT_NOT_FOUND" || code === "AGENT_NOT_ENABLED") {
-      throw error;
     }
 
     if (code === "VERIFICATION_FAILED" && failure !== undefined) {
@@ -281,10 +359,11 @@ export async function runTaskExecuteOnce(
 
     return {
       kind: "executor_failed",
-      reason:
+      reason: truncateExecutorReason(
         typeof code === "string" && code.length > 0
           ? `${code}: ${(error as Error).message}`
           : (error as Error).message,
+      ),
     };
   }
 
@@ -296,7 +375,11 @@ export async function runTaskExecuteOnce(
       applyResult.appliedContent,
     );
     if (restore.kind === "stale") {
-      return { kind: "rollback_stale_file", reason: restore.reason };
+      return {
+        kind: "rollback_stale_file",
+        reason: restore.reason,
+        applied_sha: restore.applied_sha,
+      };
     }
     if (restore.kind === "failed") {
       return {
@@ -306,7 +389,9 @@ export async function runTaskExecuteOnce(
     }
     return {
       kind: "executor_failed",
-      reason: `task complete returned unexpected kind: ${completionResult.kind}`,
+      reason: truncateExecutorReason(
+        `task complete returned unexpected kind: ${completionResult.kind}`,
+      ),
     };
   }
 
@@ -315,27 +400,6 @@ export async function runTaskExecuteOnce(
     task_id: taskId,
     changed_file: sourcePath,
     verification: "passed",
-  };
-}
-
-function buildFailureCapsule(error: unknown): BoundedFailureCapsule {
-  const checks = (error as NodeJS.ErrnoException & { checks?: unknown }).checks;
-  const checkArray = Array.isArray(checks) ? checks : [];
-  const firstFailure = checkArray.find(
-    (c: unknown) =>
-      typeof c === "object" &&
-      c !== null &&
-      (c as { ok?: boolean }).ok === false,
-  );
-  const failedCheck =
-    firstFailure && typeof firstFailure === "object" && firstFailure !== null
-      ? (firstFailure as { name?: string; reason?: string })
-      : undefined;
-  return {
-    schema_version: 1,
-    kind: failedCheck?.name ? "command_failed" : "unknown",
-    check: failedCheck?.name ?? "verification",
-    ...(failedCheck?.reason ? { reason: failedCheck.reason } : {}),
   };
 }
 
@@ -365,7 +429,9 @@ async function restoreOriginalFile(
     }
     return {
       kind: "failed",
-      reason: `ROLLBACK_FAILED: ${(error as Error).message}`,
+      reason: truncateExecutorReason(
+        `ROLLBACK_FAILED: ${(error as Error).message}`,
+      ),
     };
   }
 }

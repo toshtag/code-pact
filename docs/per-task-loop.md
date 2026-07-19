@@ -102,7 +102,7 @@ For eligible single-file tasks, `code-pact task execute <id> --executor-file <pa
 
 The external process receives a JSON input (schema version 1) with the task goal, `source_path`, source content, and verification command; it must emit either a `replace_exact` payload (`expected_file_sha256`, `old_text`, `new_text`) or a `blocked` reason. `new_text` may be empty to delete `old_text`. The runtime applies the replacement atomically, re-runs the verification command, and records `done` only when the working tree contains exactly the expected source-file change. On failure it rolls the source file back; if the working tree changes outside the source file, the edit is rejected and the source is restored.
 
-Public error codes for `task execute` are: `EDIT_REJECTED`, `EXECUTION_BLOCKED`, `EXECUTION_INELIGIBLE`, `EXECUTOR_FAILED`, `ROLLBACK_FAILED`, `ROLLBACK_STALE_FILE`, `ROLLBACK_INCOMPLETE`, `WORKTREE_NOT_CLEAN`, `EXECUTOR_MUTATED_WORKTREE`, and `EXECUTION_SCOPE_VIOLATION`.
+Public error codes for `task execute` are: `EDIT_REJECTED`, `EXECUTION_BLOCKED`, `EXECUTION_INELIGIBLE`, `EXECUTOR_FAILED`, `VERIFICATION_FAILED`, `ROLLBACK_FAILED`, `ROLLBACK_STALE_FILE`, `ROLLBACK_INCOMPLETE`, `WORKTREE_NOT_CLEAN`, `EXECUTOR_MUTATED_WORKTREE`, and `EXECUTION_SCOPE_VIOLATION`. Path lists are emitted as bounded summaries (`{ changed_path_count: number, changed_paths: string[], paths_truncated: boolean }`) and `VERIFICATION_FAILED` also carries a bounded `failure` projection.
 
 ## A worked example
 

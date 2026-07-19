@@ -4,6 +4,8 @@ import {
   readOwnedTextBounded,
   resolveExecuteSourceReadPath,
   resolveExecuteSourceWritePath,
+  type OwnedReadPath,
+  type OwnedWritePath,
 } from "../project-fs/index.ts";
 import {
   MAX_NEW_TEXT_BYTES,
@@ -34,13 +36,11 @@ export async function applyExactReplacement(
     return { kind: "rejected", reason: "NEW_TEXT_TOO_LARGE" };
   }
 
-  let readPath;
-  let writePath;
+  let readPath: OwnedReadPath;
+  let writePath: OwnedWritePath;
   try {
-    [readPath, writePath] = await Promise.all([
-      resolveExecuteSourceReadPath(cwd, replacement.path),
-      resolveExecuteSourceWritePath(cwd, replacement.path),
-    ]);
+    readPath = await resolveExecuteSourceReadPath(cwd, replacement.path);
+    writePath = await resolveExecuteSourceWritePath(cwd, replacement.path);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "PATH_NOT_OWNED") {
@@ -131,7 +131,7 @@ function countOccurrences(haystack: string, needle: string): number {
   let pos = 0;
   while ((pos = haystack.indexOf(needle, pos)) !== -1) {
     count += 1;
-    pos += needle.length;
+    pos += 1;
   }
   return count;
 }

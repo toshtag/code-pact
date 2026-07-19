@@ -145,6 +145,21 @@ export async function runTaskComplete(
     throw error;
   }
 
+  const incompleteDeps: string[] = [];
+  for (const depId of task.depends_on ?? []) {
+    if (deriveTaskState(log.events, depId).current !== "done") {
+      incompleteDeps.push(depId);
+    }
+  }
+  if (incompleteDeps.length > 0) {
+    const err = new Error(
+      `Task "${taskId}" cannot be completed: dependencies are not done: ${incompleteDeps.join(", ")}.`,
+    );
+    (err as NodeJS.ErrnoException).code = "TASK_DEPENDENCY_INCOMPLETE";
+    (err as NodeJS.ErrnoException & { deps?: string[] }).deps = incompleteDeps;
+    throw err;
+  }
+
   const verifyResult = await runVerify({
     cwd,
     phaseId,
