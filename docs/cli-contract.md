@@ -246,6 +246,12 @@ CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes
 
 > **Not a top-level command error:** `EVENT_FILE_ID_MISMATCH` (collaboration-safe-state RFC, B1/B5) is a **ledger-integrity diagnostic**, not a public structured command error. It is surfaced as a structured `data.issues[]` entry only by the lenient-loader surfaces (`doctor`, `plan lint`) — see [Plan diagnostic codes](#plan-diagnostic-codes). The strict-loader readers never expose it as the top-level `error.code`: `task *` and `verify` abort as a raw unhandled failure (exit 3, no JSON envelope — the same as a corrupt legacy `progress.yaml`), while `plan analyze` and `plan migrate` wrap the ledger-read failure in the command's own code (`PLAN_ANALYZE_FAILED` for analyze, `PLAN_MIGRATE_FAILED` for migrate) with the original cause in `error.message`. `pack` is best-effort and skips it.
 
+| `EDIT_REJECTED` | `task execute` | The executor returned a `replace_exact` payload that could not be applied to the source file (stale SHA, path not in `writes`, malformed replacement, or SHA mismatch). Exit code 1. |
+| `EXECUTION_BLOCKED` | `task execute` | The external executor reported it cannot modify the file. Exit code 1. |
+| `EXECUTION_INELIGIBLE` | `task execute` | The task is not eligible for one-shot execution (wrong type, multiple read/write files, missing source, or another blocker). Exit code 1. The envelope carries `data.reasons`. |
+| `EXECUTOR_FAILED` | `task execute` | The external executor exited non-zero, timed out, emitted malformed or oversized JSON, or returned an unsupported `kind`. Exit code 1. The envelope carries `data.reason`. |
+| `ROLLBACK_FAILED` | `task execute` | The source file could not be restored after a verification failure. Exit code 1. The envelope may carry `data.failure`. |
+
 ### Public cause codes
 
 These appear in `error.cause_code` — an **additive sibling** of `error.code`, not a

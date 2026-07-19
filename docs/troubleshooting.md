@@ -6,9 +6,9 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 
 | Code                                                                                                                                                                                                                         | Usually means                                                                                        | Start here                                                                                                                                                                                                                                 |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`VERIFICATION_FAILED`](#verification_failed-from-task-complete-or-standalone-verify)                                                                                                                                        | A completion check failed (command **or** decision gate)                                             | On `task complete`: read `error.cause_code`. On standalone `verify` default/full: inspect `data.checks`. With `--detail agent`: inspect `data.failure.kind`, `check`, and `reason` first                                                                |
-| [`INVALID_EVIDENCE_REF` / `EVIDENCE_*`](#evidence-retrieval-errors-from-evidence-show-or-agent-detail)                                                                                                                       | A cached verification evidence artifact cannot be retrieved or trusted                               | Re-run the failing verification if the evidence is missing/stale; inspect `data.system_code` or `data.failure.evidence_error` for filesystem/cache faults                                                                                               |
-| [`INVALID_CONTEXT_REF` / `CONTEXT_*`](#context-retrieval-errors-from-context-show)                                                                                                                                           | A deferred context artifact cannot be retrieved or trusted                                           | Use the exact `retrieve_command` from `task prepare`; if the cache is missing or corrupt, rerun `task prepare` to recreate the context                                                                                                                     |
+| [`VERIFICATION_FAILED`](#verification_failed-from-task-complete-or-standalone-verify)                                                                                                                                        | A completion check failed (command **or** decision gate)                                             | On `task complete`: read `error.cause_code`. On standalone `verify` default/full: inspect `data.checks`. With `--detail agent`: inspect `data.failure.kind`, `check`, and `reason` first                                                   |
+| [`INVALID_EVIDENCE_REF` / `EVIDENCE_*`](#evidence-retrieval-errors-from-evidence-show-or-agent-detail)                                                                                                                       | A cached verification evidence artifact cannot be retrieved or trusted                               | Re-run the failing verification if the evidence is missing/stale; inspect `data.system_code` or `data.failure.evidence_error` for filesystem/cache faults                                                                                  |
+| [`INVALID_CONTEXT_REF` / `CONTEXT_*`](#context-retrieval-errors-from-context-show)                                                                                                                                           | A deferred context artifact cannot be retrieved or trusted                                           | Use the exact `retrieve_command` from `task prepare`; if the cache is missing or corrupt, rerun `task prepare` to recreate the context                                                                                                     |
 | [`INVALID_TASK_TRANSITION`](#invalid_task_transition-from-task-start--block--resume--complete)                                                                                                                               | Wrong state transition (e.g. complete a blocked task)                                                | Check `task status`; `task resume` first                                                                                                                                                                                                   |
 | [`TASK_FINALIZE_NOT_ELIGIBLE`](#task_finalize_not_eligible-from-task-finalize)                                                                                                                                               | Task isn't `done` yet                                                                                | Run `task complete` first                                                                                                                                                                                                                  |
 | [`TASK_FINALIZE_WRITE_REFUSED`](#task_finalize_write_refused-from-task-finalize---write)                                                                                                                                     | Phase-YAML write blocked by the safety check                                                         | Read `data.reason`; usually fix the phase file                                                                                                                                                                                             |
@@ -38,7 +38,7 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`EVENT_FILE_ID_MISMATCH`](#event_file_id_mismatch-from-doctor--plan-lint)                                                                                                                                                   | A per-event ledger file's content doesn't match its content-addressed name (corrupt / hand-edited)   | Restore from git or remove the file named in the message, then re-run                                                                                                                                                                      |
 | [`PROGRESS_EVENT_CONFLICT`](#progress_event_conflict-from-doctor--plan-analyze)                                                                                                                                              | Incompatible same-task lifecycle events (e.g. two branches both `done` a task)                       | Reconcile the conflicting event(s) for the named task                                                                                                                                                                                      |
 | [`CONTROL_PLANE_GITIGNORED`](#control_plane_gitignored-from-doctor)                                                                                                                                                          | A `.gitignore` rule keeps part of the shared control plane off git, so collaboration silently breaks | Narrow the `.gitignore` to the local-only subset and commit the shared control plane (project.yaml, profiles, baselines, state/events/)                                                                                                    |
-| [`LOOP_MEMORY_*`](#loop_memory_-from-doctor)                                                                                                                                                                                  | Local bounded loop-memory cache is tracked, not ignored, or path-unsafe                             | Keep `/.code-pact/cache/` ignored, remove local cache files from version control, and replace unsafe cache symlinks with normal project-local directories                                                                                 |
+| [`LOOP_MEMORY_*`](#loop_memory_-from-doctor)                                                                                                                                                                                 | Local bounded loop-memory cache is tracked, not ignored, or path-unsafe                              | Keep `/.code-pact/cache/` ignored, remove local cache files from version control, and replace unsafe cache symlinks with normal project-local directories                                                                                  |
 | [`DUPLICATE_PHASE_ID`](#duplicate_phase_id-from-plan-lint--doctor)                                                                                                                                                           | Two phase files claim the same `P<N>` id (often a clean-but-wrong branch merge)                      | Renumber one phase + its roadmap entry, then re-run `plan lint`                                                                                                                                                                            |
 | [`DUPLICATE_TASK_ID`](#duplicate_task_id-from-plan-lint--doctor)                                                                                                                                                             | One task id appears in two phases                                                                    | Renumber one task (+ refs to it), then re-run `plan lint`                                                                                                                                                                                  |
 | [`PHASE_ID_MISMATCH`](#phase_id_mismatch-from-plan-lint--doctor)                                                                                                                                                             | A phase file's inner `id:` differs from its roadmap entry                                            | Make the two ids match, then re-run `plan lint`                                                                                                                                                                                            |
@@ -126,14 +126,14 @@ With `--json --detail agent`, `error.message` is intentionally short; do not tre
 
 For top-level `evidence show` failures:
 
-| Code | Recovery |
-| ---- | -------- |
-| `INVALID_EVIDENCE_REF` | The ref is malformed. Use the exact `data.failure.retrieve_command` emitted by the failing verification run. |
-| `EVIDENCE_NOT_FOUND` | The cache entry is absent, usually because the workspace was cleaned or the ref came from another checkout. Re-run the failing verification command to recreate current evidence. |
-| `EVIDENCE_INVALID` | The cache file is corrupt or schema-invalid. Delete the derived cache entry only if you are sure it is local generated state, then re-run the failing verification. |
-| `EVIDENCE_DIGEST_MISMATCH` | The cache file's bytes do not match the digest in the ref. Treat the cache as untrusted and re-run verification instead of reading the artifact. |
-| `EVIDENCE_PATH_UNSAFE` | Evidence path resolution crossed a traversal, symlink, or authority boundary. Inspect `.code-pact/cache/evidence/` and remove the unsafe cache shape before retrying. |
-| `EVIDENCE_READ_FAILED` | The cache could not be read for an I/O/platform reason. Inspect `data.system_code` for the underlying errno, fix permissions or filesystem state, then retry. |
+| Code                       | Recovery                                                                                                                                                                          |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INVALID_EVIDENCE_REF`     | The ref is malformed. Use the exact `data.failure.retrieve_command` emitted by the failing verification run.                                                                      |
+| `EVIDENCE_NOT_FOUND`       | The cache entry is absent, usually because the workspace was cleaned or the ref came from another checkout. Re-run the failing verification command to recreate current evidence. |
+| `EVIDENCE_INVALID`         | The cache file is corrupt or schema-invalid. Delete the derived cache entry only if you are sure it is local generated state, then re-run the failing verification.               |
+| `EVIDENCE_DIGEST_MISMATCH` | The cache file's bytes do not match the digest in the ref. Treat the cache as untrusted and re-run verification instead of reading the artifact.                                  |
+| `EVIDENCE_PATH_UNSAFE`     | Evidence path resolution crossed a traversal, symlink, or authority boundary. Inspect `.code-pact/cache/evidence/` and remove the unsafe cache shape before retrying.             |
+| `EVIDENCE_READ_FAILED`     | The cache could not be read for an I/O/platform reason. Inspect `data.system_code` for the underlying errno, fix permissions or filesystem state, then retry.                     |
 
 For nested agent-detail cache failures, the top-level error remains `VERIFICATION_FAILED`; read `data.failure.evidence_error`. `code: "EVIDENCE_UNAVAILABLE"` means verification still failed, but Code Pact could not store the optional evidence artifact. `cause_code` distinguishes `EVIDENCE_CONFLICT`, `EVIDENCE_PATH_UNSAFE`, and `EVIDENCE_WRITE_FAILED`. Fix the cache/filesystem issue if you need retrieval, otherwise use the bounded stdout/stderr excerpts in `data.failure` to diagnose the original verification failure.
 
@@ -143,15 +143,15 @@ Budgeted `task prepare` may return a `deferred_context.manifest_ref` and `retrie
 
 Do not hand-edit or commit `.code-pact/cache/context/`. Use `context show <ref> --list --json` to inspect available sections, then retrieve only the needed section with `--section <name>`.
 
-| Code | Recovery |
-| ---- | -------- |
-| `INVALID_CONTEXT_REF` | The ref is malformed. Use the exact `retrieve_command` emitted by `task prepare`. |
-| `CONTEXT_NOT_FOUND` | The cache entry is absent, usually because local derived state was cleaned or a competing cache mutation removed it before readback. Rerun `task prepare` with the same budget to recreate it. |
-| `CONTEXT_INVALID` | The artifact is corrupt, schema-invalid, not canonical, or has mismatched section metadata. Treat it as untrusted and rerun `task prepare`. |
-| `CONTEXT_DIGEST_MISMATCH` | The artifact bytes or section body no longer match the recorded digest. Treat the cache as untrusted and rerun `task prepare`. |
-| `CONTEXT_PATH_UNSAFE` | Context path resolution crossed a traversal, symlink, or authority boundary. Inspect `.code-pact/cache/context/` and remove the unsafe cache shape before retrying. |
-| `CONTEXT_READ_FAILED` | The cache could not be read for an I/O/platform reason. Inspect `data.system_code`, fix permissions or filesystem state, then retry. |
-| `CONTEXT_WRITE_FAILED` | The cache could not be written for an I/O/platform reason. Inspect `data.system_code`, fix permissions or disk state, then rerun `task prepare`. No context pack is written before this failure. |
+| Code                      | Recovery                                                                                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `INVALID_CONTEXT_REF`     | The ref is malformed. Use the exact `retrieve_command` emitted by `task prepare`.                                                                                                                |
+| `CONTEXT_NOT_FOUND`       | The cache entry is absent, usually because local derived state was cleaned or a competing cache mutation removed it before readback. Rerun `task prepare` with the same budget to recreate it.   |
+| `CONTEXT_INVALID`         | The artifact is corrupt, schema-invalid, not canonical, or has mismatched section metadata. Treat it as untrusted and rerun `task prepare`.                                                      |
+| `CONTEXT_DIGEST_MISMATCH` | The artifact bytes or section body no longer match the recorded digest. Treat the cache as untrusted and rerun `task prepare`.                                                                   |
+| `CONTEXT_PATH_UNSAFE`     | Context path resolution crossed a traversal, symlink, or authority boundary. Inspect `.code-pact/cache/context/` and remove the unsafe cache shape before retrying.                              |
+| `CONTEXT_READ_FAILED`     | The cache could not be read for an I/O/platform reason. Inspect `data.system_code`, fix permissions or filesystem state, then retry.                                                             |
+| `CONTEXT_WRITE_FAILED`    | The cache could not be written for an I/O/platform reason. Inspect `data.system_code`, fix permissions or disk state, then rerun `task prepare`. No context pack is written before this failure. |
 
 ## `TASK_FINALIZE_NOT_ELIGIBLE` from `task finalize`
 
@@ -691,11 +691,11 @@ Loop memory is a bounded local cache under
 checkout and must not become shared project state. `doctor` reports three
 advisories:
 
-| Code | Meaning | Fix |
-| --- | --- | --- |
-| `LOOP_MEMORY_CACHE_NOT_GITIGNORED` | `/.code-pact/cache/` is not ignored. | Add `/.code-pact/cache/` to `.gitignore`. |
-| `LOOP_MEMORY_TRACKED` | One or more files under `.code-pact/cache/loop-memory/` are tracked by git. | Remove those local cache files from version control; do not delete unrelated state. |
-| `LOOP_MEMORY_PATH_UNSAFE` | The cache path resolves through a symlink or outside the project. | Replace it with a normal directory under `.code-pact/cache/loop-memory/`. |
+| Code                               | Meaning                                                                     | Fix                                                                                 |
+| ---------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `LOOP_MEMORY_CACHE_NOT_GITIGNORED` | `/.code-pact/cache/` is not ignored.                                        | Add `/.code-pact/cache/` to `.gitignore`.                                           |
+| `LOOP_MEMORY_TRACKED`              | One or more files under `.code-pact/cache/loop-memory/` are tracked by git. | Remove those local cache files from version control; do not delete unrelated state. |
+| `LOOP_MEMORY_PATH_UNSAFE`          | The cache path resolves through a symlink or outside the project.           | Replace it with a normal directory under `.code-pact/cache/loop-memory/`.           |
 
 Use aggregate maintenance commands; they do not print episode bodies:
 
@@ -732,9 +732,9 @@ measured regular-file subset, including invalid UTF-8 files; use
 `task complete` can return two advisory warning codes without changing the
 verification result or exit code:
 
-| Code | Meaning |
-| --- | --- |
-| `LOCAL_MEMORY_WRITE_SKIPPED` | The episode was not recorded. |
+| Code                         | Meaning                                                                           |
+| ---------------------------- | --------------------------------------------------------------------------------- |
+| `LOCAL_MEMORY_WRITE_SKIPPED` | The episode was not recorded.                                                     |
 | `LOCAL_MEMORY_PRUNE_SKIPPED` | The episode was recorded, but best-effort retention maintenance did not complete. |
 
 `memory` operational errors use stable exit-1 JSON codes under `--json`:
@@ -816,3 +816,17 @@ This is a symptom of an unresolved `DUPLICATE_PHASE_ID` / `DUPLICATE_TASK_ID`:
 resolve that first (sections above) — renumber the duplicate and re-run
 `code-pact plan lint` until clean — then retry the original command. The tool
 refuses to guess which one you meant, by design.
+
+## One-shot execution errors from `task execute`
+
+These codes are emitted by the experimental `code-pact task execute` command. The
+source file is rolled back on `verification_failed`; for all other failure kinds
+the source file is left as-is.
+
+| Code                   | Usually means                                                                                                                                       | Start here                                                                                                                              |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `EDIT_REJECTED`        | The executor returned a `replace_exact` payload that could not be applied (stale SHA, path not in `writes`, malformed replacement, or SHA mismatch) | Fix the executor output; ensure the task's `writes` and the file SHA match                                                              |
+| `EXECUTION_BLOCKED`    | The executor reported it cannot modify the file                                                                                                     | Update the task or executor to handle the blocker                                                                                       |
+| `EXECUTION_INELIGIBLE` | The task is not eligible for one-shot execution                                                                                                     | Change the task to read+write a single existing file, set `type` to `feature`/`bugfix`/`refactor`, and ensure it is `planned`/`started` |
+| `EXECUTOR_FAILED`      | The external executor exited non-zero, timed out, or emitted malformed/oversized JSON                                                               | Check the executor path, permissions, timeout, and stdout size (< 16384 bytes)                                                          |
+| `ROLLBACK_FAILED`      | The file could not be restored after a verification failure                                                                                         | Inspect the working tree manually and repair the file before retrying                                                                   |
