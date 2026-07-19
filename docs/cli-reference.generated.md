@@ -351,6 +351,27 @@ code-pact task finalize P1-T1 --write --json
 code-pact task finalize P1-T1 --audit-strict --base-ref origin/main --write --json
 ```
 
+### `task execute`
+
+`code-pact task execute <task-id> [options]`
+
+EXPERIMENTAL: Run a single-file one-shot execution via an external executor.
+The executor receives a JSON input with the task goal and source file content,
+and must respond with either a replace_exact payload or a blocked reason.
+On verification failure the source file is rolled back. This command is
+experimental and its contract may change without a major version bump.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--executor-file` (required) | `<path>` | Path to the external one-shot executor executable. Must be executable and accept JSON on stdin. |
+| `--agent` | `<name>` | Agent name. Defaults to project default_agent. |
+| `--timeout` | `<ms>` | Per-command timeout in decimal milliseconds (default: 120000). |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact task execute P78-T1 --executor-file ./agents/one-shot.sh --json
+```
+
 ## Plan commands
 
 ### `plan brief`

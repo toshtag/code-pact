@@ -9,6 +9,7 @@
 
 import { parseArgs } from "node:util";
 import { strictParse, strictParseAlias, ConfigError } from "../../lib/argv.ts";
+import { cmdTaskExecute } from "./task-execute.ts";
 import {
   clusterUsage,
   emitUsage,
@@ -195,8 +196,11 @@ export async function cmdTask(
   if (subcommand === "runbook" || subcommand === "next") {
     return cmdTaskRunbook(rest, locale, globalJson, `task ${subcommand}`);
   }
+  if (subcommand === "execute") {
+    return cmdTaskExecute(rest, locale, globalJson);
+  }
 
-  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook (aliases: reconcile = finalize, next = runbook)`;
+  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook | execute (aliases: reconcile = finalize, next = runbook)`;
   emitError(globalJson, "CONFIG_ERROR", msg);
   return 2;
 }

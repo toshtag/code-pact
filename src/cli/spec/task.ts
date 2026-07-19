@@ -376,6 +376,43 @@ const runbook: CommandSpec = {
   examples: ["code-pact task runbook P1-T1 --json"],
 };
 
+const execute: CommandSpec = {
+  cluster: "task",
+  command: "execute",
+  positional: "<task-id>",
+  summary: [
+    "EXPERIMENTAL: Run a single-file one-shot execution via an external executor.",
+    "The executor receives a JSON input with the task goal and source file content,",
+    "and must respond with either a replace_exact payload or a blocked reason.",
+    "On verification failure the source file is rolled back. This command is",
+    "experimental and its contract may change without a major version bump.",
+  ].join("\n"),
+  flags: [
+    {
+      name: "executor-file",
+      value: "<path>",
+      required: true,
+      description:
+        "Path to the external one-shot executor executable. Must be executable and accept JSON on stdin.",
+    },
+    {
+      name: "agent",
+      value: "<name>",
+      description: "Agent name. Defaults to project default_agent.",
+    },
+    {
+      name: "timeout",
+      value: "<ms>",
+      description:
+        "Per-command timeout in decimal milliseconds (default: 120000).",
+    },
+    { name: "json", description: "Emit JSON." },
+  ],
+  examples: [
+    "code-pact task execute P78-T1 --executor-file ./agents/one-shot.sh --json",
+  ],
+};
+
 const recordDone: CommandSpec = {
   cluster: "task",
   command: "record-done",
@@ -433,5 +470,6 @@ export const TASK_SPECS: Record<string, CommandSpec> = {
   block,
   resume,
   runbook,
+  execute,
   "record-done": recordDone,
 };
