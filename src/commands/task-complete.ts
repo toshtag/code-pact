@@ -13,7 +13,10 @@ import {
   recordLoopMemoryEpisodeBestEffort,
   type LoopMemoryWarning,
 } from "../core/loop-memory/task-complete-recorder.ts";
-import { recallExactFailure, type ExactFailureRecall } from "../core/loop-memory/recall.ts";
+import {
+  recallExactFailure,
+  type ExactFailureRecall,
+} from "../core/loop-memory/recall.ts";
 
 export type PriorLocalSignal = {
   schema_version: 1;
@@ -23,14 +26,19 @@ export type PriorLocalSignal = {
 
 const MAX_PRIOR_LOCAL_SIGNAL_BYTES = 1024;
 
-function priorLocalSignalFromRecall(recall: ExactFailureRecall): PriorLocalSignal | undefined {
+function priorLocalSignalFromRecall(
+  recall: ExactFailureRecall,
+): PriorLocalSignal | undefined {
   if (recall === null) return undefined;
   const signal: PriorLocalSignal = {
     schema_version: 1,
     exact_match_count: recall.exact_match_count,
     last_observed_at: recall.last_observed_at,
   };
-  if (Buffer.byteLength(canonicalJson(signal), "utf8") > MAX_PRIOR_LOCAL_SIGNAL_BYTES) {
+  if (
+    Buffer.byteLength(canonicalJson(signal), "utf8") >
+    MAX_PRIOR_LOCAL_SIGNAL_BYTES
+  ) {
     return undefined;
   }
   return signal;
@@ -49,6 +57,16 @@ export type TaskCompleteOptions = {
   signal?: AbortSignal;
   /** Date injection for tests. Defaults to new Date(). */
   now?: () => Date;
+  /**
+   * Optional pre-commit hook invoked after verification passes and before the
+   * done event is written. If it rejects, no progress event is recorded.
+   */
+  beforeRecordDone?: () => Promise<void>;
+  /**
+   * When true, skip writing loop-memory episodes for this complete call.
+   * Useful for one-shot executors that must keep the working tree scoped.
+   */
+  skipLoopMemory?: boolean;
 };
 
 export type TaskCompleteResult =
@@ -92,7 +110,9 @@ export async function runTaskComplete(
   const phase = await loadPhase(cwd, phasePath);
   const task = phase.tasks?.find(candidate => candidate.id === taskId);
   if (!task) {
-    const error = new Error(`Task "${taskId}" not found in phase "${phaseId}".`);
+    const error = new Error(
+      `Task "${taskId}" not found in phase "${phaseId}".`,
+    );
     (error as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
     throw error;
   }
@@ -116,10 +136,12 @@ export async function runTaskComplete(
       `Task "${taskId}" is blocked. Run \`task resume ${taskId}\` before completing.`,
     );
     (error as NodeJS.ErrnoException).code = "INVALID_TASK_TRANSITION";
-    (error as NodeJS.ErrnoException & { current?: string; next?: string }).current =
-      state.current;
-    (error as NodeJS.ErrnoException & { current?: string; next?: string }).next =
-      "done";
+    (
+      error as NodeJS.ErrnoException & { current?: string; next?: string }
+    ).current = state.current;
+    (
+      error as NodeJS.ErrnoException & { current?: string; next?: string }
+    ).next = "done";
     throw error;
   }
 
@@ -146,22 +168,26 @@ export async function runTaskComplete(
     if (!dryRun) {
       try {
         priorLocalSignal = priorLocalSignalFromRecall(
-          await recallExactFailure(cwd, episode.verification.failure_fingerprint),
+          await recallExactFailure(
+            cwd,
+            episode.verification.failure_fingerprint,
+          ),
         );
       } catch {
         priorLocalSignal = undefined;
       }
     }
-    const memoryWarning = dryRun
-      ? undefined
-      : await recordLoopMemoryEpisodeBestEffort({
-          cwd,
-          phase,
-          task,
-          verify: verifyResult,
-          recordedAt,
-          episode,
-        });
+    const memoryWarning =
+      dryRun || opts.skipLoopMemory
+        ? undefined
+        : await recordLoopMemoryEpisodeBestEffort({
+            cwd,
+            phase,
+            task,
+            verify: verifyResult,
+            recordedAt,
+            episode,
+          });
     const error = new Error(
       `Verification failed for "${taskId}". No progress event was recorded.`,
     );
@@ -169,17 +195,22 @@ export async function runTaskComplete(
     (error as NodeJS.ErrnoException & { checks?: CheckResult[] }).checks =
       verifyResult.checks;
     if (priorLocalSignal !== undefined) {
-      (error as NodeJS.ErrnoException & { priorLocalSignal?: PriorLocalSignal }).priorLocalSignal =
-        priorLocalSignal;
+      (
+        error as NodeJS.ErrnoException & { priorLocalSignal?: PriorLocalSignal }
+      ).priorLocalSignal = priorLocalSignal;
     }
     if (memoryWarning !== undefined) {
-      (error as NodeJS.ErrnoException & { warnings?: LoopMemoryWarning[] }).warnings = [
-        memoryWarning,
-      ];
+      (
+        error as NodeJS.ErrnoException & { warnings?: LoopMemoryWarning[] }
+      ).warnings = [memoryWarning];
     }
     throw error;
   }
 
+  throwIfAborted(opts.signal);
+  if (opts.beforeRecordDone) {
+    await opts.beforeRecordDone();
+  }
   throwIfAborted(opts.signal);
   const author = await resolveEventAuthor(cwd);
   throwIfAborted(opts.signal);
@@ -189,7 +220,9 @@ export async function runTaskComplete(
     at: now().toISOString(),
     actor: "agent",
     agent: agentName,
-    evidence: verifyResult.checks.filter(check => check.ok).map(check => check.name),
+    evidence: verifyResult.checks
+      .filter(check => check.ok)
+      .map(check => check.name),
     source: "loop",
     ...(author !== undefined ? { author } : {}),
   };
@@ -210,13 +243,15 @@ export async function runTaskComplete(
   // starts, it is the commit point and is allowed to finish.
   throwIfAborted(opts.signal);
   await writeEventFile(cwd, event);
-  const memoryWarning = await recordLoopMemoryEpisodeBestEffort({
-    cwd,
-    phase,
-    task,
-    verify: verifyResult,
-    recordedAt: now(),
-  });
+  const memoryWarning = opts.skipLoopMemory
+    ? undefined
+    : await recordLoopMemoryEpisodeBestEffort({
+        cwd,
+        phase,
+        task,
+        verify: verifyResult,
+        recordedAt: now(),
+      });
 
   return {
     kind: "done",

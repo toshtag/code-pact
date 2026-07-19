@@ -19,7 +19,9 @@ async function withTempProject<T>(fn: (cwd: string) => Promise<T>): Promise<T> {
 }
 
 function sha256(content: string): string {
-  return createHash("sha256").update(Buffer.from(content, "utf8")).digest("hex");
+  return createHash("sha256")
+    .update(Buffer.from(content, "utf8"))
+    .digest("hex");
 }
 
 describe("applyExactReplacement", () => {
@@ -56,7 +58,8 @@ describe("applyExactReplacement", () => {
 
       const replacement: ExactReplacement = {
         path: "src/example.ts",
-        expected_file_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+        expected_file_sha256:
+          "0000000000000000000000000000000000000000000000000000000000000000",
         old_text: "world",
         new_text: "planet",
       };
@@ -133,6 +136,28 @@ describe("applyExactReplacement", () => {
       if (result.kind === "rejected") {
         expect(result.reason).toBe("EMPTY_OLD_TEXT");
       }
+    });
+  });
+
+  it("allows empty new_text to delete old_text", async () => {
+    await withTempProject(async cwd => {
+      const content = "hello world";
+      await mkdir(join(cwd, "src"), { recursive: true });
+      await writeFile(join(cwd, "src", "example.ts"), content, "utf8");
+
+      const replacement: ExactReplacement = {
+        path: "src/example.ts",
+        expected_file_sha256: sha256(content),
+        old_text: "hello ",
+        new_text: "",
+      };
+
+      const result = await applyExactReplacement(cwd, replacement);
+
+      expect(result.kind).toBe("applied");
+
+      const written = await readFile(join(cwd, "src", "example.ts"), "utf8");
+      expect(written).toBe("world");
     });
   });
 

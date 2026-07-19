@@ -356,10 +356,13 @@ code-pact task finalize P1-T1 --audit-strict --base-ref origin/main --write --js
 `code-pact task execute <task-id> [options]`
 
 EXPERIMENTAL: Run a single-file one-shot execution via an external executor.
-The executor receives a JSON input with the task goal and source file content,
-and must respond with either a replace_exact payload or a blocked reason.
-On verification failure the source file is rolled back. This command is
-experimental and its contract may change without a major version bump.
+Requires a clean git working tree. The executor-file must be a regular,
+non-symlink, executable file inside the project. The executor receives a JSON
+input with the task goal and source file content, and must respond with either
+a replace_exact payload or a blocked reason. On verification failure the source
+file is rolled back; if the working tree changes outside the source file the
+edit is rejected. This command is experimental and its contract may change
+without a major version bump.
 
 | Flag | Value | Description |
 | --- | --- | --- |

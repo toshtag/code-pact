@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { runTaskComplete } from "../../commands/task-complete.ts";
 import { atomicReplaceExistingText } from "../../io/atomic-text.ts";
-import { projectVerifyForAgent } from "../evidence/failure-capsule.ts";
+import { ExecutorError, truncateExecutorReason } from "./executor.ts";
 import { loadPhase } from "../plan/load-phase.ts";
 import { resolveTaskInRoadmap } from "../plan/resolve-task.ts";
 import { loadProgressLog } from "../progress/io.ts";
@@ -24,10 +26,50 @@ import {
 export type RunTaskExecuteOnceOptions = {
   cwd: string;
   taskId: string;
+  agent?: string;
   executor: OneShotExecutor;
   timeoutMs?: number;
   signal?: AbortSignal;
 };
+
+const execFileAsync = promisify(execFile);
+
+type WorktreeChanges = { clean: true } | { clean: false; paths: string[] };
+
+async function getWorktreeChanges(cwd: string): Promise<WorktreeChanges> {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      [
+        "-C",
+        cwd,
+        "-c",
+        "core.quotePath=false",
+        "status",
+        "--porcelain",
+        "--no-renames",
+        "-uall",
+      ],
+      { encoding: "utf8", maxBuffer: 2 * 1024 * 1024 },
+    );
+    const lines = stdout.split("\n").filter(line => line.length > 0);
+    if (lines.length === 0) return { clean: true };
+    const paths = lines.map(line => line.slice(3).trim());
+    return { clean: false, paths };
+  } catch {
+    return { clean: false, paths: [] };
+  }
+}
+
+function onlyPathChanged(status: WorktreeChanges, path: string): boolean {
+  if (status.clean) return false;
+  return status.paths.every(p => p === path || p.startsWith(`${path}/`));
+}
+
+function extraPaths(status: WorktreeChanges, path: string): string[] {
+  if (status.clean) return [];
+  return status.paths.filter(p => p !== path && !p.startsWith(`${path}/`));
+}
 
 function sha256(content: string): string {
   return createHash("sha256")
@@ -62,6 +104,11 @@ export async function runTaskExecuteOnce(
   }
 
   const sourcePath = eligibility.sourcePath;
+
+  const worktreeBefore = await getWorktreeChanges(cwd);
+  if (!worktreeBefore.clean) {
+    return { kind: "worktree_not_clean", paths: worktreeBefore.paths };
+  }
 
   let sourceContent: string;
   try {
@@ -104,13 +151,21 @@ export async function runTaskExecuteOnce(
   try {
     output = await executor.invoke(input);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
+    const message =
+      error instanceof ExecutorError
+        ? (error as Error).message
+        : `${(error as NodeJS.ErrnoException).code ?? "EXECUTOR_FAILED"}: ${(error as Error).message}`;
     return {
       kind: "executor_failed",
-      reason:
-        typeof code === "string" && code.length > 0
-          ? `${code}: ${(error as Error).message}`
-          : (error as Error).message,
+      reason: truncateExecutorReason(message),
+    };
+  }
+
+  const worktreeAfterExecutor = await getWorktreeChanges(cwd);
+  if (!worktreeAfterExecutor.clean) {
+    return {
+      kind: "executor_mutated_worktree",
+      changed_paths: worktreeAfterExecutor.paths,
     };
   }
 
@@ -125,13 +180,30 @@ export async function runTaskExecuteOnce(
     new_text: output.new_text,
   };
 
-  const applyResult = await applyExactReplacement(
-    cwd,
-    replacement,
-    sourcePath,
-  );
+  const applyResult = await applyExactReplacement(cwd, replacement, sourcePath);
   if (applyResult.kind === "rejected") {
     return { kind: "edit_rejected", reason: applyResult.reason };
+  }
+
+  const worktreeAfterEdit = await getWorktreeChanges(cwd);
+  if (!onlyPathChanged(worktreeAfterEdit, sourcePath)) {
+    const extras = extraPaths(worktreeAfterEdit, sourcePath);
+    const restore = await restoreOriginalFile(
+      cwd,
+      sourcePath,
+      applyResult.originalContent,
+      applyResult.appliedContent,
+    );
+    if (restore.kind === "stale") {
+      return { kind: "rollback_stale_file", reason: restore.reason };
+    }
+    if (restore.kind === "failed") {
+      return { kind: "rollback_failed", reason: restore.reason };
+    }
+    return {
+      kind: "execution_scope_violation",
+      changed_paths: extras,
+    };
   }
 
   let completionResult;
@@ -139,27 +211,64 @@ export async function runTaskExecuteOnce(
     completionResult = await runTaskComplete({
       cwd,
       taskId,
+      agent: opts.agent,
       timeoutMs: opts.timeoutMs,
       signal,
+      skipLoopMemory: true,
+      beforeRecordDone: async () => {
+        const status = await getWorktreeChanges(cwd);
+        if (!onlyPathChanged(status, sourcePath)) {
+          const error = new Error(
+            "working tree changed outside the target source file",
+          ) as NodeJS.ErrnoException;
+          error.code = "EXECUTION_SCOPE_VIOLATION";
+          (
+            error as NodeJS.ErrnoException & { changed_paths?: string[] }
+          ).changed_paths = extraPaths(status, sourcePath);
+          throw error;
+        }
+      },
     });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     const failure =
-      code === "VERIFICATION_FAILED"
-        ? await buildFailureCapsule(cwd, error)
-        : undefined;
+      code === "VERIFICATION_FAILED" ? buildFailureCapsule(error) : undefined;
 
-    const restoreResult = await restoreOriginalFile(
+    const restore = await restoreOriginalFile(
       cwd,
       sourcePath,
       applyResult.originalContent,
+      applyResult.appliedContent,
     );
-    if (restoreResult.kind === "failed") {
+    if (restore.kind === "stale") {
+      return { kind: "rollback_stale_file", reason: restore.reason };
+    }
+    if (restore.kind === "failed") {
       return {
         kind: "rollback_failed",
-        reason: restoreResult.reason,
+        reason: restore.reason,
         failure,
       };
+    }
+
+    const worktreeAfterRollback = await getWorktreeChanges(cwd);
+    if (!worktreeAfterRollback.clean) {
+      return {
+        kind: "rollback_incomplete",
+        changed_paths: worktreeAfterRollback.paths,
+        failure,
+      };
+    }
+
+    if (code === "EXECUTION_SCOPE_VIOLATION") {
+      const changed_paths =
+        (error as NodeJS.ErrnoException & { changed_paths?: string[] })
+          .changed_paths ?? [];
+      return { kind: "execution_scope_violation", changed_paths };
+    }
+
+    if (code === "AGENT_NOT_FOUND" || code === "AGENT_NOT_ENABLED") {
+      throw error;
     }
 
     if (code === "VERIFICATION_FAILED" && failure !== undefined) {
@@ -180,15 +289,19 @@ export async function runTaskExecuteOnce(
   }
 
   if (completionResult.kind !== "done") {
-    const restoreResult = await restoreOriginalFile(
+    const restore = await restoreOriginalFile(
       cwd,
       sourcePath,
       applyResult.originalContent,
+      applyResult.appliedContent,
     );
-    if (restoreResult.kind === "failed") {
+    if (restore.kind === "stale") {
+      return { kind: "rollback_stale_file", reason: restore.reason };
+    }
+    if (restore.kind === "failed") {
       return {
         kind: "rollback_failed",
-        reason: restoreResult.reason,
+        reason: restore.reason,
       };
     }
     return {
@@ -205,30 +318,51 @@ export async function runTaskExecuteOnce(
   };
 }
 
-async function buildFailureCapsule(
-  cwd: string,
-  error: unknown,
-): Promise<BoundedFailureCapsule> {
+function buildFailureCapsule(error: unknown): BoundedFailureCapsule {
   const checks = (error as NodeJS.ErrnoException & { checks?: unknown }).checks;
-  const projection = await projectVerifyForAgent(cwd, {
-    ok: false,
-    checks: Array.isArray(checks) ? checks : [],
-  });
-  return projection.failure;
+  const checkArray = Array.isArray(checks) ? checks : [];
+  const firstFailure = checkArray.find(
+    (c: unknown) =>
+      typeof c === "object" &&
+      c !== null &&
+      (c as { ok?: boolean }).ok === false,
+  );
+  const failedCheck =
+    firstFailure && typeof firstFailure === "object" && firstFailure !== null
+      ? (firstFailure as { name?: string; reason?: string })
+      : undefined;
+  return {
+    schema_version: 1,
+    kind: failedCheck?.name ? "command_failed" : "unknown",
+    check: failedCheck?.name ?? "verification",
+    ...(failedCheck?.reason ? { reason: failedCheck.reason } : {}),
+  };
 }
 
-type RestoreResult = { kind: "ok" } | { kind: "failed"; reason: string };
+type RestoreResult =
+  | { kind: "ok" }
+  | { kind: "stale"; reason: string; applied_sha: string }
+  | { kind: "failed"; reason: string };
 
 async function restoreOriginalFile(
   cwd: string,
   sourcePath: string,
   originalContent: string,
+  appliedContent: string,
 ): Promise<RestoreResult> {
   try {
     const writePath = await resolveExecuteSourceWritePath(cwd, sourcePath);
-    await atomicReplaceExistingText(writePath, originalContent);
+    await atomicReplaceExistingText(writePath, originalContent, appliedContent);
     return { kind: "ok" };
   } catch (error) {
+    if ((error as Error).message === "destination changed before write") {
+      return {
+        kind: "stale",
+        reason:
+          "source file changed after edit; rollback refused to overwrite concurrent update",
+        applied_sha: sha256(appliedContent),
+      };
+    }
     return {
       kind: "failed",
       reason: `ROLLBACK_FAILED: ${(error as Error).message}`,

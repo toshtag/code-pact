@@ -151,7 +151,7 @@ export async function resolveOneShotEligibility(
   try {
     const readPath = await resolveExecuteSourceReadPath(cwd, sourcePath);
     const content = await readOwnedTextBounded(readPath, MAX_SOURCE_BYTES);
-    const lineCount = content.split("\n").length;
+    const lineCount = countLogicalLines(content);
     if (lineCount > MAX_SOURCE_LINES) {
       reasons.push(INELIGIBLE_REASONS.LINE_COUNT_EXCEEDS_LIMIT);
     }
@@ -184,4 +184,14 @@ export async function resolveOneShotEligibility(
     }
     return { eligible: false, reasons };
   }
+}
+
+export function countLogicalLines(content: string): number {
+  if (content.length === 0) return 0;
+  const normalized = content.replace(/\r\n/g, "\n");
+  const parts = normalized.split("\n");
+  if (parts[parts.length - 1] === "") {
+    return parts.length - 1;
+  }
+  return parts.length;
 }

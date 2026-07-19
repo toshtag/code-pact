@@ -122,7 +122,7 @@ export async function applyExactReplacement(
     };
   }
 
-  return { kind: "applied", originalContent };
+  return { kind: "applied", originalContent, appliedContent: updatedContent };
 }
 
 function countOccurrences(haystack: string, needle: string): number {

@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  countLogicalLines,
   INELIGIBLE_REASONS,
   resolveOneShotEligibility,
 } from "../../../../src/core/execute-once/eligibility.ts";
@@ -55,7 +56,10 @@ function makeTask(overrides?: Partial<Task>): Task {
   } as Task;
 }
 
-function makeEvent(status: ProgressEvent["status"], taskId = "P78-T1"): ProgressEvent {
+function makeEvent(
+  status: ProgressEvent["status"],
+  taskId = "P78-T1",
+): ProgressEvent {
   return {
     task_id: taskId,
     status,
@@ -99,7 +103,9 @@ describe("resolveOneShotEligibility", () => {
 
       expect(result.eligible).toBe(false);
       if (!result.eligible) {
-        expect(result.reasons).toContain(INELIGIBLE_REASONS.MULTIPLE_READ_PATHS);
+        expect(result.reasons).toContain(
+          INELIGIBLE_REASONS.MULTIPLE_READ_PATHS,
+        );
       }
     });
   });
@@ -118,7 +124,9 @@ describe("resolveOneShotEligibility", () => {
 
       expect(result.eligible).toBe(false);
       if (!result.eligible) {
-        expect(result.reasons).toContain(INELIGIBLE_REASONS.MULTIPLE_WRITE_PATHS);
+        expect(result.reasons).toContain(
+          INELIGIBLE_REASONS.MULTIPLE_WRITE_PATHS,
+        );
       }
     });
   });
@@ -252,7 +260,9 @@ describe("resolveOneShotEligibility", () => {
   it("rejects files over the line limit", async () => {
     await withTempProject(async cwd => {
       await mkdir(join(cwd, "src"), { recursive: true });
-      const lines = Array.from({ length: 121 }, (_, i) => `line${i}`).join("\n");
+      const lines = Array.from({ length: 121 }, (_, i) => `line${i}`).join(
+        "\n",
+      );
       await writeFile(join(cwd, "src", "example.ts"), lines, "utf8");
 
       const result = await resolveOneShotEligibility({
@@ -384,5 +394,66 @@ describe("resolveOneShotEligibility", () => {
         );
       }
     });
+  });
+
+  it("rejects content exceeding the line count limit", async () => {
+    await withTempProject(async cwd => {
+      const lines121 = Array.from({ length: 121 }, (_, i) => `line ${i}`).join(
+        "\n",
+      );
+      await mkdir(join(cwd, "src"), { recursive: true });
+      await writeFile(join(cwd, "src", "example.ts"), lines121 + "\n", "utf8");
+
+      const result = await resolveOneShotEligibility({
+        cwd,
+        phase: makePhase(),
+        task: makeTask(),
+        events: [],
+      });
+
+      expect(result.eligible).toBe(false);
+      if (!result.eligible) {
+        expect(result.reasons).toContain(
+          INELIGIBLE_REASONS.LINE_COUNT_EXCEEDS_LIMIT,
+        );
+      }
+    });
+  });
+
+  it("accepts content at the line count limit with trailing newline", async () => {
+    await withTempProject(async cwd => {
+      const lines120 = Array.from({ length: 120 }, (_, i) => `line ${i}`).join(
+        "\n",
+      );
+      await mkdir(join(cwd, "src"), { recursive: true });
+      await writeFile(join(cwd, "src", "example.ts"), lines120 + "\n", "utf8");
+
+      const result = await resolveOneShotEligibility({
+        cwd,
+        phase: makePhase(),
+        task: makeTask(),
+        events: [],
+      });
+
+      expect(result.eligible).toBe(true);
+    });
+  });
+});
+
+describe("countLogicalLines", () => {
+  it("counts empty content as zero", () => {
+    expect(countLogicalLines("")).toBe(0);
+  });
+
+  it("does not count a trailing newline", () => {
+    expect(countLogicalLines("line1\nline2\n")).toBe(2);
+  });
+
+  it("counts lines without a trailing newline", () => {
+    expect(countLogicalLines("line1\nline2")).toBe(2);
+  });
+
+  it("handles CRLF", () => {
+    expect(countLogicalLines("line1\r\nline2\r\n")).toBe(2);
   });
 });

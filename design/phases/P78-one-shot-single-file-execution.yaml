@@ -1,0 +1,184 @@
+id: P78
+name: One-shot Single-File Execution
+weight: 4
+confidence: medium
+risk: medium
+status: in_progress
+objective: >
+  Provide a bounded, single-file, one-shot execution path for code-pact tasks.
+  An
+
+  external executor receives the task goal and source file content via JSON
+  stdin,
+
+  emits either a replace_exact payload or a blocked reason, and the runtime
+  applies
+
+  the edit atomically, re-runs verification, and records done only on a clean,
+
+  scoped working tree. This pass hardens rollback, execution scope, executor
+  file
+
+  validation, exact replacement contract, agent propagation, and public error
+
+  documentation.
+definition_of_done:
+  - |
+    One-shot lifecycle is formally registered in design/ and tracked through T4.
+  - >
+    Rollback uses compare-and-swap semantics with appliedContent, surfacing
+    ROLLBACK_STALE_FILE when the source changes concurrently.
+  - >
+    Execution scope is fail-closed: a clean git working tree is required before
+    invocation, executor mutations outside the source file are rejected, and
+    verification-time scope violations roll back the source file.
+  - >
+    Executor files are validated before spawn: regular file, non-symlink,
+    executable, inside the project.
+  - >
+    --agent is propagated through runTaskExecuteOnce into runTaskComplete and
+    rejects unknown/disabled agents before edits are recorded.
+  - >
+    Exact replacement contract allows empty new_text, counts lines correctly
+    (120 with trailing newline allowed, 121 rejected), and keeps executor
+    failure reasons and output payloads bounded.
+  - >
+    Public error codes, i18n, CLI help, agent-contract, per-task-loop, and
+    troubleshooting documentation are updated for the new surface.
+  - >
+    Regression tests cover CAS rollback, mutation/scope detection, agent
+    propagation, empty new_text, line boundaries, and bounded stderr.
+  - |
+    Full verification suite is green and the corrective pass is committed.
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm build
+    - pnpm test:unit
+    - pnpm test:integration:smoke
+    - pnpm vitest --config vitest.integration.config.ts run
+    - pnpm check:docs
+    - node dist/cli.js validate --json
+    - node dist/cli.js plan lint --include-quality --strict --json
+    - git diff --check
+tasks:
+  - id: P78-T1
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: done
+    description: |
+      Define one-shot eligibility, exact replacement contract, and the external
+      executor input/output schema.
+    reads:
+      - src/core/execute-once/types.ts
+      - src/core/execute-once/eligibility.ts
+      - src/core/execute-once/exact-replacement.ts
+    writes:
+      - src/core/execute-once/types.ts
+      - src/core/execute-once/eligibility.ts
+      - src/core/execute-once/exact-replacement.ts
+  - id: P78-T2
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: done
+    description: |
+      Implement the external process executor and wire the one-shot lifecycle
+      (eligibility, executor, exact replacement, verification, rollback) into
+      runTaskExecuteOnce.
+    depends_on:
+      - P78-T1
+    reads:
+      - src/core/execute-once/executor.ts
+      - src/core/execute-once/run.ts
+      - src/commands/task-complete.ts
+    writes:
+      - src/core/execute-once/executor.ts
+      - src/core/execute-once/run.ts
+      - src/commands/task-complete.ts
+  - id: P78-T3
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: done
+    description: |
+      Add the experimental `task execute` CLI, initial public error codes, and
+      basic troubleshooting documentation.
+    depends_on:
+      - P78-T2
+    reads:
+      - src/cli/commands/task-execute.ts
+      - src/cli/spec/task.ts
+      - docs/cli-contract.md
+      - docs/troubleshooting.md
+      - tests/unit/error-code-surface.test.ts
+    writes:
+      - src/cli/commands/task-execute.ts
+      - src/cli/spec/task.ts
+      - docs/cli-contract.md
+      - docs/troubleshooting.md
+      - tests/unit/error-code-surface.test.ts
+  - id: P78-T4
+    type: bugfix
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: done
+    description: |
+      Corrective pass: harden rollback to compare-and-swap, enforce fail-closed
+      execution scope, validate executor files, propagate --agent correctly,
+      complete the exact replacement contract (empty new_text, correct line
+      counts, bounded payloads), update i18n and public documentation, and add
+      regression tests.
+    depends_on:
+      - P78-T3
+    reads:
+      - src/core/execute-once/*.ts
+      - src/commands/task-complete.ts
+      - src/cli/commands/task-execute.ts
+      - src/cli/spec/task.ts
+      - docs/cli-contract.md
+      - docs/troubleshooting.md
+      - docs/per-task-loop.md
+      - docs/cli-reference.generated.md
+      - tests/unit/error-code-surface.test.ts
+      - tests/unit/core/execute-once/*.test.ts
+      - tests/integration/task-execute-once.test.ts
+      - tests/integration/task-execute-cli.test.ts
+      - tests/fixtures/executors/fake-executor.mjs
+      - design/rules/protected-paths.md
+      - design/roadmap.yaml
+      - design/phases/P78-one-shot-single-file-execution.yaml
+    writes:
+      - src/core/execute-once/*.ts
+      - src/commands/task-complete.ts
+      - src/cli/commands/task-execute.ts
+      - src/cli/spec/task.ts
+      - docs/cli-contract.md
+      - docs/troubleshooting.md
+      - docs/per-task-loop.md
+      - docs/cli-reference.generated.md
+      - tests/unit/error-code-surface.test.ts
+      - tests/unit/core/execute-once/*.test.ts
+      - tests/integration/task-execute-once.test.ts
+      - tests/integration/task-execute-cli.test.ts
+      - tests/fixtures/executors/fake-executor.mjs
+      - design/rules/protected-paths.md
+      - design/roadmap.yaml
+      - design/phases/P78-one-shot-single-file-execution.yaml

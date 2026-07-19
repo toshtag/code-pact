@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { strictParse } from "../../lib/argv.ts";
 import { toParseOptions } from "../spec/render.ts";
 import { TASK_SPECS } from "../spec/task.ts";
@@ -14,6 +14,10 @@ import { ConfigError } from "../../lib/argv.ts";
 import { runTaskExecuteOnce } from "../../core/execute-once/run.ts";
 import { ExternalProcessOneShotExecutor } from "../../core/execute-once/executor.ts";
 import type { TaskExecuteOnceResult } from "../../core/execute-once/types.ts";
+import {
+  lstatExplicitUser,
+  resolveExplicitUserReadPath,
+} from "../../core/project-fs/index.ts";
 
 export async function cmdTaskExecute(
   argv: string[],
@@ -64,6 +68,8 @@ export async function cmdTaskExecute(
     return 2;
   }
 
+  const agent = values.agent !== undefined ? String(values.agent) : undefined;
+
   let timeoutMs: number | undefined;
   if (values.timeout !== undefined) {
     const parsed = parseTimeoutArg(String(values.timeout), json);
@@ -73,6 +79,12 @@ export async function cmdTaskExecute(
 
   const cwd = process.cwd();
   const executablePath = resolve(cwd, executorFile);
+  const validationError = await validateExecutorFile(cwd, executablePath);
+  if (validationError !== undefined) {
+    emitError(json, "CONFIG_ERROR", validationError);
+    return 2;
+  }
+
   const { signal, cleanup } = createCliAbortSignal();
 
   try {
@@ -84,9 +96,9 @@ export async function cmdTaskExecute(
         const result = await runTaskExecuteOnce({
           cwd,
           taskId,
+          agent,
           executor: new ExternalProcessOneShotExecutor({
             executablePath,
-            cwd,
             timeoutMs,
             signal,
           }),
@@ -210,7 +222,124 @@ function emitExecuteResult(
         process.stderr.write(`Rollback failed: ${result.reason}\n`);
       }
       return 1;
+    case "rollback_stale_file":
+      if (json) {
+        emitError(json, "ROLLBACK_STALE_FILE", result.reason, {
+          ...(result.applied_sha !== undefined
+            ? { data: { applied_sha: result.applied_sha } }
+            : {}),
+        });
+      } else {
+        process.stderr.write(`Rollback stale: ${result.reason}\n`);
+      }
+      return 1;
+    case "rollback_incomplete":
+      if (json) {
+        emitError(
+          json,
+          "ROLLBACK_INCOMPLETE",
+          "rollback completed but extra changes remain",
+          {
+            data: {
+              changed_paths: result.changed_paths,
+              ...(result.failure !== undefined
+                ? { failure: result.failure }
+                : {}),
+            },
+          },
+        );
+      } else {
+        process.stderr.write(
+          `Rollback incomplete: ${result.changed_paths.join(", ")}\n`,
+        );
+      }
+      return 1;
+    case "worktree_not_clean":
+      if (json) {
+        emitError(
+          json,
+          "WORKTREE_NOT_CLEAN",
+          "working tree is not clean before one-shot execution",
+          {
+            data: { paths: result.paths },
+          },
+        );
+      } else {
+        process.stderr.write(`Working tree is not clean before execution.\n`);
+      }
+      return 1;
+    case "executor_mutated_worktree":
+      if (json) {
+        emitError(
+          json,
+          "EXECUTOR_MUTATED_WORKTREE",
+          "executor modified files outside the source file",
+          {
+            data: { changed_paths: result.changed_paths },
+          },
+        );
+      } else {
+        process.stderr.write(
+          `Executor mutated working tree: ${result.changed_paths.join(", ")}\n`,
+        );
+      }
+      return 1;
+    case "execution_scope_violation":
+      if (json) {
+        emitError(
+          json,
+          "EXECUTION_SCOPE_VIOLATION",
+          "verification scope changed outside the source file",
+          {
+            data: { changed_paths: result.changed_paths },
+          },
+        );
+      } else {
+        process.stderr.write(
+          `Execution scope violation: ${result.changed_paths.join(", ")}\n`,
+        );
+      }
+      return 1;
     default:
       throw new Error(`Unknown execute result kind: ${JSON.stringify(result)}`);
   }
+}
+
+async function validateExecutorFile(
+  cwd: string,
+  executablePath: string,
+): Promise<string | undefined> {
+  // Resolve user input to a project-relative path so symlink detection runs on
+  // the exact supplied path instead of its real target.
+  const relPath = relative(cwd, executablePath);
+  if (relPath === "" || relPath.startsWith(".")) {
+    return "executor file must be inside the project";
+  }
+
+  let explicitPath;
+  try {
+    explicitPath = await resolveExplicitUserReadPath(cwd, relPath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "PATH_NOT_OWNED") return "executor file is a symlink";
+    if (code === "PATH_OUTSIDE_PROJECT") {
+      return "executor file must be inside the project";
+    }
+    return `executor file must be a safe path inside the project: ${(error as Error).message}`;
+  }
+
+  try {
+    const stats = await lstatExplicitUser(explicitPath);
+    if (!stats.isFile()) {
+      return "executor file is not a regular file";
+    }
+    if (process.platform !== "win32" && (stats.mode & 0o111) === 0) {
+      return "executor file is not executable";
+    }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return "executor file does not exist";
+    return `executor file validation failed: ${(error as Error).message}`;
+  }
+  return undefined;
 }

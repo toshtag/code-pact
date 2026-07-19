@@ -212,3 +212,6 @@ phases:
   - id: P77
     path: design/phases/P77-remove-remaining-full-default-contract-residue.yaml
     weight: 4
+  - id: P78
+    path: design/phases/P78-one-shot-single-file-execution.yaml
+    weight: 4

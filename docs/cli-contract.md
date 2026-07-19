@@ -251,6 +251,11 @@ CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes
 | `EXECUTION_INELIGIBLE` | `task execute` | The task is not eligible for one-shot execution (wrong type, multiple read/write files, missing source, or another blocker). Exit code 1. The envelope carries `data.reasons`. |
 | `EXECUTOR_FAILED` | `task execute` | The external executor exited non-zero, timed out, emitted malformed or oversized JSON, or returned an unsupported `kind`. Exit code 1. The envelope carries `data.reason`. |
 | `ROLLBACK_FAILED` | `task execute` | The source file could not be restored after a verification failure. Exit code 1. The envelope may carry `data.failure`. |
+| `ROLLBACK_STALE_FILE` | `task execute` | The source file changed concurrently after the edit, so rollback refused to overwrite it. Exit code 1. The envelope may carry `data.applied_sha`. |
+| `ROLLBACK_INCOMPLETE` | `task execute` | The source file was rolled back, but other unexpected working-tree changes remain. Exit code 1. The envelope may carry `data.changed_paths` and `data.failure`. |
+| `WORKTREE_NOT_CLEAN` | `task execute` | The working tree is not clean before one-shot execution (staged, unstaged, or untracked changes). Exit code 1. The envelope carries `data.paths`. |
+| `EXECUTOR_MUTATED_WORKTREE` | `task execute` | The executor wrote to files outside the target source path before returning its response. Exit code 1. The envelope carries `data.changed_paths`. |
+| `EXECUTION_SCOPE_VIOLATION` | `task execute` | Verification or a side-effect altered files outside the target source path. Exit code 1. The envelope carries `data.changed_paths`. |
 
 ### Public cause codes
 

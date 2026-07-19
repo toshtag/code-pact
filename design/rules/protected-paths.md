@@ -30,8 +30,6 @@ starting template; edit freely):
 .git/**
 node_modules/**
 .code-pact/**
-design/roadmap.yaml
-design/phases/*.yaml
 ```
 
 Typical extensions you might add for your project:

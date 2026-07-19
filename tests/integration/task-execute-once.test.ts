@@ -10,6 +10,7 @@ import {
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
+import { execSync } from "node:child_process";
 import { ExternalProcessOneShotExecutor } from "../../src/core/execute-once/executor.ts";
 import { runTaskExecuteOnce } from "../../src/core/execute-once/run.ts";
 
@@ -19,17 +20,21 @@ const fakeExecutorPath = join(fixtureDir, "fake-executor.mjs");
 
 async function withTempProject<T>(
   fn: (cwd: string) => Promise<T>,
+  verificationCommand = "exit 0",
 ): Promise<T> {
   const cwd = await mkdtemp(join(tmpdir(), "code-pact-execute-once-"));
   try {
-    await setupCodePactProject(cwd);
+    await setupCodePactProject(cwd, verificationCommand);
     return await fn(cwd);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
 }
 
-async function setupCodePactProject(cwd: string): Promise<void> {
+async function setupCodePactProject(
+  cwd: string,
+  verificationCommand: string,
+): Promise<void> {
   const projectYaml = `name: test
 version: "0.0.1"
 locale: en-US
@@ -54,7 +59,7 @@ definition_of_done:
   - done
 verification:
   commands:
-    - {{verification_command}}
+    - ${verificationCommand}
 tasks:
   - id: P78-T1
     type: feature
@@ -79,12 +84,14 @@ tasks:
 
   await writeFile(join(cwd, ".code-pact", "project.yaml"), projectYaml, "utf8");
   await writeFile(join(cwd, "design", "roadmap.yaml"), roadmapYaml, "utf8");
-  await writeFile(
-    join(cwd, "design", "phases", "P78.yaml"),
-    phaseYaml.replace("{{verification_command}}", "exit 0"),
-    "utf8",
-  );
+  await writeFile(join(cwd, "design", "phases", "P78.yaml"), phaseYaml, "utf8");
   await writeFile(join(cwd, "src", "example.ts"), sourceContent, "utf8");
+
+  execSync("git init", { cwd, stdio: "ignore" });
+  execSync("git config user.email test@example.com", { cwd, stdio: "ignore" });
+  execSync("git config user.name Test", { cwd, stdio: "ignore" });
+  execSync("git add .", { cwd, stdio: "ignore" });
+  execSync("git commit -m init", { cwd, stdio: "ignore" });
 }
 
 function setMode(mode: string): void {
@@ -117,7 +124,6 @@ describe("runTaskExecuteOnce integration", () => {
     await withTempProject(async cwd => {
       const executor = new ExternalProcessOneShotExecutor({
         executablePath: fakeExecutorPath,
-        cwd,
       });
 
       const result = await runTaskExecuteOnce({
@@ -142,15 +148,8 @@ describe("runTaskExecuteOnce integration", () => {
     setMode("replace");
 
     await withTempProject(async cwd => {
-      const phaseYaml = (await readFile(
-        join(cwd, "design", "phases", "P78.yaml"),
-        "utf8",
-      )).replace("exit 0", "exit 1");
-      await writeFile(join(cwd, "design", "phases", "P78.yaml"), phaseYaml, "utf8");
-
       const executor = new ExternalProcessOneShotExecutor({
         executablePath: fakeExecutorPath,
-        cwd,
       });
 
       const result = await runTaskExecuteOnce({
@@ -166,7 +165,7 @@ describe("runTaskExecuteOnce integration", () => {
 
       const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
       expect(content).toBe("hello world");
-    });
+    }, "exit 1");
   });
 
   it("does not edit when the executor returns blocked", async () => {
@@ -176,7 +175,6 @@ describe("runTaskExecuteOnce integration", () => {
     await withTempProject(async cwd => {
       const executor = new ExternalProcessOneShotExecutor({
         executablePath: fakeExecutorPath,
-        cwd,
       });
 
       const result = await runTaskExecuteOnce({
@@ -227,7 +225,6 @@ describe("runTaskExecuteOnce integration", () => {
     await withTempProject(async cwd => {
       const executor = new ExternalProcessOneShotExecutor({
         executablePath: fakeExecutorPath,
-        cwd,
       });
 
       const result = await runTaskExecuteOnce({
@@ -246,7 +243,6 @@ describe("runTaskExecuteOnce integration", () => {
     await withTempProject(async cwd => {
       const executor = new ExternalProcessOneShotExecutor({
         executablePath: fakeExecutorPath,
-        cwd,
       });
 
       const result = await runTaskExecuteOnce({
@@ -268,7 +264,6 @@ describe("runTaskExecuteOnce integration", () => {
     await withTempProject(async cwd => {
       const executor = new ExternalProcessOneShotExecutor({
         executablePath: fakeExecutorPath,
-        cwd,
       });
 
       const result = await runTaskExecuteOnce({
@@ -290,7 +285,6 @@ describe("runTaskExecuteOnce integration", () => {
     await withTempProject(async cwd => {
       const executor = new ExternalProcessOneShotExecutor({
         executablePath: fakeExecutorPath,
-        cwd,
       });
 
       const result = await runTaskExecuteOnce({
@@ -303,6 +297,99 @@ describe("runTaskExecuteOnce integration", () => {
       if (result.kind === "edit_rejected") {
         expect(result.reason).toBe("STALE_FILE_SHA");
       }
+
+      const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
+      expect(content).toBe("hello world");
+    });
+  });
+
+  it("allows empty new_text to delete matched old_text", async () => {
+    setMode("replace");
+    process.env.EXECUTOR_OLD = "hello";
+    process.env.EXECUTOR_NEW = "";
+
+    await withTempProject(async cwd => {
+      const executor = new ExternalProcessOneShotExecutor({
+        executablePath: fakeExecutorPath,
+      });
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor,
+      });
+
+      expect(result.kind).toBe("done");
+
+      const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
+      expect(content).toBe(" world");
+    });
+  });
+
+  it("bounds executor failure reason size", async () => {
+    setMode("nonzero");
+    process.env.EXECUTOR_STDERR = "x".repeat(10_000);
+
+    await withTempProject(async cwd => {
+      const executor = new ExternalProcessOneShotExecutor({
+        executablePath: fakeExecutorPath,
+      });
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor,
+      });
+
+      expect(result.kind).toBe("executor_failed");
+      if (result.kind === "executor_failed") {
+        expect(Buffer.byteLength(result.reason, "utf8")).toBeLessThanOrEqual(
+          2048,
+        );
+      }
+    });
+  });
+
+  it("detects when the executor mutates files outside the source path", async () => {
+    await withTempProject(async cwd => {
+      class MutatingExecutor {
+        async invoke() {
+          await writeFile(join(cwd, "src", "side.ts"), "mutation", "utf8");
+          return {
+            kind: "replace_exact",
+            expected_file_sha256: "unused",
+            old_text: "hello",
+            new_text: "hi",
+          } as import("../../src/core/execute-once/types.ts").OneShotExecutorOutput;
+        }
+      }
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor: new MutatingExecutor(),
+      });
+
+      expect(result.kind).toBe("executor_mutated_worktree");
+    });
+  });
+
+  it("propagates unknown agent to the caller", async () => {
+    setMode("replace");
+
+    await withTempProject(async cwd => {
+      const executor = new ExternalProcessOneShotExecutor({
+        executablePath: fakeExecutorPath,
+      });
+
+      await expect(
+        runTaskExecuteOnce({
+          cwd,
+          taskId: "P78-T1",
+          agent: "unknown-agent",
+          executor,
+        }),
+      ).rejects.toMatchObject({ code: "AGENT_NOT_FOUND" });
 
       const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
       expect(content).toBe("hello world");

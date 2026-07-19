@@ -1,10 +1,12 @@
 import { spawn } from "node:child_process";
+import { tmpdir } from "node:os";
 import {
   createOutputCapture,
   terminateProcessTree,
 } from "../process/bounded-command.ts";
 import {
   DEFAULT_EXECUTOR_TIMEOUT_MS,
+  MAX_EXECUTOR_FAILED_REASON_BYTES,
   MAX_EXECUTOR_OUTPUT_BYTES,
   MAX_REASON_BYTES,
   type OneShotExecutor,
@@ -14,7 +16,7 @@ import {
 
 export type ExternalOneShotExecutorOptions = {
   executablePath: string;
-  cwd: string;
+  cwd?: string;
   timeoutMs?: number;
   maxOutputBytes?: number;
   signal?: AbortSignal;
@@ -25,7 +27,8 @@ export class ExecutorError extends Error {
     message: string,
     readonly code: string,
   ) {
-    super(message);
+    super(truncateExecutorReason(`${code}: ${message}`));
+    this.name = "ExecutorError";
   }
 }
 
@@ -39,7 +42,7 @@ export class ExternalProcessOneShotExecutor implements OneShotExecutor {
     const inputJson = JSON.stringify(input);
 
     const proc = spawn(this.opts.executablePath, [], {
-      cwd: this.opts.cwd,
+      cwd: this.opts.cwd ?? tmpdir(),
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -142,11 +145,11 @@ export class ExternalProcessOneShotExecutor implements OneShotExecutor {
 
     const exitCode = closeSettled ? (await closePromise).exitCode : null;
     if (exitCode !== 0) {
-      const errorOutput = stderr.value();
-      throw new ExecutorError(
+      const errorOutput = truncateExecutorReason(stderr.value());
+      const reason = truncateExecutorReason(
         `executor exited with code ${exitCode}${errorOutput ? `: ${errorOutput}` : ""}`,
-        "EXECUTOR_NON_ZERO_EXIT",
       );
+      throw new ExecutorError(reason, "EXECUTOR_NON_ZERO_EXIT");
     }
 
     if (output.trim().length === 0) {
@@ -217,11 +220,7 @@ function validateOneShotExecutorOutput(value: unknown): OneShotExecutorOutput {
     );
   }
 
-  if (
-    expected_file_sha256.length === 0 ||
-    old_text.length === 0 ||
-    new_text.length === 0
-  ) {
+  if (expected_file_sha256.length === 0 || old_text.length === 0) {
     throw new ExecutorError(
       "replace_exact fields must be non-empty strings",
       "EXECUTOR_SCHEMA_MISMATCH",
@@ -234,4 +233,20 @@ function validateOneShotExecutorOutput(value: unknown): OneShotExecutorOutput {
     old_text,
     new_text,
   };
+}
+
+export function truncateExecutorReason(text: string): string {
+  if (Buffer.byteLength(text, "utf8") <= MAX_EXECUTOR_FAILED_REASON_BYTES) {
+    return text;
+  }
+  const prefix = "[truncated] ";
+  const max =
+    MAX_EXECUTOR_FAILED_REASON_BYTES - Buffer.byteLength(prefix, "utf8");
+  let cut = Math.max(0, max);
+  // Walk back to avoid splitting a multi-byte UTF-8 sequence.
+  const buffer = Buffer.from(text, "utf8");
+  while (cut > 0 && (buffer[cut]! & 0b1100_0000) === 0b1000_0000) {
+    cut -= 1;
+  }
+  return prefix + buffer.subarray(0, cut).toString("utf8");
 }

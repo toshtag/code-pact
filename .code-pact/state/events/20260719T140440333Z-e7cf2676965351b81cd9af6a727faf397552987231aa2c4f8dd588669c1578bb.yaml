@@ -1,0 +1,11 @@
+task_id: P78-T3
+status: done
+at: 2026-07-19T14:04:40.333Z
+actor: agent
+agent: claude-code
+author: Pocket
+evidence:
+  - pnpm typecheck, pnpm build, pnpm test:unit, pnpm vitest integration, pnpm
+    check:docs, pnpm verify:local, pnpm test:integration:smoke all passed
+source: external
+id: e7cf2676965351b81cd9af6a727faf397552987231aa2c4f8dd588669c1578bb

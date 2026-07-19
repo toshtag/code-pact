@@ -3,9 +3,10 @@ import type { FailureCapsule } from "../evidence/failure-capsule.ts";
 export const MAX_SOURCE_BYTES = 8192;
 export const MAX_SOURCE_LINES = 120;
 export const MAX_REASON_BYTES = 512;
+export const MAX_EXECUTOR_FAILED_REASON_BYTES = 2048;
 export const MAX_NEW_TEXT_BYTES = 8192;
 export const MAX_EXECUTOR_INPUT_BYTES = 12_288;
-export const MAX_EXECUTOR_OUTPUT_BYTES = 16_384;
+export const MAX_EXECUTOR_OUTPUT_BYTES = 24_576;
 export const DEFAULT_EXECUTOR_TIMEOUT_MS = 120_000;
 
 export type OneShotEligibility =
@@ -70,6 +71,7 @@ export type ApplyExactReplacementResult =
   | {
       kind: "applied";
       originalContent: string;
+      appliedContent: string;
     }
   | {
       kind: "rejected";
@@ -90,6 +92,10 @@ export type TaskExecuteOnceResult =
       reasons: string[];
     }
   | {
+      kind: "worktree_not_clean";
+      paths: string[];
+    }
+  | {
       kind: "blocked";
       reason: string;
     }
@@ -102,6 +108,14 @@ export type TaskExecuteOnceResult =
       reason: string;
     }
   | {
+      kind: "executor_mutated_worktree";
+      changed_paths: string[];
+    }
+  | {
+      kind: "execution_scope_violation";
+      changed_paths: string[];
+    }
+  | {
       kind: "verification_failed";
       rolled_back: true;
       failure: BoundedFailureCapsule;
@@ -109,5 +123,15 @@ export type TaskExecuteOnceResult =
   | {
       kind: "rollback_failed";
       reason: string;
+      failure?: BoundedFailureCapsule;
+    }
+  | {
+      kind: "rollback_stale_file";
+      reason: string;
+      applied_sha?: string;
+    }
+  | {
+      kind: "rollback_incomplete";
+      changed_paths: string[];
       failure?: BoundedFailureCapsule;
     };

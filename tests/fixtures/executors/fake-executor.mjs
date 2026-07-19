@@ -2,6 +2,8 @@
 import { createHash } from "node:crypto";
 
 const mode = process.env.EXECUTOR_MODE ?? "replace";
+const oldText = process.env.EXECUTOR_OLD ?? "hello";
+const newText = process.env.EXECUTOR_NEW ?? "hi";
 
 let input = "";
 process.stdin.setEncoding("utf8");
@@ -20,7 +22,9 @@ process.stdin.on("end", () => {
 
     if (mode === "timeout") {
       setTimeout(() => {
-        process.stdout.write(JSON.stringify({ kind: "blocked", reason: "should not arrive" }));
+        process.stdout.write(
+          JSON.stringify({ kind: "blocked", reason: "should not arrive" }),
+        );
       }, 60_000);
       return;
     }
@@ -37,23 +41,29 @@ process.stdin.on("end", () => {
     }
 
     if (mode === "extra") {
-      process.stdout.write(JSON.stringify({ kind: "blocked", reason: "x" }) + " extra stuff");
+      process.stdout.write(
+        JSON.stringify({ kind: "blocked", reason: "x" }) + " extra stuff",
+      );
       return;
     }
 
     if (mode === "oversized") {
-      const huge = "x".repeat(20_000);
+      const huge = "x".repeat(40_000);
       process.stdout.write(JSON.stringify({ kind: "blocked", reason: huge }));
       return;
     }
 
     if (mode === "invalid_kind") {
-      process.stdout.write(JSON.stringify({ kind: "repair", reason: "not allowed" }));
+      process.stdout.write(
+        JSON.stringify({ kind: "repair", reason: "not allowed" }),
+      );
       return;
     }
 
     if (mode === "missing_fields") {
-      process.stdout.write(JSON.stringify({ kind: "replace_exact", old_text: "only old" }));
+      process.stdout.write(
+        JSON.stringify({ kind: "replace_exact", old_text: "only old" }),
+      );
       return;
     }
 
@@ -62,8 +72,8 @@ process.stdin.on("end", () => {
         JSON.stringify({
           kind: "replace_exact",
           expected_file_sha256: "0".repeat(64),
-          old_text: process.env.EXECUTOR_OLD || "hello",
-          new_text: process.env.EXECUTOR_NEW || "hi",
+          old_text: oldText,
+          new_text: newText,
         }),
       );
       return;
@@ -77,8 +87,8 @@ process.stdin.on("end", () => {
     const output = JSON.stringify({
       kind: "replace_exact",
       expected_file_sha256: sha,
-      old_text: process.env.EXECUTOR_OLD || "hello",
-      new_text: process.env.EXECUTOR_NEW || "hi",
+      old_text: oldText,
+      new_text: newText,
     });
     process.stdout.write(output);
   } catch (error) {

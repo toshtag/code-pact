@@ -96,6 +96,14 @@ When the work can be verified from the working tree and the recommendation's
 loop verification — so later diagnostics can tell the two apart. Put real proof
 in `--evidence`: a PR number, a CI result, or the verification command you ran.
 
+## Experimental: one-shot execution with `task execute`
+
+For eligible single-file tasks, `code-pact task execute <id> --executor-file <path> [--agent <a>] [--timeout <ms>]` runs an external one-shot executor. The task must read and write a single existing source file, the git working tree must be clean, and the executor file must be a regular non-symlink executable inside the project.
+
+The external process receives a JSON input (schema version 1) with the task goal, `source_path`, source content, and verification command; it must emit either a `replace_exact` payload (`expected_file_sha256`, `old_text`, `new_text`) or a `blocked` reason. `new_text` may be empty to delete `old_text`. The runtime applies the replacement atomically, re-runs the verification command, and records `done` only when the working tree contains exactly the expected source-file change. On failure it rolls the source file back; if the working tree changes outside the source file, the edit is rejected and the source is restored.
+
+Public error codes for `task execute` are: `EDIT_REJECTED`, `EXECUTION_BLOCKED`, `EXECUTION_INELIGIBLE`, `EXECUTOR_FAILED`, `ROLLBACK_FAILED`, `ROLLBACK_STALE_FILE`, `ROLLBACK_INCOMPLETE`, `WORKTREE_NOT_CLEAN`, `EXECUTOR_MUTATED_WORKTREE`, and `EXECUTION_SCOPE_VIOLATION`.
+
 ## A worked example
 
 ```sh

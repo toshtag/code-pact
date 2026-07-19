@@ -1,5 +1,13 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { chmod, mkdir, writeFile, readFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  symlink,
+  writeFile,
+  readFile,
+} from "node:fs/promises";
+import { execSync } from "node:child_process";
 import { join } from "node:path";
 import {
   createTempProject,
@@ -22,6 +30,8 @@ async function setupProject(
   verificationCommand: string,
 ): Promise<void> {
   await mkdir(join(cwd, "src"), { recursive: true });
+  await copyFile(fakeExecutorPath, join(cwd, "executor.mjs"));
+  await chmod(join(cwd, "executor.mjs"), 0o755);
 
   const roadmap = `phases:
   - id: P78
@@ -61,6 +71,12 @@ tasks:
   await writeFile(join(cwd, "design", "roadmap.yaml"), roadmap, "utf8");
   await writeFile(join(cwd, "design", "phases", "P78.yaml"), phase, "utf8");
   await writeFile(join(cwd, "src", "example.ts"), "hello world", "utf8");
+
+  execSync("git init", { cwd, stdio: "ignore" });
+  execSync("git config user.email test@example.com", { cwd, stdio: "ignore" });
+  execSync("git config user.name Test", { cwd, stdio: "ignore" });
+  execSync("git add .", { cwd, stdio: "ignore" });
+  execSync("git commit -m init", { cwd, stdio: "ignore" });
 }
 
 describe("task execute — CLI", () => {
@@ -81,7 +97,7 @@ describe("task execute — CLI", () => {
           "execute",
           "P78-T1",
           "--executor-file",
-          fakeExecutorPath,
+          "executor.mjs",
           "--json",
           "--timeout",
           "10000",
@@ -114,7 +130,7 @@ describe("task execute — CLI", () => {
           "execute",
           "P78-T1",
           "--executor-file",
-          fakeExecutorPath,
+          "executor.mjs",
           "--json",
           "--timeout",
           "10000",
@@ -148,6 +164,153 @@ describe("task execute — CLI", () => {
       expect(res.code).toBe(0);
       expect(res.stdout).toContain("EXPERIMENTAL");
       expect(res.stdout).toContain("--executor-file");
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it("rejects a missing executor file with CONFIG_ERROR", async () => {
+    const project = await createTempProject({
+      prefix: "code-pact-execute-cli-",
+    });
+    try {
+      await setupProject(project.dir, "exit 0");
+      const res = project.run(
+        ["task", "execute", "P78-T1", "--executor-file", "nope.mjs", "--json"],
+        { env: { EXECUTOR_MODE: "replace" } },
+      );
+      expect(res.code).toBe(2);
+      expectJsonErr(res, "CONFIG_ERROR");
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it("rejects an executor file that is a directory", async () => {
+    const project = await createTempProject({
+      prefix: "code-pact-execute-cli-",
+    });
+    try {
+      await setupProject(project.dir, "exit 0");
+      const res = project.run(
+        ["task", "execute", "P78-T1", "--executor-file", "src", "--json"],
+        { env: { EXECUTOR_MODE: "replace" } },
+      );
+      expect(res.code).toBe(2);
+      expectJsonErr(res, "CONFIG_ERROR");
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it("rejects an executor file that is a symlink", async () => {
+    const project = await createTempProject({
+      prefix: "code-pact-execute-cli-",
+    });
+    try {
+      await setupProject(project.dir, "exit 0");
+      await symlink("executor.mjs", join(project.dir, "bad-link.mjs"));
+      execSync("git add .", { cwd: project.dir, stdio: "ignore" });
+      execSync("git commit -m symlink", { cwd: project.dir, stdio: "ignore" });
+      const res = project.run(
+        [
+          "task",
+          "execute",
+          "P78-T1",
+          "--executor-file",
+          "bad-link.mjs",
+          "--json",
+        ],
+        { env: { EXECUTOR_MODE: "replace" } },
+      );
+      expect(res.code).toBe(2);
+      expectJsonErr(res, "CONFIG_ERROR");
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it("rejects a non-executable executor file", async () => {
+    const project = await createTempProject({
+      prefix: "code-pact-execute-cli-",
+    });
+    try {
+      await setupProject(project.dir, "exit 0");
+      await copyFile(
+        join(project.dir, "executor.mjs"),
+        join(project.dir, "noexec.mjs"),
+      );
+      await chmod(join(project.dir, "noexec.mjs"), 0o644);
+      const res = project.run(
+        [
+          "task",
+          "execute",
+          "P78-T1",
+          "--executor-file",
+          "noexec.mjs",
+          "--json",
+        ],
+        { env: { EXECUTOR_MODE: "replace" } },
+      );
+      expect(res.code).toBe(2);
+      expectJsonErr(res, "CONFIG_ERROR");
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it("rejects an executor file outside the project", async () => {
+    const project = await createTempProject({
+      prefix: "code-pact-execute-cli-",
+    });
+    try {
+      await setupProject(project.dir, "exit 0");
+      const res = project.run(
+        [
+          "task",
+          "execute",
+          "P78-T1",
+          "--executor-file",
+          fakeExecutorPath,
+          "--json",
+        ],
+        { env: { EXECUTOR_MODE: "replace" } },
+      );
+      expect(res.code).toBe(2);
+      expectJsonErr(res, "CONFIG_ERROR");
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it("propagates an unknown --agent as AGENT_NOT_FOUND", async () => {
+    const project = await createTempProject({
+      prefix: "code-pact-execute-cli-",
+    });
+    try {
+      await setupProject(project.dir, "exit 0");
+      const res = project.run(
+        [
+          "task",
+          "execute",
+          "P78-T1",
+          "--executor-file",
+          "executor.mjs",
+          "--agent",
+          "unknown-agent",
+          "--json",
+        ],
+        { env: { EXECUTOR_MODE: "replace" } },
+      );
+      expect(res.code).toBe(2);
+      const parsed = expectJsonErr(res, "AGENT_NOT_FOUND");
+      expect(parsed.error.message).toContain("unknown-agent");
+
+      const content = await readFile(
+        join(project.dir, "src", "example.ts"),
+        "utf8",
+      );
+      expect(content).toBe("hello world");
     } finally {
       await project.cleanup();
     }
