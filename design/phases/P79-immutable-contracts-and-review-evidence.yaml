@@ -3,7 +3,7 @@ name: Immutable Contracts and Review Evidence
 weight: 3
 confidence: medium
 risk: medium
-status: planned
+status: done
 objective: Lock task contracts after planning and produce review evidence
   manifests that link CI results, done events, and tested HEAD.
 definition_of_done:
@@ -20,7 +20,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: medium
-    status: planned
+    status: done
     description: Task contract lock command and TASK_CONTRACT_DRIFT gate.
     reads:
       - src/commands/task-finalize.ts
@@ -58,7 +58,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: medium
-    status: planned
+    status: done
     description: Review evidence manifest and review-bundle command.
     reads:
       - src/core/progress/io.ts
@@ -90,7 +90,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: medium
-    status: planned
+    status: done
     description: CI parity gate and classifier parity.
     reads:
       - src/core/evidence/failure-capsule.ts

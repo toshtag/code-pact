@@ -18,7 +18,7 @@ import { TASK_SPECS } from "./spec/task.ts";
 /** The subcommand list shown for each cluster, mirroring the unknown-subcommand hints. */
 const CLUSTER_SUBCOMMANDS: Record<string, string> = {
   plan: `${PLAN_SPEC_ORDER.join(" | ")} | import (alias for "phase import")`,
-  task: "add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook | execute (aliases: reconcile = finalize, next = runbook)",
+  task: "add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook | execute | lock | review-bundle | ci-parity (aliases: reconcile = finalize, next = runbook)",
   phase: `${PHASE_SPEC_ORDER.join(" | ")} (alias: next = runbook)`,
   adapter: ADAPTER_SPEC_ORDER.join(" | "),
   decision: DECISION_SPEC_ORDER.join(" | "),
@@ -138,6 +138,10 @@ const LEAF_USAGE: Record<string, () => string> = {
   "task runbook": () => renderLeafHelp(TASK_SPECS.runbook!),
 
   "task execute": () => renderLeafHelp(TASK_SPECS.execute!),
+
+  "task review-bundle": () => renderLeafHelp(TASK_SPECS["review-bundle"]!),
+
+  "task ci-parity": () => renderLeafHelp(TASK_SPECS["ci-parity"]!),
 
   "evidence show": () => renderLeafHelp(EVIDENCE_SPECS.show),
 

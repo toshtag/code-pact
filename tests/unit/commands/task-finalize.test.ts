@@ -8,6 +8,7 @@ import {
   TaskFinalizeAuditStrictError,
 } from "../../../src/commands/task-finalize.ts";
 import { Phase } from "../../../src/core/schemas/phase.ts";
+import { writeContractLock } from "../../../src/core/contract-lock.ts";
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
@@ -25,11 +26,7 @@ afterEach(async () => {
 
 type SetupOpts = {
   /** Pre-task-complete event status for P1-T1 (controls eligibility). */
-  taskState?:
-    | "no_events"
-    | "started"
-    | "done"
-    | "blocked";
+  taskState?: "no_events" | "started" | "done" | "blocked";
   /** Initial design status for P1-T1 inside the phase YAML. */
   designStatus?: "planned" | "in_progress" | "done";
   /** P10 fields for P1-T1. */
@@ -201,7 +198,7 @@ describe("runTaskFinalize — dry-run (default)", () => {
     await setupProject({ taskState: "done", designStatus: "planned" });
     await runTaskFinalize({ cwd, taskId: "P1-T1" });
     const phase = await readPhase();
-    const t1 = phase.tasks?.find((t) => t.id === "P1-T1");
+    const t1 = phase.tasks?.find(t => t.id === "P1-T1");
     expect(t1?.status).toBe("planned");
   });
 });
@@ -221,7 +218,7 @@ describe("runTaskFinalize — --write", () => {
     expect(result.skipped_writes).toEqual([]);
 
     const phase = await readPhase();
-    const t1 = phase.tasks?.find((t) => t.id === "P1-T1");
+    const t1 = phase.tasks?.find(t => t.id === "P1-T1");
     expect(t1?.status).toBe("done");
   });
 
@@ -229,7 +226,7 @@ describe("runTaskFinalize — --write", () => {
     await setupProject({ taskState: "done", designStatus: "planned" });
     await runTaskFinalize({ cwd, taskId: "P1-T1", write: true });
     const phase = await readPhase();
-    const t2 = phase.tasks?.find((t) => t.id === "P1-T2");
+    const t2 = phase.tasks?.find(t => t.id === "P1-T2");
     // T2 was already done in the fixture; must remain done untouched.
     expect(t2?.status).toBe("done");
   });
@@ -407,7 +404,20 @@ describe("runTaskFinalize — P10 field surfacing", () => {
       const { spawnSync } = await import("node:child_process");
       spawnSync("git", ["init", "--quiet"], { cwd });
       spawnSync("git", ["add", "."], { cwd });
-      spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--quiet", "-m", "initial"], { cwd });
+      spawnSync(
+        "git",
+        [
+          "-c",
+          "user.email=t@t",
+          "-c",
+          "user.name=t",
+          "commit",
+          "--quiet",
+          "-m",
+          "initial",
+        ],
+        { cwd },
+      );
 
       const phasePath = join(cwd, "design/phases/P1-foundation.yaml");
       const before = await readFile(phasePath, "utf8");
@@ -436,7 +446,20 @@ describe("runTaskFinalize — P10 field surfacing", () => {
       const { spawnSync } = await import("node:child_process");
       spawnSync("git", ["init", "--quiet"], { cwd });
       spawnSync("git", ["add", "."], { cwd });
-      spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--quiet", "-m", "initial"], { cwd });
+      spawnSync(
+        "git",
+        [
+          "-c",
+          "user.email=t@t",
+          "-c",
+          "user.name=t",
+          "commit",
+          "--quiet",
+          "-m",
+          "initial",
+        ],
+        { cwd },
+      );
 
       try {
         await runTaskFinalize({
@@ -457,5 +480,86 @@ describe("runTaskFinalize — P10 field surfacing", () => {
         }
       }
     });
+  });
+});
+
+// -----------------------------------------------------------------------------
+// P79-T1: TASK_CONTRACT_DRIFT gate
+// -----------------------------------------------------------------------------
+
+describe("runTaskFinalize — TASK_CONTRACT_DRIFT", () => {
+  it("throws TASK_CONTRACT_DRIFT when declared writes changed after lock", async () => {
+    await setupProject({ taskState: "done", writes: ["src/a.ts"] });
+    const { spawnSync } = await import("node:child_process");
+    spawnSync("git", ["init", "--quiet"], { cwd });
+    spawnSync(
+      "git",
+      [
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "user.name=t",
+        "commit",
+        "--quiet",
+        "--allow-empty",
+        "-m",
+        "initial",
+      ],
+      { cwd },
+    );
+
+    await writeContractLock(cwd, {
+      task_id: "P1-T1",
+      phase_id: "P1",
+      plan_sha: "0".repeat(40),
+      base_ref: "HEAD",
+      reads: [],
+      writes: ["src/a.ts", "src/b.ts"],
+      at: new Date().toISOString(),
+      actor: "agent",
+      agent: "claude-code",
+      author: "test",
+    });
+
+    await expect(
+      runTaskFinalize({ cwd, taskId: "P1-T1" }),
+    ).rejects.toMatchObject({ code: "TASK_CONTRACT_DRIFT" });
+  });
+
+  it("passes when lock matches current declaration and base ref", async () => {
+    await setupProject({ taskState: "done", writes: ["src/a.ts"] });
+    const { spawnSync } = await import("node:child_process");
+    spawnSync("git", ["init", "--quiet"], { cwd });
+    spawnSync(
+      "git",
+      [
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "user.name=t",
+        "commit",
+        "--quiet",
+        "--allow-empty",
+        "-m",
+        "initial",
+      ],
+      { cwd },
+    );
+
+    await writeContractLock(cwd, {
+      task_id: "P1-T1",
+      phase_id: "P1",
+      plan_sha: "0".repeat(40),
+      base_ref: "HEAD",
+      reads: [],
+      writes: ["src/a.ts"],
+      at: new Date().toISOString(),
+      actor: "agent",
+      agent: "claude-code",
+      author: "test",
+    });
+
+    const result = await runTaskFinalize({ cwd, taskId: "P1-T1" });
+    expect(result.kind).toBe("would_finalize");
   });
 });

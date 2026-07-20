@@ -1,0 +1,10 @@
+task_id: P79-T3
+status: done
+at: 2026-07-20T11:32:53.880Z
+actor: agent
+agent: claude-code
+author: Pocket
+evidence:
+  - pnpm test
+source: external
+id: 3ea3f0e454fbb6f45a670b73ec30a2be9a0347600e5651b86a76ea91627133f8

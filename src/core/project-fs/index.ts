@@ -102,6 +102,12 @@ export {
 export {
   resolveProjectScaffoldReadPath,
   resolveProjectScaffoldWritePath,
+  resolveContractLockDirWritePath,
+  resolveContractLockReadPath,
+  resolveContractLockWritePath,
+  resolveReviewManifestDirWritePath,
+  resolveReviewManifestReadPath,
+  resolveReviewManifestWritePath,
 } from "./authorities/project-config-authority.ts";
 export {
   resolveContextManifestReadPath,

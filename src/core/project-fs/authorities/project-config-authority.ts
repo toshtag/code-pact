@@ -43,8 +43,7 @@ const PROJECT_SCAFFOLD_PATHS = new Set([
 function isProjectScaffoldPath(path: string): boolean {
   return (
     PROJECT_SCAFFOLD_PATHS.has(path) ||
-    (path.startsWith(".code-pact/agent-profiles/") &&
-      path.endsWith(".yaml")) ||
+    (path.startsWith(".code-pact/agent-profiles/") && path.endsWith(".yaml")) ||
     (path.startsWith(".code-pact/model-profiles/") && path.endsWith(".yaml"))
   );
 }
@@ -68,6 +67,30 @@ function isProjectRuntimeLockFile(path: string): boolean {
 
 function isProgressEventsDir(path: string): boolean {
   return path === ".code-pact/state/events";
+}
+
+function isContractLockDir(path: string): boolean {
+  return path === ".code-pact/state/locks";
+}
+
+function isContractLockPath(path: string): boolean {
+  return (
+    path.startsWith(".code-pact/state/locks/") &&
+    !path.slice(".code-pact/state/locks/".length).includes("/") &&
+    path.endsWith(".yaml")
+  );
+}
+
+function isReviewManifestDir(path: string): boolean {
+  return path === ".code-pact/state/reviews";
+}
+
+function isReviewManifestPath(path: string): boolean {
+  return (
+    path.startsWith(".code-pact/state/reviews/") &&
+    !path.slice(".code-pact/state/reviews/".length).includes("/") &&
+    path.endsWith(".yaml")
+  );
 }
 
 function isProgressEventPath(path: string): boolean {
@@ -238,6 +261,70 @@ export async function resolveProgressEventDeletePath(
     cwd,
     [".code-pact/state/events", file].join("/"),
     isProgressEventPath,
+  );
+}
+
+export async function resolveContractLockDirWritePath(
+  cwd: string,
+): Promise<OwnedWritePath> {
+  return resolveAndBrandWriteForAuthority(
+    cwd,
+    ".code-pact/state/locks",
+    isContractLockDir,
+  );
+}
+
+export async function resolveContractLockReadPath(
+  cwd: string,
+  file: string,
+): Promise<OwnedReadPath> {
+  return resolveAndBrandReadForAuthority(
+    cwd,
+    [".code-pact/state/locks", file].join("/"),
+    isContractLockPath,
+  );
+}
+
+export async function resolveContractLockWritePath(
+  cwd: string,
+  file: string,
+): Promise<OwnedWritePath> {
+  return resolveAndBrandWriteForAuthority(
+    cwd,
+    [".code-pact/state/locks", file].join("/"),
+    isContractLockPath,
+  );
+}
+
+export async function resolveReviewManifestDirWritePath(
+  cwd: string,
+): Promise<OwnedWritePath> {
+  return resolveAndBrandWriteForAuthority(
+    cwd,
+    ".code-pact/state/reviews",
+    isReviewManifestDir,
+  );
+}
+
+export async function resolveReviewManifestReadPath(
+  cwd: string,
+  file: string,
+): Promise<OwnedReadPath> {
+  return resolveAndBrandReadForAuthority(
+    cwd,
+    [".code-pact/state/reviews", file].join("/"),
+    isReviewManifestPath,
+  );
+}
+
+export async function resolveReviewManifestWritePath(
+  cwd: string,
+  file: string,
+): Promise<OwnedWritePath> {
+  return resolveAndBrandWriteForAuthority(
+    cwd,
+    [".code-pact/state/reviews", file].join("/"),
+    isReviewManifestPath,
   );
 }
 

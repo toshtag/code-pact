@@ -10,6 +10,9 @@
 import { parseArgs } from "node:util";
 import { strictParse, strictParseAlias, ConfigError } from "../../lib/argv.ts";
 import { cmdTaskExecute } from "./task-execute.ts";
+import { cmdTaskLock } from "./task-lock.ts";
+import { cmdReviewBundle } from "./review-bundle.ts";
+import { cmdCiParity } from "./ci-parity.ts";
 import {
   clusterUsage,
   emitUsage,
@@ -199,8 +202,17 @@ export async function cmdTask(
   if (subcommand === "execute") {
     return cmdTaskExecute(rest, locale, globalJson);
   }
+  if (subcommand === "lock") {
+    return cmdTaskLock(rest, locale, globalJson);
+  }
+  if (subcommand === "review-bundle") {
+    return cmdReviewBundle(rest, locale, globalJson);
+  }
+  if (subcommand === "ci-parity") {
+    return cmdCiParity(rest, locale, globalJson);
+  }
 
-  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook | execute (aliases: reconcile = finalize, next = runbook)`;
+  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook | execute | lock | review-bundle | ci-parity (aliases: reconcile = finalize, next = runbook)`;
   emitError(globalJson, "CONFIG_ERROR", msg);
   return 2;
 }
@@ -1930,6 +1942,17 @@ async function cmdTaskFinalize(
             first_failure: summary.first_failure,
             suggested_next_command: summary.suggested_next_command,
           };
+          break;
+        }
+        case "TASK_CONTRACT_DRIFT": {
+          const drift =
+            (err as NodeJS.ErrnoException & { drift?: { message: string }[] })
+              .drift ?? [];
+          msg = m.task.finalize.contractDrift(
+            taskId,
+            drift.map(d => d.message),
+          );
+          outCode = "TASK_CONTRACT_DRIFT";
           break;
         }
         case "PHASE_SNAPSHOT_INVALID":

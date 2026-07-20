@@ -32,6 +32,30 @@ export const messages = {
     "      --locale     ja-JP | en-US (既定は LANG)",
   ].join("\n"),
   unknownCommand: (cmd: string): string => `未知のコマンド: ${cmd}`,
+  reviewBundle: {
+    missingTaskId: "review-bundle にはタスク ID が必要です。",
+    invalidCiStatus: (v: string): string =>
+      `review-bundle: --ci-status は success/failure/pending のいずれかである必要があります (入力: "${v}")。`,
+    invalidClassifierResult: (v: string): string =>
+      `review-bundle: --classifier-result は success/failure/pending のいずれかである必要があります (入力: "${v}")。`,
+    written: (taskId: string, phaseId: string, path: string): string =>
+      `"${taskId}" （フェーズ ${phaseId}）のレビュー証拠を ${path} に書きました。`,
+    taskNotDone: (taskId: string): string =>
+      `タスク "${taskId}" に done イベントがありません。レビュー証拠を作成できません。`,
+  },
+  ciParity: {
+    missingTaskId: "ci-parity にはタスク ID が必要です。",
+    missingManifest: (taskId: string): string =>
+      `ci-parity: "${taskId}" のレビュー証拠がありません。先に ".code-pact review-bundle ${taskId}" を実行してください。`,
+    headMismatch: (expected: string, actual: string): string =>
+      `ci-parity: テスト済み HEAD が一致しません。証拠: ${expected}, 現在: ${actual}。`,
+    statusNotSuccess: (status: string): string =>
+      `ci-parity: CI ステータスが "${status}" です。"success" が必要です。`,
+    classifierNotSuccess: (result: string): string =>
+      `ci-parity: classifier 結果が "${result}" です。"success" が必要です。`,
+    ok: (taskId: string): string =>
+      `ci-parity: "${taskId}" のレビュー証拠は現在の HEAD と CI/classifier 結果と一致しています。`,
+  },
   init: {
     alreadyInitialized: (dir: string): string =>
       `"${dir}" に ".code-pact/" が既に存在します。上書きするには --force を使ってください。`,
@@ -279,6 +303,13 @@ export const messages = {
       agentNotFound: (name: string): string =>
         `エージェント "${name}" は project.yaml に設定されていません。`,
     },
+    lock: {
+      missingTaskId: "task lock にはタスク ID が必要です。",
+      locked: (taskId: string, phaseId: string, path: string): string =>
+        `タスク "${taskId}" （フェーズ "${phaseId}"）の契約を ${path} にロックしました。`,
+      contractDrift: (taskId: string, reasons: string[]): string =>
+        `"${taskId}" で TASK_CONTRACT_DRIFT: ${reasons.join("; ")}`,
+    },
     execute: {
       missingTaskId: "task execute にはタスク ID が必要です。",
       missingExecutorFile:
@@ -403,6 +434,8 @@ export const messages = {
         `タスク "${taskId}" は finalize できません: derived 状態が "${current}" で、"done" が必要です。先に \`code-pact task complete ${taskId}\` を実行してください。`,
       writeRefused: (taskId: string, reason: string): string =>
         `タスク "${taskId}" の finalize は拒否されました: ${reason}`,
+      contractDrift: (taskId: string, reasons: string[]): string =>
+        `"${taskId}" で TASK_CONTRACT_DRIFT: ${reasons.join("; ")}`,
       alreadyFinalized: (taskId: string): string =>
         `タスク "${taskId}" の design status は既に "done" です。書き込みは行いませんでした。`,
       success: (taskId: string, file: string): string =>

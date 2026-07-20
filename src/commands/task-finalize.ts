@@ -13,6 +13,11 @@ import type { TaskStatusDiff } from "../core/finalize/diff.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { auditWrites, type WriteAuditResult } from "../core/audit/index.ts";
 import { projectPathPresence } from "../core/plan/checks/fs.ts";
+import {
+  checkContractLock,
+  readContractLock,
+  resolveGitRef,
+} from "../core/contract-lock.ts";
 
 // ---------------------------------------------------------------------------
 // `task finalize <task-id>`
@@ -143,10 +148,7 @@ export async function runTaskFinalize(
   // `phasePath`; alias to the local `file` to keep the rest of this
   // function (which feeds `file` into the safe-write classifier and
   // the public FinalizeContext) unchanged.
-  const { phaseId, phasePath: file } = await resolveTaskInRoadmap(
-    cwd,
-    taskId,
-  );
+  const { phaseId, phasePath: file } = await resolveTaskInRoadmap(cwd, taskId);
 
   // 2. Derive current state from the progress ledger.
   const { log } = await loadProgressLog(cwd);
@@ -160,21 +162,27 @@ export async function runTaskFinalize(
       `Task "${taskId}" is not finalize-eligible: derived state is "${state.current}", expected "done". Run \`task complete ${taskId}\` first.`,
     );
     (err as NodeJS.ErrnoException).code = "TASK_FINALIZE_NOT_ELIGIBLE";
-    (err as NodeJS.ErrnoException & {
-      current?: string;
-      task_id?: string;
-      phase_id?: string;
-    }).current = state.current;
-    (err as NodeJS.ErrnoException & {
-      current?: string;
-      task_id?: string;
-      phase_id?: string;
-    }).task_id = taskId;
-    (err as NodeJS.ErrnoException & {
-      current?: string;
-      task_id?: string;
-      phase_id?: string;
-    }).phase_id = phaseId;
+    (
+      err as NodeJS.ErrnoException & {
+        current?: string;
+        task_id?: string;
+        phase_id?: string;
+      }
+    ).current = state.current;
+    (
+      err as NodeJS.ErrnoException & {
+        current?: string;
+        task_id?: string;
+        phase_id?: string;
+      }
+    ).task_id = taskId;
+    (
+      err as NodeJS.ErrnoException & {
+        current?: string;
+        task_id?: string;
+        phase_id?: string;
+      }
+    ).phase_id = phaseId;
     throw err;
   }
 
@@ -192,26 +200,55 @@ export async function runTaskFinalize(
       `Refused to finalize "${taskId}": ${classified.detail}`,
     );
     (err as NodeJS.ErrnoException).code = "TASK_FINALIZE_WRITE_REFUSED";
-    (err as NodeJS.ErrnoException & {
-      reason?: WriteRefusalReason;
-      file?: string;
-    }).reason = classified.reason;
-    (err as NodeJS.ErrnoException & {
-      reason?: WriteRefusalReason;
-      file?: string;
-    }).file = classified.file;
+    (
+      err as NodeJS.ErrnoException & {
+        reason?: WriteRefusalReason;
+        file?: string;
+      }
+    ).reason = classified.reason;
+    (
+      err as NodeJS.ErrnoException & {
+        reason?: WriteRefusalReason;
+        file?: string;
+      }
+    ).file = classified.file;
     throw err;
   }
 
   // 5. The phase parsed cleanly and the task exists. Pull the readiness
   //    fields off the task for the report sections that appear under every
   //    kind.
-  const task = (classified.phase.tasks ?? []).find((t) => t.id === taskId);
+  const task = (classified.phase.tasks ?? []).find(t => t.id === taskId);
   // task is guaranteed present because classifyWriteRequest validated it.
   if (!task) {
     throw new Error(
       `internal invariant: task "${taskId}" missing from classified phase`,
     );
+  }
+
+  // TASK_CONTRACT_DRIFT gate. If a lock was recorded at planning time, the
+  // current declared reads/writes and the supplied base ref must still match.
+  const lock = await readContractLock(cwd, taskId);
+  if (lock !== null) {
+    let baseRefSha: string | undefined;
+    if (opts.baseRef !== undefined) {
+      try {
+        baseRefSha = await resolveGitRef(cwd, opts.baseRef);
+      } catch {
+        baseRefSha = opts.baseRef;
+      }
+    }
+    const drift = checkContractLock(task, baseRefSha, lock);
+    if (drift.length > 0) {
+      const err = new Error(
+        `TASK_CONTRACT_DRIFT: ${drift.map(d => d.message).join("; ")}`,
+      );
+      (err as NodeJS.ErrnoException).code = "TASK_CONTRACT_DRIFT";
+      (err as NodeJS.ErrnoException & { task_id?: string }).task_id = taskId;
+      (err as NodeJS.ErrnoException & { phase_id?: string }).phase_id = phaseId;
+      (err as NodeJS.ErrnoException & { drift?: typeof drift }).drift = drift;
+      throw err;
+    }
   }
 
   const acceptanceRefsCheck: AcceptanceRefCheck[] = [];
@@ -221,7 +258,7 @@ export async function runTaskFinalize(
   }
 
   const dependsOnCheck: DependsOnCheck[] = (task.depends_on ?? []).map(
-    (depId) => {
+    depId => {
       const depState = deriveTaskState(log.events, depId);
       return {
         task_id: depId,

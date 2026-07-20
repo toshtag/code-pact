@@ -32,6 +32,30 @@ export const messages = {
     "      --locale     ja-JP | en-US (defaults to LANG)",
   ].join("\n"),
   unknownCommand: (cmd: string): string => `Unknown command: ${cmd}`,
+  reviewBundle: {
+    missingTaskId: "review-bundle requires a task id.",
+    invalidCiStatus: (v: string): string =>
+      `review-bundle: --ci-status must be success, failure, or pending (got "${v}").`,
+    invalidClassifierResult: (v: string): string =>
+      `review-bundle: --classifier-result must be success, failure, or pending (got "${v}").`,
+    written: (taskId: string, phaseId: string, path: string): string =>
+      `Review bundle written for "${taskId}" (phase ${phaseId}) at ${path}.`,
+    taskNotDone: (taskId: string): string =>
+      `Task "${taskId}" has no done event; cannot create review bundle.`,
+  },
+  ciParity: {
+    missingTaskId: "ci-parity requires a task id.",
+    missingManifest: (taskId: string): string =>
+      `ci-parity: no review manifest found for "${taskId}". Run ".code-pact review-bundle ${taskId}" first.`,
+    headMismatch: (expected: string, actual: string): string =>
+      `ci-parity: tested HEAD mismatch. Manifest: ${expected}, current: ${actual}.`,
+    statusNotSuccess: (status: string): string =>
+      `ci-parity: CI status is "${status}", expected "success".`,
+    classifierNotSuccess: (result: string): string =>
+      `ci-parity: classifier result is "${result}", expected "success".`,
+    ok: (taskId: string): string =>
+      `ci-parity: review evidence for "${taskId}" matches current HEAD and CI/classifier results.`,
+  },
   init: {
     alreadyInitialized: (dir: string): string =>
       `".code-pact/" already exists in ${dir}. Use --force to overwrite.`,
@@ -277,6 +301,13 @@ export const messages = {
       agentNotFound: (name: string): string =>
         `Agent "${name}" is not configured in project.yaml.`,
     },
+    lock: {
+      missingTaskId: "task lock requires a task id.",
+      locked: (taskId: string, phaseId: string, path: string): string =>
+        `Locked contract for task "${taskId}" in phase "${phaseId}" at ${path}.`,
+      contractDrift: (taskId: string, reasons: string[]): string =>
+        `TASK_CONTRACT_DRIFT for "${taskId}": ${reasons.join("; ")}`,
+    },
     execute: {
       missingTaskId: "task execute requires a task id.",
       missingExecutorFile: "task execute requires --executor-file <path>.",
@@ -400,6 +431,8 @@ export const messages = {
         `Task "${taskId}" is not finalize-eligible: derived state is "${current}", expected "done". Run \`code-pact task complete ${taskId}\` first.`,
       writeRefused: (taskId: string, reason: string): string =>
         `Refused to finalize "${taskId}": ${reason}.`,
+      contractDrift: (taskId: string, reasons: string[]): string =>
+        `TASK_CONTRACT_DRIFT for "${taskId}": ${reasons.join("; ")}`,
       alreadyFinalized: (taskId: string): string =>
         `Task "${taskId}" design status is already "done". No change written.`,
       success: (taskId: string, file: string): string =>

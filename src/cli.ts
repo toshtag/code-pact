@@ -720,14 +720,25 @@ async function cmdVerify(
   const m = messages[locale];
   let values: Record<string, unknown>;
   try {
-    ({ values } = strictParse("verify", argv, toParseOptions(ROOT_SPECS.verify)));
+    ({ values } = strictParse(
+      "verify",
+      argv,
+      toParseOptions(ROOT_SPECS.verify),
+    ));
   } catch (error) {
     if (!(error instanceof ConfigError)) throw error;
     if (wantsAgentDetail(argv, globalJson)) {
-      emitAgentError({ code: "CONFIG_ERROR", message: "Invalid configuration" }, error.message);
+      emitAgentError(
+        { code: "CONFIG_ERROR", message: "Invalid configuration" },
+        error.message,
+      );
       return 2;
     }
-    emitError(globalJson || argv.includes("--json"), "CONFIG_ERROR", error.message);
+    emitError(
+      globalJson || argv.includes("--json"),
+      "CONFIG_ERROR",
+      error.message,
+    );
     return 2;
   }
 
@@ -741,7 +752,11 @@ async function cmdVerify(
     return 2;
   }
   if (detail !== undefined && detail !== "full" && detail !== "agent") {
-    emitError(json, "CONFIG_ERROR", `verify: invalid --detail "${detail}" (expected full or agent)`);
+    emitError(
+      json,
+      "CONFIG_ERROR",
+      `verify: invalid --detail "${detail}" (expected full or agent)`,
+    );
     return 2;
   }
 
@@ -757,9 +772,13 @@ async function cmdVerify(
     return 2;
   }
 
-  const parsedTimeout = parseTimeoutArg(values.timeout as string | undefined, json, {
-    emit: detail !== "agent",
-  });
+  const parsedTimeout = parseTimeoutArg(
+    values.timeout as string | undefined,
+    json,
+    {
+      emit: detail !== "agent",
+    },
+  );
   if (!parsedTimeout.ok) {
     if (detail === "agent") {
       emitAgentError(
@@ -802,7 +821,9 @@ async function cmdVerify(
               error: {
                 code: "VERIFICATION_FAILED",
                 ...(aborted ? { cause_code: "ABORTED" } : {}),
-                message: aborted ? "Verification aborted" : "Verification failed",
+                message: aborted
+                  ? "Verification aborted"
+                  : "Verification failed",
               },
               data: await projectVerifyForAgent(process.cwd(), result),
             }),
@@ -863,7 +884,9 @@ async function cmdVerify(
       const phases =
         (error as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
       const message =
-        error instanceof Error ? error.message : `Phase "${phaseId}" is ambiguous.`;
+        error instanceof Error
+          ? error.message
+          : `Phase "${phaseId}" is ambiguous.`;
       if (detail === "agent") {
         emitAgentError(
           { code: "AMBIGUOUS_PHASE_ID", message: "Ambiguous phase id" },

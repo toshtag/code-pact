@@ -431,6 +431,82 @@ const execute: CommandSpec = {
   ],
 };
 
+const lock: CommandSpec = {
+  cluster: "task",
+  command: "lock",
+  positional: "<task-id>",
+  summary: [
+    "Lock a task's declared reads/writes and base ref as an immutable contract.",
+    "After locking, `task finalize` (and other mutating verbs) compare the",
+    "current task declaration and --base-ref against the lock. Any mismatch",
+    "raises TASK_CONTRACT_DRIFT and aborts the operation.",
+  ].join("\n"),
+  flags: [
+    {
+      name: "base-ref",
+      value: "<ref>",
+      description:
+        "Git ref to record as the contract base (default: HEAD, resolved to a SHA).",
+    },
+    {
+      name: "agent",
+      value: "<name>",
+      description: "Agent name. Defaults to project default_agent.",
+    },
+    { name: "json", description: "Emit JSON." },
+  ],
+  examples: [
+    "code-pact task lock P1-T1",
+    "code-pact task lock P1-T1 --base-ref origin/main --json",
+  ],
+};
+
+const reviewBundle: CommandSpec = {
+  cluster: "task",
+  command: "review-bundle",
+  positional: "<task-id>",
+  summary: [
+    "Write a review evidence manifest for a done task. The manifest captures",
+    "the tested HEAD, the latest done event, and optional CI/classifier results.",
+    "It is stored under .code-pact/state/reviews/<task-id>.yaml.",
+  ].join("\n"),
+  flags: [
+    {
+      name: "ci-status",
+      value: "<success|failure|pending>",
+      description: "CI status to record in the manifest (default: pending).",
+    },
+    {
+      name: "ci-run-url",
+      value: "<url>",
+      description: "URL of the CI run that produced the status.",
+    },
+    {
+      name: "classifier-result",
+      value: "<success|failure|pending>",
+      description: "Change-classifier result to record in the manifest.",
+    },
+    { name: "json", description: "Emit JSON." },
+  ],
+  examples: [
+    "code-pact task review-bundle P1-T1 --ci-status success --classifier-result success --json",
+  ],
+};
+
+const ciParity: CommandSpec = {
+  cluster: "task",
+  command: "ci-parity",
+  positional: "<task-id>",
+  summary: [
+    "Verify that the review evidence manifest for a task matches the current",
+    "repository HEAD and that CI (and classifier) results are successful.",
+    "Fails with CI_PARITY_* when the manifest is missing, HEAD drifted, or",
+    "the recorded CI/classifier result is not success.",
+  ].join("\n"),
+  flags: [{ name: "json", description: "Emit JSON." }],
+  examples: ["code-pact task ci-parity P1-T1 --json"],
+};
+
 const recordDone: CommandSpec = {
   cluster: "task",
   command: "record-done",
@@ -489,5 +565,8 @@ export const TASK_SPECS: Record<string, CommandSpec> = {
   resume,
   runbook,
   execute,
+  lock,
+  "review-bundle": reviewBundle,
+  "ci-parity": ciParity,
   "record-done": recordDone,
 };

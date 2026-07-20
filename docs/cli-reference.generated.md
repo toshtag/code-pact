@@ -390,6 +390,62 @@ major version bump.
 code-pact task execute P78-T1 --executor-file agents/one-shot.sh --json
 ```
 
+### `task lock`
+
+`code-pact task lock <task-id> [options]`
+
+Lock a task's declared reads/writes and base ref as an immutable contract.
+After locking, `task finalize` (and other mutating verbs) compare the
+current task declaration and --base-ref against the lock. Any mismatch
+raises TASK_CONTRACT_DRIFT and aborts the operation.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--base-ref` | `<ref>` | Git ref to record as the contract base (default: HEAD, resolved to a SHA). |
+| `--agent` | `<name>` | Agent name. Defaults to project default_agent. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact task lock P1-T1
+code-pact task lock P1-T1 --base-ref origin/main --json
+```
+
+### `task review-bundle`
+
+`code-pact task review-bundle <task-id> [options]`
+
+Write a review evidence manifest for a done task. The manifest captures
+the tested HEAD, the latest done event, and optional CI/classifier results.
+It is stored under .code-pact/state/reviews/<task-id>.yaml.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--ci-status` | `<success|failure|pending>` | CI status to record in the manifest (default: pending). |
+| `--ci-run-url` | `<url>` | URL of the CI run that produced the status. |
+| `--classifier-result` | `<success|failure|pending>` | Change-classifier result to record in the manifest. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact task review-bundle P1-T1 --ci-status success --classifier-result success --json
+```
+
+### `task ci-parity`
+
+`code-pact task ci-parity <task-id> [options]`
+
+Verify that the review evidence manifest for a task matches the current
+repository HEAD and that CI (and classifier) results are successful.
+Fails with CI_PARITY_* when the manifest is missing, HEAD drifted, or
+the recorded CI/classifier result is not success.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact task ci-parity P1-T1 --json
+```
+
 ## Plan commands
 
 ### `plan brief`
