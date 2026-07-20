@@ -39,12 +39,14 @@ beforeAll(() => {
 }, 60_000);
 
 afterEach(async () => {
-  await Promise.all(cleanups.map((c) => c()));
+  await Promise.all(cleanups.map(c => c()));
   cleanups = [];
 });
 
 async function freshProject(prefix: string): Promise<Project> {
-  const p = await createTempProject({ prefix: `code-pact-json-stdout-${prefix}-` });
+  const p = await createTempProject({
+    prefix: `code-pact-json-stdout-${prefix}-`,
+  });
   cleanups.push(p.cleanup);
   return p;
 }
@@ -73,7 +75,10 @@ async function projectWithPhase(prefix: string): Promise<Project> {
 async function projectWithTask(prefix: string): Promise<Project> {
   const p = await projectWithPhase(prefix);
   const phasePath = join(p.dir, "design", "phases", "P1-foundation.yaml");
-  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
+  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+    string,
+    unknown
+  >;
   doc.tasks = [
     {
       id: "P1-T1",
@@ -92,9 +97,15 @@ async function projectWithTask(prefix: string): Promise<Project> {
   return p;
 }
 
-async function setProjectVerifyCommand(p: Project, command: string): Promise<void> {
+async function setProjectVerifyCommand(
+  p: Project,
+  command: string,
+): Promise<void> {
   const phasePath = join(p.dir, "design", "phases", "P1-foundation.yaml");
-  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
+  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+    string,
+    unknown
+  >;
   doc.verification = { commands: [command] };
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
 }
@@ -166,7 +177,10 @@ describe("json-stdout contract: read-only Stable (v1.0) commands", () => {
 
   it("plan normalize --check --json", async () => {
     const p = await freshProject("plan-normalize");
-    expectStdoutIsJson(p.run(["plan", "normalize", "--check", "--json"]), "plan normalize");
+    expectStdoutIsJson(
+      p.run(["plan", "normalize", "--check", "--json"]),
+      "plan normalize",
+    );
   });
 
   it("plan analyze --json", async () => {
@@ -228,13 +242,25 @@ describe("json-stdout contract: read-only Stable (v1.0) commands", () => {
 
   it("task status P1-T1 --json", async () => {
     const p = await projectWithTask("task-status");
-    expectStdoutIsJson(p.run(["task", "status", "P1-T1", "--json"]), "task status");
+    expectStdoutIsJson(
+      p.run(["task", "status", "P1-T1", "--json"]),
+      "task status",
+    );
   });
 
   it("pack --phase P1 --task P1-T1 --agent claude-code --json", async () => {
     const p = await projectWithTask("pack");
     expectStdoutIsJson(
-      p.run(["pack", "--phase", "P1", "--task", "P1-T1", "--agent", "claude-code", "--json"]),
+      p.run([
+        "pack",
+        "--phase",
+        "P1",
+        "--task",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--json",
+      ]),
       "pack",
     );
   });
@@ -259,7 +285,10 @@ describe("json-stdout contract: read-only Stable (v1.0) commands", () => {
 
   it("adapter doctor --json (with manifest)", async () => {
     const p = await projectWithAdapter("adapter-doctor");
-    expectStdoutIsJson(p.run(["adapter", "doctor", "--json"]), "adapter doctor");
+    expectStdoutIsJson(
+      p.run(["adapter", "doctor", "--json"]),
+      "adapter doctor",
+    );
   });
 
   it("adapter upgrade <agent> --check --json (with manifest)", async () => {
@@ -367,14 +396,7 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
       "--json",
     ]);
     expectStdoutIsJson(
-      p.run([
-        "task",
-        "add",
-        "TUTORIAL",
-        "--type",
-        "docs",
-        "--json",
-      ]),
+      p.run(["task", "add", "TUTORIAL", "--type", "docs", "--json"]),
       "task add partial-flags CONFIG_ERROR",
     );
   });
@@ -419,7 +441,10 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
       }),
       "utf8",
     );
-    expectStdoutIsJson(p.run(["phase", "import", importPath, "--json"]), "phase import");
+    expectStdoutIsJson(
+      p.run(["phase", "import", importPath, "--json"]),
+      "phase import",
+    );
   });
 
   it("phase import --scaffold-decisions --json", async () => {
@@ -497,7 +522,16 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
     // The fresh-init gate must skip lock acquisition; otherwise the
     // mkdir of `.code-pact/locks/` would itself trip ALREADY_INITIALIZED.
     const res = p.run(
-      ["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--sample-phase", "--json"],
+      [
+        "init",
+        "--non-interactive",
+        "--locale",
+        "en-US",
+        "--agent",
+        "claude-code",
+        "--sample-phase",
+        "--json",
+      ],
       { CODE_PACT_DISABLE_LOCKS: "" },
     );
     expectStdoutIsJson(res, "fresh init --sample-phase with locks active");
@@ -509,7 +543,10 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
     const phaseExists = await readFile(
       join(p.dir, "design", "phases", "TUTORIAL-walkthrough.yaml"),
       "utf8",
-    ).then(() => true, () => false);
+    ).then(
+      () => true,
+      () => false,
+    );
     expect(phaseExists).toBe(true);
   });
 
@@ -703,9 +740,50 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
     );
   });
 
+  it("task complete P1-T1 --json returns data.deps for incomplete dependency", async () => {
+    const p = await projectWithTask("task-complete-dep");
+    const phasePath = join(p.dir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    (doc.tasks as Record<string, unknown>[])[0]!["depends_on"] = ["P1-T2"];
+    (doc.tasks as Record<string, unknown>[]).push({
+      id: "P1-T2",
+      type: "feature",
+      ambiguity: "low",
+      risk: "low",
+      context_size: "small",
+      write_surface: "low",
+      verification_strength: "weak",
+      expected_duration: "short",
+      status: "planned",
+      description: "dependency",
+    });
+    await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+    const res = p.run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(res.code).toBe(2);
+    expectStdoutIsJson(res, "task complete dependency incomplete");
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string; message: string };
+      data?: { deps?: string[] };
+    };
+    expect(parsed.error.code).toBe("TASK_DEPENDENCY_INCOMPLETE");
+    expect(parsed.data?.deps).toEqual(["P1-T2"]);
+  });
+
   it("task complete --detail agent emits bounded prior_local_signal only after repeat failure", async () => {
     const p = await projectWithTask("task-complete-prior-local-signal");
-    await setProjectVerifyCommand(p, "node -e \"process.exit(1)\"");
+    await setProjectVerifyCommand(p, 'node -e "process.exit(1)"');
     p.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]);
 
     const first = p.run([
@@ -759,7 +837,9 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
     );
     expect(secondJson.data.projection_truncated).not.toBe(true);
-    expect(JSON.stringify(secondJson.data.failure)).not.toContain("prior_local_signal");
+    expect(JSON.stringify(secondJson.data.failure)).not.toContain(
+      "prior_local_signal",
+    );
 
     const defaultJson = p.run([
       "task",
@@ -770,7 +850,10 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
       "--json",
     ]);
     expect(defaultJson.code).toBe(1);
-    expectStdoutIsJson(defaultJson, "task complete repeated failure default json");
+    expectStdoutIsJson(
+      defaultJson,
+      "task complete repeated failure default json",
+    );
     expect(defaultJson.stdout).not.toContain("prior_local_signal");
 
     const withoutSignal = structuredClone(secondJson);
@@ -818,6 +901,49 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
       ]),
       "task record-done",
     );
+  });
+
+  it("task record-done P1-T1 --json returns data.deps for incomplete dependency", async () => {
+    const p = await projectWithTask("task-record-done-dep");
+    const phasePath = join(p.dir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    (doc.tasks as Record<string, unknown>[])[0]!["depends_on"] = ["P1-T2"];
+    (doc.tasks as Record<string, unknown>[]).push({
+      id: "P1-T2",
+      type: "feature",
+      ambiguity: "low",
+      risk: "low",
+      context_size: "small",
+      write_surface: "low",
+      verification_strength: "weak",
+      expected_duration: "short",
+      status: "planned",
+      description: "dependency",
+    });
+    await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+    const res = p.run([
+      "task",
+      "record-done",
+      "P1-T1",
+      "--evidence",
+      "PR #123",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(res.code).toBe(2);
+    expectStdoutIsJson(res, "task record-done dependency incomplete");
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string; message: string };
+      data?: { deps?: string[] };
+    };
+    expect(parsed.error.code).toBe("TASK_DEPENDENCY_INCOMPLETE");
+    expect(parsed.data?.deps).toEqual(["P1-T2"]);
   });
 
   it("task finalize P1-T1 --write --json (finalized after record-done)", async () => {

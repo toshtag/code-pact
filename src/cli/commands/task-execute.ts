@@ -1,4 +1,4 @@
-import { relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { strictParse } from "../../lib/argv.ts";
 import { toParseOptions } from "../spec/render.ts";
 import { TASK_SPECS } from "../spec/task.ts";
@@ -13,7 +13,10 @@ import {
 import { ConfigError } from "../../lib/argv.ts";
 import { runTaskExecuteOnce } from "../../core/execute-once/run.ts";
 import { ExternalProcessOneShotExecutor } from "../../core/execute-once/executor.ts";
-import type { TaskExecuteOnceResult } from "../../core/execute-once/types.ts";
+import {
+  truncateExecuteReason,
+  type TaskExecuteOnceResult,
+} from "../../core/execute-once/types.ts";
 import {
   lstatExplicitUser,
   resolveExplicitUserReadPath,
@@ -64,6 +67,10 @@ export async function cmdTaskExecute(
     emitError(json, "CONFIG_ERROR", m.task.execute.missingExecutorFile);
     return 2;
   }
+  if (isAbsolute(executorFile)) {
+    emitError(json, "CONFIG_ERROR", m.task.execute.absoluteExecutorFile);
+    return 2;
+  }
 
   const agent = values.agent !== undefined ? String(values.agent) : undefined;
 
@@ -78,7 +85,11 @@ export async function cmdTaskExecute(
   const executablePath = resolve(cwd, executorFile);
   const validationError = await validateExecutorFile(cwd, executablePath);
   if (validationError !== undefined) {
-    emitError(json, "CONFIG_ERROR", validationError);
+    emitError(
+      json,
+      "CONFIG_ERROR",
+      truncateExecuteReason(validationError, 1024),
+    );
     return 2;
   }
 
@@ -195,7 +206,9 @@ function emitExecuteResult(
       return 1;
     case "executor_failed":
       if (json) {
-        emitError(json, "EXECUTOR_FAILED", result.reason);
+        emitError(json, "EXECUTOR_FAILED", result.reason, {
+          data: { reason: result.reason },
+        });
       } else {
         process.stderr.write(
           `${m.task.execute.executorFailed(taskId, result.reason)}\n`,
@@ -204,7 +217,9 @@ function emitExecuteResult(
       return 1;
     case "edit_rejected":
       if (json) {
-        emitError(json, "EDIT_REJECTED", result.reason);
+        emitError(json, "EDIT_REJECTED", result.reason, {
+          data: { reason: result.reason },
+        });
       } else {
         process.stderr.write(
           `${m.task.execute.editRejected(taskId, result.reason)}\n`,
@@ -330,7 +345,10 @@ async function validateExecutorFile(
     if (code === "PATH_OUTSIDE_PROJECT") {
       return "executor file must be inside the project";
     }
-    return `executor file must be a safe path inside the project: ${(error as Error).message}`;
+    return truncateExecuteReason(
+      `executor file must be a safe path inside the project: ${(error as Error).message}`,
+      1024,
+    );
   }
 
   try {
@@ -344,7 +362,10 @@ async function validateExecutorFile(
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return "executor file does not exist";
-    return `executor file validation failed: ${(error as Error).message}`;
+    return truncateExecuteReason(
+      `executor file validation failed: ${(error as Error).message}`,
+      1024,
+    );
   }
   return undefined;
 }

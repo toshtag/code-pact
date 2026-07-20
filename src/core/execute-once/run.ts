@@ -3,7 +3,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { runTaskComplete } from "../../commands/task-complete.ts";
 import { atomicReplaceExistingText } from "../../io/atomic-text.ts";
-import { ExecutorError, truncateExecutorReason } from "./executor.ts";
+import { ExecutorError } from "./executor.ts";
+import { truncateExecuteReason } from "./types.ts";
 import { loadPhase } from "../plan/load-phase.ts";
 import { resolveTaskInRoadmap } from "../plan/resolve-task.ts";
 import { loadProgressLog } from "../progress/io.ts";
@@ -67,17 +68,22 @@ async function getWorktreeChanges(cwd: string): Promise<WorktreeChanges> {
   }
 }
 
-function boundedPathSummary(paths: string[]): BoundedPathSummary {
-  const unique = [...new Set(paths)].sort((a, b) => a.localeCompare(b));
+export function boundedPathSummary(paths: string[]): BoundedPathSummary {
+  const unique = [...new Set(paths)].sort((a, b) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
   const sample: string[] = [];
   let bytes = 0;
   for (const p of unique) {
     const pBytes = Buffer.byteLength(p, "utf8");
+    if (pBytes > MAX_PATH_SAMPLE_BYTES) {
+      continue;
+    }
     if (
       sample.length >= MAX_PATH_SAMPLE_COUNT ||
-      (sample.length > 0 && bytes + pBytes > MAX_PATH_SAMPLE_BYTES)
+      bytes + pBytes > MAX_PATH_SAMPLE_BYTES
     ) {
-      break;
+      continue;
     }
     sample.push(p);
     bytes += pBytes;
@@ -151,7 +157,7 @@ export async function runTaskExecuteOnce(
   } catch (error) {
     return {
       kind: "executor_failed",
-      reason: truncateExecutorReason(
+      reason: truncateExecuteReason(
         `source read failed: ${(error as Error).message}`,
       ),
     };
@@ -179,7 +185,7 @@ export async function runTaskExecuteOnce(
   if (Buffer.byteLength(inputJson, "utf8") > MAX_EXECUTOR_INPUT_BYTES) {
     return {
       kind: "executor_failed",
-      reason: truncateExecutorReason(
+      reason: truncateExecuteReason(
         `executor input exceeds ${MAX_EXECUTOR_INPUT_BYTES} bytes`,
       ),
     };
@@ -195,12 +201,34 @@ export async function runTaskExecuteOnce(
         : `${(error as NodeJS.ErrnoException).code ?? "EXECUTOR_FAILED"}: ${(error as Error).message}`;
     return {
       kind: "executor_failed",
-      reason: truncateExecutorReason(message),
+      reason: truncateExecuteReason(message),
     };
   }
 
   const worktreeAfterExecutor = await getWorktreeChanges(cwd);
   if (!worktreeAfterExecutor.clean) {
+    // The executor is not allowed to touch the working tree before returning.
+    // If it mutated the source file, try to restore the original content.
+    if (
+      !worktreeAfterExecutor.clean &&
+      worktreeAfterExecutor.paths.includes(sourcePath)
+    ) {
+      try {
+        const readPath = await resolveExecuteSourceReadPath(cwd, sourcePath);
+        const mutatedContent = await readOwnedTextBounded(
+          readPath,
+          MAX_SOURCE_BYTES,
+        );
+        await restoreOriginalFile(
+          cwd,
+          sourcePath,
+          sourceContent,
+          mutatedContent,
+        );
+      } catch {
+        // Best-effort restore; if it fails we still report the mutation.
+      }
+    }
     return {
       kind: "executor_mutated_worktree",
       paths: boundedPathSummary(worktreeAfterExecutor.paths),
@@ -359,7 +387,7 @@ export async function runTaskExecuteOnce(
 
     return {
       kind: "executor_failed",
-      reason: truncateExecutorReason(
+      reason: truncateExecuteReason(
         typeof code === "string" && code.length > 0
           ? `${code}: ${(error as Error).message}`
           : (error as Error).message,
@@ -389,7 +417,7 @@ export async function runTaskExecuteOnce(
     }
     return {
       kind: "executor_failed",
-      reason: truncateExecutorReason(
+      reason: truncateExecuteReason(
         `task complete returned unexpected kind: ${completionResult.kind}`,
       ),
     };
@@ -429,7 +457,7 @@ async function restoreOriginalFile(
     }
     return {
       kind: "failed",
-      reason: truncateExecutorReason(
+      reason: truncateExecuteReason(
         `ROLLBACK_FAILED: ${(error as Error).message}`,
       ),
     };

@@ -10,6 +10,7 @@ import {
 import {
   MAX_NEW_TEXT_BYTES,
   MAX_SOURCE_BYTES,
+  truncateExecuteReason,
   type ApplyExactReplacementResult,
   type ExactReplacement,
 } from "./types.ts";
@@ -54,7 +55,9 @@ export async function applyExactReplacement(
     }
     return {
       kind: "rejected",
-      reason: `SOURCE_RESOLUTION_FAILED:${code ?? (error as Error).message}`,
+      reason: truncateExecuteReason(
+        `SOURCE_RESOLUTION_FAILED:${code ?? (error as Error).message}`,
+      ),
     };
   }
 
@@ -77,7 +80,9 @@ export async function applyExactReplacement(
     }
     return {
       kind: "rejected",
-      reason: `SOURCE_READ_FAILED:${code ?? (error as Error).message}`,
+      reason: truncateExecuteReason(
+        `SOURCE_READ_FAILED:${code ?? (error as Error).message}`,
+      ),
     };
   }
 
@@ -118,7 +123,9 @@ export async function applyExactReplacement(
     const code = (error as NodeJS.ErrnoException).code;
     return {
       kind: "rejected",
-      reason: `APPLY_FAILED:${code ?? (error as Error).message}`,
+      reason: truncateExecuteReason(
+        `APPLY_FAILED:${code ?? (error as Error).message}`,
+      ),
     };
   }
 

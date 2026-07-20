@@ -11,6 +11,7 @@ import type { Task } from "../schemas/task.ts";
 import {
   MAX_SOURCE_BYTES,
   MAX_SOURCE_LINES,
+  truncateExecuteReason,
   type OneShotEligibility,
 } from "./types.ts";
 
@@ -179,7 +180,9 @@ export async function resolveOneShotEligibility(
       reasons.push(INELIGIBLE_REASONS.SOURCE_NOT_VALID_TEXT);
     } else {
       reasons.push(
-        `${INELIGIBLE_REASONS.SOURCE_NOT_FOUND}:${code ?? (error as Error).message}`,
+        truncateExecuteReason(
+          `${INELIGIBLE_REASONS.SOURCE_NOT_FOUND}:${code ?? (error as Error).message}`,
+        ),
       );
     }
     return { eligible: false, reasons };

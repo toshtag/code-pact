@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -199,7 +200,6 @@ describe("runTaskExecuteOnce integration", () => {
     await withTempProject(async cwd => {
       const executor = new ExternalProcessOneShotExecutor({
         executablePath: fakeExecutorPath,
-        cwd,
         timeoutMs: 100,
       });
 
@@ -458,5 +458,105 @@ describe("runTaskExecuteOnce integration", () => {
       const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
       expect(content).toBe("hello world");
     });
+  });
+
+  it("detects and rolls back an executor that mutates the source file before returning", async () => {
+    await withTempProject(async cwd => {
+      class MutatingSourceExecutor {
+        async invoke(): Promise<
+          import("../../src/core/execute-once/types.ts").OneShotExecutorOutput
+        > {
+          await writeFile(join(cwd, "src", "example.ts"), "mutated", "utf8");
+          return {
+            kind: "replace_exact",
+            expected_file_sha256: "unused",
+            old_text: "hello",
+            new_text: "hi",
+          };
+        }
+      }
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor: new MutatingSourceExecutor(),
+      });
+
+      expect(result.kind).toBe("executor_mutated_worktree");
+      if (result.kind === "executor_mutated_worktree") {
+        expect(result.paths).toEqual({
+          changed_path_count: 1,
+          changed_paths: ["src/example.ts"],
+          paths_truncated: false,
+        });
+      }
+
+      const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
+      expect(content).toBe("hello world");
+    });
+  });
+
+  it("runs external executors in an OS temp directory with a sanitized environment", async () => {
+    const execDir = await mkdtemp(join(tmpdir(), "code-pact-executor-env-"));
+    const scriptPath = join(execDir, "env-check.mjs");
+    const outputPath = join(execDir, "env.json");
+    const script = `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+writeFileSync(process.env.CP_TEST_OUTPUT, JSON.stringify({
+  cwd: process.cwd(),
+  hasPwd: "PWD" in process.env,
+  hasInitCwd: "INIT_CWD" in process.env,
+  hasNpmJson: "npm_package_json" in process.env,
+  hasPath: "PATH" in process.env,
+}));
+process.stdout.write(JSON.stringify({ kind: "blocked", reason: "env check" }));\n`;
+
+    await writeFile(scriptPath, script, "utf8");
+    await chmod(scriptPath, 0o755);
+
+    const savedPwd = process.env.PWD;
+    const savedInitCwd = process.env.INIT_CWD;
+    const savedNpmJson = process.env.npm_package_json;
+    process.env.PWD = execDir;
+    process.env.INIT_CWD = execDir;
+    process.env.npm_package_json = "/should/be/removed/package.json";
+    process.env.CP_TEST_OUTPUT = outputPath;
+
+    try {
+      const executor = new ExternalProcessOneShotExecutor({
+        executablePath: scriptPath,
+      });
+      const result = await executor.invoke({
+        schema_version: 1,
+        task: {
+          id: "T",
+          goal: "x",
+          source_path: "s",
+          done_when: [],
+          verification_command: "exit 0",
+        },
+        source: { content: "c", sha256: "s" },
+        response_contract: { allowed_kinds: ["replace_exact", "blocked"] },
+      });
+
+      expect(result.kind).toBe("blocked");
+
+      const captured = JSON.parse(await readFile(outputPath, "utf8"));
+      expect(captured.cwd).not.toBe(execDir);
+      expect(await realpath(captured.cwd)).toBe(await realpath(tmpdir()));
+      expect(captured.hasPwd).toBe(false);
+      expect(captured.hasInitCwd).toBe(false);
+      expect(captured.hasNpmJson).toBe(false);
+      expect(captured.hasPath).toBe(true);
+    } finally {
+      if (savedPwd === undefined) delete process.env.PWD;
+      else process.env.PWD = savedPwd;
+      if (savedInitCwd === undefined) delete process.env.INIT_CWD;
+      else process.env.INIT_CWD = savedInitCwd;
+      if (savedNpmJson === undefined) delete process.env.npm_package_json;
+      else process.env.npm_package_json = savedNpmJson;
+      delete process.env.CP_TEST_OUTPUT;
+      await rm(execDir, { recursive: true, force: true });
+    }
   });
 });

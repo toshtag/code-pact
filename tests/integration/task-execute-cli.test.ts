@@ -315,4 +315,81 @@ describe("task execute — CLI", () => {
       await project.cleanup();
     }
   });
+
+  it("rejects an absolute executor-file even when it is inside the project", async () => {
+    const project = await createTempProject({
+      prefix: "code-pact-execute-cli-absolute-",
+    });
+    try {
+      await setupProject(project.dir, "exit 0");
+      const res = project.run(
+        [
+          "task",
+          "execute",
+          "P78-T1",
+          "--executor-file",
+          join(project.dir, "executor.mjs"),
+          "--json",
+        ],
+        { env: { EXECUTOR_MODE: "replace" } },
+      );
+      expect(res.code).toBe(2);
+      const parsed = expectJsonErr(res, "CONFIG_ERROR");
+      expect(parsed.error.message).toContain("relative path");
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it("emits data.reason in EXECUTOR_FAILED JSON", async () => {
+    const project = await createTempProject({
+      prefix: "code-pact-execute-cli-failed-",
+    });
+    try {
+      await setupProject(project.dir, "exit 0");
+      const res = project.run(
+        [
+          "task",
+          "execute",
+          "P78-T1",
+          "--executor-file",
+          "executor.mjs",
+          "--json",
+        ],
+        { env: { EXECUTOR_MODE: "nonzero", EXECUTOR_STDERR: "bad thing" } },
+      );
+      expect(res.code).toBe(1);
+      const parsed = expectJsonErr(res, "EXECUTOR_FAILED");
+      const data = parsed.data as { reason?: string } | undefined;
+      expect(data?.reason).toContain("bad thing");
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it("emits data.reason in EDIT_REJECTED JSON", async () => {
+    const project = await createTempProject({
+      prefix: "code-pact-execute-cli-edit-",
+    });
+    try {
+      await setupProject(project.dir, "exit 0");
+      const res = project.run(
+        [
+          "task",
+          "execute",
+          "P78-T1",
+          "--executor-file",
+          "executor.mjs",
+          "--json",
+        ],
+        { env: { EXECUTOR_MODE: "sha_mismatch" } },
+      );
+      expect(res.code).toBe(1);
+      const parsed = expectJsonErr(res, "EDIT_REJECTED");
+      const data = parsed.data as { reason?: string } | undefined;
+      expect(data?.reason).toBeTruthy();
+    } finally {
+      await project.cleanup();
+    }
+  });
 });

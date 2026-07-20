@@ -6,9 +6,9 @@ import {
 } from "../process/bounded-command.ts";
 import {
   DEFAULT_EXECUTOR_TIMEOUT_MS,
-  MAX_EXECUTOR_FAILED_REASON_BYTES,
   MAX_EXECUTOR_OUTPUT_BYTES,
   MAX_REASON_BYTES,
+  truncateExecuteReason,
   type OneShotExecutor,
   type OneShotExecutorInput,
   type OneShotExecutorOutput,
@@ -16,18 +16,34 @@ import {
 
 export type ExternalOneShotExecutorOptions = {
   executablePath: string;
-  cwd?: string;
   timeoutMs?: number;
   maxOutputBytes?: number;
   signal?: AbortSignal;
 };
+
+const REPOSITORY_PATH_ENV_KEYS = [
+  "PWD",
+  "OLDPWD",
+  "INIT_CWD",
+  "npm_config_local_prefix",
+  "npm_package_json",
+  "npm_package_name",
+];
+
+function sanitizedProcessEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of REPOSITORY_PATH_ENV_KEYS) {
+    delete env[key];
+  }
+  return env;
+}
 
 export class ExecutorError extends Error {
   constructor(
     message: string,
     readonly code: string,
   ) {
-    super(truncateExecutorReason(`${code}: ${message}`));
+    super(truncateExecuteReason(`${code}: ${message}`));
     this.name = "ExecutorError";
   }
 }
@@ -42,7 +58,8 @@ export class ExternalProcessOneShotExecutor implements OneShotExecutor {
     const inputJson = JSON.stringify(input);
 
     const proc = spawn(this.opts.executablePath, [], {
-      cwd: this.opts.cwd ?? tmpdir(),
+      cwd: tmpdir(),
+      env: sanitizedProcessEnv(),
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -118,7 +135,7 @@ export class ExternalProcessOneShotExecutor implements OneShotExecutor {
 
     if (stdinError) {
       throw new ExecutorError(
-        `executor stdin error: ${stdinError.message}`,
+        truncateExecuteReason(`executor stdin error: ${stdinError.message}`),
         "EXECUTOR_START_FAILED",
       );
     }
@@ -145,8 +162,8 @@ export class ExternalProcessOneShotExecutor implements OneShotExecutor {
 
     const exitCode = closeSettled ? (await closePromise).exitCode : null;
     if (exitCode !== 0) {
-      const errorOutput = truncateExecutorReason(stderr.value());
-      const reason = truncateExecutorReason(
+      const errorOutput = truncateExecuteReason(stderr.value());
+      const reason = truncateExecuteReason(
         `executor exited with code ${exitCode}${errorOutput ? `: ${errorOutput}` : ""}`,
       );
       throw new ExecutorError(reason, "EXECUTOR_NON_ZERO_EXIT");
@@ -235,18 +252,4 @@ function validateOneShotExecutorOutput(value: unknown): OneShotExecutorOutput {
   };
 }
 
-export function truncateExecutorReason(text: string): string {
-  if (Buffer.byteLength(text, "utf8") <= MAX_EXECUTOR_FAILED_REASON_BYTES) {
-    return text;
-  }
-  const prefix = "[truncated] ";
-  const max =
-    MAX_EXECUTOR_FAILED_REASON_BYTES - Buffer.byteLength(prefix, "utf8");
-  let cut = Math.max(0, max);
-  // Walk back to avoid splitting a multi-byte UTF-8 sequence.
-  const buffer = Buffer.from(text, "utf8");
-  while (cut > 0 && (buffer[cut]! & 0b1100_0000) === 0b1000_0000) {
-    cut -= 1;
-  }
-  return prefix + buffer.subarray(0, cut).toString("utf8");
-}
+export { truncateExecuteReason as truncateExecutorReason } from "./types.ts";

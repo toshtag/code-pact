@@ -1445,6 +1445,7 @@ async function cmdTaskComplete(
 
     let message: string;
     let outCode: string;
+    let errorData: { deps?: string[] } | undefined;
     switch (code) {
       case "TASK_NOT_FOUND":
         message = m.task.complete.taskNotFound(taskId);
@@ -1470,6 +1471,7 @@ async function cmdTaskComplete(
           (error as NodeJS.ErrnoException & { deps?: string[] }).deps ?? [];
         message = m.task.complete.dependencyIncomplete(taskId, deps);
         outCode = "TASK_DEPENDENCY_INCOMPLETE";
+        errorData = { deps };
         break;
       }
       case "INVALID_TASK_TRANSITION": {
@@ -1494,10 +1496,15 @@ async function cmdTaskComplete(
       emitAgentTaskCompleteError(
         { code: outCode, message: messageForAgentError(outCode) },
         message,
-        { task_id: taskId, agent },
+        { task_id: taskId, agent, ...(errorData ?? {}) },
       );
     } else {
-      emitError(json, outCode, message);
+      emitError(
+        json,
+        outCode,
+        message,
+        errorData !== undefined ? { data: errorData } : {},
+      );
     }
     return 2;
   } finally {
@@ -1624,6 +1631,7 @@ async function cmdTaskRecordDone(
 
     let msg: string;
     let outCode: string;
+    let errorData: { deps?: string[] } | undefined;
     switch (code) {
       case "TASK_NOT_FOUND":
         msg = m.task.complete.taskNotFound(taskId);
@@ -1649,6 +1657,7 @@ async function cmdTaskRecordDone(
           (err as NodeJS.ErrnoException & { deps?: string[] }).deps ?? [];
         msg = m.task.recordDone.dependencyIncomplete(taskId, deps);
         outCode = "TASK_DEPENDENCY_INCOMPLETE";
+        errorData = { deps };
         break;
       }
       case "INVALID_TASK_TRANSITION": {
@@ -1672,7 +1681,12 @@ async function cmdTaskRecordDone(
       default:
         throw err;
     }
-    emitError(json, outCode, msg);
+    emitError(
+      json,
+      outCode,
+      msg,
+      errorData !== undefined ? { data: errorData } : {},
+    );
     return 2;
   }
 }

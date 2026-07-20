@@ -9,6 +9,23 @@ export const MAX_EXECUTOR_INPUT_BYTES = 12_288;
 export const MAX_EXECUTOR_OUTPUT_BYTES = 24_576;
 export const DEFAULT_EXECUTOR_TIMEOUT_MS = 120_000;
 
+export function truncateExecuteReason(
+  text: string,
+  maxBytes = MAX_EXECUTOR_FAILED_REASON_BYTES,
+): string {
+  if (Buffer.byteLength(text, "utf8") <= maxBytes) {
+    return text;
+  }
+  const prefix = "[truncated] ";
+  const max = Math.max(0, maxBytes - Buffer.byteLength(prefix, "utf8"));
+  let cut = max;
+  const buffer = Buffer.from(text, "utf8");
+  while (cut > 0 && (buffer[cut]! & 0b1100_0000) === 0b1000_0000) {
+    cut -= 1;
+  }
+  return prefix + buffer.subarray(0, cut).toString("utf8");
+}
+
 export type OneShotEligibility =
   | {
       eligible: true;

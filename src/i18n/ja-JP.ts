@@ -283,6 +283,8 @@ export const messages = {
       missingTaskId: "task execute にはタスク ID が必要です。",
       missingExecutorFile:
         "task execute には --executor-file <path> が必要です。",
+      absoluteExecutorFile:
+        "task execute --executor-file はプロジェクト内の相対パスである必要があります。",
       done: (taskId: string, changed_file: string): string =>
         `タスク ${taskId} 完了: ${changed_file}`,
       ineligible: (taskId: string, reasons: string[]): string =>
@@ -299,7 +301,7 @@ export const messages = {
         changed_paths: string[];
         paths_truncated: boolean;
       }): string =>
-        `executor が source ファイル外に ${summary.changed_path_count} 件の変更を加えました${summary.paths_truncated ? " (一覧は打ち切り)" : ""}。`,
+        `executor が source ファイルを含む working tree に ${summary.changed_path_count} 件の変更を加えました${summary.paths_truncated ? " (一覧は打ち切り)" : ""}。`,
       executionScopeViolation: (
         summary: {
           changed_path_count: number;

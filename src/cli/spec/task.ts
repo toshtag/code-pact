@@ -382,12 +382,16 @@ const execute: CommandSpec = {
   positional: "<task-id>",
   summary: [
     "EXPERIMENTAL: Run a single-file one-shot execution via an external executor.",
-    "Requires a clean git working tree. The executor-file must be a regular,",
-    "non-symlink, executable file inside the project. The executor receives a JSON",
-    "input with the task goal and source file content, and must respond with either",
+    "Requires a clean git working tree. The executor-file must be a relative path",
+    "to a regular, non-symlink, executable file inside the project. The executor is",
+    "a trusted executable: it runs with its cwd set to an OS temporary directory,",
+    "a sanitized environment (known repository-path variables removed), and the same",
+    "process privileges as code-pact. It is not an OS sandbox. The executor receives a",
+    "JSON input with the task goal and source file content, and must respond with either",
     "a replace_exact payload or a blocked reason. On verification failure the source",
-    "file is rolled back; if the working tree changes outside the source file the",
-    "edit is rejected. This command is experimental and its contract may change",
+    "file is rolled back; if the working tree changes before returning the response,",
+    "the edit is rejected and the source is restored. All public failure reasons and",
+    "path lists are bounded. This command is experimental and its contract may change",
     "without a major version bump.",
   ].join("\n"),
   flags: [
@@ -396,7 +400,7 @@ const execute: CommandSpec = {
       value: "<path>",
       required: true,
       description:
-        "Path to the external one-shot executor executable. Must be executable and accept JSON on stdin.",
+        "Relative project path to the trusted external one-shot executor executable. Must be executable and accept JSON on stdin.",
     },
     {
       name: "agent",

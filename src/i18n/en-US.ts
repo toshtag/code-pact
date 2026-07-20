@@ -280,6 +280,8 @@ export const messages = {
     execute: {
       missingTaskId: "task execute requires a task id.",
       missingExecutorFile: "task execute requires --executor-file <path>.",
+      absoluteExecutorFile:
+        "task execute --executor-file must be a relative path inside the project.",
       done: (taskId: string, changed_file: string): string =>
         `Task ${taskId} done: ${changed_file}`,
       ineligible: (taskId: string, reasons: string[]): string =>
@@ -296,7 +298,7 @@ export const messages = {
         changed_paths: string[];
         paths_truncated: boolean;
       }): string =>
-        `Executor modified ${summary.changed_path_count} file${summary.changed_path_count === 1 ? "" : "s"} outside the source file${summary.paths_truncated ? " (list truncated)" : ""}.`,
+        `Executor modified the working tree before returning (${summary.changed_path_count} file${summary.changed_path_count === 1 ? "" : "s"}${summary.paths_truncated ? ", list truncated" : ""}).`,
       executionScopeViolation: (
         summary: {
           changed_path_count: number;

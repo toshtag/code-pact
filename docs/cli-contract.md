@@ -247,16 +247,16 @@ CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes
 
 > **Not a top-level command error:** `EVENT_FILE_ID_MISMATCH` (collaboration-safe-state RFC, B1/B5) is a **ledger-integrity diagnostic**, not a public structured command error. It is surfaced as a structured `data.issues[]` entry only by the lenient-loader surfaces (`doctor`, `plan lint`) — see [Plan diagnostic codes](#plan-diagnostic-codes). The strict-loader readers never expose it as the top-level `error.code`: `task *` and `verify` abort as a raw unhandled failure (exit 3, no JSON envelope — the same as a corrupt legacy `progress.yaml`), while `plan analyze` and `plan migrate` wrap the ledger-read failure in the command's own code (`PLAN_ANALYZE_FAILED` for analyze, `PLAN_MIGRATE_FAILED` for migrate) with the original cause in `error.message`. `pack` is best-effort and skips it.
 
-| `EDIT_REJECTED` | `task execute` | The executor returned a `replace_exact` payload that could not be applied to the source file (stale SHA, path not in `writes`, malformed replacement, or SHA mismatch). Exit code 1. |
+| `EDIT_REJECTED` | `task execute` | The executor returned a `replace_exact` payload that could not be applied to the source file (stale SHA, path not in `writes`, malformed replacement, or SHA mismatch). Exit code 1. The envelope carries `data.reason` (bounded). |
 | `EXECUTION_BLOCKED` | `task execute` | The external executor reported it cannot modify the file. Exit code 1. |
-| `EXECUTION_INELIGIBLE` | `task execute` | The task is not eligible for one-shot execution (wrong type, multiple read/write files, missing source, or another blocker). Exit code 1. The envelope carries `data.reasons`. |
-| `EXECUTOR_FAILED` | `task execute` | The external executor exited non-zero, timed out, emitted malformed or oversized JSON, or returned an unsupported `kind`. Exit code 1. The envelope carries `data.reason`. |
+| `EXECUTION_INELIGIBLE` | `task execute` | The task is not eligible for one-shot execution (multiple read/write files, missing source, or another blocker). Exit code 1. The envelope carries `data.reasons`. |
+| `EXECUTOR_FAILED` | `task execute` | The external executor exited non-zero, timed out, emitted malformed or oversized JSON, or returned an unsupported `kind`. Exit code 1. The envelope carries `data.reason` (bounded). |
 | `VERIFICATION_FAILED` | `task execute` | The verification command failed after the source file was edited; the source file is rolled back. Exit code 1. The envelope carries `data.rolled_back` and `data.failure`. |
 | `ROLLBACK_FAILED` | `task execute` | The source file could not be restored after a verification failure. Exit code 1. The envelope may carry `data.failure`. |
 | `ROLLBACK_STALE_FILE` | `task execute` | The source file changed concurrently after the edit, so rollback refused to overwrite it. Exit code 1. The envelope may carry `data.applied_sha`. |
 | `ROLLBACK_INCOMPLETE` | `task execute` | The source file was rolled back, but other unexpected working-tree changes remain. Exit code 1. The envelope may carry `data.paths` (a bounded summary) and `data.failure`. |
 | `WORKTREE_NOT_CLEAN` | `task execute` | The working tree is not clean before one-shot execution (staged, unstaged, or untracked changes). Exit code 1. The envelope carries `data.paths` (a bounded summary). |
-| `EXECUTOR_MUTATED_WORKTREE` | `task execute` | The executor wrote to files outside the target source path before returning its response. Exit code 1. The envelope carries `data.paths` (a bounded summary). |
+| `EXECUTOR_MUTATED_WORKTREE` | `task execute` | The executor modified the working tree before returning its response (the source file or any other file). Exit code 1. The envelope carries `data.paths` (a bounded summary). |
 | `EXECUTION_SCOPE_VIOLATION` | `task execute` | Verification or a side-effect altered files outside the target source path. Exit code 1. The envelope carries `data.paths` (a bounded summary) and `data.rollback` (`complete`, `incomplete`, or `stale`). |
 
 ### Public cause codes
