@@ -304,7 +304,9 @@ export const messages = {
         head_changed: boolean,
         index_changed: boolean,
       ): string =>
-        `executor が source ファイルを含む working tree に ${summary.changed_path_count} 件の変更を加えました${summary.paths_truncated ? " (一覧は打ち切り)" : ""}; rollback=${rollback}, head_changed=${head_changed}, index_changed=${index_changed}。`,
+        `executor が source ファイルを含む working tree に ${summary.changed_path_count} 件の変更を加えました${summary.paths_truncated ? " (一覧は打ち切り)" : ""}; rollback=${rollback}, head_changed=${head_changed}, index_changed=${index_changed}。手動で確認・復元してください。`,
+      gitStateUnavailable: (reason: string, source_rollback: string): string =>
+        `edit 後に Git 状態を取得できません: ${reason}; source_rollback=${source_rollback}。リポジトリがクリーンであることは保証されません。`,
       executionScopeViolation: (
         summary: {
           changed_path_count: number;

@@ -29,8 +29,32 @@ type ParseGitStatusResult =
   | { ok: true; entries: GitStatusEntry[] }
   | { ok: false; reason: string };
 
-function isPrintableAscii(byte: number): boolean {
-  return byte >= 0x20 && byte <= 0x7e;
+const VALID_STATUS_CHARS = new Set([
+  " ",
+  "M",
+  "T",
+  "A",
+  "D",
+  "R",
+  "C",
+  "U",
+  "?",
+]);
+
+const UNMERGED_PAIRS = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
+
+function isRenameOrCopy(index: string, worktree: string): boolean {
+  return index === "R" || worktree === "R" || index === "C" || worktree === "C";
+}
+
+function isUnmerged(index: string, worktree: string): boolean {
+  return UNMERGED_PAIRS.has(`${index}${worktree}`);
+}
+
+/** Decode a path segment with fatal UTF-8. */
+function decodePath(buffer: Buffer, start: number, end: number): string {
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  return decoder.decode(buffer.subarray(start, end));
 }
 
 /** Parse `git status --porcelain=v1 -z` output.
@@ -39,8 +63,9 @@ function isPrintableAscii(byte: number): boolean {
  * them as UTF-8 without quoting or trimming. This keeps leading/trailing
  * spaces, newlines, and other unusual characters intact.
  *
- * The parser is fail-closed: any malformed or truncated record makes the
- * whole snapshot unusable.
+ * The parser is fail-closed: any malformed or truncated record, invalid status
+ * character or combination, invalid UTF-8 path, or empty path makes the whole
+ * snapshot unusable.
  */
 export function parsePorcelainV1Z(buffer: Buffer): ParseGitStatusResult {
   const entries: GitStatusEntry[] = [];
@@ -49,13 +74,30 @@ export function parsePorcelainV1Z(buffer: Buffer): ParseGitStatusResult {
     if (i + 2 >= buffer.length) {
       return { ok: false, reason: "truncated status record" };
     }
-    const indexByte = buffer[i]!;
-    const worktreeByte = buffer[i + 1]!;
-    if (!isPrintableAscii(indexByte) || !isPrintableAscii(worktreeByte)) {
-      return { ok: false, reason: "invalid status byte" };
+    const index = String.fromCharCode(buffer[i]!);
+    const worktree = String.fromCharCode(buffer[i + 1]!);
+
+    if (!VALID_STATUS_CHARS.has(index) || !VALID_STATUS_CHARS.has(worktree)) {
+      return { ok: false, reason: "invalid status character" };
     }
-    const index = String.fromCharCode(indexByte);
-    const worktree = String.fromCharCode(worktreeByte);
+
+    if (index === "?" || worktree === "?") {
+      if (index !== "?" || worktree !== "?") {
+        return { ok: false, reason: "untracked status must be ??" };
+      }
+    }
+
+    if (index === " " && worktree === " ") {
+      return {
+        ok: false,
+        reason: "unmodified status is not a porcelain record",
+      };
+    }
+
+    if ((index === "U" || worktree === "U") && !isUnmerged(index, worktree)) {
+      return { ok: false, reason: "invalid unmerged status combination" };
+    }
+
     // The format is two status chars, a space, then the path terminated by NUL.
     if (buffer[i + 2]! !== 0x20) {
       return { ok: false, reason: "malformed status record prefix" };
@@ -68,9 +110,42 @@ export function parsePorcelainV1Z(buffer: Buffer): ParseGitStatusResult {
     if (nul === -1) {
       return { ok: false, reason: "status record missing NUL terminator" };
     }
-    const path = buffer.toString("utf8", pathStart, nul);
+    if (nul === pathStart) {
+      return { ok: false, reason: "status record has empty path" };
+    }
+
+    let path: string;
+    try {
+      path = decodePath(buffer, pathStart, nul);
+    } catch {
+      return { ok: false, reason: "invalid UTF-8 in status path" };
+    }
+
+    let nextIndex = nul + 1;
+
+    // Rename or copy entries carry the origin path as a second NUL-terminated
+    // field. We consume it but only record the new path in the snapshot.
+    if (isRenameOrCopy(index, worktree)) {
+      const originNul = buffer.indexOf(0, nextIndex);
+      if (originNul === -1) {
+        return { ok: false, reason: "rename/copy record missing origin path" };
+      }
+      if (originNul === nextIndex) {
+        return {
+          ok: false,
+          reason: "rename/copy record has empty origin path",
+        };
+      }
+      try {
+        decodePath(buffer, nextIndex, originNul);
+      } catch {
+        return { ok: false, reason: "invalid UTF-8 in rename origin path" };
+      }
+      nextIndex = originNul + 1;
+    }
+
     entries.push({ index, worktree, path });
-    i = nul + 1;
+    i = nextIndex;
   }
   return {
     ok: true,
@@ -140,25 +215,58 @@ function isUnbornRepositoryError(reason: string): boolean {
   );
 }
 
+export type GitSnapshotProvider = (
+  cwd: string,
+  deps?: GitSnapshotDeps,
+) => Promise<GitSnapshot | GitSnapshotError>;
+
+type GitRunText = (
+  cwd: string,
+  args: readonly string[],
+) => ReturnType<typeof runGitText>;
+
+type GitRunBuffer = (
+  cwd: string,
+  args: readonly string[],
+) => ReturnType<typeof runGitBuffer>;
+
+export type GitSnapshotDeps = {
+  runGitText?: GitRunText;
+  runGitBuffer?: GitRunBuffer;
+};
+
+function trimHead(stdout: string): string | null {
+  const trimmed = stdout.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}
+
 /** Capture a deterministic git snapshot.
  *
  * Returns a `GitSnapshotError` instead of throwing so callers can fail closed
  * without an exception crossing module boundaries.
+ *
+ * HEAD is read before and after `git status`; if the two reads do not match,
+ * the snapshot is rejected because the repository state is not a single
+ * coherent point. The caller must not retry.
  */
 export async function getExecutionGitSnapshot(
   cwd: string,
+  deps?: GitSnapshotDeps,
 ): Promise<GitSnapshot | GitSnapshotError> {
-  const headRun = await runGitText(cwd, ["rev-parse", "--verify", "HEAD"]);
-  let head: string | null;
-  if (headRun.ok) {
-    head = headRun.stdout.trim() || null;
-  } else if (isUnbornRepositoryError(headRun.reason)) {
-    head = null;
+  const runText = deps?.runGitText ?? runGitText;
+  const runBuffer = deps?.runGitBuffer ?? runGitBuffer;
+
+  const headBeforeRun = await runText(cwd, ["rev-parse", "--verify", "HEAD"]);
+  let headBefore: string | null;
+  if (headBeforeRun.ok) {
+    headBefore = trimHead(headBeforeRun.stdout);
+  } else if (isUnbornRepositoryError(headBeforeRun.reason)) {
+    headBefore = null;
   } else {
-    return { kind: "git_error", reason: headRun.reason };
+    return { kind: "git_error", reason: headBeforeRun.reason };
   }
 
-  const statusRun = await runGitBuffer(cwd, [
+  const statusRun = await runBuffer(cwd, [
     "status",
     "--porcelain=v1",
     "-z",
@@ -169,6 +277,24 @@ export async function getExecutionGitSnapshot(
     return { kind: "git_error", reason: statusRun.reason };
   }
 
+  const headAfterRun = await runText(cwd, ["rev-parse", "--verify", "HEAD"]);
+  let headAfter: string | null;
+  if (headAfterRun.ok) {
+    headAfter = trimHead(headAfterRun.stdout);
+  } else if (isUnbornRepositoryError(headAfterRun.reason)) {
+    headAfter = null;
+  } else {
+    return { kind: "git_error", reason: headAfterRun.reason };
+  }
+
+  if (headBefore !== headAfter) {
+    return {
+      kind: "git_error",
+      reason:
+        "GIT_SNAPSHOT_CHANGED_DURING_READ: HEAD changed between snapshot reads",
+    };
+  }
+
   const parsed = parsePorcelainV1Z(statusRun.stdout);
   if (!parsed.ok) {
     return { kind: "git_error", reason: parsed.reason };
@@ -176,7 +302,7 @@ export async function getExecutionGitSnapshot(
 
   return {
     kind: "ok",
-    head,
+    head: headBefore,
     entries: parsed.entries,
   };
 }

@@ -301,7 +301,9 @@ export const messages = {
         head_changed: boolean,
         index_changed: boolean,
       ): string =>
-        `Executor modified the working tree before returning (${summary.changed_path_count} file${summary.changed_path_count === 1 ? "" : "s"}${summary.paths_truncated ? ", list truncated" : ""}); rollback=${rollback}, head_changed=${head_changed}, index_changed=${index_changed}.`,
+        `Executor modified the working tree before returning (${summary.changed_path_count} file${summary.changed_path_count === 1 ? "" : "s"}${summary.paths_truncated ? ", list truncated" : ""}); rollback=${rollback}, head_changed=${head_changed}, index_changed=${index_changed}. Review and restore the repository manually.`,
+      gitStateUnavailable: (reason: string, source_rollback: string): string =>
+        `Git state is unavailable after edit: ${reason}; source_rollback=${source_rollback}. The repository may not be clean.`,
       executionScopeViolation: (
         summary: {
           changed_path_count: number;

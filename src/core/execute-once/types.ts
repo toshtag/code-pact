@@ -134,7 +134,8 @@ export type TaskExecuteOnceResult =
   | {
       kind: "executor_mutated_worktree";
       paths: BoundedPathSummary;
-      rollback: "complete" | "incomplete" | "stale";
+      rollback: "complete" | "incomplete" | "stale" | "not_attempted";
+      rollback_reason?: string;
       head_changed: boolean;
       index_changed: boolean;
     }
@@ -144,6 +145,11 @@ export type TaskExecuteOnceResult =
       rollback: "complete" | "incomplete" | "stale";
       head_changed: boolean;
       index_changed: boolean;
+    }
+  | {
+      kind: "git_state_unavailable";
+      reason: string;
+      source_rollback: "complete" | "stale" | "failed" | "not_needed";
     }
   | {
       kind: "verification_failed";

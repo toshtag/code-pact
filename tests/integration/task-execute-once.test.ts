@@ -1,9 +1,12 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import {
   chmod,
+  lstat,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
+  readlink,
   realpath,
   rm,
   symlink,
@@ -16,6 +19,7 @@ import { execSync } from "node:child_process";
 import { ExternalProcessOneShotExecutor } from "../../src/core/execute-once/executor.ts";
 import { parseOneShotExecutorOutput } from "../../src/core/execute-once/output-schema.ts";
 import { runTaskExecuteOnce } from "../../src/core/execute-once/run.ts";
+import type { GitSnapshotProvider } from "../../src/core/execute-once/git-status.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const fixtureDir = join(dirname(__filename), "..", "fixtures", "executors");
@@ -109,6 +113,16 @@ function clearEnv(): void {
   delete process.env.EXECUTOR_STDERR;
 }
 
+async function countEventFiles(cwd: string): Promise<number> {
+  try {
+    const names = await readdir(join(cwd, ".code-pact", "state", "events"));
+    return names.filter(n => /^\d{8}T\d{9}Z-[0-9a-f]{64}\.yaml$/.test(n))
+      .length;
+  } catch {
+    return 0;
+  }
+}
+
 describe("runTaskExecuteOnce integration", () => {
   beforeEach(async () => {
     await chmod(fakeExecutorPath, 0o755);
@@ -125,6 +139,10 @@ describe("runTaskExecuteOnce integration", () => {
     setMode("replace");
 
     await withTempProject(async cwd => {
+      const headBefore = execSync("git rev-parse HEAD", {
+        cwd,
+        encoding: "utf8",
+      }).trim();
       const executor = new ExternalProcessOneShotExecutor({
         executablePath: fakeExecutorPath,
       });
@@ -144,6 +162,19 @@ describe("runTaskExecuteOnce integration", () => {
 
       const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
       expect(content).toBe("hi world");
+
+      expect(await countEventFiles(cwd)).toBe(1);
+      const status = execSync("git status --porcelain", {
+        cwd,
+        encoding: "utf8",
+      });
+      expect(status).toContain("M src/example.ts");
+      expect(status).toContain("?? .code-pact/state/");
+      const headAfter = execSync("git rev-parse HEAD", {
+        cwd,
+        encoding: "utf8",
+      }).trim();
+      expect(headAfter).toBe(headBefore);
     });
   });
 
@@ -168,6 +199,12 @@ describe("runTaskExecuteOnce integration", () => {
 
       const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
       expect(content).toBe("hello world");
+      expect(await countEventFiles(cwd)).toBe(0);
+      const status = execSync("git status --porcelain", {
+        cwd,
+        encoding: "utf8",
+      });
+      expect(status.trim()).toBe("");
     }, "exit 1");
   });
 
@@ -462,7 +499,7 @@ describe("runTaskExecuteOnce integration", () => {
     });
   });
 
-  it("detects and rolls back an executor that mutates the source file before returning", async () => {
+  it("reports executor_mutated_worktree and does not roll back when the executor mutates the source file before returning", async () => {
     await withTempProject(async cwd => {
       class MutatingSourceExecutor {
         async invoke(): Promise<
@@ -491,13 +528,16 @@ describe("runTaskExecuteOnce integration", () => {
           changed_paths: ["src/example.ts"],
           paths_truncated: false,
         });
-        expect(result.rollback).toBe("complete");
+        expect(result.rollback).toBe("not_attempted");
+        expect(result.rollback_reason).toBe(
+          "mutation provenance cannot be proven",
+        );
         expect(result.head_changed).toBe(false);
         expect(result.index_changed).toBe(false);
       }
 
       const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
-      expect(content).toBe("hello world");
+      expect(content).toBe("mutated");
     });
   });
 
@@ -577,10 +617,13 @@ describe("runTaskExecuteOnce integration", () => {
 
       expect(result.kind).toBe("executor_mutated_worktree");
       if (result.kind === "executor_mutated_worktree") {
-        expect(result.rollback).toBe("incomplete");
+        expect(result.rollback).toBe("not_attempted");
         expect(result.index_changed).toBe(true);
         expect(result.head_changed).toBe(false);
       }
+
+      const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
+      expect(content).toBe("staged");
     });
   });
 
@@ -606,8 +649,12 @@ describe("runTaskExecuteOnce integration", () => {
 
       expect(result.kind).toBe("executor_mutated_worktree");
       if (result.kind === "executor_mutated_worktree") {
-        expect(result.rollback).toBe("incomplete");
+        expect(result.rollback).toBe("not_attempted");
       }
+
+      await expect(
+        readFile(join(cwd, "src", "example.ts"), "utf8"),
+      ).rejects.toThrow();
     });
   });
 
@@ -706,6 +753,12 @@ process.stdin.on("end", () => {
       });
 
       expect(result.kind).toBe("executor_mutated_worktree");
+      if (result.kind === "executor_mutated_worktree") {
+        expect(result.rollback).toBe("not_attempted");
+      }
+
+      const stats = await lstat(join(cwd, "src", "example.ts"));
+      expect(stats.isDirectory()).toBe(true);
     });
   });
 
@@ -734,6 +787,12 @@ process.stdin.on("end", () => {
       });
 
       expect(result.kind).toBe("executor_mutated_worktree");
+      if (result.kind === "executor_mutated_worktree") {
+        expect(result.rollback).toBe("not_attempted");
+      }
+
+      const target = await readlink(join(cwd, "src", "example.ts"));
+      expect(target).toBe(join(cwd, "src", "target.txt"));
     });
   });
 
@@ -766,8 +825,20 @@ process.stdin.on("end", () => {
       expect(result.kind).toBe("executor_mutated_worktree");
       if (result.kind === "executor_mutated_worktree") {
         expect(result.head_changed).toBe(true);
-        expect(result.rollback).toBe("incomplete");
+        expect(result.rollback).toBe("not_attempted");
       }
+
+      const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
+      expect(content).toBe("committed");
+      const headNow = execSync("git rev-parse HEAD", {
+        cwd,
+        encoding: "utf8",
+      }).trim();
+      const headBefore = execSync("git rev-parse HEAD~1", {
+        cwd,
+        encoding: "utf8",
+      }).trim();
+      expect(headNow).not.toBe(headBefore);
     });
   });
 
@@ -808,6 +879,89 @@ process.stdin.on("end", () => {
 
       expect(result.kind).not.toBe("done");
     }, 'sh -c "git add src/example.ts && git commit -m verify-fail && exit 1"');
+  });
+
+  it("does not roll back an unknown external source change", async () => {
+    const { execSync } = await import("node:child_process");
+
+    await withTempProject(async cwd => {
+      class ExternalMutationExecutor {
+        async invoke() {
+          // Simulate an external process mutating the source before the
+          // executor returns. The mutation must not be rolled back.
+          execSync('sh -c "echo external > src/example.ts"', {
+            cwd,
+            stdio: "ignore",
+          });
+          return {
+            kind: "replace_exact",
+            expected_file_sha256: "unused",
+            old_text: "hello",
+            new_text: "hi",
+          } as import("../../src/core/execute-once/types.ts").OneShotExecutorOutput;
+        }
+      }
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor: new ExternalMutationExecutor(),
+      });
+
+      expect(result.kind).toBe("executor_mutated_worktree");
+      if (result.kind === "executor_mutated_worktree") {
+        expect(result.rollback).toBe("not_attempted");
+        expect(result.rollback_reason).toBe(
+          "mutation provenance cannot be proven",
+        );
+      }
+
+      const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
+      expect(content.trim()).toBe("external");
+      expect(await countEventFiles(cwd)).toBe(0);
+    });
+  });
+
+  it("rolls back a known edit and reports git_state_unavailable when git snapshot fails after edit", async () => {
+    setMode("replace");
+
+    await withTempProject(async cwd => {
+      const executor = new ExternalProcessOneShotExecutor({
+        executablePath: fakeExecutorPath,
+      });
+
+      let calls = 0;
+      const gitSnapshotProvider: GitSnapshotProvider = async () => {
+        calls += 1;
+        if (calls === 3) {
+          return {
+            kind: "git_error",
+            reason: "GIT_SNAPSHOT_CHANGED_DURING_READ",
+          };
+        }
+        return {
+          kind: "ok",
+          head: null,
+          entries: [],
+        } as import("../../src/core/execute-once/git-status.ts").GitSnapshot;
+      };
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor,
+        gitSnapshotProvider,
+      });
+
+      expect(result.kind).toBe("git_state_unavailable");
+      if (result.kind === "git_state_unavailable") {
+        expect(result.source_rollback).toBe("complete");
+      }
+
+      const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
+      expect(content).toBe("hello world");
+      expect(await countEventFiles(cwd)).toBe(0);
+    });
   });
 
   it("runs external executors in an OS temp directory with a sanitized environment", async () => {

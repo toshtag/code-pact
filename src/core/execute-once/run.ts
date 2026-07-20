@@ -17,13 +17,14 @@ import { resolveOneShotEligibility } from "./eligibility.ts";
 import { projectVerifyForAgent } from "../evidence/failure-capsule.ts";
 import {
   changedPaths,
-  findStatusEntry,
   getExecutionGitSnapshot,
   isOnlyWorktreeModifyOf,
   snapshotHeadChanged,
   snapshotIndexChanged,
   snapshotIsClean,
   type GitSnapshot,
+  type GitSnapshotError,
+  type GitSnapshotProvider,
 } from "./git-status.ts";
 import { parseOneShotExecutorOutput } from "./output-schema.ts";
 import {
@@ -45,6 +46,8 @@ export type RunTaskExecuteOnceOptions = {
   executor: OneShotExecutor;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Internal test hook. Not exposed through the CLI or executor contract. */
+  gitSnapshotProvider?: GitSnapshotProvider;
 };
 
 const MAX_PATH_SAMPLE_COUNT = 20;
@@ -54,7 +57,7 @@ type RollbackResult = {
   rollback: "complete" | "incomplete" | "stale";
   head_changed: boolean;
   index_changed: boolean;
-  finalSnapshot: GitSnapshot | null;
+  finalSnapshot: GitSnapshot;
   rollbackReason?: string;
 };
 
@@ -91,170 +94,62 @@ function sha256(content: string): string {
     .digest("hex");
 }
 
-function gitErrorResult(reason: string): TaskExecuteOnceResult {
-  return {
-    kind: "executor_failed",
-    reason: truncateExecuteReason(`git state read failed: ${reason}`),
-  };
-}
-
 function truncateReason(text: string): string {
   return truncateExecuteReason(text, MAX_EXECUTOR_FAILED_REASON_BYTES);
 }
 
-/** Rollback after an executor mutation whose current content is unknown.
- *
- * Re-reads the source as bounded text and uses that content as the CAS
- * expected-current value. Anything else (staged change, deletion,
- * directory/symlink replacement, HEAD commit, concurrent drift, or extra
- * changed files) yields `incomplete` or `stale`. HEAD is never reset.
- */
-async function rollbackUnknownMutation(
-  cwd: string,
-  sourcePath: string,
-  originalContent: string,
-  before: GitSnapshot,
-  after: GitSnapshot,
-): Promise<RollbackResult> {
-  const head_changed = snapshotHeadChanged(before, after);
-  const index_changed = snapshotIndexChanged(after);
+type SnapshotGetter = (cwd: string) => Promise<GitSnapshot | GitSnapshotError>;
 
-  if (head_changed) {
-    return {
-      rollback: "incomplete",
-      head_changed,
-      index_changed,
-      finalSnapshot: after,
-      rollbackReason: truncateReason("HEAD changed; refusing to reset"),
-    };
-  }
+type KnownEditRollbackResult = {
+  sourceRollback: "complete" | "stale" | "failed";
+  finalSnapshot: GitSnapshot | GitSnapshotError | null;
+  restoreResult: RestoreResult;
+};
 
-  const entry = findStatusEntry(after, sourcePath);
-  if (!entry) {
-    return {
-      rollback: "incomplete",
-      head_changed,
-      index_changed,
-      finalSnapshot: after,
-      rollbackReason: truncateReason("source was not modified"),
-    };
-  }
-
-  if (entry.index !== " " || entry.worktree !== "M") {
-    return {
-      rollback: "incomplete",
-      head_changed,
-      index_changed,
-      finalSnapshot: after,
-      rollbackReason: truncateReason(
-        `source status is ${entry.index}${entry.worktree}`,
-      ),
-    };
-  }
-
-  let currentContent: string;
-  try {
-    const readPath = await resolveExecuteSourceReadPath(cwd, sourcePath);
-    currentContent = await readOwnedTextBounded(readPath, MAX_SOURCE_BYTES);
-  } catch (error) {
-    return {
-      rollback: "incomplete",
-      head_changed,
-      index_changed,
-      finalSnapshot: after,
-      rollbackReason: truncateReason(
-        `rollback failed: ${(error as Error).message}`,
-      ),
-    };
-  }
-
-  const restoreResult = await restoreOriginalFile(
-    cwd,
-    sourcePath,
-    originalContent,
-    currentContent,
-  );
-  return finalizeRollbackResult(cwd, before, restoreResult, after);
+function gitStateUnavailableResult(
+  reason: string,
+  source_rollback: "complete" | "stale" | "failed" | "not_needed",
+): Extract<TaskExecuteOnceResult, { kind: "git_state_unavailable" }> {
+  return {
+    kind: "git_state_unavailable",
+    reason: truncateReason(reason),
+    source_rollback,
+  };
 }
 
-/** Rollback after a known edit applied by Code Pact.
- *
- * Uses the captured `appliedContent` as the CAS expected-current value,
- * avoiding a re-read that could fail when the resulting source is at the
- * byte boundary.
+/** Rollback a known Code Pact edit using the captured applied content as the
+ * CAS expected-current value. Always attempts the file restore; git state is
+ * captured afterward if possible but a snapshot failure is reported to the
+ * caller instead of being swallowed.
  */
-async function rollbackKnownAppliedEdit(
+async function rollbackKnownEdit(
   cwd: string,
   sourcePath: string,
   originalContent: string,
   appliedContent: string,
-  before: GitSnapshot,
-  after: GitSnapshot,
-): Promise<RollbackResult> {
-  const head_changed = snapshotHeadChanged(before, after);
-  const index_changed = snapshotIndexChanged(after);
-
-  if (head_changed) {
-    return {
-      rollback: "incomplete",
-      head_changed,
-      index_changed,
-      finalSnapshot: after,
-      rollbackReason: truncateReason("HEAD changed; refusing to reset"),
-    };
-  }
-
+  getSnapshot: SnapshotGetter,
+): Promise<KnownEditRollbackResult> {
   const restoreResult = await restoreOriginalFile(
     cwd,
     sourcePath,
     originalContent,
     appliedContent,
   );
-  return finalizeRollbackResult(cwd, before, restoreResult, after);
+  const finalSnapshot = await getSnapshot(cwd);
+  const sourceRollback: KnownEditRollbackResult["sourceRollback"] =
+    restoreResult.kind === "ok"
+      ? "complete"
+      : restoreResult.kind === "stale"
+        ? "stale"
+        : "failed";
+  return { sourceRollback, finalSnapshot, restoreResult };
 }
 
-async function finalizeRollbackResult(
-  cwd: string,
+function toRollbackResult(
   before: GitSnapshot,
   restoreResult: RestoreResult,
-  after: GitSnapshot,
-): Promise<RollbackResult> {
-  const head_changed = snapshotHeadChanged(before, after);
-  const index_changed = snapshotIndexChanged(after);
-
-  if (restoreResult.kind === "stale") {
-    return {
-      rollback: "stale",
-      head_changed,
-      index_changed,
-      finalSnapshot: after,
-      rollbackReason: truncateReason(restoreResult.reason),
-    };
-  }
-
-  if (restoreResult.kind === "failed") {
-    return {
-      rollback: "incomplete",
-      head_changed,
-      index_changed,
-      finalSnapshot: after,
-      rollbackReason: truncateReason(restoreResult.reason),
-    };
-  }
-
-  const finalSnapshot = await getExecutionGitSnapshot(cwd);
-  if (finalSnapshot.kind === "git_error") {
-    return {
-      rollback: "incomplete",
-      head_changed,
-      index_changed,
-      finalSnapshot: after,
-      rollbackReason: truncateReason(
-        `git status failed after rollback: ${finalSnapshot.reason}`,
-      ),
-    };
-  }
-
+  finalSnapshot: GitSnapshot,
+): RollbackResult {
   if (snapshotHeadChanged(before, finalSnapshot)) {
     return {
       rollback: "incomplete",
@@ -262,6 +157,26 @@ async function finalizeRollbackResult(
       index_changed: snapshotIndexChanged(finalSnapshot),
       finalSnapshot,
       rollbackReason: truncateReason("HEAD changed during rollback"),
+    };
+  }
+
+  if (restoreResult.kind === "stale") {
+    return {
+      rollback: "stale",
+      head_changed: false,
+      index_changed: snapshotIndexChanged(finalSnapshot),
+      finalSnapshot,
+      rollbackReason: truncateReason(restoreResult.reason),
+    };
+  }
+
+  if (restoreResult.kind === "failed") {
+    return {
+      rollback: "incomplete",
+      head_changed: false,
+      index_changed: snapshotIndexChanged(finalSnapshot),
+      finalSnapshot,
+      rollbackReason: truncateReason(restoreResult.reason),
     };
   }
 
@@ -288,12 +203,12 @@ async function finalizeRollbackResult(
 function buildMutationResult(
   before: GitSnapshot,
   after: GitSnapshot,
-  rollback: RollbackResult,
 ): Extract<TaskExecuteOnceResult, { kind: "executor_mutated_worktree" }> {
   return {
     kind: "executor_mutated_worktree",
     paths: boundedPathSummary(changedPaths(after)),
-    rollback: rollback.rollback,
+    rollback: "not_attempted",
+    rollback_reason: "mutation provenance cannot be proven",
     head_changed: snapshotHeadChanged(before, after),
     index_changed: snapshotIndexChanged(after),
   };
@@ -301,10 +216,9 @@ function buildMutationResult(
 
 function buildScopeViolationResult(
   before: GitSnapshot,
-  after: GitSnapshot,
   rollback: RollbackResult,
 ): Extract<TaskExecuteOnceResult, { kind: "execution_scope_violation" }> {
-  const final = rollback.finalSnapshot ?? after;
+  const final = rollback.finalSnapshot ?? before;
   return {
     kind: "execution_scope_violation",
     paths: boundedPathSummary(changedPaths(final)),
@@ -318,6 +232,8 @@ export async function runTaskExecuteOnce(
   opts: RunTaskExecuteOnceOptions,
 ): Promise<TaskExecuteOnceResult> {
   const { cwd, taskId, executor, signal } = opts;
+  const getSnapshot: SnapshotGetter =
+    opts.gitSnapshotProvider ?? getExecutionGitSnapshot;
 
   const { phasePath } = await resolveTaskInRoadmap(cwd, taskId);
   const phase = await loadPhase(cwd, phasePath);
@@ -342,9 +258,9 @@ export async function runTaskExecuteOnce(
 
   const sourcePath = eligibility.sourcePath;
 
-  const snapshotBefore = await getExecutionGitSnapshot(cwd);
+  const snapshotBefore = await getSnapshot(cwd);
   if (snapshotBefore.kind === "git_error") {
-    return gitErrorResult(snapshotBefore.reason);
+    return gitStateUnavailableResult(snapshotBefore.reason, "not_needed");
   }
   if (!snapshotIsClean(snapshotBefore)) {
     return {
@@ -411,23 +327,19 @@ export async function runTaskExecuteOnce(
     };
   }
 
-  const snapshotAfterExecutor = await getExecutionGitSnapshot(cwd);
+  const snapshotAfterExecutor = await getSnapshot(cwd);
   if (snapshotAfterExecutor.kind === "git_error") {
-    return gitErrorResult(snapshotAfterExecutor.reason);
+    return gitStateUnavailableResult(
+      snapshotAfterExecutor.reason,
+      "not_needed",
+    );
   }
 
   if (
     !snapshotIsClean(snapshotAfterExecutor) ||
     snapshotHeadChanged(snapshotBefore, snapshotAfterExecutor)
   ) {
-    const rollback = await rollbackUnknownMutation(
-      cwd,
-      sourcePath,
-      sourceContent,
-      snapshotBefore,
-      snapshotAfterExecutor,
-    );
-    return buildMutationResult(snapshotBefore, snapshotAfterExecutor, rollback);
+    return buildMutationResult(snapshotBefore, snapshotAfterExecutor);
   }
 
   let output;
@@ -458,25 +370,45 @@ export async function runTaskExecuteOnce(
     return { kind: "edit_rejected", reason: applyResult.reason };
   }
 
-  const snapshotAfterEdit = await getExecutionGitSnapshot(cwd);
+  const snapshotAfterEdit = await getSnapshot(cwd);
   if (snapshotAfterEdit.kind === "git_error") {
-    return gitErrorResult(snapshotAfterEdit.reason);
-  }
-
-  if (!isOnlyWorktreeModifyOf(snapshotAfterEdit, sourcePath)) {
-    const rollback = await rollbackKnownAppliedEdit(
+    const rollback = await rollbackKnownEdit(
       cwd,
       sourcePath,
       applyResult.originalContent,
       applyResult.appliedContent,
-      snapshotBefore,
-      snapshotAfterEdit,
+      getSnapshot,
     );
-    return buildScopeViolationResult(
-      snapshotBefore,
-      snapshotAfterEdit,
-      rollback,
+    return gitStateUnavailableResult(
+      snapshotAfterEdit.reason,
+      rollback.sourceRollback,
     );
+  }
+
+  if (!isOnlyWorktreeModifyOf(snapshotAfterEdit, sourcePath)) {
+    const rollback = await rollbackKnownEdit(
+      cwd,
+      sourcePath,
+      applyResult.originalContent,
+      applyResult.appliedContent,
+      getSnapshot,
+    );
+    if (
+      rollback.finalSnapshot === null ||
+      rollback.finalSnapshot.kind === "git_error"
+    ) {
+      return gitStateUnavailableResult(
+        rollback.finalSnapshot?.reason ??
+          "git status unavailable after rollback",
+        rollback.sourceRollback,
+      );
+    }
+    const rb = toRollbackResult(
+      snapshotBefore,
+      rollback.restoreResult,
+      rollback.finalSnapshot,
+    );
+    return buildScopeViolationResult(snapshotBefore, rb);
   }
 
   let completionResult;
@@ -489,12 +421,12 @@ export async function runTaskExecuteOnce(
       signal,
       skipLoopMemory: true,
       beforeRecordDone: async () => {
-        const snapshot = await getExecutionGitSnapshot(cwd);
+        const snapshot = await getSnapshot(cwd);
         if (snapshot.kind === "git_error") {
           const err = new Error(
             `git status failed before recording done: ${snapshot.reason}`,
           ) as NodeJS.ErrnoException;
-          err.code = "EXECUTION_SCOPE_VIOLATION";
+          err.code = "GIT_STATE_UNAVAILABLE";
           throw err;
         }
 
@@ -534,50 +466,40 @@ export async function runTaskExecuteOnce(
       throw error;
     }
 
-    const snapshotAfterError = await getExecutionGitSnapshot(cwd);
-    if (snapshotAfterError.kind === "git_error") {
-      return gitErrorResult(snapshotAfterError.reason);
+    const rollback = await rollbackKnownEdit(
+      cwd,
+      sourcePath,
+      applyResult.originalContent,
+      applyResult.appliedContent,
+      getSnapshot,
+    );
+
+    if (code === "GIT_STATE_UNAVAILABLE") {
+      return gitStateUnavailableResult(
+        (error as Error).message,
+        rollback.sourceRollback,
+      );
     }
 
-    if (code === "EXECUTION_SCOPE_VIOLATION") {
-      const errorWithData = error as NodeJS.ErrnoException & {
-        changed_paths?: string[];
-        index_changed?: boolean;
-        head_changed?: boolean;
-        snapshot?: GitSnapshot;
-      };
-      const headChanged =
-        errorWithData.head_changed ??
-        snapshotHeadChanged(
-          snapshotBefore,
-          errorWithData.snapshot ?? snapshotAfterError,
-        );
-      let rollback: RollbackResult;
-      if (headChanged) {
-        rollback = {
-          rollback: "incomplete",
-          head_changed: true,
-          index_changed:
-            errorWithData.index_changed ??
-            snapshotIndexChanged(errorWithData.snapshot ?? snapshotAfterError),
-          finalSnapshot: errorWithData.snapshot ?? snapshotAfterError,
-          rollbackReason: truncateReason("HEAD changed; refusing to reset"),
-        };
-      } else {
-        rollback = await rollbackKnownAppliedEdit(
-          cwd,
-          sourcePath,
-          applyResult.originalContent,
-          applyResult.appliedContent,
-          snapshotBefore,
-          snapshotAfterError,
-        );
-      }
-      return buildScopeViolationResult(
-        snapshotBefore,
-        snapshotAfterError,
-        rollback,
+    if (
+      rollback.finalSnapshot === null ||
+      rollback.finalSnapshot.kind === "git_error"
+    ) {
+      return gitStateUnavailableResult(
+        rollback.finalSnapshot?.reason ??
+          "git status unavailable after rollback",
+        rollback.sourceRollback,
       );
+    }
+
+    const rb = toRollbackResult(
+      snapshotBefore,
+      rollback.restoreResult,
+      rollback.finalSnapshot,
+    );
+
+    if (code === "EXECUTION_SCOPE_VIOLATION") {
+      return buildScopeViolationResult(snapshotBefore, rb);
     }
 
     let failure: BoundedFailureCapsule | undefined;
@@ -593,39 +515,29 @@ export async function runTaskExecuteOnce(
       ).failure;
     }
 
-    const rollback = await rollbackKnownAppliedEdit(
-      cwd,
-      sourcePath,
-      applyResult.originalContent,
-      applyResult.appliedContent,
-      snapshotBefore,
-      snapshotAfterError,
-    );
-    const finalSnapshot = rollback.finalSnapshot ?? snapshotAfterError;
-
-    if (rollback.rollback === "stale") {
+    if (rb.rollback === "stale") {
       return {
         kind: "rollback_stale_file",
-        reason: rollback.rollbackReason ?? "source changed during rollback",
+        reason: rb.rollbackReason ?? "source changed during rollback",
         applied_sha: sha256(applyResult.appliedContent),
       };
     }
 
-    if (rollback.rollback !== "complete") {
+    if (rb.rollback !== "complete") {
       return {
         kind: "rollback_failed",
-        reason: rollback.rollbackReason ?? "rollback failed",
+        reason: rb.rollbackReason ?? "rollback failed",
         failure,
       };
     }
 
     if (
-      !snapshotIsClean(finalSnapshot) ||
-      snapshotHeadChanged(snapshotBefore, finalSnapshot)
+      !snapshotIsClean(rb.finalSnapshot) ||
+      snapshotHeadChanged(snapshotBefore, rb.finalSnapshot)
     ) {
       return {
         kind: "rollback_incomplete",
-        paths: boundedPathSummary(changedPaths(finalSnapshot)),
+        paths: boundedPathSummary(changedPaths(rb.finalSnapshot)),
         failure,
       };
     }
@@ -649,38 +561,51 @@ export async function runTaskExecuteOnce(
   }
 
   if (completionResult.kind !== "done") {
-    const rollback = await rollbackKnownAppliedEdit(
+    const rollback = await rollbackKnownEdit(
       cwd,
       sourcePath,
       applyResult.originalContent,
       applyResult.appliedContent,
-      snapshotBefore,
-      snapshotAfterEdit,
+      getSnapshot,
     );
-    const finalSnapshot = rollback.finalSnapshot ?? snapshotAfterEdit;
+    if (
+      rollback.finalSnapshot === null ||
+      rollback.finalSnapshot.kind === "git_error"
+    ) {
+      return gitStateUnavailableResult(
+        rollback.finalSnapshot?.reason ??
+          "git status unavailable after rollback",
+        rollback.sourceRollback,
+      );
+    }
+    const rb = toRollbackResult(
+      snapshotBefore,
+      rollback.restoreResult,
+      rollback.finalSnapshot,
+    );
 
-    if (rollback.rollback === "stale") {
+    if (rb.rollback === "stale") {
       return {
         kind: "rollback_stale_file",
-        reason: rollback.rollbackReason ?? "source changed during rollback",
+        reason: rb.rollbackReason ?? "source changed during rollback",
         applied_sha: sha256(applyResult.appliedContent),
       };
     }
 
-    if (rollback.rollback !== "complete") {
+    if (rb.rollback !== "complete") {
       return {
         kind: "rollback_failed",
-        reason: rollback.rollbackReason ?? "rollback failed",
+        reason: rb.rollbackReason ?? "rollback failed",
       };
     }
 
     if (
-      !snapshotIsClean(finalSnapshot) ||
-      snapshotHeadChanged(snapshotBefore, finalSnapshot)
+      !snapshotIsClean(rb.finalSnapshot) ||
+      snapshotHeadChanged(snapshotBefore, rb.finalSnapshot)
     ) {
       return {
         kind: "rollback_incomplete",
-        paths: boundedPathSummary(changedPaths(finalSnapshot)),
+        paths: boundedPathSummary(changedPaths(rb.finalSnapshot)),
       };
     }
 

@@ -71,7 +71,7 @@ describe("parsePorcelainV1Z", () => {
   });
 
   it("rejects a missing space separator after XY", () => {
-    const result = parsePorcelainV1Z(buf("Msrc/example.ts\0"));
+    const result = parsePorcelainV1Z(buf("MMsrc/example.ts\0"));
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toContain("prefix");
@@ -94,11 +94,11 @@ describe("parsePorcelainV1Z", () => {
     }
   });
 
-  it("rejects an invalid status byte", () => {
+  it("rejects an invalid status character", () => {
     const result = parsePorcelainV1Z(buf("\x01 M src/example.ts\0"));
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.reason).toContain("invalid status byte");
+      expect(result.reason).toContain("invalid status character");
     }
   });
 
@@ -109,6 +109,83 @@ describe("parsePorcelainV1Z", () => {
       expect(result.entries).toEqual([
         { index: " ", worktree: "M", path: "src/ex\nam.ts" },
       ]);
+    }
+  });
+
+  it("rejects invalid status combinations like ZZ, ##, @@, and !!", () => {
+    for (const pair of ["ZZ ", "## ", "@@ ", "!! "]) {
+      const result = parsePorcelainV1Z(buf(`${pair}src/example.ts\0`));
+      expect(result.ok).toBe(false);
+    }
+  });
+
+  it("rejects a partial question-mark status", () => {
+    const result = parsePorcelainV1Z(buf("? M src/example.ts\0"));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain("untracked status must be ??");
+    }
+  });
+
+  it("rejects an empty path", () => {
+    const result = parsePorcelainV1Z(buf(" M \0"));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain("empty path");
+    }
+  });
+
+  it("rejects invalid UTF-8 in the path", () => {
+    const invalid = Buffer.concat([
+      Buffer.from(" M src/"),
+      Buffer.from([0xc3, 0x28]),
+      Buffer.from("\0"),
+    ]);
+    const result = parsePorcelainV1Z(invalid);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain("invalid UTF-8");
+    }
+  });
+
+  it("parses valid UTF-8 paths including multibyte characters", () => {
+    const result = parsePorcelainV1Z(buf(" M 日本語/例.ts\0"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.entries).toEqual([
+        { index: " ", worktree: "M", path: "日本語/例.ts" },
+      ]);
+    }
+  });
+
+  it("parses rename/copy entries with an origin path", () => {
+    const result = parsePorcelainV1Z(buf("R  new.ts\0old.ts\0"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.entries).toEqual([
+        { index: "R", worktree: " ", path: "new.ts" },
+      ]);
+    }
+  });
+
+  it("rejects a rename entry with an empty origin path", () => {
+    const result = parsePorcelainV1Z(buf("R  new.ts\0\0"));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain("empty origin path");
+    }
+  });
+
+  it("rejects a truncated multibyte UTF-8 sequence", () => {
+    const truncated = Buffer.concat([
+      Buffer.from(" M src/"),
+      Buffer.from([0xf0, 0x9f]),
+      Buffer.from("\0"),
+    ]);
+    const result = parsePorcelainV1Z(truncated);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain("invalid UTF-8");
     }
   });
 });
@@ -163,5 +240,72 @@ describe("getExecutionGitSnapshot", () => {
     }
 
     await fs.rm(cwd, { recursive: true, force: true });
+  });
+
+  it("rejects the snapshot when HEAD changes between reads", async () => {
+    let calls = 0;
+    const head = "abc123";
+    const deps = {
+      runGitText: async (_cwd: string, args: readonly string[]) => {
+        if (args[0] === "rev-parse") {
+          calls += 1;
+          return {
+            ok: true as const,
+            stdout: calls === 1 ? head : "def456",
+          };
+        }
+        return { ok: true as const, stdout: "" };
+      },
+      runGitBuffer: async () => ({
+        ok: true as const,
+        stdout: Buffer.alloc(0),
+      }),
+    };
+    const snapshot = await getExecutionGitSnapshot("/fake/cwd", deps);
+    expect(snapshot.kind).toBe("git_error");
+    if (snapshot.kind === "git_error") {
+      expect(snapshot.reason).toContain("GIT_SNAPSHOT_CHANGED_DURING_READ");
+    }
+  });
+
+  it("succeeds when unborn HEAD is null on both reads", async () => {
+    const deps = {
+      runGitText: async (_cwd: string, args: readonly string[]) => {
+        if (args[0] === "rev-parse") {
+          return {
+            ok: false as const,
+            reason: "Needed a single revision",
+          };
+        }
+        return { ok: true as const, stdout: "" };
+      },
+      runGitBuffer: async () => ({
+        ok: true as const,
+        stdout: Buffer.alloc(0),
+      }),
+    };
+    const snapshot = await getExecutionGitSnapshot("/fake/cwd", deps);
+    expect(snapshot.kind).toBe("ok");
+    if (snapshot.kind === "ok") {
+      expect(snapshot.head).toBeNull();
+      expect(snapshotIsClean(snapshot)).toBe(true);
+    }
+  });
+
+  it("fails closed when HEAD read fails", async () => {
+    const deps = {
+      runGitText: async (_cwd: string, args: readonly string[]) => {
+        if (args[0] === "rev-parse") {
+          return { ok: false as const, reason: "git rev-parse failed" };
+        }
+        return { ok: true as const, stdout: "" };
+      },
+      runGitBuffer: async () => ({
+        ok: true as const,
+        stdout: Buffer.alloc(0),
+      }),
+    };
+    const snapshot = await getExecutionGitSnapshot("/fake/cwd", deps);
+    expect(snapshot.kind).toBe("git_error");
   });
 });

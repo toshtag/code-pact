@@ -297,6 +297,7 @@ function emitExecuteResult(
             data: {
               paths: result.paths,
               rollback: result.rollback,
+              rollback_reason: result.rollback_reason,
               head_changed: result.head_changed,
               index_changed: result.index_changed,
             },
@@ -305,6 +306,17 @@ function emitExecuteResult(
       } else {
         process.stderr.write(
           `${m.task.execute.executorMutatedWorktree(result.paths, result.rollback, result.head_changed, result.index_changed)}\n`,
+        );
+      }
+      return 1;
+    case "git_state_unavailable":
+      if (json) {
+        emitError(json, "GIT_STATE_UNAVAILABLE", result.reason, {
+          data: { source_rollback: result.source_rollback },
+        });
+      } else {
+        process.stderr.write(
+          `${m.task.execute.gitStateUnavailable(result.reason, result.source_rollback)}\n`,
         );
       }
       return 1;

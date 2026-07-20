@@ -579,14 +579,20 @@ contract shape.
   the index, and Git-visible tracked/untracked paths; ignored paths and
   repository-external side effects are not prevented. On `EXECUTOR_FAILED` or
   `EDIT_REJECTED` the public envelope carries `data.reason`. On
-  `EXECUTOR_MUTATED_WORKTREE` and `EXECUTION_SCOPE_VIOLATION` the runtime attempts
-  a compare-and-swap rollback of the source file and reports `data.rollback`
-  (`complete`/`incomplete`/`stale`), `data.head_changed`, and `data.index_changed`;
-  it never resets HEAD or unstages changes. Rollback distinguishes known edits
-  applied by Code Pact (CAS against the captured applied content) from unknown
-  executor mutations (current content is re-read before rollback). The rollback
-  is best-effort and not guaranteed. All public failure reasons and path lists
-  are bounded to 2,048 UTF-8 bytes.
+  `EXECUTOR_MUTATED_WORKTREE` and `EXECUTION_SCOPE_VIOLATION` the runtime reports
+  `data.rollback`, `data.head_changed`, and `data.index_changed`; it never resets
+  HEAD or unstages changes. Unknown executor or external mutations detected
+  before Code Pact applies its own edit are reported with
+  `data.rollback: "not_attempted"` and `data.rollback_reason`; they are not
+  rolled back because their provenance cannot be proven. Known Code Pact edits
+  are always rolled back using the captured applied content as the CAS expected
+  value, even when git state inspection later fails; such snapshot failures emit
+  `GIT_STATE_UNAVAILABLE` with `data.source_rollback`
+  (`complete`/`stale`/`failed`/`not_needed`). Porcelain status characters and
+  UTF-8 paths are validated fail-closed, and HEAD is read before and after status
+  capture; a HEAD mismatch yields `GIT_SNAPSHOT_CHANGED_DURING_READ`. Path samples
+  are bounded to 4,096 raw UTF-8 bytes and 20 entries; public failure reasons are
+  bounded to 2,048 UTF-8 bytes.
 
 - **`task finalize <task-id> --json [--write] [--audit-strict] [--base-ref
 <ref>]`** — reports the task's design-YAML finalization candidate and
