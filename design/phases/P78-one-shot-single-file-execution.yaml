@@ -3,7 +3,7 @@ name: One-shot Single-File Execution
 weight: 4
 confidence: medium
 risk: medium
-status: done
+status: in_progress
 objective: >
   Provide a bounded, single-file, one-shot execution path for code-pact tasks.
   An
@@ -399,3 +399,64 @@ tasks:
       - tests/unit/core/execute-once/git-status.test.ts
       - tests/unit/core/execute-once/output-schema.test.ts
       - design/phases/P78-one-shot-single-file-execution.yaml
+
+  - id: P78-T8
+    type: bugfix
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: planned
+    description: |
+      Close the remaining controller-schema, git fail-closed, known-edit
+      rollback, executor-path validation, bounded-output, and regression gaps
+      in experimental one-shot execution. No new features, no multi-file
+      execution, and no provider comparison.
+    depends_on:
+      - P78-T7
+    reads:
+      - src/core/execute-once/types.ts
+      - src/core/execute-once/executor.ts
+      - src/core/execute-once/output-schema.ts
+      - src/core/execute-once/git-status.ts
+      - src/core/execute-once/exact-replacement.ts
+      - src/core/execute-once/run.ts
+      - src/cli/commands/task-execute.ts
+      - src/cli/spec/task.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/per-task-loop.md
+      - docs/troubleshooting.md
+      - docs/cli-reference.generated.md
+      - tests/unit/core/execute-once/git-status.test.ts
+      - tests/unit/core/execute-once/output-schema.test.ts
+      - tests/unit/core/execute-once/run.test.ts
+      - tests/unit/core/execute-once/exact-replacement.test.ts
+      - tests/integration/task-execute-once.test.ts
+      - tests/integration/task-execute-cli.test.ts
+    writes:
+      - src/core/execute-once/types.ts
+      - src/core/execute-once/executor.ts
+      - src/core/execute-once/output-schema.ts
+      - src/core/execute-once/git-status.ts
+      - src/core/execute-once/exact-replacement.ts
+      - src/core/execute-once/run.ts
+      - src/cli/commands/task-execute.ts
+      - src/cli/spec/task.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/per-task-loop.md
+      - docs/troubleshooting.md
+      - docs/cli-reference.generated.md
+      - tests/unit/core/execute-once/git-status.test.ts
+      - tests/unit/core/execute-once/output-schema.test.ts
+      - tests/unit/core/execute-once/run.test.ts
+      - tests/unit/core/execute-once/exact-replacement.test.ts
+      - tests/integration/task-execute-once.test.ts
+      - tests/integration/task-execute-cli.test.ts
