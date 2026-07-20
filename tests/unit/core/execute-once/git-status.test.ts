@@ -12,6 +12,37 @@ function buf(text: string): Buffer {
   return Buffer.from(text, "utf8");
 }
 
+function gitTextOk(stdout = ""): {
+  ok: true;
+  stdout: string;
+  exitCode: number;
+  stderr: string;
+} {
+  return { ok: true as const, stdout, exitCode: 0, stderr: "" };
+}
+
+function gitTextErr(
+  reason: string,
+  exitCode: number,
+  stderr = "",
+): {
+  ok: false;
+  reason: string;
+  exitCode: number;
+  stderr: string;
+} {
+  return { ok: false as const, reason, exitCode, stderr };
+}
+
+function gitBufferOk(stdout: Buffer): {
+  ok: true;
+  stdout: Buffer;
+  exitCode: number;
+  stderr: string;
+} {
+  return { ok: true as const, stdout, exitCode: 0, stderr: "" };
+}
+
 describe("parsePorcelainV1Z", () => {
   it("returns an empty result for no output", () => {
     const result = parsePorcelainV1Z(Buffer.alloc(0));
@@ -158,21 +189,13 @@ describe("parsePorcelainV1Z", () => {
     }
   });
 
-  it("parses rename/copy entries with an origin path", () => {
-    const result = parsePorcelainV1Z(buf("R  new.ts\0old.ts\0"));
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.entries).toEqual([
-        { index: "R", worktree: " ", path: "new.ts" },
-      ]);
-    }
-  });
-
-  it("rejects a rename entry with an empty origin path", () => {
-    const result = parsePorcelainV1Z(buf("R  new.ts\0\0"));
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toContain("empty origin path");
+  it("rejects rename/copy entries because --no-renames is used", () => {
+    for (const pair of ["R  new.ts\0old.ts\0", "C  new.ts\0old.ts\0"]) {
+      const result = parsePorcelainV1Z(buf(pair));
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toContain("disallowed porcelain status pair");
+      }
     }
   });
 
@@ -249,17 +272,17 @@ describe("getExecutionGitSnapshot", () => {
       runGitText: async (_cwd: string, args: readonly string[]) => {
         if (args[0] === "rev-parse") {
           calls += 1;
-          return {
-            ok: true as const,
-            stdout: calls === 1 ? head : "def456",
-          };
+          return gitTextOk(calls === 1 ? head : "def456");
         }
-        return { ok: true as const, stdout: "" };
+        if (args[0] === "symbolic-ref") {
+          return gitTextOk("refs/heads/main");
+        }
+        if (args[0] === "show-ref") {
+          return gitTextErr("ref not found", 1);
+        }
+        return gitTextOk();
       },
-      runGitBuffer: async () => ({
-        ok: true as const,
-        stdout: Buffer.alloc(0),
-      }),
+      runGitBuffer: async () => gitBufferOk(Buffer.alloc(0)),
     };
     const snapshot = await getExecutionGitSnapshot("/fake/cwd", deps);
     expect(snapshot.kind).toBe("git_error");
@@ -272,17 +295,17 @@ describe("getExecutionGitSnapshot", () => {
     const deps = {
       runGitText: async (_cwd: string, args: readonly string[]) => {
         if (args[0] === "rev-parse") {
-          return {
-            ok: false as const,
-            reason: "Needed a single revision",
-          };
+          return gitTextErr("Needed a single revision", 1);
         }
-        return { ok: true as const, stdout: "" };
+        if (args[0] === "symbolic-ref") {
+          return gitTextOk("refs/heads/main");
+        }
+        if (args[0] === "show-ref") {
+          return gitTextErr("ref not found", 1);
+        }
+        return gitTextOk();
       },
-      runGitBuffer: async () => ({
-        ok: true as const,
-        stdout: Buffer.alloc(0),
-      }),
+      runGitBuffer: async () => gitBufferOk(Buffer.alloc(0)),
     };
     const snapshot = await getExecutionGitSnapshot("/fake/cwd", deps);
     expect(snapshot.kind).toBe("ok");
@@ -296,16 +319,42 @@ describe("getExecutionGitSnapshot", () => {
     const deps = {
       runGitText: async (_cwd: string, args: readonly string[]) => {
         if (args[0] === "rev-parse") {
-          return { ok: false as const, reason: "git rev-parse failed" };
+          return gitTextErr("git rev-parse failed", 1);
         }
-        return { ok: true as const, stdout: "" };
+        if (args[0] === "symbolic-ref") {
+          return gitTextErr("HEAD is not a symbolic ref", 1);
+        }
+        return gitTextOk();
       },
-      runGitBuffer: async () => ({
-        ok: true as const,
-        stdout: Buffer.alloc(0),
-      }),
+      runGitBuffer: async () => gitBufferOk(Buffer.alloc(0)),
     };
     const snapshot = await getExecutionGitSnapshot("/fake/cwd", deps);
     expect(snapshot.kind).toBe("git_error");
+    if (snapshot.kind === "git_error") {
+      expect(snapshot.reason).toContain("GIT_HEAD_UNAVAILABLE");
+    }
+  });
+
+  it("fails closed when symbolic-ref succeeds but show-ref is unexpected", async () => {
+    const deps = {
+      runGitText: async (_cwd: string, args: readonly string[]) => {
+        if (args[0] === "rev-parse") {
+          return gitTextErr("Needed a single revision", 1);
+        }
+        if (args[0] === "symbolic-ref") {
+          return gitTextOk("refs/heads/main");
+        }
+        if (args[0] === "show-ref") {
+          return gitTextErr("invalid ref name", 2);
+        }
+        return gitTextOk();
+      },
+      runGitBuffer: async () => gitBufferOk(Buffer.alloc(0)),
+    };
+    const snapshot = await getExecutionGitSnapshot("/fake/cwd", deps);
+    expect(snapshot.kind).toBe("git_error");
+    if (snapshot.kind === "git_error") {
+      expect(snapshot.reason).toContain("GIT_HEAD_UNAVAILABLE");
+    }
   });
 });

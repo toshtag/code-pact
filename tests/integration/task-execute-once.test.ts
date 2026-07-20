@@ -22,10 +22,15 @@ import { runTaskExecuteOnce } from "../../src/core/execute-once/run.ts";
 import type { GitSnapshotProvider } from "../../src/core/execute-once/git-status.ts";
 
 const __filename = fileURLToPath(import.meta.url);
-const fixtureDir = join(dirname(__filename), "..", "fixtures", "executors");
-const fakeExecutorPath = join(fixtureDir, "fake-executor.mjs");
+export const fixtureDir = join(
+  dirname(__filename),
+  "..",
+  "fixtures",
+  "executors",
+);
+export const fakeExecutorPath = join(fixtureDir, "fake-executor.mjs");
 
-async function withTempProject<T>(
+export async function withTempProject<T>(
   fn: (cwd: string) => Promise<T>,
   verificationCommand = "exit 0",
 ): Promise<T> {
@@ -38,7 +43,7 @@ async function withTempProject<T>(
   }
 }
 
-async function setupCodePactProject(
+export async function setupCodePactProject(
   cwd: string,
   verificationCommand: string,
 ): Promise<void> {
@@ -101,11 +106,11 @@ tasks:
   execSync("git commit -m init", { cwd, stdio: "ignore" });
 }
 
-function setMode(mode: string): void {
+export function setMode(mode: string): void {
   process.env.EXECUTOR_MODE = mode;
 }
 
-function clearEnv(): void {
+export function clearEnv(): void {
   delete process.env.EXECUTOR_MODE;
   delete process.env.EXECUTOR_OLD;
   delete process.env.EXECUTOR_NEW;
@@ -113,7 +118,7 @@ function clearEnv(): void {
   delete process.env.EXECUTOR_STDERR;
 }
 
-async function countEventFiles(cwd: string): Promise<number> {
+export async function countEventFiles(cwd: string): Promise<number> {
   try {
     const names = await readdir(join(cwd, ".code-pact", "state", "events"));
     return names.filter(n => /^\d{8}T\d{9}Z-[0-9a-f]{64}\.yaml$/.test(n))
@@ -866,7 +871,13 @@ process.stdin.on("end", () => {
   });
 
   it("reports execution_scope_violation when verification commits and exits 1", async () => {
+    const { execSync } = await import("node:child_process");
+
     await withTempProject(async cwd => {
+      const headBefore = execSync("git rev-parse HEAD", {
+        cwd,
+        encoding: "utf8",
+      }).trim();
       const executor = new ExternalProcessOneShotExecutor({
         executablePath: fakeExecutorPath,
       });
@@ -877,7 +888,28 @@ process.stdin.on("end", () => {
         executor,
       });
 
-      expect(result.kind).not.toBe("done");
+      expect(result.kind).toBe("execution_scope_violation");
+      if (result.kind === "execution_scope_violation") {
+        expect(result.head_changed).toBe(true);
+        expect(result.rollback).toBe("incomplete");
+      }
+
+      const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
+      expect(content).toBe("hello world");
+
+      const headAfter = execSync("git rev-parse HEAD", {
+        cwd,
+        encoding: "utf8",
+      }).trim();
+      expect(headAfter).not.toBe(headBefore);
+
+      const indexChanged = execSync("git diff --cached --name-only", {
+        cwd,
+        encoding: "utf8",
+      }).trim();
+      expect(indexChanged).toBe("");
+
+      expect(await countEventFiles(cwd)).toBe(0);
     }, 'sh -c "git add src/example.ts && git commit -m verify-fail && exit 1"');
   });
 

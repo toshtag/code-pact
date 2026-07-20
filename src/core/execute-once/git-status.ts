@@ -43,13 +43,32 @@ const VALID_STATUS_CHARS = new Set([
 
 const UNMERGED_PAIRS = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
 
-function isRenameOrCopy(index: string, worktree: string): boolean {
-  return index === "R" || worktree === "R" || index === "C" || worktree === "C";
-}
-
 function isUnmerged(index: string, worktree: string): boolean {
   return UNMERGED_PAIRS.has(`${index}${worktree}`);
 }
+
+// Allowed XY status pairs from `git status --porcelain=v1 -z --no-renames`.
+// Rename/copy pairs (R/C) are intentionally absent because --no-renames should
+// prevent them; if they appear, the snapshot is treated as malformed.
+const ALLOWED_PORCELAIN_PAIRS = new Set([
+  " M",
+  "M ",
+  "MM",
+  "A ",
+  "AM",
+  "AD",
+  "D ",
+  " D",
+  "DD",
+  "T ",
+  " T",
+  "TM",
+  "TD",
+  "MD",
+  "DM",
+  "??",
+  ...UNMERGED_PAIRS,
+]);
 
 /** Decode a path segment with fatal UTF-8. */
 function decodePath(buffer: Buffer, start: number, end: number): string {
@@ -98,6 +117,14 @@ export function parsePorcelainV1Z(buffer: Buffer): ParseGitStatusResult {
       return { ok: false, reason: "invalid unmerged status combination" };
     }
 
+    const pair = `${index}${worktree}`;
+    if (!ALLOWED_PORCELAIN_PAIRS.has(pair)) {
+      return {
+        ok: false,
+        reason: `disallowed porcelain status pair: ${pair}`,
+      };
+    }
+
     // The format is two status chars, a space, then the path terminated by NUL.
     if (buffer[i + 2]! !== 0x20) {
       return { ok: false, reason: "malformed status record prefix" };
@@ -121,31 +148,8 @@ export function parsePorcelainV1Z(buffer: Buffer): ParseGitStatusResult {
       return { ok: false, reason: "invalid UTF-8 in status path" };
     }
 
-    let nextIndex = nul + 1;
-
-    // Rename or copy entries carry the origin path as a second NUL-terminated
-    // field. We consume it but only record the new path in the snapshot.
-    if (isRenameOrCopy(index, worktree)) {
-      const originNul = buffer.indexOf(0, nextIndex);
-      if (originNul === -1) {
-        return { ok: false, reason: "rename/copy record missing origin path" };
-      }
-      if (originNul === nextIndex) {
-        return {
-          ok: false,
-          reason: "rename/copy record has empty origin path",
-        };
-      }
-      try {
-        decodePath(buffer, nextIndex, originNul);
-      } catch {
-        return { ok: false, reason: "invalid UTF-8 in rename origin path" };
-      }
-      nextIndex = originNul + 1;
-    }
-
     entries.push({ index, worktree, path });
-    i = nextIndex;
+    i = nul + 1;
   }
   return {
     ok: true,
@@ -161,12 +165,24 @@ export function parsePorcelainV1Z(buffer: Buffer): ParseGitStatusResult {
   };
 }
 
+type GitTextResult =
+  | { ok: true; stdout: string; exitCode: number; stderr: string }
+  | { ok: false; reason: string; exitCode: number; stderr: string };
+
+type GitBufferResult =
+  | { ok: true; stdout: Buffer; exitCode: number; stderr: string }
+  | { ok: false; reason: string; exitCode: number; stderr: string };
+
+function stderrString(stderr: Buffer | string): string {
+  return Buffer.isBuffer(stderr) ? stderr.toString("utf8") : stderr;
+}
+
 async function runGitBuffer(
   cwd: string,
   args: readonly string[],
-): Promise<{ ok: true; stdout: Buffer } | { ok: false; reason: string }> {
+): Promise<GitBufferResult> {
   try {
-    const { stdout } = await execFileAsync(
+    const { stdout, stderr } = await execFileAsync(
       "git",
       ["-c", "core.quotePath=false", ...args],
       {
@@ -175,11 +191,19 @@ async function runGitBuffer(
         maxBuffer: 2 * 1024 * 1024,
       } as const,
     );
-    return { ok: true, stdout };
+    return { ok: true, stdout, exitCode: 0, stderr: stderrString(stderr) };
   } catch (error) {
+    const err = error as Error & {
+      code?: string | number | null;
+      stdout?: Buffer;
+      stderr?: Buffer;
+    };
     return {
       ok: false,
-      reason: `git ${args[0]} failed: ${(error as Error).message}`,
+      reason: `git ${args[0]} failed: ${err.message}`,
+      exitCode:
+        typeof err.code === "number" ? err.code : err.code === null ? -1 : 1,
+      stderr: err.stderr ? stderrString(err.stderr) : "",
     };
   }
 }
@@ -187,9 +211,9 @@ async function runGitBuffer(
 async function runGitText(
   cwd: string,
   args: readonly string[],
-): Promise<{ ok: true; stdout: string } | { ok: false; reason: string }> {
+): Promise<GitTextResult> {
   try {
-    const { stdout } = await execFileAsync(
+    const { stdout, stderr } = await execFileAsync(
       "git",
       ["-c", "core.quotePath=false", ...args],
       {
@@ -198,21 +222,21 @@ async function runGitText(
         maxBuffer: 1 * 1024 * 1024,
       } as const,
     );
-    return { ok: true, stdout };
+    return { ok: true, stdout, exitCode: 0, stderr };
   } catch (error) {
+    const err = error as Error & {
+      code?: string | number | null;
+      stdout?: string;
+      stderr?: string;
+    };
     return {
       ok: false,
-      reason: `git ${args[0]} failed: ${(error as Error).message}`,
+      reason: `git ${args[0]} failed: ${err.message}`,
+      exitCode:
+        typeof err.code === "number" ? err.code : err.code === null ? -1 : 1,
+      stderr: err.stderr ?? "",
     };
   }
-}
-
-function isUnbornRepositoryError(reason: string): boolean {
-  return (
-    reason.includes("Needed a single revision") ||
-    reason.includes("unknown revision") ||
-    reason.includes("bad revision")
-  );
 }
 
 export type GitSnapshotProvider = (
@@ -223,12 +247,12 @@ export type GitSnapshotProvider = (
 type GitRunText = (
   cwd: string,
   args: readonly string[],
-) => ReturnType<typeof runGitText>;
+) => Promise<GitTextResult>;
 
 type GitRunBuffer = (
   cwd: string,
   args: readonly string[],
-) => ReturnType<typeof runGitBuffer>;
+) => Promise<GitBufferResult>;
 
 export type GitSnapshotDeps = {
   runGitText?: GitRunText;
@@ -238,6 +262,69 @@ export type GitSnapshotDeps = {
 function trimHead(stdout: string): string | null {
   const trimmed = stdout.trim();
   return trimmed.length === 0 ? null : trimmed;
+}
+
+type ResolveHeadResult =
+  | { kind: "ok"; head: string | null }
+  | { kind: "git_error"; reason: string };
+
+async function resolveHeadForSnapshot(
+  cwd: string,
+  runText: GitRunText,
+): Promise<ResolveHeadResult> {
+  const commit = await runText(cwd, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    "HEAD^{commit}",
+  ]);
+  if (commit.ok) {
+    const head = trimHead(commit.stdout);
+    return { kind: "ok", head };
+  }
+
+  const symref = await runText(cwd, ["symbolic-ref", "-q", "HEAD"]);
+  if (!symref.ok) {
+    return {
+      kind: "git_error",
+      reason:
+        "GIT_HEAD_UNAVAILABLE: HEAD commit and symbolic ref are both unavailable",
+    };
+  }
+
+  const ref = trimHead(symref.stdout);
+  if (ref === null) {
+    return {
+      kind: "git_error",
+      reason: "GIT_HEAD_UNAVAILABLE: symbolic-ref returned an empty ref",
+    };
+  }
+
+  const refExists = await runText(cwd, [
+    "show-ref",
+    "--verify",
+    "--quiet",
+    ref,
+  ]);
+  if (refExists.ok) {
+    // The branch ref exists but HEAD^{commit} did not resolve. Repository is
+    // corrupt or in an unexpected state; do not guess.
+    return {
+      kind: "git_error",
+      reason:
+        "GIT_HEAD_UNAVAILABLE: HEAD ref exists but does not point to a commit",
+    };
+  }
+
+  if (refExists.exitCode === 1) {
+    // Ref not found: this is an unborn branch.
+    return { kind: "ok", head: null };
+  }
+
+  return {
+    kind: "git_error",
+    reason: `GIT_HEAD_UNAVAILABLE: show-ref failed with exit code ${refExists.exitCode}`,
+  };
 }
 
 /** Capture a deterministic git snapshot.
@@ -256,15 +343,11 @@ export async function getExecutionGitSnapshot(
   const runText = deps?.runGitText ?? runGitText;
   const runBuffer = deps?.runGitBuffer ?? runGitBuffer;
 
-  const headBeforeRun = await runText(cwd, ["rev-parse", "--verify", "HEAD"]);
-  let headBefore: string | null;
-  if (headBeforeRun.ok) {
-    headBefore = trimHead(headBeforeRun.stdout);
-  } else if (isUnbornRepositoryError(headBeforeRun.reason)) {
-    headBefore = null;
-  } else {
-    return { kind: "git_error", reason: headBeforeRun.reason };
+  const headBeforeResult = await resolveHeadForSnapshot(cwd, runText);
+  if (headBeforeResult.kind === "git_error") {
+    return { kind: "git_error", reason: headBeforeResult.reason };
   }
+  const headBefore = headBeforeResult.head;
 
   const statusRun = await runBuffer(cwd, [
     "status",
@@ -277,15 +360,11 @@ export async function getExecutionGitSnapshot(
     return { kind: "git_error", reason: statusRun.reason };
   }
 
-  const headAfterRun = await runText(cwd, ["rev-parse", "--verify", "HEAD"]);
-  let headAfter: string | null;
-  if (headAfterRun.ok) {
-    headAfter = trimHead(headAfterRun.stdout);
-  } else if (isUnbornRepositoryError(headAfterRun.reason)) {
-    headAfter = null;
-  } else {
-    return { kind: "git_error", reason: headAfterRun.reason };
+  const headAfterResult = await resolveHeadForSnapshot(cwd, runText);
+  if (headAfterResult.kind === "git_error") {
+    return { kind: "git_error", reason: headAfterResult.reason };
   }
+  const headAfter = headAfterResult.head;
 
   if (headBefore !== headAfter) {
     return {

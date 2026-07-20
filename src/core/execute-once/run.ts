@@ -31,7 +31,6 @@ import {
   MAX_EXECUTOR_FAILED_REASON_BYTES,
   MAX_EXECUTOR_INPUT_BYTES,
   MAX_SOURCE_BYTES,
-  type BoundedFailureCapsule,
   type BoundedPathSummary,
   type OneShotExecutor,
   type OneShotExecutorInput,
@@ -96,6 +95,45 @@ function sha256(content: string): string {
 
 function truncateReason(text: string): string {
   return truncateExecuteReason(text, MAX_EXECUTOR_FAILED_REASON_BYTES);
+}
+
+async function assertAppliedSourceUnchanged(
+  cwd: string,
+  sourcePath: string,
+  appliedContent: string,
+): Promise<void> {
+  const readPath = await resolveExecuteSourceReadPath(cwd, sourcePath);
+  let currentContent: string;
+  try {
+    currentContent = await readOwnedTextBounded(readPath, MAX_SOURCE_BYTES);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    const message =
+      code === "ENOTFILE" || code === "ELOOP"
+        ? "source is not a regular file"
+        : code === "OWNED_TEXT_TOO_LARGE"
+          ? "source exceeds maximum size"
+          : code === "OWNED_TEXT_INVALID_UTF8"
+            ? "source is not valid UTF-8"
+            : `source read failed: ${(error as Error).message}`;
+    const err = new Error(message) as NodeJS.ErrnoException;
+    err.code = "EXECUTION_SCOPE_VIOLATION";
+    (
+      err as NodeJS.ErrnoException & { source_content_drift?: boolean }
+    ).source_content_drift = true;
+    throw err;
+  }
+
+  if (sha256(currentContent) !== sha256(appliedContent)) {
+    const err = new Error(
+      "source content does not match the applied edit",
+    ) as NodeJS.ErrnoException;
+    err.code = "EXECUTION_SCOPE_VIOLATION";
+    (
+      err as NodeJS.ErrnoException & { source_content_drift?: boolean }
+    ).source_content_drift = true;
+    throw err;
+  }
 }
 
 type SnapshotGetter = (cwd: string) => Promise<GitSnapshot | GitSnapshotError>;
@@ -413,6 +451,13 @@ export async function runTaskExecuteOnce(
 
   let completionResult;
   try {
+    // Verify the applied edit is still intact before we let verification run.
+    await assertAppliedSourceUnchanged(
+      cwd,
+      sourcePath,
+      applyResult.appliedContent,
+    );
+
     completionResult = await runTaskComplete({
       cwd,
       taskId,
@@ -458,6 +503,12 @@ export async function runTaskExecuteOnce(
           ).index_changed = snapshotIndexChanged(snapshot);
           throw err;
         }
+
+        await assertAppliedSourceUnchanged(
+          cwd,
+          sourcePath,
+          applyResult.appliedContent,
+        );
       },
     });
   } catch (error) {
@@ -502,17 +553,32 @@ export async function runTaskExecuteOnce(
       return buildScopeViolationResult(snapshotBefore, rb);
     }
 
-    let failure: BoundedFailureCapsule | undefined;
     if (code === "VERIFICATION_FAILED") {
       const checks =
         (error as NodeJS.ErrnoException & { checks?: CheckResult[] }).checks ??
         [];
       const verifyResult: VerifyResult = { ok: false, checks };
-      failure = (
-        await projectVerifyForAgent(cwd, verifyResult, {
-          skipEvidenceStore: true,
-        })
-      ).failure;
+      const { failure } = await projectVerifyForAgent(cwd, verifyResult, {
+        skipEvidenceStore: true,
+      });
+
+      // If verification failed and left the repository different from the
+      // pre-edit state (source content, index, or HEAD), report it as a scope
+      // violation. Only a clean rollback with unchanged HEAD is reported as a
+      // plain verification failure.
+      if (
+        rb.rollback !== "complete" ||
+        !snapshotIsClean(rb.finalSnapshot) ||
+        snapshotHeadChanged(snapshotBefore, rb.finalSnapshot)
+      ) {
+        return buildScopeViolationResult(snapshotBefore, rb);
+      }
+
+      return {
+        kind: "verification_failed",
+        rolled_back: true,
+        failure,
+      };
     }
 
     if (rb.rollback === "stale") {
@@ -527,7 +593,6 @@ export async function runTaskExecuteOnce(
       return {
         kind: "rollback_failed",
         reason: rb.rollbackReason ?? "rollback failed",
-        failure,
       };
     }
 
@@ -538,15 +603,6 @@ export async function runTaskExecuteOnce(
       return {
         kind: "rollback_incomplete",
         paths: boundedPathSummary(changedPaths(rb.finalSnapshot)),
-        failure,
-      };
-    }
-
-    if (code === "VERIFICATION_FAILED" && failure !== undefined) {
-      return {
-        kind: "verification_failed",
-        rolled_back: true,
-        failure,
       };
     }
 
