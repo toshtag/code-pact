@@ -555,24 +555,30 @@ contract shape.
   [`per-task-loop.md` § Recording a done without task complete](per-task-loop.md#recording-a-done-without-task-complete)
   for the lifecycle explanation (a lighter loop, not lighter verification).
 
-- **`task execute <task-id> --executor-file <relative-project-path> [--agent
-<a>] [--timeout <ms>] [--json]`** — experimental single-file one-shot
-  execution. The task must read and write one existing source file, the git
-  working tree must be clean, and the executor file must be a relative path to
+- **`task execute <task-id> --executor-file <project-relative-posix-path>
+[--agent <a>] [--timeout <ms>] [--json]`** — experimental single-file
+  one-shot execution. The task must read and write one existing source file,
+  HEAD and the git index must be unchanged, and the working tree must be
+  clean. The executor file must be a project-relative POSIX path: no leading
+  `/` or `~`, no `..` or `.` segments, no backslashes, and it must resolve to
   a regular, non-symlink, executable file inside the project. The executor is a
   trusted executable: it runs with `cwd` set to an OS temporary directory, a
   sanitized environment (known repository-path variables such as `PWD`,
   `INIT_CWD`, `npm_package_json`, etc. are removed), and the same process
   privileges as code-pact. It is **not** an OS sandbox. The executor receives a
   JSON input with the task goal, `source_path`, source content, and verification
-  command; it must emit either a `replace_exact` payload (`expected_file_sha256`,
-  `old_text`, `new_text`) or a `blocked` reason. The runtime applies the
-  replacement atomically, re-runs the verification command, and records `done`
-  only when the working tree contains exactly the expected source-file change.
-  On `EXECUTOR_FAILED` or `EDIT_REJECTED` the public envelope carries
-  `data.reason`. On `EXECUTOR_MUTATED_WORKTREE` the source is restored and the
-  envelope carries `data.paths` (a bounded summary). All public failure reasons
-  and path lists are bounded.
+  command; it must emit either a `replace_exact` payload (`expected_file_sha256`
+  is 64 lowercase hex, `old_text` is non-empty, `new_text` is a string) or a
+  `blocked` reason. The runtime validates the executor output at the controller
+  boundary, applies the replacement atomically, re-runs the verification
+  command, and records `done` only when HEAD and the working tree contain exactly
+  the expected source-file change. On `EXECUTOR_FAILED` or `EDIT_REJECTED` the
+  public envelope carries `data.reason`. On `EXECUTOR_MUTATED_WORKTREE` and
+  `EXECUTION_SCOPE_VIOLATION` the runtime attempts a compare-and-swap rollback of
+  the source file and reports `data.rollback` (`complete`/`incomplete`/`stale`),
+  `data.head_changed`, and `data.index_changed`; it never resets HEAD or unstages
+  changes. The rollback is best-effort and not guaranteed. All public failure
+  reasons and path lists are bounded.
 
 - **`task finalize <task-id> --json [--write] [--audit-strict] [--base-ref
 <ref>]`** — reports the task's design-YAML finalization candidate and

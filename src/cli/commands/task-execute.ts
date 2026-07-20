@@ -1,4 +1,6 @@
-import { isAbsolute, relative, resolve } from "node:path";
+import { resolve } from "node:path";
+import { normalize as normalizePosixPath } from "node:path/posix";
+import { RelativePosixPath } from "../../core/schemas/relative-path.ts";
 import { strictParse } from "../../lib/argv.ts";
 import { toParseOptions } from "../spec/render.ts";
 import { TASK_SPECS } from "../spec/task.ts";
@@ -67,10 +69,6 @@ export async function cmdTaskExecute(
     emitError(json, "CONFIG_ERROR", m.task.execute.missingExecutorFile);
     return 2;
   }
-  if (isAbsolute(executorFile)) {
-    emitError(json, "CONFIG_ERROR", m.task.execute.absoluteExecutorFile);
-    return 2;
-  }
 
   const agent = values.agent !== undefined ? String(values.agent) : undefined;
 
@@ -82,8 +80,7 @@ export async function cmdTaskExecute(
   }
 
   const cwd = process.cwd();
-  const executablePath = resolve(cwd, executorFile);
-  const validationError = await validateExecutorFile(cwd, executablePath);
+  const validationError = await validateExecutorFile(cwd, executorFile);
   if (validationError !== undefined) {
     emitError(
       json,
@@ -92,6 +89,7 @@ export async function cmdTaskExecute(
     );
     return 2;
   }
+  const executablePath = resolve(cwd, executorFile);
 
   const { signal, cleanup } = createCliAbortSignal();
 
@@ -295,12 +293,19 @@ function emitExecuteResult(
         emitError(
           json,
           "EXECUTOR_MUTATED_WORKTREE",
-          "executor modified files outside the source file",
-          { data: { paths: result.paths } },
+          "executor modified repository state before returning",
+          {
+            data: {
+              paths: result.paths,
+              rollback: result.rollback,
+              head_changed: result.head_changed,
+              index_changed: result.index_changed,
+            },
+          },
         );
       } else {
         process.stderr.write(
-          `${m.task.execute.executorMutatedWorktree(result.paths)}\n`,
+          `${m.task.execute.executorMutatedWorktree(result.paths, result.rollback, result.head_changed, result.index_changed)}\n`,
         );
       }
       return 1;
@@ -311,12 +316,17 @@ function emitExecuteResult(
           "EXECUTION_SCOPE_VIOLATION",
           "verification scope changed outside the source file",
           {
-            data: { paths: result.paths, rollback: result.rollback },
+            data: {
+              paths: result.paths,
+              rollback: result.rollback,
+              head_changed: result.head_changed,
+              index_changed: result.index_changed,
+            },
           },
         );
       } else {
         process.stderr.write(
-          `${m.task.execute.executionScopeViolation(result.paths, result.rollback)}\n`,
+          `${m.task.execute.executionScopeViolation(result.paths, result.rollback, result.head_changed, result.index_changed)}\n`,
         );
       }
       return 1;
@@ -327,14 +337,16 @@ function emitExecuteResult(
 
 async function validateExecutorFile(
   cwd: string,
-  executablePath: string,
+  executorFile: string,
 ): Promise<string | undefined> {
-  // Resolve user input to a project-relative path so symlink detection runs on
-  // the exact supplied path instead of its real target.
-  const relPath = relative(cwd, executablePath);
-  if (relPath === "" || relPath.startsWith(".")) {
-    return "executor file must be inside the project";
+  // Normalize "./x" to "x" while preserving hidden directories such as
+  // ".agents/one-shot.mjs". The result must be a project-relative POSIX path.
+  const normalized = normalizePosixPath(executorFile).replace(/^\.\//, "");
+  const parsed = RelativePosixPath.safeParse(normalized);
+  if (!parsed.success) {
+    return "executor file must be a relative path inside the project (project-relative POSIX path: no leading /, no .., no \\, no empty segments)";
   }
+  const relPath = parsed.data;
 
   let explicitPath;
   try {

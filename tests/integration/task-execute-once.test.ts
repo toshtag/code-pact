@@ -489,10 +489,123 @@ describe("runTaskExecuteOnce integration", () => {
           changed_paths: ["src/example.ts"],
           paths_truncated: false,
         });
+        expect(result.rollback).toBe("complete");
+        expect(result.head_changed).toBe(false);
+        expect(result.index_changed).toBe(false);
       }
 
       const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
       expect(content).toBe("hello world");
+    });
+  });
+
+  it("does not invoke the executor when the agent is unknown", async () => {
+    let invoked = false;
+    class SpyExecutor {
+      async invoke() {
+        invoked = true;
+        return { kind: "blocked", reason: "should not run" } as any;
+      }
+    }
+
+    await withTempProject(async cwd => {
+      await expect(
+        runTaskExecuteOnce({
+          cwd,
+          taskId: "P78-T1",
+          agent: "unknown-agent",
+          executor: new SpyExecutor(),
+        }),
+      ).rejects.toMatchObject({ code: "AGENT_NOT_FOUND" });
+      expect(invoked).toBe(false);
+
+      const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
+      expect(content).toBe("hello world");
+    });
+  });
+
+  it("rejects executor output that fails controller-level schema validation", async () => {
+    await withTempProject(async cwd => {
+      class BadOutputExecutor {
+        async invoke() {
+          return {
+            kind: "replace_exact",
+            expected_file_sha256: "not-hex",
+            old_text: "hello",
+            new_text: "hi",
+          };
+        }
+      }
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor: new BadOutputExecutor(),
+      });
+
+      expect(result.kind).toBe("executor_failed");
+      if (result.kind === "executor_failed") {
+        expect(result.reason).toMatch(/EXECUTOR_SCHEMA_MISMATCH/);
+      }
+    });
+  });
+
+  it("reports executor_mutated_worktree when the executor stages the source file", async () => {
+    const { execSync } = await import("node:child_process");
+
+    await withTempProject(async cwd => {
+      class StageThenReturnExecutor {
+        async invoke() {
+          await writeFile(join(cwd, "src", "example.ts"), "staged", "utf8");
+          execSync("git add src/example.ts", { cwd, stdio: "ignore" });
+          return {
+            kind: "replace_exact",
+            expected_file_sha256: "unused",
+            old_text: "hello",
+            new_text: "hi",
+          } as import("../../src/core/execute-once/types.ts").OneShotExecutorOutput;
+        }
+      }
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor: new StageThenReturnExecutor(),
+      });
+
+      expect(result.kind).toBe("executor_mutated_worktree");
+      if (result.kind === "executor_mutated_worktree") {
+        expect(result.rollback).toBe("incomplete");
+        expect(result.index_changed).toBe(true);
+        expect(result.head_changed).toBe(false);
+      }
+    });
+  });
+
+  it("reports executor_mutated_worktree when the executor deletes the source file", async () => {
+    await withTempProject(async cwd => {
+      class DeleteSourceExecutor {
+        async invoke() {
+          await rm(join(cwd, "src", "example.ts"));
+          return {
+            kind: "replace_exact",
+            expected_file_sha256: "unused",
+            old_text: "hello",
+            new_text: "hi",
+          } as import("../../src/core/execute-once/types.ts").OneShotExecutorOutput;
+        }
+      }
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor: new DeleteSourceExecutor(),
+      });
+
+      expect(result.kind).toBe("executor_mutated_worktree");
+      if (result.kind === "executor_mutated_worktree") {
+        expect(result.rollback).toBe("incomplete");
+      }
     });
   });
 

@@ -280,8 +280,6 @@ export const messages = {
     execute: {
       missingTaskId: "task execute requires a task id.",
       missingExecutorFile: "task execute requires --executor-file <path>.",
-      absoluteExecutorFile:
-        "task execute --executor-file must be a relative path inside the project.",
       done: (taskId: string, changed_file: string): string =>
         `Task ${taskId} done: ${changed_file}`,
       ineligible: (taskId: string, reasons: string[]): string =>
@@ -293,12 +291,17 @@ export const messages = {
         paths_truncated: boolean;
       }): string =>
         `Working tree is not clean before execution (${summary.changed_path_count} path${summary.changed_path_count === 1 ? "" : "s"} changed${summary.paths_truncated ? ", list truncated" : ""}).`,
-      executorMutatedWorktree: (summary: {
-        changed_path_count: number;
-        changed_paths: string[];
-        paths_truncated: boolean;
-      }): string =>
-        `Executor modified the working tree before returning (${summary.changed_path_count} file${summary.changed_path_count === 1 ? "" : "s"}${summary.paths_truncated ? ", list truncated" : ""}).`,
+      executorMutatedWorktree: (
+        summary: {
+          changed_path_count: number;
+          changed_paths: string[];
+          paths_truncated: boolean;
+        },
+        rollback: string,
+        head_changed: boolean,
+        index_changed: boolean,
+      ): string =>
+        `Executor modified the working tree before returning (${summary.changed_path_count} file${summary.changed_path_count === 1 ? "" : "s"}${summary.paths_truncated ? ", list truncated" : ""}); rollback=${rollback}, head_changed=${head_changed}, index_changed=${index_changed}.`,
       executionScopeViolation: (
         summary: {
           changed_path_count: number;
@@ -306,8 +309,10 @@ export const messages = {
           paths_truncated: boolean;
         },
         rollback: string,
+        head_changed: boolean,
+        index_changed: boolean,
       ): string =>
-        `Execution scope violation: ${summary.changed_path_count} file${summary.changed_path_count === 1 ? "" : "s"} changed outside the target source file${summary.paths_truncated ? " (list truncated)" : ""}; rollback=${rollback}.`,
+        `Execution scope violation: ${summary.changed_path_count} file${summary.changed_path_count === 1 ? "" : "s"} changed outside the target source file${summary.paths_truncated ? " (list truncated)" : ""}; rollback=${rollback}, head_changed=${head_changed}, index_changed=${index_changed}.`,
       blocked: (taskId: string, reason: string): string =>
         `Task ${taskId} blocked: ${reason}`,
       editRejected: (taskId: string, reason: string): string =>

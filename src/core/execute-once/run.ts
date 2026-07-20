@@ -1,6 +1,4 @@
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { runTaskComplete } from "../../commands/task-complete.ts";
 import { atomicReplaceExistingText } from "../../io/atomic-text.ts";
 import { ExecutorError } from "./executor.ts";
@@ -17,6 +15,17 @@ import {
 import { applyExactReplacement } from "./exact-replacement.ts";
 import { resolveOneShotEligibility } from "./eligibility.ts";
 import { projectVerifyForAgent } from "../evidence/failure-capsule.ts";
+import {
+  changedPaths,
+  findStatusEntry,
+  getExecutionGitSnapshot,
+  isOnlyWorktreeModifyOf,
+  snapshotHeadChanged,
+  snapshotIndexChanged,
+  snapshotIsClean,
+  type GitSnapshot,
+} from "./git-status.ts";
+import { parseOneShotExecutorOutput } from "./output-schema.ts";
 import {
   MAX_EXECUTOR_INPUT_BYTES,
   MAX_SOURCE_BYTES,
@@ -37,36 +46,16 @@ export type RunTaskExecuteOnceOptions = {
   signal?: AbortSignal;
 };
 
-const execFileAsync = promisify(execFile);
 const MAX_PATH_SAMPLE_COUNT = 20;
 const MAX_PATH_SAMPLE_BYTES = 4096;
 
-type WorktreeChanges = { clean: true } | { clean: false; paths: string[] };
-
-async function getWorktreeChanges(cwd: string): Promise<WorktreeChanges> {
-  try {
-    const { stdout } = await execFileAsync(
-      "git",
-      [
-        "-C",
-        cwd,
-        "-c",
-        "core.quotePath=false",
-        "status",
-        "--porcelain",
-        "--no-renames",
-        "-uall",
-      ],
-      { encoding: "utf8", maxBuffer: 2 * 1024 * 1024 },
-    );
-    const lines = stdout.split("\n").filter(line => line.length > 0);
-    if (lines.length === 0) return { clean: true };
-    const paths = lines.map(line => line.slice(3).trim());
-    return { clean: false, paths };
-  } catch {
-    return { clean: false, paths: [] };
-  }
-}
+type RollbackResult = {
+  rollback: "complete" | "incomplete" | "stale";
+  head_changed: boolean;
+  index_changed: boolean;
+  finalSnapshot: GitSnapshot | null;
+  rollbackReason?: string;
+};
 
 export function boundedPathSummary(paths: string[]): BoundedPathSummary {
   const unique = [...new Set(paths)].sort((a, b) =>
@@ -95,20 +84,165 @@ export function boundedPathSummary(paths: string[]): BoundedPathSummary {
   };
 }
 
-function onlyPathChanged(status: WorktreeChanges, path: string): boolean {
-  if (status.clean) return false;
-  return status.paths.length === 1 && status.paths[0] === path;
-}
-
-function extraPaths(status: WorktreeChanges, path: string): string[] {
-  if (status.clean) return [];
-  return status.paths.filter(p => p !== path);
-}
-
 function sha256(content: string): string {
   return createHash("sha256")
     .update(Buffer.from(content, "utf8"))
     .digest("hex");
+}
+
+function gitErrorResult(reason: string): TaskExecuteOnceResult {
+  return {
+    kind: "executor_failed",
+    reason: truncateExecuteReason(`git state read failed: ${reason}`),
+  };
+}
+
+/** Best-effort rollback of the source file to `originalContent`.
+ *
+ * Returns `complete` only when:
+ *   - HEAD did not change,
+ *   - the source was the only worktree modification (` M sourcePath`),
+ *   - the source could be re-read as bounded text,
+ *   - compare-and-swap restored the original, and
+ *   - the post-rollback snapshot is clean.
+ *
+ * Anything else (staged change, deletion, directory/symlink replacement,
+ * HEAD commit, concurrent drift, or extra changed files) yields
+ * `incomplete` or `stale`. HEAD is never reset.
+ */
+async function rollbackSourceIfSafe(
+  cwd: string,
+  sourcePath: string,
+  originalContent: string,
+  before: GitSnapshot,
+  after: GitSnapshot,
+): Promise<RollbackResult> {
+  const head_changed = snapshotHeadChanged(before, after);
+  const index_changed = snapshotIndexChanged(after);
+
+  if (head_changed) {
+    return {
+      rollback: "incomplete",
+      head_changed,
+      index_changed,
+      finalSnapshot: after,
+      rollbackReason: "HEAD changed; refusing to reset",
+    };
+  }
+
+  const entry = findStatusEntry(after, sourcePath);
+  if (!entry) {
+    return {
+      rollback: "incomplete",
+      head_changed,
+      index_changed,
+      finalSnapshot: after,
+      rollbackReason: "source was not modified",
+    };
+  }
+
+  if (entry.index !== " " || entry.worktree !== "M") {
+    return {
+      rollback: "incomplete",
+      head_changed,
+      index_changed,
+      finalSnapshot: after,
+      rollbackReason: `source status is ${entry.index}${entry.worktree}`,
+    };
+  }
+
+  try {
+    const readPath = await resolveExecuteSourceReadPath(cwd, sourcePath);
+    const currentContent = await readOwnedTextBounded(
+      readPath,
+      MAX_SOURCE_BYTES,
+    );
+    await restoreOriginalFile(cwd, sourcePath, originalContent, currentContent);
+  } catch (error) {
+    if ((error as Error).message === "destination changed before write") {
+      return {
+        rollback: "stale",
+        head_changed,
+        index_changed,
+        finalSnapshot: after,
+        rollbackReason: "source changed during rollback",
+      };
+    }
+    return {
+      rollback: "incomplete",
+      head_changed,
+      index_changed,
+      finalSnapshot: after,
+      rollbackReason: `rollback failed: ${(error as Error).message}`,
+    };
+  }
+
+  const finalSnapshot = await getExecutionGitSnapshot(cwd);
+  if (finalSnapshot.kind === "git_error") {
+    return {
+      rollback: "incomplete",
+      head_changed,
+      index_changed,
+      finalSnapshot: after,
+      rollbackReason: `git status failed after rollback: ${finalSnapshot.reason}`,
+    };
+  }
+
+  if (snapshotHeadChanged(before, finalSnapshot)) {
+    return {
+      rollback: "incomplete",
+      head_changed: true,
+      index_changed: snapshotIndexChanged(finalSnapshot),
+      finalSnapshot,
+      rollbackReason: "HEAD changed during rollback",
+    };
+  }
+
+  if (snapshotIsClean(finalSnapshot)) {
+    return {
+      rollback: "complete",
+      head_changed: false,
+      index_changed: false,
+      finalSnapshot,
+    };
+  }
+
+  return {
+    rollback: "incomplete",
+    head_changed: false,
+    index_changed: snapshotIndexChanged(finalSnapshot),
+    finalSnapshot,
+    rollbackReason: "extra worktree changes remain after rollback",
+  };
+}
+
+function buildMutationResult(
+  before: GitSnapshot,
+  after: GitSnapshot,
+  rollback: RollbackResult,
+): Extract<TaskExecuteOnceResult, { kind: "executor_mutated_worktree" }> {
+  return {
+    kind: "executor_mutated_worktree",
+    paths: boundedPathSummary(changedPaths(after)),
+    rollback: rollback.rollback,
+    head_changed: snapshotHeadChanged(before, after),
+    index_changed: snapshotIndexChanged(after),
+  };
+}
+
+function buildScopeViolationResult(
+  before: GitSnapshot,
+  after: GitSnapshot,
+  rollback: RollbackResult,
+): Extract<TaskExecuteOnceResult, { kind: "execution_scope_violation" }> {
+  const final = rollback.finalSnapshot ?? after;
+  return {
+    kind: "execution_scope_violation",
+    paths: boundedPathSummary(changedPaths(final)),
+    rollback: rollback.rollback,
+    head_changed: snapshotHeadChanged(before, final),
+    index_changed: snapshotIndexChanged(final),
+  };
 }
 
 export async function runTaskExecuteOnce(
@@ -139,11 +273,14 @@ export async function runTaskExecuteOnce(
 
   const sourcePath = eligibility.sourcePath;
 
-  const worktreeBefore = await getWorktreeChanges(cwd);
-  if (!worktreeBefore.clean) {
+  const snapshotBefore = await getExecutionGitSnapshot(cwd);
+  if (snapshotBefore.kind === "git_error") {
+    return gitErrorResult(snapshotBefore.reason);
+  }
+  if (!snapshotIsClean(snapshotBefore)) {
     return {
       kind: "worktree_not_clean",
-      paths: boundedPathSummary(worktreeBefore.paths),
+      paths: boundedPathSummary(changedPaths(snapshotBefore)),
     };
   }
 
@@ -191,9 +328,9 @@ export async function runTaskExecuteOnce(
     };
   }
 
-  let output;
+  let rawOutput: unknown;
   try {
-    output = await executor.invoke(input);
+    rawOutput = await executor.invoke(input);
   } catch (error) {
     const message =
       error instanceof ExecutorError
@@ -205,33 +342,37 @@ export async function runTaskExecuteOnce(
     };
   }
 
-  const worktreeAfterExecutor = await getWorktreeChanges(cwd);
-  if (!worktreeAfterExecutor.clean) {
-    // The executor is not allowed to touch the working tree before returning.
-    // If it mutated the source file, try to restore the original content.
-    if (
-      !worktreeAfterExecutor.clean &&
-      worktreeAfterExecutor.paths.includes(sourcePath)
-    ) {
-      try {
-        const readPath = await resolveExecuteSourceReadPath(cwd, sourcePath);
-        const mutatedContent = await readOwnedTextBounded(
-          readPath,
-          MAX_SOURCE_BYTES,
-        );
-        await restoreOriginalFile(
-          cwd,
-          sourcePath,
-          sourceContent,
-          mutatedContent,
-        );
-      } catch {
-        // Best-effort restore; if it fails we still report the mutation.
-      }
-    }
+  const snapshotAfterExecutor = await getExecutionGitSnapshot(cwd);
+  if (snapshotAfterExecutor.kind === "git_error") {
+    return gitErrorResult(snapshotAfterExecutor.reason);
+  }
+
+  if (
+    !snapshotIsClean(snapshotAfterExecutor) ||
+    snapshotHeadChanged(snapshotBefore, snapshotAfterExecutor)
+  ) {
+    const rollback = await rollbackSourceIfSafe(
+      cwd,
+      sourcePath,
+      sourceContent,
+      snapshotBefore,
+      snapshotAfterExecutor,
+    );
+    return buildMutationResult(
+      snapshotBefore,
+      snapshotAfterExecutor,
+      rollback,
+    );
+  }
+
+  let output;
+  try {
+    output = parseOneShotExecutorOutput(rawOutput);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? "EXECUTOR_SCHEMA_MISMATCH";
     return {
-      kind: "executor_mutated_worktree",
-      paths: boundedPathSummary(worktreeAfterExecutor.paths),
+      kind: "executor_failed",
+      reason: truncateExecuteReason(`${code}: ${(error as Error).message}`),
     };
   }
 
@@ -251,34 +392,24 @@ export async function runTaskExecuteOnce(
     return { kind: "edit_rejected", reason: applyResult.reason };
   }
 
-  const worktreeAfterEdit = await getWorktreeChanges(cwd);
-  if (!onlyPathChanged(worktreeAfterEdit, sourcePath)) {
-    const extras = extraPaths(worktreeAfterEdit, sourcePath);
-    const restore = await restoreOriginalFile(
+  const snapshotAfterEdit = await getExecutionGitSnapshot(cwd);
+  if (snapshotAfterEdit.kind === "git_error") {
+    return gitErrorResult(snapshotAfterEdit.reason);
+  }
+
+  if (!isOnlyWorktreeModifyOf(snapshotAfterEdit, sourcePath)) {
+    const rollback = await rollbackSourceIfSafe(
       cwd,
       sourcePath,
       applyResult.originalContent,
-      applyResult.appliedContent,
+      snapshotBefore,
+      snapshotAfterEdit,
     );
-    if (restore.kind === "stale") {
-      return {
-        kind: "execution_scope_violation",
-        paths: boundedPathSummary(extras),
-        rollback: "stale",
-      };
-    }
-    if (restore.kind === "failed") {
-      return {
-        kind: "execution_scope_violation",
-        paths: boundedPathSummary(extras),
-        rollback: "incomplete",
-      };
-    }
-    return {
-      kind: "execution_scope_violation",
-      paths: boundedPathSummary(extras),
-      rollback: "complete",
-    };
+    return buildScopeViolationResult(
+      snapshotBefore,
+      snapshotAfterEdit,
+      rollback,
+    );
   }
 
   let completionResult;
@@ -291,21 +422,92 @@ export async function runTaskExecuteOnce(
       signal,
       skipLoopMemory: true,
       beforeRecordDone: async () => {
-        const status = await getWorktreeChanges(cwd);
-        if (!onlyPathChanged(status, sourcePath)) {
-          const error = new Error(
+        const snapshot = await getExecutionGitSnapshot(cwd);
+        if (snapshot.kind === "git_error") {
+          const err = new Error(
+            `git status failed before recording done: ${snapshot.reason}`,
+          ) as NodeJS.ErrnoException;
+          err.code = "EXECUTION_SCOPE_VIOLATION";
+          throw err;
+        }
+
+        if (snapshotHeadChanged(snapshotBefore, snapshot)) {
+          const err = new Error(
+            "HEAD changed during verification",
+          ) as NodeJS.ErrnoException;
+          err.code = "EXECUTION_SCOPE_VIOLATION";
+          (
+            err as NodeJS.ErrnoException & { head_changed?: boolean }
+          ).head_changed = true;
+          (
+            err as NodeJS.ErrnoException & { snapshot?: GitSnapshot }
+          ).snapshot = snapshot;
+          throw err;
+        }
+
+        if (!isOnlyWorktreeModifyOf(snapshot, sourcePath)) {
+          const err = new Error(
             "working tree changed outside the target source file",
           ) as NodeJS.ErrnoException;
-          error.code = "EXECUTION_SCOPE_VIOLATION";
+          err.code = "EXECUTION_SCOPE_VIOLATION";
           (
-            error as NodeJS.ErrnoException & { changed_paths?: string[] }
-          ).changed_paths = extraPaths(status, sourcePath);
-          throw error;
+            err as NodeJS.ErrnoException & { changed_paths?: string[] }
+          ).changed_paths = changedPaths(snapshot).filter(p => p !== sourcePath);
+          (
+            err as NodeJS.ErrnoException & { index_changed?: boolean }
+          ).index_changed = snapshotIndexChanged(snapshot);
+          throw err;
         }
       },
     });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
+    if (code === "AGENT_NOT_FOUND" || code === "AGENT_NOT_ENABLED") {
+      throw error;
+    }
+
+    const snapshotAfterError = await getExecutionGitSnapshot(cwd);
+    if (snapshotAfterError.kind === "git_error") {
+      return gitErrorResult(snapshotAfterError.reason);
+    }
+
+    if (code === "EXECUTION_SCOPE_VIOLATION") {
+      const errorWithData = error as NodeJS.ErrnoException & {
+        changed_paths?: string[];
+        index_changed?: boolean;
+        head_changed?: boolean;
+        snapshot?: GitSnapshot;
+      };
+      const headChanged =
+        errorWithData.head_changed ??
+        snapshotHeadChanged(snapshotBefore, errorWithData.snapshot ?? snapshotAfterError);
+      let rollback: RollbackResult;
+      if (headChanged) {
+        rollback = {
+          rollback: "incomplete",
+          head_changed: true,
+          index_changed:
+            errorWithData.index_changed ??
+            snapshotIndexChanged(errorWithData.snapshot ?? snapshotAfterError),
+          finalSnapshot: errorWithData.snapshot ?? snapshotAfterError,
+          rollbackReason: "HEAD changed; refusing to reset",
+        };
+      } else {
+        rollback = await rollbackSourceIfSafe(
+          cwd,
+          sourcePath,
+          applyResult.originalContent,
+          snapshotBefore,
+          snapshotAfterError,
+        );
+      }
+      return buildScopeViolationResult(
+        snapshotBefore,
+        snapshotAfterError,
+        rollback,
+      );
+    }
+
     let failure: BoundedFailureCapsule | undefined;
     if (code === "VERIFICATION_FAILED") {
       const checks =
@@ -319,60 +521,38 @@ export async function runTaskExecuteOnce(
       ).failure;
     }
 
-    const restore = await restoreOriginalFile(
+    const rollback = await rollbackSourceIfSafe(
       cwd,
       sourcePath,
       applyResult.originalContent,
-      applyResult.appliedContent,
+      snapshotBefore,
+      snapshotAfterError,
     );
+    const finalSnapshot = rollback.finalSnapshot ?? snapshotAfterError;
 
-    const worktreeAfterRollback = await getWorktreeChanges(cwd);
-
-    if (code === "EXECUTION_SCOPE_VIOLATION") {
-      const extras =
-        (error as NodeJS.ErrnoException & { changed_paths?: string[] })
-          .changed_paths ??
-        (worktreeAfterRollback.clean ? [] : worktreeAfterRollback.paths);
-      let rollback: "complete" | "incomplete" | "stale";
-      if (restore.kind === "stale") {
-        rollback = "stale";
-      } else if (restore.kind === "failed") {
-        rollback = "incomplete";
-      } else if (!worktreeAfterRollback.clean) {
-        rollback = "incomplete";
-      } else {
-        rollback = "complete";
-      }
-      return {
-        kind: "execution_scope_violation",
-        paths: boundedPathSummary(extras),
-        rollback,
-      };
-    }
-
-    if (restore.kind === "stale") {
+    if (rollback.rollback === "stale") {
       return {
         kind: "rollback_stale_file",
-        reason: restore.reason,
-        applied_sha: restore.applied_sha,
+        reason: rollback.rollbackReason ?? "source changed during rollback",
+        applied_sha: sha256(applyResult.appliedContent),
       };
     }
-    if (restore.kind === "failed") {
+
+    if (rollback.rollback !== "complete") {
       return {
         kind: "rollback_failed",
-        reason: restore.reason,
+        reason: rollback.rollbackReason ?? "rollback failed",
         failure,
       };
     }
 
-    if (code === "AGENT_NOT_FOUND" || code === "AGENT_NOT_ENABLED") {
-      throw error;
-    }
-
-    if (!worktreeAfterRollback.clean) {
+    if (
+      !snapshotIsClean(finalSnapshot) ||
+      snapshotHeadChanged(snapshotBefore, finalSnapshot)
+    ) {
       return {
         kind: "rollback_incomplete",
-        paths: boundedPathSummary(worktreeAfterRollback.paths),
+        paths: boundedPathSummary(changedPaths(finalSnapshot)),
         failure,
       };
     }
@@ -396,25 +576,40 @@ export async function runTaskExecuteOnce(
   }
 
   if (completionResult.kind !== "done") {
-    const restore = await restoreOriginalFile(
+    const rollback = await rollbackSourceIfSafe(
       cwd,
       sourcePath,
       applyResult.originalContent,
-      applyResult.appliedContent,
+      snapshotBefore,
+      snapshotAfterEdit,
     );
-    if (restore.kind === "stale") {
+    const finalSnapshot = rollback.finalSnapshot ?? snapshotAfterEdit;
+
+    if (rollback.rollback === "stale") {
       return {
         kind: "rollback_stale_file",
-        reason: restore.reason,
-        applied_sha: restore.applied_sha,
+        reason: rollback.rollbackReason ?? "source changed during rollback",
+        applied_sha: sha256(applyResult.appliedContent),
       };
     }
-    if (restore.kind === "failed") {
+
+    if (rollback.rollback !== "complete") {
       return {
         kind: "rollback_failed",
-        reason: restore.reason,
+        reason: rollback.rollbackReason ?? "rollback failed",
       };
     }
+
+    if (
+      !snapshotIsClean(finalSnapshot) ||
+      snapshotHeadChanged(snapshotBefore, finalSnapshot)
+    ) {
+      return {
+        kind: "rollback_incomplete",
+        paths: boundedPathSummary(changedPaths(finalSnapshot)),
+      };
+    }
+
     return {
       kind: "executor_failed",
       reason: truncateExecuteReason(

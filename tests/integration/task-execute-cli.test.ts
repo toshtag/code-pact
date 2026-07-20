@@ -283,6 +283,96 @@ describe("task execute — CLI", () => {
     }
   });
 
+  it("rejects a parent-traversal executor file", async () => {
+    const project = await createTempProject({
+      prefix: "code-pact-execute-cli-traversal-",
+    });
+    try {
+      await setupProject(project.dir, "exit 0");
+      const res = project.run(
+        [
+          "task",
+          "execute",
+          "P78-T1",
+          "--executor-file",
+          "../executor.mjs",
+          "--json",
+        ],
+        { env: { EXECUTOR_MODE: "replace" } },
+      );
+      expect(res.code).toBe(2);
+      const parsed = expectJsonErr(res, "CONFIG_ERROR");
+      expect(parsed.error.message).toContain("relative path");
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it("rejects a backslash-containing executor file", async () => {
+    const project = await createTempProject({
+      prefix: "code-pact-execute-cli-backslash-",
+    });
+    try {
+      await setupProject(project.dir, "exit 0");
+      const res = project.run(
+        [
+          "task",
+          "execute",
+          "P78-T1",
+          "--executor-file",
+          "src\\example.ts",
+          "--json",
+        ],
+        { env: { EXECUTOR_MODE: "replace" } },
+      );
+      expect(res.code).toBe(2);
+      expectJsonErr(res, "CONFIG_ERROR");
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it("accepts a hidden-directory executor file", async () => {
+    const project = await createTempProject({
+      prefix: "code-pact-execute-cli-hidden-",
+    });
+    try {
+      await setupProject(project.dir, "exit 0");
+      await mkdir(join(project.dir, ".agents"));
+      await copyFile(
+        join(project.dir, "executor.mjs"),
+        join(project.dir, ".agents", "one-shot.mjs"),
+      );
+      await chmod(join(project.dir, ".agents", "one-shot.mjs"), 0o755);
+      execSync("git add .agents && git commit -m agents", {
+        cwd: project.dir,
+        stdio: "ignore",
+      });
+
+      const res = project.run(
+        [
+          "task",
+          "execute",
+          "P78-T1",
+          "--executor-file",
+          ".agents/one-shot.mjs",
+          "--json",
+        ],
+        { env: { EXECUTOR_MODE: "replace" } },
+      );
+
+      expect(res.code).toBe(0);
+      expectJsonOk(res);
+      const content = await readFile(
+        join(project.dir, "src", "example.ts"),
+        "utf8",
+      );
+      expect(content).toBe("hi world");
+    } finally {
+      await project.cleanup();
+    }
+  });
+
   it("propagates an unknown --agent as AGENT_NOT_FOUND", async () => {
     const project = await createTempProject({
       prefix: "code-pact-execute-cli-",

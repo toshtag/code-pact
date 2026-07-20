@@ -256,8 +256,8 @@ CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes
 | `ROLLBACK_STALE_FILE` | `task execute` | The source file changed concurrently after the edit, so rollback refused to overwrite it. Exit code 1. The envelope may carry `data.applied_sha`. |
 | `ROLLBACK_INCOMPLETE` | `task execute` | The source file was rolled back, but other unexpected working-tree changes remain. Exit code 1. The envelope may carry `data.paths` (a bounded summary) and `data.failure`. |
 | `WORKTREE_NOT_CLEAN` | `task execute` | The working tree is not clean before one-shot execution (staged, unstaged, or untracked changes). Exit code 1. The envelope carries `data.paths` (a bounded summary). |
-| `EXECUTOR_MUTATED_WORKTREE` | `task execute` | The executor modified the working tree before returning its response (the source file or any other file). Exit code 1. The envelope carries `data.paths` (a bounded summary). |
-| `EXECUTION_SCOPE_VIOLATION` | `task execute` | Verification or a side-effect altered files outside the target source path. Exit code 1. The envelope carries `data.paths` (a bounded summary) and `data.rollback` (`complete`, `incomplete`, or `stale`). |
+| `EXECUTOR_MUTATED_WORKTREE` | `task execute` | The executor modified repository state before returning its response (HEAD, index, worktree, or any file). Exit code 1. The envelope carries `data.paths` (a bounded summary), `data.rollback` (`complete`/`incomplete`/`stale`), `data.head_changed`, and `data.index_changed`. |
+| `EXECUTION_SCOPE_VIOLATION` | `task execute` | Verification or a side-effect altered files, HEAD, or the index outside the target source-file change. Exit code 1. The envelope carries `data.paths` (a bounded summary), `data.rollback` (`complete`/`incomplete`/`stale`), `data.head_changed`, and `data.index_changed`. |
 
 ### Public cause codes
 

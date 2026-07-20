@@ -74,7 +74,8 @@ export type OneShotExecutorOutput =
   | OneShotExecutorOutputBlocked;
 
 export interface OneShotExecutor {
-  invoke(input: OneShotExecutorInput): Promise<OneShotExecutorOutput>;
+  /** Adapters return an untrusted value; the controller validates it. */
+  invoke(input: OneShotExecutorInput): Promise<unknown>;
 }
 
 export type ExactReplacement = {
@@ -133,11 +134,16 @@ export type TaskExecuteOnceResult =
   | {
       kind: "executor_mutated_worktree";
       paths: BoundedPathSummary;
+      rollback: "complete" | "incomplete" | "stale";
+      head_changed: boolean;
+      index_changed: boolean;
     }
   | {
       kind: "execution_scope_violation";
       paths: BoundedPathSummary;
       rollback: "complete" | "incomplete" | "stale";
+      head_changed: boolean;
+      index_changed: boolean;
     }
   | {
       kind: "verification_failed";

@@ -356,27 +356,29 @@ code-pact task finalize P1-T1 --audit-strict --base-ref origin/main --write --js
 `code-pact task execute <task-id> [options]`
 
 EXPERIMENTAL: Run a single-file one-shot execution via an external executor.
-Requires a clean git working tree. The executor-file must be a relative path
-to a regular, non-symlink, executable file inside the project. The executor is
-a trusted executable: it runs with its cwd set to an OS temporary directory,
-a sanitized environment (known repository-path variables removed), and the same
-process privileges as code-pact. It is not an OS sandbox. The executor receives a
-JSON input with the task goal and source file content, and must respond with either
-a replace_exact payload or a blocked reason. On verification failure the source
-file is rolled back; if the working tree changes before returning the response,
-the edit is rejected and the source is restored. All public failure reasons and
+Requires a clean git working tree and an unmodified HEAD and index. The
+executor-file must be a project-relative POSIX path to a regular, non-symlink,
+executable file inside the project. The executor is a trusted executable: it
+runs with its cwd set to an OS temporary directory, a sanitized environment
+(known repository-path variables removed), and the same process privileges as
+code-pact. It is not an OS sandbox. The executor receives a JSON input with
+the task goal and source file content, and must respond with either a
+replace_exact payload (expected_file_sha256, old_text, new_text) or a blocked
+reason. On verification failure or any scope violation the source file is
+rolled back with a reported rollback status (complete/incomplete/stale); the
+runtime never resets HEAD or unstages changes. All public failure reasons and
 path lists are bounded. This command is experimental and its contract may change
 without a major version bump.
 
 | Flag | Value | Description |
 | --- | --- | --- |
-| `--executor-file` (required) | `<path>` | Relative project path to the trusted external one-shot executor executable. Must be executable and accept JSON on stdin. |
+| `--executor-file` (required) | `<path>` | Project-relative POSIX path to the trusted external one-shot executor executable. Must not start with '/', '~', or '.', must not contain '..' or '\\', and must be executable and accept JSON on stdin. |
 | `--agent` | `<name>` | Agent name. Defaults to project default_agent. |
 | `--timeout` | `<ms>` | Per-command timeout in decimal milliseconds (default: 120000). |
 | `--json` | — | Emit JSON. |
 
 ```sh
-code-pact task execute P78-T1 --executor-file ./agents/one-shot.sh --json
+code-pact task execute P78-T1 --executor-file agents/one-shot.sh --json
 ```
 
 ## Plan commands

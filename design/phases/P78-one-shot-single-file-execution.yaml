@@ -3,7 +3,7 @@ name: One-shot Single-File Execution
 weight: 4
 confidence: medium
 risk: medium
-status: in_progress
+status: done
 objective: >
   Provide a bounded, single-file, one-shot execution path for code-pact tasks.
   An
@@ -337,7 +337,6 @@ tasks:
       - tests/integration/json-stdout.test.ts
       - tests/unit/core/execute-once/run.test.ts
       - design/phases/P78-one-shot-single-file-execution.yaml
-
   - id: P78-T7
     type: bugfix
     ambiguity: medium
@@ -346,7 +345,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Harden git-state integrity and honest rollback contract for one-shot
       execution. Parse git status as a snapshot (HEAD, index, worktree), detect
@@ -385,7 +384,6 @@ tasks:
       - src/core/execute-once/types.ts
       - src/core/execute-once/git-status.ts
       - src/core/execute-once/output-schema.ts
-      - src/core/execute-once/executor.ts
       - src/core/execute-once/run.ts
       - src/cli/commands/task-execute.ts
       - src/cli/spec/task.ts
@@ -396,10 +394,8 @@ tasks:
       - docs/per-task-loop.md
       - docs/troubleshooting.md
       - docs/cli-reference.generated.md
-      - tests/fixtures/executors/fake-executor.mjs
       - tests/integration/task-execute-once.test.ts
       - tests/integration/task-execute-cli.test.ts
-      - tests/integration/json-stdout.test.ts
-      - tests/unit/core/execute-once/run.test.ts
       - tests/unit/core/execute-once/git-status.test.ts
       - tests/unit/core/execute-once/output-schema.test.ts
+      - design/phases/P78-one-shot-single-file-execution.yaml

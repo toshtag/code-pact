@@ -283,8 +283,6 @@ export const messages = {
       missingTaskId: "task execute にはタスク ID が必要です。",
       missingExecutorFile:
         "task execute には --executor-file <path> が必要です。",
-      absoluteExecutorFile:
-        "task execute --executor-file はプロジェクト内の相対パスである必要があります。",
       done: (taskId: string, changed_file: string): string =>
         `タスク ${taskId} 完了: ${changed_file}`,
       ineligible: (taskId: string, reasons: string[]): string =>
@@ -296,12 +294,17 @@ export const messages = {
         paths_truncated: boolean;
       }): string =>
         `実行前に working tree がクリーンではありません (${summary.changed_path_count} 件の変更${summary.paths_truncated ? "、一覧は打ち切り" : ""})。`,
-      executorMutatedWorktree: (summary: {
-        changed_path_count: number;
-        changed_paths: string[];
-        paths_truncated: boolean;
-      }): string =>
-        `executor が source ファイルを含む working tree に ${summary.changed_path_count} 件の変更を加えました${summary.paths_truncated ? " (一覧は打ち切り)" : ""}。`,
+      executorMutatedWorktree: (
+        summary: {
+          changed_path_count: number;
+          changed_paths: string[];
+          paths_truncated: boolean;
+        },
+        rollback: string,
+        head_changed: boolean,
+        index_changed: boolean,
+      ): string =>
+        `executor が source ファイルを含む working tree に ${summary.changed_path_count} 件の変更を加えました${summary.paths_truncated ? " (一覧は打ち切り)" : ""}; rollback=${rollback}, head_changed=${head_changed}, index_changed=${index_changed}。`,
       executionScopeViolation: (
         summary: {
           changed_path_count: number;
@@ -309,8 +312,10 @@ export const messages = {
           paths_truncated: boolean;
         },
         rollback: string,
+        head_changed: boolean,
+        index_changed: boolean,
       ): string =>
-        `実行スコープ違反: source ファイル外に ${summary.changed_path_count} 件の変更があります${summary.paths_truncated ? " (一覧は打ち切り)" : ""}; rollback=${rollback}。`,
+        `実行スコープ違反: source ファイル外に ${summary.changed_path_count} 件の変更があります${summary.paths_truncated ? " (一覧は打ち切り)" : ""}; rollback=${rollback}, head_changed=${head_changed}, index_changed=${index_changed}。`,
       blocked: (taskId: string, reason: string): string =>
         `タスク ${taskId} はブロックされました: ${reason}`,
       editRejected: (taskId: string, reason: string): string =>
