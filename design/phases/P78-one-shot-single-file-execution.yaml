@@ -3,7 +3,7 @@ name: One-shot Single-File Execution
 weight: 4
 confidence: medium
 risk: medium
-status: in_progress
+status: done
 objective: >
   Provide a bounded, single-file, one-shot execution path for code-pact tasks.
   An
