@@ -105,7 +105,7 @@ export {
   resolveContractLockDirWritePath,
   resolveContractLockReadPath,
   resolveContractLockWritePath,
-  resolveReviewManifestDirWritePath,
+  resolveReviewCacheDirWritePath,
   resolveReviewManifestReadPath,
   resolveReviewManifestWritePath,
 } from "./authorities/project-config-authority.ts";

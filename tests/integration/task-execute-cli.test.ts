@@ -15,6 +15,7 @@ import {
   expectJsonErr,
   expectJsonOk,
   repoRoot,
+  run,
 } from "../helpers/cli.ts";
 
 const fakeExecutorPath = join(
@@ -77,6 +78,10 @@ tasks:
   execSync("git config user.name Test", { cwd, stdio: "ignore" });
   execSync("git add .", { cwd, stdio: "ignore" });
   execSync("git commit -m init", { cwd, stdio: "ignore" });
+
+  expectJsonOk(run(cwd, ["task", "lock", "P78-T1", "--json"]));
+  execSync("git add .", { cwd, stdio: "ignore" });
+  execSync("git commit -m lock", { cwd, stdio: "ignore" });
 }
 
 describe("task execute — CLI", () => {

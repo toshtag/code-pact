@@ -1457,7 +1457,7 @@ async function cmdTaskComplete(
 
     let message: string;
     let outCode: string;
-    let errorData: { deps?: string[] } | undefined;
+    let errorData: Record<string, unknown> | undefined;
     switch (code) {
       case "TASK_NOT_FOUND":
         message = m.task.complete.taskNotFound(taskId);
@@ -1497,6 +1497,32 @@ async function cmdTaskComplete(
         message = error.message;
         outCode = "PHASE_SNAPSHOT_INVALID";
         break;
+      case "TASK_CONTRACT_LOCK_REQUIRED": {
+        message = error.message;
+        outCode = "TASK_CONTRACT_LOCK_REQUIRED";
+        break;
+      }
+      case "TASK_CONTRACT_DRIFT": {
+        const drift =
+          (error as NodeJS.ErrnoException & { drift?: { message: string }[] })
+            .drift ?? [];
+        const changed =
+          (error as NodeJS.ErrnoException & { changed_fields?: string[] })
+            .changed_fields ?? [];
+        message = `TASK_CONTRACT_DRIFT for "${taskId}": ${drift.map(d => d.message).join("; ")}`;
+        outCode = "TASK_CONTRACT_DRIFT";
+        errorData = {
+          locked_digest:
+            (error as NodeJS.ErrnoException & { locked_digest?: string })
+              .locked_digest ?? "",
+          current_digest:
+            (error as NodeJS.ErrnoException & { current_digest?: string })
+              .current_digest ?? "",
+          changed_fields: changed,
+          drift,
+        };
+        break;
+      }
       case "CONFIG_ERROR":
         message = error.message;
         outCode = "CONFIG_ERROR";
@@ -1643,7 +1669,7 @@ async function cmdTaskRecordDone(
 
     let msg: string;
     let outCode: string;
-    let errorData: { deps?: string[] } | undefined;
+    let errorData: Record<string, unknown> | undefined;
     switch (code) {
       case "TASK_NOT_FOUND":
         msg = m.task.complete.taskNotFound(taskId);
@@ -1679,6 +1705,31 @@ async function cmdTaskRecordDone(
         outCode = "INVALID_TASK_TRANSITION";
         break;
       }
+      case "TASK_CONTRACT_LOCK_REQUIRED":
+        msg = err.message;
+        outCode = "TASK_CONTRACT_LOCK_REQUIRED";
+        break;
+      case "TASK_CONTRACT_DRIFT": {
+        const drift =
+          (err as NodeJS.ErrnoException & { drift?: { message: string }[] })
+            .drift ?? [];
+        const changed =
+          (err as NodeJS.ErrnoException & { changed_fields?: string[] })
+            .changed_fields ?? [];
+        msg = `TASK_CONTRACT_DRIFT for "${taskId}": ${drift.map(d => d.message).join("; ")}`;
+        outCode = "TASK_CONTRACT_DRIFT";
+        errorData = {
+          locked_digest:
+            (err as NodeJS.ErrnoException & { locked_digest?: string })
+              .locked_digest ?? "",
+          current_digest:
+            (err as NodeJS.ErrnoException & { current_digest?: string })
+              .current_digest ?? "",
+          changed_fields: changed,
+          drift,
+        };
+        break;
+      }
       case "PHASE_SNAPSHOT_INVALID":
         msg = err.message;
         outCode = "PHASE_SNAPSHOT_INVALID";
@@ -1699,7 +1750,10 @@ async function cmdTaskRecordDone(
       msg,
       errorData !== undefined ? { data: errorData } : {},
     );
-    return 2;
+    return code === "TASK_CONTRACT_DRIFT" ||
+      code === "TASK_CONTRACT_LOCK_REQUIRED"
+      ? 1
+      : 2;
   }
 }
 
@@ -1955,6 +2009,10 @@ async function cmdTaskFinalize(
           outCode = "TASK_CONTRACT_DRIFT";
           break;
         }
+        case "TASK_CONTRACT_LOCK_REQUIRED":
+          msg = err.message;
+          outCode = "TASK_CONTRACT_LOCK_REQUIRED";
+          break;
         case "PHASE_SNAPSHOT_INVALID":
           msg = err.message;
           outCode = "PHASE_SNAPSHOT_INVALID";
@@ -2129,8 +2187,19 @@ function emitTaskCommonError(
         (err as NodeJS.ErrnoException & { current?: string }).current ?? "";
       msg = m.task[key].invalidTransition(taskId, current);
       outCode = "INVALID_TASK_TRANSITION";
-      break;
+      emitError(json, outCode, msg);
+      return 1;
     }
+    case "WORKTREE_NOT_CLEAN":
+      msg = err.message;
+      outCode = "WORKTREE_NOT_CLEAN";
+      emitError(json, outCode, msg);
+      return 1;
+    case "TASK_CONTRACT_LOCK_EXISTS":
+      msg = err.message;
+      outCode = "TASK_CONTRACT_LOCK_EXISTS";
+      emitError(json, outCode, msg);
+      return 1;
     // Control-plane integrity error from the shared resolver / plan-state loaders.
     case "PHASE_SNAPSHOT_INVALID":
       msg = err.message;

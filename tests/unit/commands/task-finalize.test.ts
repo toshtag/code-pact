@@ -8,7 +8,7 @@ import {
   TaskFinalizeAuditStrictError,
 } from "../../../src/commands/task-finalize.ts";
 import { Phase } from "../../../src/core/schemas/phase.ts";
-import { writeContractLock } from "../../../src/core/contract-lock.ts";
+import { createTaskContractLock } from "../../../src/core/contract-lock.ts";
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
@@ -149,17 +149,48 @@ async function setupProject(opts: SetupOpts = {}): Promise<void> {
     reason: Test
 `;
   }
-  await writeFile(
-    join(cwd, ".code-pact", "state", "progress.yaml"),
-    progressYaml,
-    "utf8",
-  );
-
   for (const [relPath, body] of Object.entries(opts.acceptanceRefFiles ?? {})) {
     const abs = join(cwd, relPath);
     await mkdir(join(abs, ".."), { recursive: true });
     await writeFile(abs, body, "utf8");
   }
+
+  // Lock the contract against the committed state. Progress events (including
+  // the done event) are written afterwards so the lock is created while the
+  // task is not yet marked done.
+  const { spawnSync } = await import("node:child_process");
+  spawnSync("git", ["init", "--quiet"], { cwd });
+  spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."], {
+    cwd,
+  });
+  spawnSync(
+    "git",
+    [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "initial",
+    ],
+    { cwd },
+  );
+
+  await createTaskContractLock({
+    cwd,
+    taskId: "P1-T1",
+    baseRef: "HEAD",
+    actor: "agent",
+    agent: "claude-code",
+  });
+
+  await writeFile(
+    join(cwd, ".code-pact", "state", "progress.yaml"),
+    progressYaml,
+    "utf8",
+  );
 }
 
 async function readPhase(): Promise<Phase> {
@@ -375,10 +406,7 @@ describe("runTaskFinalize — P10 field surfacing", () => {
       ).rejects.toThrow(/auditStrict=true requires includeWriteAudit=true/);
     });
 
-    it("auditStrict + clean audit (non-git cwd → no warnings) → no throw, normal result", async () => {
-      // The fixture tmp dir is non-git, so auditWrites returns
-      // git_available: false and an empty warnings array. The strict
-      // gate must NOT fire in that case.
+    it("auditStrict + clean audit (no warnings) → no throw, normal result", async () => {
       await setupProject({ taskState: "done" });
       const result = await runTaskFinalize({
         cwd,
@@ -386,7 +414,7 @@ describe("runTaskFinalize — P10 field surfacing", () => {
         includeWriteAudit: true,
         auditStrict: true,
       });
-      expect(result.write_audit?.git_available).toBe(false);
+      expect(result.write_audit?.git_available).toBe(true);
       expect(result.write_audit?.warnings).toEqual([]);
       // Result resolves normally — kind is would_finalize (no --write).
       expect(result.kind).toBe("would_finalize");
@@ -394,30 +422,13 @@ describe("runTaskFinalize — P10 field surfacing", () => {
 
     it("auditStrict + warnings throws TaskFinalizeAuditStrictError BEFORE applyPlannedWrite", async () => {
       // Setup a task with declared writes that DON'T cover anything in
-      // the working tree (so declared_unused fires), then init git so
-      // the audit runs. We expect the strict gate to refuse, and the
-      // phase YAML must remain unchanged.
+      // the working tree (so declared_unused fires). setupProject already
+      // commits the phase and creates a contract lock, so the strict gate
+      // should fire after contract-drift verification.
       await setupProject({
         taskState: "done",
         writes: ["src/does-not-exist/**"],
       });
-      const { spawnSync } = await import("node:child_process");
-      spawnSync("git", ["init", "--quiet"], { cwd });
-      spawnSync("git", ["add", "."], { cwd });
-      spawnSync(
-        "git",
-        [
-          "-c",
-          "user.email=t@t",
-          "-c",
-          "user.name=t",
-          "commit",
-          "--quiet",
-          "-m",
-          "initial",
-        ],
-        { cwd },
-      );
 
       const phasePath = join(cwd, "design/phases/P1-foundation.yaml");
       const before = await readFile(phasePath, "utf8");
@@ -443,23 +454,6 @@ describe("runTaskFinalize — P10 field surfacing", () => {
         taskState: "done",
         writes: ["src/does-not-exist/**"],
       });
-      const { spawnSync } = await import("node:child_process");
-      spawnSync("git", ["init", "--quiet"], { cwd });
-      spawnSync("git", ["add", "."], { cwd });
-      spawnSync(
-        "git",
-        [
-          "-c",
-          "user.email=t@t",
-          "-c",
-          "user.name=t",
-          "commit",
-          "--quiet",
-          "-m",
-          "initial",
-        ],
-        { cwd },
-      );
 
       try {
         await runTaskFinalize({
@@ -490,36 +484,15 @@ describe("runTaskFinalize — P10 field surfacing", () => {
 describe("runTaskFinalize — TASK_CONTRACT_DRIFT", () => {
   it("throws TASK_CONTRACT_DRIFT when declared writes changed after lock", async () => {
     await setupProject({ taskState: "done", writes: ["src/a.ts"] });
-    const { spawnSync } = await import("node:child_process");
-    spawnSync("git", ["init", "--quiet"], { cwd });
-    spawnSync(
-      "git",
-      [
-        "-c",
-        "user.email=t@t",
-        "-c",
-        "user.name=t",
-        "commit",
-        "--quiet",
-        "--allow-empty",
-        "-m",
-        "initial",
-      ],
-      { cwd },
-    );
 
-    await writeContractLock(cwd, {
-      task_id: "P1-T1",
-      phase_id: "P1",
-      plan_sha: "0".repeat(40),
-      base_ref: "HEAD",
-      reads: [],
-      writes: ["src/a.ts", "src/b.ts"],
-      at: new Date().toISOString(),
-      actor: "agent",
-      agent: "claude-code",
-      author: "test",
-    });
+    // Mutate the phase YAML after the lock was created to simulate drift.
+    const phasePath = join(cwd, "design", "phases", "P1-foundation.yaml");
+    const raw = await readFile(phasePath, "utf8");
+    const mutated = raw.replace(
+      /writes:\n      - src\/a\.ts/,
+      "writes:\n      - src/a.ts\n      - src/b.ts",
+    );
+    await writeFile(phasePath, mutated, "utf8");
 
     await expect(
       runTaskFinalize({ cwd, taskId: "P1-T1" }),
@@ -528,36 +501,6 @@ describe("runTaskFinalize — TASK_CONTRACT_DRIFT", () => {
 
   it("passes when lock matches current declaration and base ref", async () => {
     await setupProject({ taskState: "done", writes: ["src/a.ts"] });
-    const { spawnSync } = await import("node:child_process");
-    spawnSync("git", ["init", "--quiet"], { cwd });
-    spawnSync(
-      "git",
-      [
-        "-c",
-        "user.email=t@t",
-        "-c",
-        "user.name=t",
-        "commit",
-        "--quiet",
-        "--allow-empty",
-        "-m",
-        "initial",
-      ],
-      { cwd },
-    );
-
-    await writeContractLock(cwd, {
-      task_id: "P1-T1",
-      phase_id: "P1",
-      plan_sha: "0".repeat(40),
-      base_ref: "HEAD",
-      reads: [],
-      writes: ["src/a.ts"],
-      at: new Date().toISOString(),
-      actor: "agent",
-      agent: "claude-code",
-      author: "test",
-    });
 
     const result = await runTaskFinalize({ cwd, taskId: "P1-T1" });
     expect(result.kind).toBe("would_finalize");

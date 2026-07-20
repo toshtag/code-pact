@@ -69,6 +69,22 @@ async function setupTask(
     },
   ];
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+  spawnSync("git", ["init"], { cwd: project.dir, stdio: "ignore" });
+  spawnSync("git", ["config", "user.email", "test@example.com"], {
+    cwd: project.dir,
+    stdio: "ignore",
+  });
+  spawnSync("git", ["config", "user.name", "Test"], {
+    cwd: project.dir,
+    stdio: "ignore",
+  });
+  spawnSync("git", ["add", "."], { cwd: project.dir, stdio: "ignore" });
+  spawnSync("git", ["commit", "-m", "init"], {
+    cwd: project.dir,
+    stdio: "ignore",
+  });
+  expectJsonOk(project.run(["task", "lock", "P1-T1", "--json"]));
 }
 
 const FORCING_READ_MARKER = "p53-forcing-read-marker";

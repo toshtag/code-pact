@@ -139,6 +139,8 @@ const LEAF_USAGE: Record<string, () => string> = {
 
   "task execute": () => renderLeafHelp(TASK_SPECS.execute!),
 
+  "task lock": () => renderLeafHelp(TASK_SPECS.lock!),
+
   "task review-bundle": () => renderLeafHelp(TASK_SPECS["review-bundle"]!),
 
   "task ci-parity": () => renderLeafHelp(TASK_SPECS["ci-parity"]!),

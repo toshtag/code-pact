@@ -34,27 +34,13 @@ export const messages = {
   unknownCommand: (cmd: string): string => `Unknown command: ${cmd}`,
   reviewBundle: {
     missingTaskId: "review-bundle requires a task id.",
-    invalidCiStatus: (v: string): string =>
-      `review-bundle: --ci-status must be success, failure, or pending (got "${v}").`,
-    invalidClassifierResult: (v: string): string =>
-      `review-bundle: --classifier-result must be success, failure, or pending (got "${v}").`,
     written: (taskId: string, phaseId: string, path: string): string =>
       `Review bundle written for "${taskId}" (phase ${phaseId}) at ${path}.`,
-    taskNotDone: (taskId: string): string =>
-      `Task "${taskId}" has no done event; cannot create review bundle.`,
   },
   ciParity: {
     missingTaskId: "ci-parity requires a task id.",
-    missingManifest: (taskId: string): string =>
-      `ci-parity: no review manifest found for "${taskId}". Run ".code-pact review-bundle ${taskId}" first.`,
-    headMismatch: (expected: string, actual: string): string =>
-      `ci-parity: tested HEAD mismatch. Manifest: ${expected}, current: ${actual}.`,
-    statusNotSuccess: (status: string): string =>
-      `ci-parity: CI status is "${status}", expected "success".`,
-    classifierNotSuccess: (result: string): string =>
-      `ci-parity: classifier result is "${result}", expected "success".`,
     ok: (taskId: string): string =>
-      `ci-parity: review evidence for "${taskId}" matches current HEAD and CI/classifier results.`,
+      `ci-parity: review evidence for "${taskId}" matches current HEAD and local verification passed.`,
   },
   init: {
     alreadyInitialized: (dir: string): string =>

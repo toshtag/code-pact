@@ -374,7 +374,11 @@ export function buildLocalCommands(scope, mergeBase, changeSet = {}) {
   }
 
   if (scope.generic) {
-    if (indeterminate || hasGenericFiles(untrackedFiles) || mergeBase === null) {
+    if (
+      indeterminate ||
+      hasGenericFiles(untrackedFiles) ||
+      mergeBase === null
+    ) {
       commands.push(["pnpm", ["exec", "vitest", "run", "--reporter=agent"]]);
     } else {
       const baseGenericFiles = genericFiles(baseFiles);
@@ -547,6 +551,7 @@ async function main() {
       format: { type: "string", default: "json" },
       local: { type: "boolean", default: false },
       run: { type: "boolean", default: false },
+      commands: { type: "boolean", default: false },
     },
     allowPositionals: false,
   });
@@ -604,6 +609,27 @@ async function main() {
   const scope = failSafe
     ? buildFailSafeScope(files)
     : classifyChangedFiles(files);
+
+  if (values.commands) {
+    const commands = buildLocalCommands(scope, mergeBase, {
+      baseFiles: files,
+      workingTreeFiles: [],
+      untrackedFiles: [],
+      indeterminate: failSafe,
+    });
+    console.log(
+      JSON.stringify(
+        {
+          scope: { ...scope, changedFiles: files, mergeBase },
+          commands,
+          failSafe,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
 
   if (values.format === "github") {
     outputGitHub(scope);

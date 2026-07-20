@@ -114,7 +114,7 @@ function isCodePactRuntimeState(file: string): boolean {
     file === ".code-pact/state/progress.yaml" ||
     file.startsWith(".code-pact/state/events/") ||
     file.startsWith(".code-pact/state/locks/") ||
-    file.startsWith(".code-pact/state/reviews/") ||
+    file.startsWith(".code-pact/cache/reviews/") ||
     file.startsWith(".code-pact/locks/")
   );
 }

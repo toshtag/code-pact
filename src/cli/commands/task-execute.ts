@@ -131,6 +131,10 @@ export async function cmdTaskExecute(
         return 2;
       case "LOCK_HELD":
         return 2;
+      case "TASK_CONTRACT_LOCK_REQUIRED":
+      case "TASK_CONTRACT_DRIFT":
+        emitError(json, code, message);
+        return 1;
       default:
         throw err;
     }

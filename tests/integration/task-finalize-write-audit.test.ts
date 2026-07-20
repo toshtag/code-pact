@@ -38,7 +38,7 @@ beforeAll(() => {
 }, 60_000);
 
 afterEach(async () => {
-  await Promise.all(cleanups.map((c) => c()));
+  await Promise.all(cleanups.map(c => c()));
   cleanups = [];
 });
 
@@ -111,15 +111,16 @@ async function projectWithFinalizableTask(
   ];
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
 
+  // Contract lock gates require git and a lock; initialize and commit the
+  // fixtures before start/complete so task start can create the lock on a
+  // clean worktree.
+  git(p.dir, ["init", "--quiet", "--initial-branch=main"]);
+  git(p.dir, ["add", "."]);
+  git(p.dir, ["commit", "--quiet", "-m", "initial"]);
+
   // Advance progress.yaml to the `done` state so task finalize is eligible.
   p.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]);
   p.run(["task", "complete", "P1-T1", "--agent", "claude-code", "--json"]);
-
-  if (opts?.initGit ?? false) {
-    git(p.dir, ["init", "--quiet", "--initial-branch=main"]);
-    git(p.dir, ["add", "."]);
-    git(p.dir, ["commit", "--quiet", "-m", "initial"]);
-  }
 
   return p;
 }
@@ -163,9 +164,9 @@ describe("task finalize --json write_audit envelope", () => {
     const data = parseFinalize(res);
     expect(data.kind).toBe("would_finalize");
     expect(data.write_audit).toBeDefined();
-    expect(data.write_audit?.base_kind).toBe("unavailable");
-    expect(data.write_audit?.git_available).toBe(false);
-    expect(data.write_audit?.reason).toBe("not_a_git_repo");
+    expect(data.write_audit?.base_kind).toBe("working-tree");
+    expect(data.write_audit?.git_available).toBe(true);
+    expect(data.write_audit?.reason).toBeUndefined();
     // field-presence-fixed shape: every key always present
     expect(data.write_audit?.files_touched).toEqual([]);
     expect(data.write_audit?.outside_declared).toEqual([]);
@@ -358,9 +359,7 @@ describe("task finalize --json write_audit boundary semantics", () => {
     // Advisory only — exit code is still 0 even with the warning.
     expect(res.code).toBe(0);
     const data = parseFinalize(res);
-    expect(data.write_audit?.declared_unused).toEqual([
-      "docs/cli-contract.md",
-    ]);
+    expect(data.write_audit?.declared_unused).toEqual(["docs/cli-contract.md"]);
     expect(data.write_audit?.warnings).toContain(
       "TASK_WRITES_AUDIT_DECLARED_UNUSED",
     );

@@ -4,9 +4,13 @@ import {
 } from "../core/project-fs/authorities/temporary-sandbox-authority.ts";
 import { unbrand } from "../core/project-fs/branded-paths.ts";
 import { tmpdir } from "node:os";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { LocaleCode } from "../core/schemas/locale.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
 import { runInitCore } from "./init.ts";
+
+const execFileAsync = promisify(execFile);
 import {
   runTaskPrepare,
   type TaskPrepareMinimalResult,
@@ -58,6 +62,29 @@ export type TutorialOptions = {
 const AGENT = "claude-code";
 const T1 = "TUTORIAL-T1";
 const T2 = "TUTORIAL-T2";
+
+async function gitInitAndCommit(cwd: string): Promise<void> {
+  await execFileAsync("git", ["init", "--quiet"], { cwd });
+  await execFileAsync(
+    "git",
+    ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."],
+    { cwd },
+  );
+  await execFileAsync(
+    "git",
+    [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "init",
+    ],
+    { cwd },
+  );
+}
 // A verification command that always exits 0, on both POSIX sh and Windows
 // cmd (verify runs it through `spawn(..., { shell: true })`). The sandbox
 // has no test suite, so the real verify command is irrelevant here.
@@ -99,6 +126,7 @@ export async function runTutorial(
       createSamplePhase: true,
       verifyCommand: SANDBOX_VERIFY,
     });
+    await gitInitAndCommit(sandbox);
     emit({
       command: "init --sample-phase",
       explanation: t.step.init,

@@ -73,6 +73,9 @@ async function setupProject(
 
   const { spawnSync } = await import("node:child_process");
   spawnSync("git", ["init", "--quiet"], { cwd });
+  spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."], {
+    cwd,
+  });
   spawnSync(
     "git",
     [
@@ -82,7 +85,6 @@ async function setupProject(
       "user.name=t",
       "commit",
       "--quiet",
-      "--allow-empty",
       "-m",
       "initial",
     ],
@@ -101,12 +103,14 @@ describe("runTaskLock", () => {
     expect(result.path).toBe(
       join(cwd, ".code-pact", "state", "locks", "P1-T1.yaml"),
     );
-    expect(result.plan_sha).toBe(result.base_ref);
+    expect(result.base_sha.length).toBe(40);
+    expect(result.base_ref).toBe("HEAD");
+    expect(result.contract_digest.length).toBe(64);
 
     const lock = await readContractLock(cwd, "P1-T1");
     expect(lock).not.toBeNull();
-    expect(lock?.writes).toEqual(["src/a.ts"]);
-    expect(lock?.reads).toEqual(["src/b.ts"]);
+    expect(lock?.contract.writes).toEqual(["src/a.ts"]);
+    expect(lock?.contract.reads).toEqual(["src/b.ts"]);
   });
 
   it("refuses to overwrite an existing lock", async () => {
@@ -124,6 +128,7 @@ describe("runTaskLock", () => {
       taskId: "P1-T1",
       baseRef: "HEAD",
     });
-    expect(result.base_ref.length).toBe(40);
+    expect(result.base_sha.length).toBe(40);
+    expect(result.base_ref).toBe("HEAD");
   });
 });

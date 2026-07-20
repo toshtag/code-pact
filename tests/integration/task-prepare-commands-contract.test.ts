@@ -24,6 +24,7 @@
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { readFile, writeFile } from "node:fs/promises";
+import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -85,6 +86,15 @@ async function setupTask(
     },
   ];
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+  execSync("git init", { cwd: project.dir, stdio: "ignore" });
+  execSync("git config user.email test@example.com", {
+    cwd: project.dir,
+    stdio: "ignore",
+  });
+  execSync("git config user.name Test", { cwd: project.dir, stdio: "ignore" });
+  execSync("git add .", { cwd: project.dir, stdio: "ignore" });
+  execSync("git commit -m init", { cwd: project.dir, stdio: "ignore" });
 }
 
 type Commands = {

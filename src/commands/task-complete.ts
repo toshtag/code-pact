@@ -7,6 +7,7 @@ import { deriveTaskState } from "../core/progress/task-state.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { runVerify, throwIfAborted, type CheckResult } from "./verify.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
+import { assertTaskContractCurrent } from "../core/contract-lock.ts";
 import { canonicalJson } from "../core/content-addressed-store/canonical-json.ts";
 import {
   buildLoopMemoryEpisodeForTaskComplete,
@@ -159,6 +160,8 @@ export async function runTaskComplete(
     (err as NodeJS.ErrnoException & { deps?: string[] }).deps = incompleteDeps;
     throw err;
   }
+
+  await assertTaskContractCurrent({ cwd, taskId, requireLock: true });
 
   const verifyResult = await runVerify({
     cwd,

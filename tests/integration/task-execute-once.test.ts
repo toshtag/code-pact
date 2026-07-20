@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
+import { run, expectJsonOk } from "../helpers/cli.ts";
 import { ExternalProcessOneShotExecutor } from "../../src/core/execute-once/executor.ts";
 import { parseOneShotExecutorOutput } from "../../src/core/execute-once/output-schema.ts";
 import { runTaskExecuteOnce } from "../../src/core/execute-once/run.ts";
@@ -104,6 +105,10 @@ tasks:
   execSync("git config user.name Test", { cwd, stdio: "ignore" });
   execSync("git add .", { cwd, stdio: "ignore" });
   execSync("git commit -m init", { cwd, stdio: "ignore" });
+
+  expectJsonOk(run(cwd, ["task", "lock", "P78-T1", "--json"]));
+  execSync("git add .", { cwd, stdio: "ignore" });
+  execSync("git commit -m lock", { cwd, stdio: "ignore" });
 }
 
 export function setMode(mode: string): void {

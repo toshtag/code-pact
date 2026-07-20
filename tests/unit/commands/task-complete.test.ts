@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runTaskComplete } from "../../../src/commands/task-complete.ts";
 import { loadMergedProgress } from "../../../src/core/progress/io.ts";
+import { createTaskContractLock } from "../../../src/core/contract-lock.ts";
 import { scanLoopMemoryEpisodes } from "../../../src/core/loop-memory/episode-store.ts";
 import {
   __setLoopMemoryPruneFailureForTests,
@@ -118,6 +119,42 @@ async function setupProject(
         status: opts.taskStatus,
         command: opts.command,
       }),
+    "utf8",
+  );
+
+  // Lock the contract before writing progress.yaml so createTaskContractLock
+  // sees the task as not yet done. Progress events (including any pre-supplied
+  // done event) are written afterwards.
+  const { spawnSync } = await import("node:child_process");
+  spawnSync("git", ["init", "--quiet"], { cwd: dir });
+  spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."], {
+    cwd: dir,
+  });
+  spawnSync(
+    "git",
+    [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "initial",
+    ],
+    { cwd: dir },
+  );
+
+  await createTaskContractLock({
+    cwd: dir,
+    taskId: "P1-T1",
+    actor: "agent",
+    agent: "claude-code",
+  });
+
+  await writeFile(
+    join(dir, ".code-pact", "state", "progress.yaml"),
+    opts.progressYaml ?? EMPTY_PROGRESS,
     "utf8",
   );
 }

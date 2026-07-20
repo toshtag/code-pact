@@ -20,7 +20,8 @@
 // fan-out so individual tests stay readable.
 
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { execSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -94,6 +95,17 @@ async function projectWithTask(prefix: string): Promise<Project> {
     },
   ];
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+  execSync("git init", { cwd: p.dir, stdio: "ignore" });
+  execSync("git config user.email test@example.com", {
+    cwd: p.dir,
+    stdio: "ignore",
+  });
+  execSync("git config user.name Test", { cwd: p.dir, stdio: "ignore" });
+  execSync("git add .", { cwd: p.dir, stdio: "ignore" });
+  execSync("git commit -m init", { cwd: p.dir, stdio: "ignore" });
+  expect(p.run(["task", "lock", "P1-T1", "--json"]).code).toBe(0);
+
   return p;
 }
 
@@ -108,6 +120,13 @@ async function setProjectVerifyCommand(
   >;
   doc.verification = { commands: [command] };
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+  // The verification command is part of the contract; re-lock after changing it.
+  const lockPath = join(p.dir, ".code-pact", "state", "locks", "P1-T1.yaml");
+  await rm(lockPath, { force: true });
+  execSync("git add .", { cwd: p.dir, stdio: "ignore" });
+  execSync("git commit -m verify", { cwd: p.dir, stdio: "ignore" });
+  expect(p.run(["task", "lock", "P1-T1", "--json"]).code).toBe(0);
 }
 
 async function projectWithAdapter(prefix: string): Promise<Project> {

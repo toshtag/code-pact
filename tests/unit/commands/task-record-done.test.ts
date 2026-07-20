@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { runTaskRecordDone } from "../../../src/commands/task-record-done.ts";
 import { runTaskComplete } from "../../../src/commands/task-complete.ts";
 import { loadMergedProgress } from "../../../src/core/progress/io.ts";
+import { createTaskContractLock } from "../../../src/core/contract-lock.ts";
 
 // ---------------------------------------------------------------------------
 // Minimal project fixture. record-done never runs verification commands, so
@@ -125,6 +126,33 @@ async function setupProject(
       "utf8",
     );
   }
+
+  const { spawnSync } = await import("node:child_process");
+  spawnSync("git", ["init", "--quiet"], { cwd: dir });
+  spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."], {
+    cwd: dir,
+  });
+  spawnSync(
+    "git",
+    [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "initial",
+    ],
+    { cwd: dir },
+  );
+
+  await createTaskContractLock({
+    cwd: dir,
+    taskId: "P1-T1",
+    actor: "agent",
+    agent: "claude-code",
+  });
 }
 
 async function readProgress(dir: string) {

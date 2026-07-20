@@ -3,9 +3,16 @@ import { execSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
+import { run, expectJsonOk } from "../../helpers/cli.ts";
 
 const __filename = fileURLToPath(import.meta.url);
-export const fixtureDir = join(dirname(__filename), "..", "..", "fixtures", "executors");
+export const fixtureDir = join(
+  dirname(__filename),
+  "..",
+  "..",
+  "fixtures",
+  "executors",
+);
 export const fakeExecutorPath = join(fixtureDir, "fake-executor.mjs");
 
 export async function withTempProject<T>(
@@ -74,9 +81,17 @@ tasks:
 
   await import("node:fs/promises").then(fs =>
     Promise.all([
-      fs.writeFile(join(cwd, ".code-pact", "project.yaml"), projectYaml, "utf8"),
+      fs.writeFile(
+        join(cwd, ".code-pact", "project.yaml"),
+        projectYaml,
+        "utf8",
+      ),
       fs.writeFile(join(cwd, "design", "roadmap.yaml"), roadmapYaml, "utf8"),
-      fs.writeFile(join(cwd, "design", "phases", "P78.yaml"), phaseYaml, "utf8"),
+      fs.writeFile(
+        join(cwd, "design", "phases", "P78.yaml"),
+        phaseYaml,
+        "utf8",
+      ),
       fs.writeFile(join(cwd, "src", "example.ts"), sourceContent, "utf8"),
     ]),
   );
@@ -86,6 +101,10 @@ tasks:
   execSync("git config user.name Test", { cwd, stdio: "ignore" });
   execSync("git add .", { cwd, stdio: "ignore" });
   execSync("git commit -m init", { cwd, stdio: "ignore" });
+
+  expectJsonOk(run(cwd, ["task", "lock", "P78-T1", "--json"]));
+  execSync("git add .", { cwd, stdio: "ignore" });
+  execSync("git commit -m lock", { cwd, stdio: "ignore" });
 }
 
 export function setMode(mode: string): void {

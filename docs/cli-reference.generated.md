@@ -414,29 +414,30 @@ code-pact task lock P1-T1 --base-ref origin/main --json
 
 `code-pact task review-bundle <task-id> [options]`
 
-Write a review evidence manifest for a done task. The manifest captures
-the tested HEAD, the latest done event, and optional CI/classifier results.
-It is stored under .code-pact/state/reviews/<task-id>.yaml.
+Generate a review evidence manifest and ZIP bundle for a done task.
+Runs the same classifier and verification commands used in CI, stores the
+manifest under .code-pact/cache/reviews/<task-id>/manifest.json, and writes
+a ZIP with manifest, contract lock, phase YAML, done event, verification
+results, changed files, and diff patch.
 
 | Flag | Value | Description |
 | --- | --- | --- |
-| `--ci-status` | `<success|failure|pending>` | CI status to record in the manifest (default: pending). |
-| `--ci-run-url` | `<url>` | URL of the CI run that produced the status. |
-| `--classifier-result` | `<success|failure|pending>` | Change-classifier result to record in the manifest. |
+| `--output` | `<path>` | Path for the review ZIP bundle (default: .code-pact/cache/reviews/<task-id>/bundle.zip). |
 | `--json` | — | Emit JSON. |
 
 ```sh
-code-pact task review-bundle P1-T1 --ci-status success --classifier-result success --json
+code-pact task review-bundle P1-T1
+code-pact task review-bundle P1-T1 --output /tmp/P1-T1-review.zip --json
 ```
 
 ### `task ci-parity`
 
 `code-pact task ci-parity <task-id> [options]`
 
-Verify that the review evidence manifest for a task matches the current
-repository HEAD and that CI (and classifier) results are successful.
-Fails with CI_PARITY_* when the manifest is missing, HEAD drifted, or
-the recorded CI/classifier result is not success.
+Verify that the review evidence for a task is consistent with the current
+repository HEAD, re-run the classifier-selected verification commands, and
+confirm local verification passed. Remote CI cannot be self-reported; it is
+always pending unless an external run is supplied.
 
 | Flag | Value | Description |
 | --- | --- | --- |

@@ -7,6 +7,7 @@ import { loadPhase } from "../plan/load-phase.ts";
 import { resolveTaskInRoadmap } from "../plan/resolve-task.ts";
 import { loadProgressLog } from "../progress/io.ts";
 import { loadProject, resolveEnabledAgent } from "../project.ts";
+import { assertTaskContractCurrent } from "../contract-lock.ts";
 import {
   readOwnedTextBounded,
   resolveExecuteSourceReadPath,
@@ -293,6 +294,8 @@ export async function runTaskExecuteOnce(
   if (!eligibility.eligible) {
     return { kind: "ineligible", reasons: eligibility.reasons };
   }
+
+  await assertTaskContractCurrent({ cwd, taskId, requireLock: true });
 
   const sourcePath = eligibility.sourcePath;
 

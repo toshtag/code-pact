@@ -40,6 +40,7 @@
 
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -259,6 +260,16 @@ describe("migration: v0.8-era project (mixed events + historical tasks)", () => 
         description: "historical task — design says done, no events ever fired",
       },
     ]);
+    // Commit fixtures so task start can create a contract lock on a clean worktree.
+    execSync("git init", { cwd: p.dir, stdio: "ignore" });
+    execSync("git config user.email test@example.com", {
+      cwd: p.dir,
+      stdio: "ignore",
+    });
+    execSync("git config user.name Test", { cwd: p.dir, stdio: "ignore" });
+    execSync("git add .", { cwd: p.dir, stdio: "ignore" });
+    execSync("git commit -m init", { cwd: p.dir, stdio: "ignore" });
+
     // Generate real progress events for P1-T1.
     p.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]);
     p.run(["task", "complete", "P1-T1", "--agent", "claude-code", "--json"]);

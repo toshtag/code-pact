@@ -23,10 +23,10 @@ export async function cmdCiParity(
       emitOk({
         task_id: result.task_id,
         phase_id: result.phase_id,
-        tested_head: result.tested_head,
-        current_head: result.current_head,
-        ci_status: result.ci_status,
-        classifier_result: result.classifier_result,
+        head_sha: result.head_sha,
+        tree_sha: result.tree_sha,
+        local_verification_passed: result.local_verification_passed,
+        remote_ci_status: result.remote_ci_status,
       });
     } else {
       process.stderr.write(m.ciParity.ok(result.task_id));
@@ -38,10 +38,11 @@ export async function cmdCiParity(
     const message = err instanceof Error ? err.message : String(err);
     if (
       code === "TASK_NOT_FOUND" ||
+      code === "TASK_CONTRACT_LOCK_REQUIRED" ||
+      code === "TASK_CONTRACT_DRIFT" ||
       code === "CI_PARITY_MANIFEST_MISSING" ||
       code === "CI_PARITY_HEAD_MISMATCH" ||
-      code === "CI_PARITY_STATUS_MISMATCH" ||
-      code === "CI_PARITY_CLASSIFIER_MISMATCH"
+      code === "VERIFICATION_FAILED"
     ) {
       emitError(json, code, message);
       return 1;

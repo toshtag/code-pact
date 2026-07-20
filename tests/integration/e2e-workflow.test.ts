@@ -19,6 +19,7 @@
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { readFile, writeFile } from "node:fs/promises";
+import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -161,6 +162,20 @@ describe("e2e: full agent-facing loop (init → adapter install → recommend �
       expect(res.code).toBe(0);
       expect(env.ok).toBe(true);
     }
+
+    // Commit the design + adapter manifest so task start can create a contract
+    // lock on a clean worktree.
+    execSync("git init", { cwd: project.dir, stdio: "ignore" });
+    execSync("git config user.email test@example.com", {
+      cwd: project.dir,
+      stdio: "ignore",
+    });
+    execSync("git config user.name Test", {
+      cwd: project.dir,
+      stdio: "ignore",
+    });
+    execSync("git add .", { cwd: project.dir, stdio: "ignore" });
+    execSync("git commit -m init", { cwd: project.dir, stdio: "ignore" });
 
     // 6. task start — appends started event.
     {

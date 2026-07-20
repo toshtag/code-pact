@@ -13,11 +13,7 @@ import type { TaskStatusDiff } from "../core/finalize/diff.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { auditWrites, type WriteAuditResult } from "../core/audit/index.ts";
 import { projectPathPresence } from "../core/plan/checks/fs.ts";
-import {
-  checkContractLock,
-  readContractLock,
-  resolveGitRef,
-} from "../core/contract-lock.ts";
+import { assertTaskContractCurrent } from "../core/contract-lock.ts";
 
 // ---------------------------------------------------------------------------
 // `task finalize <task-id>`
@@ -226,30 +222,11 @@ export async function runTaskFinalize(
     );
   }
 
-  // TASK_CONTRACT_DRIFT gate. If a lock was recorded at planning time, the
-  // current declared reads/writes and the supplied base ref must still match.
-  const lock = await readContractLock(cwd, taskId);
-  if (lock !== null) {
-    let baseRefSha: string | undefined;
-    if (opts.baseRef !== undefined) {
-      try {
-        baseRefSha = await resolveGitRef(cwd, opts.baseRef);
-      } catch {
-        baseRefSha = opts.baseRef;
-      }
-    }
-    const drift = checkContractLock(task, baseRefSha, lock);
-    if (drift.length > 0) {
-      const err = new Error(
-        `TASK_CONTRACT_DRIFT: ${drift.map(d => d.message).join("; ")}`,
-      );
-      (err as NodeJS.ErrnoException).code = "TASK_CONTRACT_DRIFT";
-      (err as NodeJS.ErrnoException & { task_id?: string }).task_id = taskId;
-      (err as NodeJS.ErrnoException & { phase_id?: string }).phase_id = phaseId;
-      (err as NodeJS.ErrnoException & { drift?: typeof drift }).drift = drift;
-      throw err;
-    }
-  }
+  // TASK_CONTRACT_DRIFT gate. A lock is required unless the task was already
+  // finalized before contract locking existed. The locked base and phase blob
+  // must still be ancestors of / reachable from HEAD, and the canonical digest
+  // of the contract must be unchanged.
+  await assertTaskContractCurrent({ cwd, taskId, requireLock: true });
 
   const acceptanceRefsCheck: AcceptanceRefCheck[] = [];
   for (const ref of task.acceptance_refs ?? []) {

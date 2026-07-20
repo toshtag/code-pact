@@ -81,16 +81,21 @@ function isContractLockPath(path: string): boolean {
   );
 }
 
-function isReviewManifestDir(path: string): boolean {
-  return path === ".code-pact/state/reviews";
+const REVIEWS_CACHE_PREFIX = ".code-pact/cache/reviews";
+
+function isReviewCacheDir(path: string): boolean {
+  if (path === REVIEWS_CACHE_PREFIX) return true;
+  if (!path.startsWith(`${REVIEWS_CACHE_PREFIX}/`)) return false;
+  const tail = path.slice(`${REVIEWS_CACHE_PREFIX}/`.length);
+  const first = tail.split("/")[0];
+  return first !== undefined && first.length > 0;
 }
 
 function isReviewManifestPath(path: string): boolean {
-  return (
-    path.startsWith(".code-pact/state/reviews/") &&
-    !path.slice(".code-pact/state/reviews/".length).includes("/") &&
-    path.endsWith(".yaml")
-  );
+  if (!path.startsWith(`${REVIEWS_CACHE_PREFIX}/`)) return false;
+  const tail = path.slice(`${REVIEWS_CACHE_PREFIX}/`.length);
+  const parts = tail.split("/");
+  return parts.length === 2 && parts[1] === "manifest.json";
 }
 
 function isProgressEventPath(path: string): boolean {
@@ -296,14 +301,14 @@ export async function resolveContractLockWritePath(
   );
 }
 
-export async function resolveReviewManifestDirWritePath(
+export async function resolveReviewCacheDirWritePath(
   cwd: string,
+  relPath?: string,
 ): Promise<OwnedWritePath> {
-  return resolveAndBrandWriteForAuthority(
-    cwd,
-    ".code-pact/state/reviews",
-    isReviewManifestDir,
-  );
+  const target = relPath
+    ? [".code-pact/cache/reviews", relPath].join("/")
+    : ".code-pact/cache/reviews";
+  return resolveAndBrandWriteForAuthority(cwd, target, isReviewCacheDir);
 }
 
 export async function resolveReviewManifestReadPath(
@@ -312,7 +317,7 @@ export async function resolveReviewManifestReadPath(
 ): Promise<OwnedReadPath> {
   return resolveAndBrandReadForAuthority(
     cwd,
-    [".code-pact/state/reviews", file].join("/"),
+    [".code-pact/cache/reviews", file].join("/"),
     isReviewManifestPath,
   );
 }
@@ -323,7 +328,7 @@ export async function resolveReviewManifestWritePath(
 ): Promise<OwnedWritePath> {
   return resolveAndBrandWriteForAuthority(
     cwd,
-    [".code-pact/state/reviews", file].join("/"),
+    [".code-pact/cache/reviews", file].join("/"),
     isReviewManifestPath,
   );
 }

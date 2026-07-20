@@ -59,8 +59,11 @@ export async function cmdTaskLock(
           emitOk({
             task_id: result.task_id,
             phase_id: result.phase_id,
-            plan_sha: result.plan_sha,
+            phase_path: result.phase_path,
             base_ref: result.base_ref,
+            base_sha: result.base_sha,
+            phase_blob_sha: result.phase_blob_sha,
+            contract_digest: result.contract_digest,
             path: result.path,
           });
         } else {
@@ -76,10 +79,12 @@ export async function cmdTaskLock(
         if (
           code === "TASK_NOT_FOUND" ||
           code === "TASK_CONTRACT_LOCK_EXISTS" ||
-          code === "AMBIGUOUS_TASK_ID"
+          code === "AMBIGUOUS_TASK_ID" ||
+          code === "WORKTREE_NOT_CLEAN" ||
+          code === "INVALID_TASK_TRANSITION"
         ) {
           emitError(json, code, message);
-          return code === "TASK_CONTRACT_LOCK_EXISTS" ? 1 : 2;
+          return 1;
         }
         if (code === "CONFIG_ERROR") {
           emitError(json, "CONFIG_ERROR", message);

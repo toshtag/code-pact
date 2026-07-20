@@ -6,6 +6,7 @@ import { resolveEventAuthor } from "../core/progress/author.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
+import { assertTaskContractCurrent } from "../core/contract-lock.ts";
 import { checkDecision, type CheckResult } from "./verify.ts";
 import type { ConsideredAcceptance } from "../core/decisions/adr.ts";
 
@@ -174,21 +175,15 @@ export async function runTaskRecordDone(
     (err as NodeJS.ErrnoException).code = "DECISION_REQUIRED";
     // resolution is non-null whenever check.ok is false: checkDecision only
     // skips resolution when neither phase nor task has requires_decision, in
-    // which case check.ok is true and we never enter this branch.
-    const res = resolution!;
+    // which case check.ok is true.
     const data: DecisionRequiredData = {
       task_id: taskId,
       decision_check: check,
       current_resolution: "status-aware",
-      via: res.via,
-      considered: res.considered.map(c => ({
-        path: c.path,
-        status: c.status,
-        accepted: c.accepted,
-        acceptance: c.acceptance,
-      })),
+      via: resolution!.via,
+      considered: resolution!.considered,
       declared_decision_refs: task.decision_refs ?? [],
-      ...(res.via === "filename-scan"
+      ...(resolution!.via === "filename-scan"
         ? { expected_pattern: `design/decisions/*${taskId}*.md` }
         : {}),
     };
@@ -196,6 +191,10 @@ export async function runTaskRecordDone(
       data;
     throw err;
   }
+
+  // Contract lock drift gate: require a lock and verify the contract has not
+  // changed since the lock was created.
+  await assertTaskContractCurrent({ cwd, taskId, requireLock: true });
 
   // ---- Step 7: build the done event (source: external) ----
   const author = await resolveEventAuthor(cwd);

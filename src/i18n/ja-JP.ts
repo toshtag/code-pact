@@ -34,27 +34,13 @@ export const messages = {
   unknownCommand: (cmd: string): string => `未知のコマンド: ${cmd}`,
   reviewBundle: {
     missingTaskId: "review-bundle にはタスク ID が必要です。",
-    invalidCiStatus: (v: string): string =>
-      `review-bundle: --ci-status は success/failure/pending のいずれかである必要があります (入力: "${v}")。`,
-    invalidClassifierResult: (v: string): string =>
-      `review-bundle: --classifier-result は success/failure/pending のいずれかである必要があります (入力: "${v}")。`,
     written: (taskId: string, phaseId: string, path: string): string =>
-      `"${taskId}" （フェーズ ${phaseId}）のレビュー証拠を ${path} に書きました。`,
-    taskNotDone: (taskId: string): string =>
-      `タスク "${taskId}" に done イベントがありません。レビュー証拠を作成できません。`,
+      `"${taskId}" （フェーズ ${phaseId}）のレビュー bundle を ${path} に書きました。`,
   },
   ciParity: {
     missingTaskId: "ci-parity にはタスク ID が必要です。",
-    missingManifest: (taskId: string): string =>
-      `ci-parity: "${taskId}" のレビュー証拠がありません。先に ".code-pact review-bundle ${taskId}" を実行してください。`,
-    headMismatch: (expected: string, actual: string): string =>
-      `ci-parity: テスト済み HEAD が一致しません。証拠: ${expected}, 現在: ${actual}。`,
-    statusNotSuccess: (status: string): string =>
-      `ci-parity: CI ステータスが "${status}" です。"success" が必要です。`,
-    classifierNotSuccess: (result: string): string =>
-      `ci-parity: classifier 結果が "${result}" です。"success" が必要です。`,
     ok: (taskId: string): string =>
-      `ci-parity: "${taskId}" のレビュー証拠は現在の HEAD と CI/classifier 結果と一致しています。`,
+      `ci-parity: "${taskId}" のレビュー証拠は現在の HEAD と一致し、ローカル検証が通過しました。`,
   },
   init: {
     alreadyInitialized: (dir: string): string =>
