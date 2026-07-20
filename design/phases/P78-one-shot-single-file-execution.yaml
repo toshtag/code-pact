@@ -53,11 +53,11 @@ definition_of_done:
     Public failure reasons are bounded to 2,048 UTF-8 bytes. Path samples are
     bounded to 4,096 raw UTF-8 bytes and 20 entries.
   - >
-    Regression tests cover known-edit CAS rollback, unknown-mutation no-rollback,
-    mutation/scope detection, agent propagation, empty new_text, line boundaries,
-    ambiguous old_text, bounded stderr, verification side effects, final
-    repository state, call counts, invalid porcelain status, invalid UTF-8 paths,
-    and coherent HEAD/status snapshots.
+    Regression tests cover known-edit CAS rollback, unknown-mutation
+    no-rollback, mutation/scope detection, agent propagation, empty new_text,
+    line boundaries, ambiguous old_text, bounded stderr, verification side
+    effects, final repository state, call counts, invalid porcelain status,
+    invalid UTF-8 paths, and coherent HEAD/status snapshots.
   - |
     Full verification suite is green and the final corrective pass is committed.
 verification:
@@ -471,7 +471,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Make one-shot failure closure concurrency-safe: never overwrite unknown
       external mutations, restore known Code Pact edits when Git inspection
@@ -493,9 +493,9 @@ tasks:
       - docs/troubleshooting.md
       - docs/cli-reference.generated.md
       - tests/unit/core/execute-once/git-status.test.ts
-      - tests/unit/core/execute-once/run.test.ts
+      - tests/unit/error-code-surface.test.ts
       - tests/integration/task-execute-once.test.ts
-      - tests/integration/task-execute-cli.test.ts
+      - design/phases/P78-one-shot-single-file-execution.yaml
     writes:
       - src/core/execute-once/git-status.ts
       - src/core/execute-once/run.ts
@@ -510,6 +510,6 @@ tasks:
       - docs/troubleshooting.md
       - docs/cli-reference.generated.md
       - tests/unit/core/execute-once/git-status.test.ts
-      - tests/unit/core/execute-once/run.test.ts
+      - tests/unit/error-code-surface.test.ts
       - tests/integration/task-execute-once.test.ts
-      - tests/integration/task-execute-cli.test.ts
+      - design/phases/P78-one-shot-single-file-execution.yaml
