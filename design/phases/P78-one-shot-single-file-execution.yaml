@@ -521,7 +521,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: medium
-    status: planned
+    status: done
     description: Final source-state integrity for one-shot execution.
     depends_on:
       - P78-T9
