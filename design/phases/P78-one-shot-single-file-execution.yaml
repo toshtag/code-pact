@@ -513,3 +513,31 @@ tasks:
       - tests/unit/error-code-surface.test.ts
       - tests/integration/task-execute-once.test.ts
       - design/phases/P78-one-shot-single-file-execution.yaml
+  - id: P78-T10
+    type: bugfix
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: planned
+    description: Final source-state integrity for one-shot execution.
+    depends_on:
+      - P78-T9
+    reads:
+      - src/core/execute-once/git-status.ts
+      - src/core/execute-once/run.ts
+      - docs/per-task-loop.md
+      - tests/unit/core/execute-once/git-status.test.ts
+      - tests/integration/task-execute-once.test.ts
+      - tests/integration/helpers/execute-once.ts
+      - tests/integration/task-execute-terminal-invariants.test.ts
+    writes:
+      - src/core/execute-once/git-status.ts
+      - src/core/execute-once/run.ts
+      - docs/per-task-loop.md
+      - tests/unit/core/execute-once/git-status.test.ts
+      - tests/integration/task-execute-once.test.ts
+      - tests/integration/helpers/execute-once.ts
+      - tests/integration/task-execute-terminal-invariants.test.ts
