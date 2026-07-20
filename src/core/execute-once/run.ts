@@ -27,6 +27,7 @@ import {
 } from "./git-status.ts";
 import { parseOneShotExecutorOutput } from "./output-schema.ts";
 import {
+  MAX_EXECUTOR_FAILED_REASON_BYTES,
   MAX_EXECUTOR_INPUT_BYTES,
   MAX_SOURCE_BYTES,
   type BoundedFailureCapsule,
@@ -97,20 +98,18 @@ function gitErrorResult(reason: string): TaskExecuteOnceResult {
   };
 }
 
-/** Best-effort rollback of the source file to `originalContent`.
+function truncateReason(text: string): string {
+  return truncateExecuteReason(text, MAX_EXECUTOR_FAILED_REASON_BYTES);
+}
+
+/** Rollback after an executor mutation whose current content is unknown.
  *
- * Returns `complete` only when:
- *   - HEAD did not change,
- *   - the source was the only worktree modification (` M sourcePath`),
- *   - the source could be re-read as bounded text,
- *   - compare-and-swap restored the original, and
- *   - the post-rollback snapshot is clean.
- *
- * Anything else (staged change, deletion, directory/symlink replacement,
- * HEAD commit, concurrent drift, or extra changed files) yields
- * `incomplete` or `stale`. HEAD is never reset.
+ * Re-reads the source as bounded text and uses that content as the CAS
+ * expected-current value. Anything else (staged change, deletion,
+ * directory/symlink replacement, HEAD commit, concurrent drift, or extra
+ * changed files) yields `incomplete` or `stale`. HEAD is never reset.
  */
-async function rollbackSourceIfSafe(
+async function rollbackUnknownMutation(
   cwd: string,
   sourcePath: string,
   originalContent: string,
@@ -126,7 +125,7 @@ async function rollbackSourceIfSafe(
       head_changed,
       index_changed,
       finalSnapshot: after,
-      rollbackReason: "HEAD changed; refusing to reset",
+      rollbackReason: truncateReason("HEAD changed; refusing to reset"),
     };
   }
 
@@ -137,7 +136,7 @@ async function rollbackSourceIfSafe(
       head_changed,
       index_changed,
       finalSnapshot: after,
-      rollbackReason: "source was not modified",
+      rollbackReason: truncateReason("source was not modified"),
     };
   }
 
@@ -147,33 +146,99 @@ async function rollbackSourceIfSafe(
       head_changed,
       index_changed,
       finalSnapshot: after,
-      rollbackReason: `source status is ${entry.index}${entry.worktree}`,
+      rollbackReason: truncateReason(
+        `source status is ${entry.index}${entry.worktree}`,
+      ),
     };
   }
 
+  let currentContent: string;
   try {
     const readPath = await resolveExecuteSourceReadPath(cwd, sourcePath);
-    const currentContent = await readOwnedTextBounded(
-      readPath,
-      MAX_SOURCE_BYTES,
-    );
-    await restoreOriginalFile(cwd, sourcePath, originalContent, currentContent);
+    currentContent = await readOwnedTextBounded(readPath, MAX_SOURCE_BYTES);
   } catch (error) {
-    if ((error as Error).message === "destination changed before write") {
-      return {
-        rollback: "stale",
-        head_changed,
-        index_changed,
-        finalSnapshot: after,
-        rollbackReason: "source changed during rollback",
-      };
-    }
     return {
       rollback: "incomplete",
       head_changed,
       index_changed,
       finalSnapshot: after,
-      rollbackReason: `rollback failed: ${(error as Error).message}`,
+      rollbackReason: truncateReason(
+        `rollback failed: ${(error as Error).message}`,
+      ),
+    };
+  }
+
+  const restoreResult = await restoreOriginalFile(
+    cwd,
+    sourcePath,
+    originalContent,
+    currentContent,
+  );
+  return finalizeRollbackResult(cwd, before, restoreResult, after);
+}
+
+/** Rollback after a known edit applied by Code Pact.
+ *
+ * Uses the captured `appliedContent` as the CAS expected-current value,
+ * avoiding a re-read that could fail when the resulting source is at the
+ * byte boundary.
+ */
+async function rollbackKnownAppliedEdit(
+  cwd: string,
+  sourcePath: string,
+  originalContent: string,
+  appliedContent: string,
+  before: GitSnapshot,
+  after: GitSnapshot,
+): Promise<RollbackResult> {
+  const head_changed = snapshotHeadChanged(before, after);
+  const index_changed = snapshotIndexChanged(after);
+
+  if (head_changed) {
+    return {
+      rollback: "incomplete",
+      head_changed,
+      index_changed,
+      finalSnapshot: after,
+      rollbackReason: truncateReason("HEAD changed; refusing to reset"),
+    };
+  }
+
+  const restoreResult = await restoreOriginalFile(
+    cwd,
+    sourcePath,
+    originalContent,
+    appliedContent,
+  );
+  return finalizeRollbackResult(cwd, before, restoreResult, after);
+}
+
+async function finalizeRollbackResult(
+  cwd: string,
+  before: GitSnapshot,
+  restoreResult: RestoreResult,
+  after: GitSnapshot,
+): Promise<RollbackResult> {
+  const head_changed = snapshotHeadChanged(before, after);
+  const index_changed = snapshotIndexChanged(after);
+
+  if (restoreResult.kind === "stale") {
+    return {
+      rollback: "stale",
+      head_changed,
+      index_changed,
+      finalSnapshot: after,
+      rollbackReason: truncateReason(restoreResult.reason),
+    };
+  }
+
+  if (restoreResult.kind === "failed") {
+    return {
+      rollback: "incomplete",
+      head_changed,
+      index_changed,
+      finalSnapshot: after,
+      rollbackReason: truncateReason(restoreResult.reason),
     };
   }
 
@@ -184,7 +249,9 @@ async function rollbackSourceIfSafe(
       head_changed,
       index_changed,
       finalSnapshot: after,
-      rollbackReason: `git status failed after rollback: ${finalSnapshot.reason}`,
+      rollbackReason: truncateReason(
+        `git status failed after rollback: ${finalSnapshot.reason}`,
+      ),
     };
   }
 
@@ -194,7 +261,7 @@ async function rollbackSourceIfSafe(
       head_changed: true,
       index_changed: snapshotIndexChanged(finalSnapshot),
       finalSnapshot,
-      rollbackReason: "HEAD changed during rollback",
+      rollbackReason: truncateReason("HEAD changed during rollback"),
     };
   }
 
@@ -212,7 +279,9 @@ async function rollbackSourceIfSafe(
     head_changed: false,
     index_changed: snapshotIndexChanged(finalSnapshot),
     finalSnapshot,
-    rollbackReason: "extra worktree changes remain after rollback",
+    rollbackReason: truncateReason(
+      "extra worktree changes remain after rollback",
+    ),
   };
 }
 
@@ -351,25 +420,22 @@ export async function runTaskExecuteOnce(
     !snapshotIsClean(snapshotAfterExecutor) ||
     snapshotHeadChanged(snapshotBefore, snapshotAfterExecutor)
   ) {
-    const rollback = await rollbackSourceIfSafe(
+    const rollback = await rollbackUnknownMutation(
       cwd,
       sourcePath,
       sourceContent,
       snapshotBefore,
       snapshotAfterExecutor,
     );
-    return buildMutationResult(
-      snapshotBefore,
-      snapshotAfterExecutor,
-      rollback,
-    );
+    return buildMutationResult(snapshotBefore, snapshotAfterExecutor, rollback);
   }
 
   let output;
   try {
     output = parseOneShotExecutorOutput(rawOutput);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code ?? "EXECUTOR_SCHEMA_MISMATCH";
+    const code =
+      (error as NodeJS.ErrnoException).code ?? "EXECUTOR_SCHEMA_MISMATCH";
     return {
       kind: "executor_failed",
       reason: truncateExecuteReason(`${code}: ${(error as Error).message}`),
@@ -398,10 +464,11 @@ export async function runTaskExecuteOnce(
   }
 
   if (!isOnlyWorktreeModifyOf(snapshotAfterEdit, sourcePath)) {
-    const rollback = await rollbackSourceIfSafe(
+    const rollback = await rollbackKnownAppliedEdit(
       cwd,
       sourcePath,
       applyResult.originalContent,
+      applyResult.appliedContent,
       snapshotBefore,
       snapshotAfterEdit,
     );
@@ -439,9 +506,8 @@ export async function runTaskExecuteOnce(
           (
             err as NodeJS.ErrnoException & { head_changed?: boolean }
           ).head_changed = true;
-          (
-            err as NodeJS.ErrnoException & { snapshot?: GitSnapshot }
-          ).snapshot = snapshot;
+          (err as NodeJS.ErrnoException & { snapshot?: GitSnapshot }).snapshot =
+            snapshot;
           throw err;
         }
 
@@ -452,7 +518,9 @@ export async function runTaskExecuteOnce(
           err.code = "EXECUTION_SCOPE_VIOLATION";
           (
             err as NodeJS.ErrnoException & { changed_paths?: string[] }
-          ).changed_paths = changedPaths(snapshot).filter(p => p !== sourcePath);
+          ).changed_paths = changedPaths(snapshot).filter(
+            p => p !== sourcePath,
+          );
           (
             err as NodeJS.ErrnoException & { index_changed?: boolean }
           ).index_changed = snapshotIndexChanged(snapshot);
@@ -480,7 +548,10 @@ export async function runTaskExecuteOnce(
       };
       const headChanged =
         errorWithData.head_changed ??
-        snapshotHeadChanged(snapshotBefore, errorWithData.snapshot ?? snapshotAfterError);
+        snapshotHeadChanged(
+          snapshotBefore,
+          errorWithData.snapshot ?? snapshotAfterError,
+        );
       let rollback: RollbackResult;
       if (headChanged) {
         rollback = {
@@ -490,13 +561,14 @@ export async function runTaskExecuteOnce(
             errorWithData.index_changed ??
             snapshotIndexChanged(errorWithData.snapshot ?? snapshotAfterError),
           finalSnapshot: errorWithData.snapshot ?? snapshotAfterError,
-          rollbackReason: "HEAD changed; refusing to reset",
+          rollbackReason: truncateReason("HEAD changed; refusing to reset"),
         };
       } else {
-        rollback = await rollbackSourceIfSafe(
+        rollback = await rollbackKnownAppliedEdit(
           cwd,
           sourcePath,
           applyResult.originalContent,
+          applyResult.appliedContent,
           snapshotBefore,
           snapshotAfterError,
         );
@@ -521,10 +593,11 @@ export async function runTaskExecuteOnce(
       ).failure;
     }
 
-    const rollback = await rollbackSourceIfSafe(
+    const rollback = await rollbackKnownAppliedEdit(
       cwd,
       sourcePath,
       applyResult.originalContent,
+      applyResult.appliedContent,
       snapshotBefore,
       snapshotAfterError,
     );
@@ -576,10 +649,11 @@ export async function runTaskExecuteOnce(
   }
 
   if (completionResult.kind !== "done") {
-    const rollback = await rollbackSourceIfSafe(
+    const rollback = await rollbackKnownAppliedEdit(
       cwd,
       sourcePath,
       applyResult.originalContent,
+      applyResult.appliedContent,
       snapshotBefore,
       snapshotAfterEdit,
     );

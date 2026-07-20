@@ -6,6 +6,7 @@ import {
   readFile,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -13,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 import { ExternalProcessOneShotExecutor } from "../../src/core/execute-once/executor.ts";
+import { parseOneShotExecutorOutput } from "../../src/core/execute-once/output-schema.ts";
 import { runTaskExecuteOnce } from "../../src/core/execute-once/run.ts";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -609,6 +611,205 @@ describe("runTaskExecuteOnce integration", () => {
     });
   });
 
+  it("rejects custom executor output with unknown keys via controller schema", async () => {
+    await withTempProject(async cwd => {
+      class UnknownKeyExecutor {
+        async invoke() {
+          return {
+            kind: "replace_exact",
+            expected_file_sha256: "0".repeat(64),
+            old_text: "hello",
+            new_text: "hi",
+            extra: true,
+          } as import("../../src/core/execute-once/types.ts").OneShotExecutorOutput;
+        }
+      }
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor: new UnknownKeyExecutor(),
+      });
+
+      expect(result.kind).toBe("executor_failed");
+      if (result.kind === "executor_failed") {
+        expect(result.reason).toMatch(/EXECUTOR_SCHEMA_MISMATCH/);
+        expect(Buffer.byteLength(result.reason, "utf8")).toBeLessThanOrEqual(
+          2048,
+        );
+      }
+    });
+  });
+
+  it("rejects external executor output with unknown keys via controller schema", async () => {
+    const execDir = await mkdtemp(
+      join(tmpdir(), "code-pact-executor-unknown-key-"),
+    );
+    const scriptPath = join(execDir, "unknown-key.mjs");
+    const script = `#!/usr/bin/env node
+process.stdin.on("data", () => {});
+process.stdin.on("end", () => {
+  process.stdout.write(JSON.stringify({
+    kind: "replace_exact",
+    expected_file_sha256: "${"0".repeat(64)}",
+    old_text: "hello",
+    new_text: "hi",
+    extra: true
+  }));
+});
+`;
+
+    await writeFile(scriptPath, script, "utf8");
+    await chmod(scriptPath, 0o755);
+
+    try {
+      await withTempProject(async cwd => {
+        const executor = new ExternalProcessOneShotExecutor({
+          executablePath: scriptPath,
+        });
+
+        const result = await runTaskExecuteOnce({
+          cwd,
+          taskId: "P78-T1",
+          executor,
+        });
+
+        expect(result.kind).toBe("executor_failed");
+        if (result.kind === "executor_failed") {
+          expect(result.reason).toMatch(/EXECUTOR_SCHEMA_MISMATCH/);
+        }
+      });
+    } finally {
+      await rm(execDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports executor_mutated_worktree when the executor replaces source with a directory", async () => {
+    await withTempProject(async cwd => {
+      class DirectoryReplaceExecutor {
+        async invoke() {
+          await rm(join(cwd, "src", "example.ts"));
+          await mkdir(join(cwd, "src", "example.ts"));
+          return {
+            kind: "replace_exact",
+            expected_file_sha256: "unused",
+            old_text: "hello",
+            new_text: "hi",
+          } as import("../../src/core/execute-once/types.ts").OneShotExecutorOutput;
+        }
+      }
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor: new DirectoryReplaceExecutor(),
+      });
+
+      expect(result.kind).toBe("executor_mutated_worktree");
+    });
+  });
+
+  it("reports executor_mutated_worktree when the executor replaces source with a symlink", async () => {
+    await withTempProject(async cwd => {
+      class SymlinkReplaceExecutor {
+        async invoke() {
+          await rm(join(cwd, "src", "example.ts"));
+          await symlink(
+            join(cwd, "src", "target.txt"),
+            join(cwd, "src", "example.ts"),
+          );
+          return {
+            kind: "replace_exact",
+            expected_file_sha256: "unused",
+            old_text: "hello",
+            new_text: "hi",
+          } as import("../../src/core/execute-once/types.ts").OneShotExecutorOutput;
+        }
+      }
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor: new SymlinkReplaceExecutor(),
+      });
+
+      expect(result.kind).toBe("executor_mutated_worktree");
+    });
+  });
+
+  it("reports executor_mutated_worktree when the executor creates a commit", async () => {
+    const { execSync } = await import("node:child_process");
+
+    await withTempProject(async cwd => {
+      class CommittingExecutor {
+        async invoke() {
+          await writeFile(join(cwd, "src", "example.ts"), "committed", "utf8");
+          execSync('git add src/example.ts && git commit -m "executor"', {
+            cwd,
+            stdio: "ignore",
+          });
+          return {
+            kind: "replace_exact",
+            expected_file_sha256: "unused",
+            old_text: "hello",
+            new_text: "hi",
+          } as import("../../src/core/execute-once/types.ts").OneShotExecutorOutput;
+        }
+      }
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor: new CommittingExecutor(),
+      });
+
+      expect(result.kind).toBe("executor_mutated_worktree");
+      if (result.kind === "executor_mutated_worktree") {
+        expect(result.head_changed).toBe(true);
+        expect(result.rollback).toBe("incomplete");
+      }
+    });
+  });
+
+  it("reports execution_scope_violation when verification stages the source file", async () => {
+    await withTempProject(async cwd => {
+      const executor = new ExternalProcessOneShotExecutor({
+        executablePath: fakeExecutorPath,
+      });
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor,
+      });
+
+      expect(result.kind).toBe("execution_scope_violation");
+      if (result.kind === "execution_scope_violation") {
+        expect(result.index_changed).toBe(true);
+        expect(result.head_changed).toBe(false);
+      }
+
+      const content = await readFile(join(cwd, "src", "example.ts"), "utf8");
+      expect(content).toBe("hello world");
+    }, 'sh -c "git add src/example.ts && exit 0"');
+  });
+
+  it("reports execution_scope_violation when verification commits and exits 1", async () => {
+    await withTempProject(async cwd => {
+      const executor = new ExternalProcessOneShotExecutor({
+        executablePath: fakeExecutorPath,
+      });
+
+      const result = await runTaskExecuteOnce({
+        cwd,
+        taskId: "P78-T1",
+        executor,
+      });
+
+      expect(result.kind).not.toBe("done");
+    }, 'sh -c "git add src/example.ts && git commit -m verify-fail && exit 1"');
+  });
+
   it("runs external executors in an OS temp directory with a sanitized environment", async () => {
     const execDir = await mkdtemp(join(tmpdir(), "code-pact-executor-env-"));
     const scriptPath = join(execDir, "env-check.mjs");
@@ -639,7 +840,7 @@ process.stdout.write(JSON.stringify({ kind: "blocked", reason: "env check" }));\
       const executor = new ExternalProcessOneShotExecutor({
         executablePath: scriptPath,
       });
-      const result = await executor.invoke({
+      const raw = await executor.invoke({
         schema_version: 1,
         task: {
           id: "T",
@@ -652,6 +853,7 @@ process.stdout.write(JSON.stringify({ kind: "blocked", reason: "env check" }));\
         response_contract: { allowed_kinds: ["replace_exact", "blocked"] },
       });
 
+      const result = parseOneShotExecutorOutput(raw);
       expect(result.kind).toBe("blocked");
 
       const captured = JSON.parse(await readFile(outputPath, "utf8"));

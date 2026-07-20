@@ -110,6 +110,10 @@ export async function applyExactReplacement(
     return { kind: "rejected", reason: "NO_OP_REPLACEMENT" };
   }
 
+  if (Buffer.byteLength(updatedContent, "utf8") > MAX_SOURCE_BYTES) {
+    return { kind: "rejected", reason: "RESULTING_SOURCE_TOO_LARGE" };
+  }
+
   if (Buffer.from(updatedContent, "utf8").toString("utf8") !== updatedContent) {
     return { kind: "rejected", reason: "INVALID_REPLACEMENT_UTF8" };
   }

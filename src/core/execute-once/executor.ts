@@ -7,11 +7,9 @@ import {
 import {
   DEFAULT_EXECUTOR_TIMEOUT_MS,
   MAX_EXECUTOR_OUTPUT_BYTES,
-  MAX_REASON_BYTES,
   truncateExecuteReason,
   type OneShotExecutor,
   type OneShotExecutorInput,
-  type OneShotExecutorOutput,
 } from "./types.ts";
 
 export type ExternalOneShotExecutorOptions = {
@@ -51,7 +49,7 @@ export class ExecutorError extends Error {
 export class ExternalProcessOneShotExecutor implements OneShotExecutor {
   constructor(private readonly opts: ExternalOneShotExecutorOptions) {}
 
-  async invoke(input: OneShotExecutorInput): Promise<OneShotExecutorOutput> {
+  async invoke(input: OneShotExecutorInput): Promise<unknown> {
     const maxOutputBytes =
       this.opts.maxOutputBytes ?? MAX_EXECUTOR_OUTPUT_BYTES;
     const timeoutMs = this.opts.timeoutMs ?? DEFAULT_EXECUTOR_TIMEOUT_MS;
@@ -186,70 +184,8 @@ export class ExternalProcessOneShotExecutor implements OneShotExecutor {
       );
     }
 
-    return validateOneShotExecutorOutput(parsed);
+    return parsed;
   }
-}
-
-function validateOneShotExecutorOutput(value: unknown): OneShotExecutorOutput {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new ExecutorError(
-      "executor output is not a JSON object",
-      "EXECUTOR_SCHEMA_MISMATCH",
-    );
-  }
-
-  const output = value as Record<string, unknown>;
-  if (output.kind !== "replace_exact" && output.kind !== "blocked") {
-    throw new ExecutorError(
-      `executor output kind "${String(output.kind)}" is not allowed`,
-      "EXECUTOR_SCHEMA_MISMATCH",
-    );
-  }
-
-  if (output.kind === "blocked") {
-    const reason = output.reason;
-    if (typeof reason !== "string" || reason.length === 0) {
-      throw new ExecutorError(
-        "blocked output requires a non-empty string reason",
-        "EXECUTOR_SCHEMA_MISMATCH",
-      );
-    }
-    if (Buffer.byteLength(reason, "utf8") > MAX_REASON_BYTES) {
-      throw new ExecutorError(
-        "blocked reason exceeds 512 bytes",
-        "EXECUTOR_SCHEMA_MISMATCH",
-      );
-    }
-    return { kind: "blocked", reason };
-  }
-
-  const expected_file_sha256 = output.expected_file_sha256;
-  const old_text = output.old_text;
-  const new_text = output.new_text;
-  if (
-    typeof expected_file_sha256 !== "string" ||
-    typeof old_text !== "string" ||
-    typeof new_text !== "string"
-  ) {
-    throw new ExecutorError(
-      "replace_exact output requires expected_file_sha256, old_text, and new_text strings",
-      "EXECUTOR_SCHEMA_MISMATCH",
-    );
-  }
-
-  if (expected_file_sha256.length === 0 || old_text.length === 0) {
-    throw new ExecutorError(
-      "replace_exact fields must be non-empty strings",
-      "EXECUTOR_SCHEMA_MISMATCH",
-    );
-  }
-
-  return {
-    kind: "replace_exact",
-    expected_file_sha256,
-    old_text,
-    new_text,
-  };
 }
 
 export { truncateExecuteReason as truncateExecutorReason } from "./types.ts";

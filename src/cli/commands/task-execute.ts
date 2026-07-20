@@ -1,5 +1,4 @@
 import { resolve } from "node:path";
-import { normalize as normalizePosixPath } from "node:path/posix";
 import { RelativePosixPath } from "../../core/schemas/relative-path.ts";
 import { strictParse } from "../../lib/argv.ts";
 import { toParseOptions } from "../spec/render.ts";
@@ -80,16 +79,16 @@ export async function cmdTaskExecute(
   }
 
   const cwd = process.cwd();
-  const validationError = await validateExecutorFile(cwd, executorFile);
-  if (validationError !== undefined) {
+  const validated = await validateExecutorFile(cwd, executorFile);
+  if (!validated.ok) {
     emitError(
       json,
       "CONFIG_ERROR",
-      truncateExecuteReason(validationError, 1024),
+      truncateExecuteReason(validated.reason, 1024),
     );
     return 2;
   }
-  const executablePath = resolve(cwd, executorFile);
+  const { executablePath } = validated;
 
   const { signal, cleanup } = createCliAbortSignal();
 
@@ -335,16 +334,21 @@ function emitExecuteResult(
   }
 }
 
+type ExecutorPathValidation =
+  | { ok: true; relPath: string; executablePath: string }
+  | { ok: false; reason: string };
+
 async function validateExecutorFile(
   cwd: string,
   executorFile: string,
-): Promise<string | undefined> {
-  // Normalize "./x" to "x" while preserving hidden directories such as
-  // ".agents/one-shot.mjs". The result must be a project-relative POSIX path.
-  const normalized = normalizePosixPath(executorFile).replace(/^\.\//, "");
-  const parsed = RelativePosixPath.safeParse(normalized);
+): Promise<ExecutorPathValidation> {
+  const parsed = RelativePosixPath.safeParse(executorFile);
   if (!parsed.success) {
-    return "executor file must be a relative path inside the project (project-relative POSIX path: no leading /, no .., no \\, no empty segments)";
+    return {
+      ok: false,
+      reason:
+        "executor file must be a project-relative POSIX path (no leading /, no .., no . segments, no \\, no empty segments)",
+    };
   }
   const relPath = parsed.data;
 
@@ -353,31 +357,42 @@ async function validateExecutorFile(
     explicitPath = await resolveExplicitUserReadPath(cwd, relPath);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === "PATH_NOT_OWNED") return "executor file is a symlink";
-    if (code === "PATH_OUTSIDE_PROJECT") {
-      return "executor file must be inside the project";
+    if (code === "PATH_NOT_OWNED") {
+      return { ok: false, reason: "executor file is a symlink" };
     }
-    return truncateExecuteReason(
-      `executor file must be a safe path inside the project: ${(error as Error).message}`,
-      1024,
-    );
+    if (code === "PATH_OUTSIDE_PROJECT") {
+      return { ok: false, reason: "executor file must be inside the project" };
+    }
+    return {
+      ok: false,
+      reason: truncateExecuteReason(
+        `executor file must be a safe path inside the project: ${(error as Error).message}`,
+        1024,
+      ),
+    };
   }
 
   try {
     const stats = await lstatExplicitUser(explicitPath);
     if (!stats.isFile()) {
-      return "executor file is not a regular file";
+      return { ok: false, reason: "executor file is not a regular file" };
     }
     if (process.platform !== "win32" && (stats.mode & 0o111) === 0) {
-      return "executor file is not executable";
+      return { ok: false, reason: "executor file is not executable" };
     }
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return "executor file does not exist";
-    return truncateExecuteReason(
-      `executor file validation failed: ${(error as Error).message}`,
-      1024,
-    );
+    if (code === "ENOENT") {
+      return { ok: false, reason: "executor file does not exist" };
+    }
+    return {
+      ok: false,
+      reason: truncateExecuteReason(
+        `executor file validation failed: ${(error as Error).message}`,
+        1024,
+      ),
+    };
   }
-  return undefined;
+
+  return { ok: true, relPath, executablePath: resolve(cwd, relPath) };
 }

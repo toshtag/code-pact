@@ -274,6 +274,28 @@ describe("applyExactReplacement", () => {
     });
   });
 
+  it("rejects resulting source that exceeds the byte limit", async () => {
+    await withTempProject(async cwd => {
+      const content = "a" + "x".repeat(8191);
+      await mkdir(join(cwd, "src"), { recursive: true });
+      await writeFile(join(cwd, "src", "example.ts"), content, "utf8");
+
+      const replacement: ExactReplacement = {
+        path: "src/example.ts",
+        expected_file_sha256: sha256(content),
+        old_text: "a",
+        new_text: "aaa",
+      };
+
+      const result = await applyExactReplacement(cwd, replacement);
+
+      expect(result.kind).toBe("rejected");
+      if (result.kind === "rejected") {
+        expect(result.reason).toBe("RESULTING_SOURCE_TOO_LARGE");
+      }
+    });
+  });
+
   it("rejects oversized source", async () => {
     await withTempProject(async cwd => {
       const content = "x".repeat(8193);

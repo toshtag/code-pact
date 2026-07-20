@@ -302,7 +302,7 @@ describe("task execute — CLI", () => {
       );
       expect(res.code).toBe(2);
       const parsed = expectJsonErr(res, "CONFIG_ERROR");
-      expect(parsed.error.message).toContain("relative path");
+      expect(parsed.error.message).toMatch(/project-relative POSIX/);
     } finally {
       await project.cleanup();
     }
@@ -406,6 +406,78 @@ describe("task execute — CLI", () => {
     }
   });
 
+  it("rejects a leading-dot-slash executor file", async () => {
+    const project = await createTempProject({
+      prefix: "code-pact-execute-cli-dot-slash-",
+    });
+    try {
+      await setupProject(project.dir, "exit 0");
+      const res = project.run(
+        [
+          "task",
+          "execute",
+          "P78-T1",
+          "--executor-file",
+          "./executor.mjs",
+          "--json",
+        ],
+        { env: { EXECUTOR_MODE: "replace" } },
+      );
+      expect(res.code).toBe(2);
+      expectJsonErr(res, "CONFIG_ERROR");
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it("rejects a redundant current-segment executor file", async () => {
+    const project = await createTempProject({
+      prefix: "code-pact-execute-cli-dot-segment-",
+    });
+    try {
+      await setupProject(project.dir, "exit 0");
+      const res = project.run(
+        [
+          "task",
+          "execute",
+          "P78-T1",
+          "--executor-file",
+          "src/./executor.mjs",
+          "--json",
+        ],
+        { env: { EXECUTOR_MODE: "replace" } },
+      );
+      expect(res.code).toBe(2);
+      expectJsonErr(res, "CONFIG_ERROR");
+    } finally {
+      await project.cleanup();
+    }
+  });
+
+  it("rejects a parent-segment executor file", async () => {
+    const project = await createTempProject({
+      prefix: "code-pact-execute-cli-parent-segment-",
+    });
+    try {
+      await setupProject(project.dir, "exit 0");
+      const res = project.run(
+        [
+          "task",
+          "execute",
+          "P78-T1",
+          "--executor-file",
+          "src/../executor.mjs",
+          "--json",
+        ],
+        { env: { EXECUTOR_MODE: "replace" } },
+      );
+      expect(res.code).toBe(2);
+      expectJsonErr(res, "CONFIG_ERROR");
+    } finally {
+      await project.cleanup();
+    }
+  });
+
   it("rejects an absolute executor-file even when it is inside the project", async () => {
     const project = await createTempProject({
       prefix: "code-pact-execute-cli-absolute-",
@@ -425,7 +497,7 @@ describe("task execute — CLI", () => {
       );
       expect(res.code).toBe(2);
       const parsed = expectJsonErr(res, "CONFIG_ERROR");
-      expect(parsed.error.message).toContain("relative path");
+      expect(parsed.error.message).toMatch(/project-relative POSIX/);
     } finally {
       await project.cleanup();
     }

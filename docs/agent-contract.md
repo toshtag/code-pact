@@ -559,26 +559,34 @@ contract shape.
 [--agent <a>] [--timeout <ms>] [--json]`** — experimental single-file
   one-shot execution. The task must read and write one existing source file,
   HEAD and the git index must be unchanged, and the working tree must be
-  clean. The executor file must be a project-relative POSIX path: no leading
-  `/` or `~`, no `..` or `.` segments, no backslashes, and it must resolve to
-  a regular, non-symlink, executable file inside the project. The executor is a
-  trusted executable: it runs with `cwd` set to an OS temporary directory, a
-  sanitized environment (known repository-path variables such as `PWD`,
-  `INIT_CWD`, `npm_package_json`, etc. are removed), and the same process
-  privileges as code-pact. It is **not** an OS sandbox. The executor receives a
-  JSON input with the task goal, `source_path`, source content, and verification
-  command; it must emit either a `replace_exact` payload (`expected_file_sha256`
-  is 64 lowercase hex, `old_text` is non-empty, `new_text` is a string) or a
-  `blocked` reason. The runtime validates the executor output at the controller
-  boundary, applies the replacement atomically, re-runs the verification
-  command, and records `done` only when HEAD and the working tree contain exactly
-  the expected source-file change. On `EXECUTOR_FAILED` or `EDIT_REJECTED` the
-  public envelope carries `data.reason`. On `EXECUTOR_MUTATED_WORKTREE` and
-  `EXECUTION_SCOPE_VIOLATION` the runtime attempts a compare-and-swap rollback of
-  the source file and reports `data.rollback` (`complete`/`incomplete`/`stale`),
-  `data.head_changed`, and `data.index_changed`; it never resets HEAD or unstages
-  changes. The rollback is best-effort and not guaranteed. All public failure
-  reasons and path lists are bounded.
+  clean. The executor file must be given as the raw project-relative POSIX path
+  exactly as stored in the project: no leading `/` or `~`, no `..` or `.`
+  segments, no empty segments, and no backslashes. It must resolve to a regular,
+  non-symlink, executable file inside the project. The executor is a trusted
+  executable: it runs with `cwd` set to an OS temporary directory, a sanitized
+  environment (known repository-path variables such as `PWD`, `INIT_CWD`,
+  `npm_package_json`, etc. are removed), and the same process privileges as
+  code-pact. It is **not** an OS sandbox. The executor receives a JSON input
+  with the task goal, `source_path`, source content, and verification command; it
+  must emit either a `replace_exact` payload (`expected_file_sha256` is 64
+  lowercase hex, `old_text` is non-empty, `new_text` is a string) or a `blocked`
+  reason. The runtime validates the executor output at the controller boundary,
+  applies the replacement atomically, and re-runs the verification command. The
+  resulting source file is also bounded to `MAX_SOURCE_BYTES` (`8192` bytes),
+  producing `EDIT_REJECTED` with reason `RESULTING_SOURCE_TOO_LARGE` if exceeded.
+  The runtime records `done` only when HEAD, the git index, and the working tree
+  contain exactly the expected source-file change. Scope auditing covers HEAD,
+  the index, and Git-visible tracked/untracked paths; ignored paths and
+  repository-external side effects are not prevented. On `EXECUTOR_FAILED` or
+  `EDIT_REJECTED` the public envelope carries `data.reason`. On
+  `EXECUTOR_MUTATED_WORKTREE` and `EXECUTION_SCOPE_VIOLATION` the runtime attempts
+  a compare-and-swap rollback of the source file and reports `data.rollback`
+  (`complete`/`incomplete`/`stale`), `data.head_changed`, and `data.index_changed`;
+  it never resets HEAD or unstages changes. Rollback distinguishes known edits
+  applied by Code Pact (CAS against the captured applied content) from unknown
+  executor mutations (current content is re-read before rollback). The rollback
+  is best-effort and not guaranteed. All public failure reasons and path lists
+  are bounded to 2,048 UTF-8 bytes.
 
 - **`task finalize <task-id> --json [--write] [--audit-strict] [--base-ref
 <ref>]`** — reports the task's design-YAML finalization candidate and

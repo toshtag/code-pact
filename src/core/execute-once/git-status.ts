@@ -25,40 +25,65 @@ export type GitSnapshotError = {
   reason: string;
 };
 
+type ParseGitStatusResult =
+  | { ok: true; entries: GitStatusEntry[] }
+  | { ok: false; reason: string };
+
+function isPrintableAscii(byte: number): boolean {
+  return byte >= 0x20 && byte <= 0x7e;
+}
+
 /** Parse `git status --porcelain=v1 -z` output.
  *
  * With `-z`, each entry is `XY <path>\0`. Paths are raw bytes; we interpret
  * them as UTF-8 without quoting or trimming. This keeps leading/trailing
  * spaces, newlines, and other unusual characters intact.
+ *
+ * The parser is fail-closed: any malformed or truncated record makes the
+ * whole snapshot unusable.
  */
-export function parsePorcelainV1Z(buffer: Buffer): GitStatusEntry[] {
+export function parsePorcelainV1Z(buffer: Buffer): ParseGitStatusResult {
   const entries: GitStatusEntry[] = [];
   let i = 0;
   while (i < buffer.length) {
-    if (i + 2 >= buffer.length) break;
-    const index = String.fromCharCode(buffer[i]!);
-    const worktree = String.fromCharCode(buffer[i + 1]!);
+    if (i + 2 >= buffer.length) {
+      return { ok: false, reason: "truncated status record" };
+    }
+    const indexByte = buffer[i]!;
+    const worktreeByte = buffer[i + 1]!;
+    if (!isPrintableAscii(indexByte) || !isPrintableAscii(worktreeByte)) {
+      return { ok: false, reason: "invalid status byte" };
+    }
+    const index = String.fromCharCode(indexByte);
+    const worktree = String.fromCharCode(worktreeByte);
     // The format is two status chars, a space, then the path terminated by NUL.
     if (buffer[i + 2]! !== 0x20) {
-      i += 1;
-      continue;
+      return { ok: false, reason: "malformed status record prefix" };
     }
     const pathStart = i + 3;
+    if (pathStart >= buffer.length) {
+      return { ok: false, reason: "status record missing path" };
+    }
     const nul = buffer.indexOf(0, pathStart);
-    if (nul === -1) break;
+    if (nul === -1) {
+      return { ok: false, reason: "status record missing NUL terminator" };
+    }
     const path = buffer.toString("utf8", pathStart, nul);
     entries.push({ index, worktree, path });
     i = nul + 1;
   }
-  return entries.sort((a, b) => {
-    if (a.path < b.path) return -1;
-    if (a.path > b.path) return 1;
-    if (a.index < b.index) return -1;
-    if (a.index > b.index) return 1;
-    if (a.worktree < b.worktree) return -1;
-    if (a.worktree > b.worktree) return 1;
-    return 0;
-  });
+  return {
+    ok: true,
+    entries: entries.sort((a, b) => {
+      if (a.path < b.path) return -1;
+      if (a.path > b.path) return 1;
+      if (a.index < b.index) return -1;
+      if (a.index > b.index) return 1;
+      if (a.worktree < b.worktree) return -1;
+      if (a.worktree > b.worktree) return 1;
+      return 0;
+    }),
+  };
 }
 
 async function runGitBuffer(
@@ -107,6 +132,14 @@ async function runGitText(
   }
 }
 
+function isUnbornRepositoryError(reason: string): boolean {
+  return (
+    reason.includes("Needed a single revision") ||
+    reason.includes("unknown revision") ||
+    reason.includes("bad revision")
+  );
+}
+
 /** Capture a deterministic git snapshot.
  *
  * Returns a `GitSnapshotError` instead of throwing so callers can fail closed
@@ -116,7 +149,14 @@ export async function getExecutionGitSnapshot(
   cwd: string,
 ): Promise<GitSnapshot | GitSnapshotError> {
   const headRun = await runGitText(cwd, ["rev-parse", "--verify", "HEAD"]);
-  const head = headRun.ok ? headRun.stdout.trim() || null : null;
+  let head: string | null;
+  if (headRun.ok) {
+    head = headRun.stdout.trim() || null;
+  } else if (isUnbornRepositoryError(headRun.reason)) {
+    head = null;
+  } else {
+    return { kind: "git_error", reason: headRun.reason };
+  }
 
   const statusRun = await runGitBuffer(cwd, [
     "status",
@@ -129,10 +169,15 @@ export async function getExecutionGitSnapshot(
     return { kind: "git_error", reason: statusRun.reason };
   }
 
+  const parsed = parsePorcelainV1Z(statusRun.stdout);
+  if (!parsed.ok) {
+    return { kind: "git_error", reason: parsed.reason };
+  }
+
   return {
     kind: "ok",
     head,
-    entries: parsePorcelainV1Z(statusRun.stdout),
+    entries: parsed.entries,
   };
 }
 

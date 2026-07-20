@@ -13,51 +13,103 @@ function buf(text: string): Buffer {
 }
 
 describe("parsePorcelainV1Z", () => {
-  it("returns an empty array for no output", () => {
-    expect(parsePorcelainV1Z(Buffer.alloc(0))).toEqual([]);
+  it("returns an empty result for no output", () => {
+    const result = parsePorcelainV1Z(Buffer.alloc(0));
+    expect(result).toEqual({ ok: true, entries: [] });
   });
 
   it("parses a single worktree modification", () => {
-    const entries = parsePorcelainV1Z(buf(" M src/example.ts\0"));
-    expect(entries).toEqual([
-      { index: " ", worktree: "M", path: "src/example.ts" },
-    ]);
+    const result = parsePorcelainV1Z(buf(" M src/example.ts\0"));
+    expect(result).toEqual({
+      ok: true,
+      entries: [{ index: " ", worktree: "M", path: "src/example.ts" }],
+    });
   });
 
   it("parses untracked files with ??", () => {
-    const entries = parsePorcelainV1Z(buf("?? src/extra.ts\0?? README.md\0"));
-    expect(entries).toEqual([
-      { index: "?", worktree: "?", path: "README.md" },
-      { index: "?", worktree: "?", path: "src/extra.ts" },
-    ]);
+    const result = parsePorcelainV1Z(buf("?? src/extra.ts\0?? README.md\0"));
+    expect(result).toEqual({
+      ok: true,
+      entries: [
+        { index: "?", worktree: "?", path: "README.md" },
+        { index: "?", worktree: "?", path: "src/extra.ts" },
+      ],
+    });
   });
 
   it("sorts entries deterministically by path", () => {
-    const entries = parsePorcelainV1Z(buf(" M z/a.ts\0 M a/b.ts\0 M m/c.ts\0"));
-    expect(entries.map(e => e.path)).toEqual(["a/b.ts", "m/c.ts", "z/a.ts"]);
+    const result = parsePorcelainV1Z(buf(" M z/a.ts\0 M a/b.ts\0 M m/c.ts\0"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.entries.map(e => e.path)).toEqual([
+        "a/b.ts",
+        "m/c.ts",
+        "z/a.ts",
+      ]);
+    }
   });
 
   it("preserves paths with leading or trailing spaces", () => {
-    const entries = parsePorcelainV1Z(
+    const result = parsePorcelainV1Z(
       buf(" M  leading-space.ts\0??  trailing-space \0"),
     );
-    expect(entries).toEqual([
-      { index: " ", worktree: "M", path: " leading-space.ts" },
-      { index: "?", worktree: "?", path: " trailing-space " },
-    ]);
+    expect(result).toEqual({
+      ok: true,
+      entries: [
+        { index: " ", worktree: "M", path: " leading-space.ts" },
+        { index: "?", worktree: "?", path: " trailing-space " },
+      ],
+    });
   });
 
   it("preserves hidden-directory paths", () => {
-    const entries = parsePorcelainV1Z(buf(" M .agents/executor.mjs\0"));
-    expect(entries).toEqual([
-      { index: " ", worktree: "M", path: ".agents/executor.mjs" },
-    ]);
+    const result = parsePorcelainV1Z(buf(" M .agents/executor.mjs\0"));
+    expect(result).toEqual({
+      ok: true,
+      entries: [{ index: " ", worktree: "M", path: ".agents/executor.mjs" }],
+    });
   });
 
-  it("ignores malformed status prefixes without advancing forever", () => {
-    // Missing the space separator after XY.
-    const entries = parsePorcelainV1Z(buf("Msrc/example.ts\0"));
-    expect(entries).toEqual([]);
+  it("rejects a missing space separator after XY", () => {
+    const result = parsePorcelainV1Z(buf("Msrc/example.ts\0"));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain("prefix");
+    }
+  });
+
+  it("rejects a record missing its NUL terminator", () => {
+    const result = parsePorcelainV1Z(buf(" M src/example.ts"));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain("NUL");
+    }
+  });
+
+  it("rejects a truncated record", () => {
+    const result = parsePorcelainV1Z(buf(" M"));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toMatch(/truncated|missing path/);
+    }
+  });
+
+  it("rejects an invalid status byte", () => {
+    const result = parsePorcelainV1Z(buf("\x01 M src/example.ts\0"));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain("invalid status byte");
+    }
+  });
+
+  it("rejects a path containing a newline", () => {
+    const result = parsePorcelainV1Z(buf(" M src/ex\nam.ts\0"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.entries).toEqual([
+        { index: " ", worktree: "M", path: "src/ex\nam.ts" },
+      ]);
+    }
   });
 });
 
