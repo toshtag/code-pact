@@ -399,7 +399,6 @@ tasks:
       - tests/unit/core/execute-once/git-status.test.ts
       - tests/unit/core/execute-once/output-schema.test.ts
       - design/phases/P78-one-shot-single-file-execution.yaml
-
   - id: P78-T8
     type: bugfix
     ambiguity: medium
@@ -408,7 +407,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Close the remaining controller-schema, git fail-closed, known-edit
       rollback, executor-path validation, bounded-output, and regression gaps
