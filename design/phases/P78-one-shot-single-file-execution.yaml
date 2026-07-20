@@ -3,7 +3,7 @@ name: One-shot Single-File Execution
 weight: 4
 confidence: medium
 risk: medium
-status: done
+status: in_progress
 objective: >
   Provide a bounded, single-file, one-shot execution path for code-pact tasks.
   An
@@ -24,7 +24,9 @@ objective: >
   documentation.
 definition_of_done:
   - |
-    One-shot lifecycle is formally registered in design/ and tracked through T5.
+    One-shot lifecycle is formally registered in design/ and tracked through T7.
+    Provider token reduction effects are not verified and P78 does not assert
+    product completion.
   - >
     Rollback uses compare-and-swap semantics with appliedContent, surfacing
     ROLLBACK_STALE_FILE when the source changes concurrently.
@@ -335,3 +337,69 @@ tasks:
       - tests/integration/json-stdout.test.ts
       - tests/unit/core/execute-once/run.test.ts
       - design/phases/P78-one-shot-single-file-execution.yaml
+
+  - id: P78-T7
+    type: bugfix
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: planned
+    description: |
+      Harden git-state integrity and honest rollback contract for one-shot
+      execution. Parse git status as a snapshot (HEAD, index, worktree), detect
+      and reject executor/verification mutations beyond the target source file,
+      surface rollback completeness, move executor output validation to the
+      controller boundary, and accept only project-relative POSIX executor
+      paths. Update public docs and regression tests. No new features, no
+      multi-file execution, and no provider comparison.
+    depends_on:
+      - P78-T6
+    reads:
+      - src/core/execute-once/types.ts
+      - src/core/execute-once/executor.ts
+      - src/core/execute-once/run.ts
+      - src/core/execute-once/exact-replacement.ts
+      - src/core/execute-once/eligibility.ts
+      - src/cli/commands/task-execute.ts
+      - src/cli/spec/task.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - src/commands/task-complete.ts
+      - src/core/project-fs/index.ts
+      - src/core/project-fs/authority-resolvers.ts
+      - src/core/audit/write-audit.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/per-task-loop.md
+      - docs/troubleshooting.md
+      - docs/cli-reference.generated.md
+      - tests/fixtures/executors/fake-executor.mjs
+      - tests/integration/task-execute-once.test.ts
+      - tests/integration/task-execute-cli.test.ts
+      - tests/integration/json-stdout.test.ts
+      - tests/unit/core/execute-once/run.test.ts
+    writes:
+      - src/core/execute-once/types.ts
+      - src/core/execute-once/git-status.ts
+      - src/core/execute-once/output-schema.ts
+      - src/core/execute-once/executor.ts
+      - src/core/execute-once/run.ts
+      - src/cli/commands/task-execute.ts
+      - src/cli/spec/task.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/per-task-loop.md
+      - docs/troubleshooting.md
+      - docs/cli-reference.generated.md
+      - tests/fixtures/executors/fake-executor.mjs
+      - tests/integration/task-execute-once.test.ts
+      - tests/integration/task-execute-cli.test.ts
+      - tests/integration/json-stdout.test.ts
+      - tests/unit/core/execute-once/run.test.ts
+      - tests/unit/core/execute-once/git-status.test.ts
+      - tests/unit/core/execute-once/output-schema.test.ts
