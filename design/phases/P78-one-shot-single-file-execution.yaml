@@ -3,7 +3,7 @@ name: One-shot Single-File Execution
 weight: 4
 confidence: medium
 risk: medium
-status: done
+status: in_progress
 objective: >
   Provide a bounded, single-file, one-shot execution path for code-pact tasks.
   An
@@ -24,16 +24,18 @@ objective: >
   documentation.
 definition_of_done:
   - |
-    One-shot lifecycle is formally registered in design/ and tracked through T7.
+    One-shot lifecycle is formally registered in design/ and tracked through T9.
     Provider token reduction effects are not verified and P78 does not assert
     product completion.
   - >
-    Rollback uses compare-and-swap semantics with appliedContent, surfacing
-    ROLLBACK_STALE_FILE when the source changes concurrently.
+    Known Code Pact edits use compare-and-swap rollback with appliedContent.
+    Unknown executor or external mutations are never automatically rolled back
+    because provenance cannot be proven.
   - >
     Execution scope is fail-closed: a clean git working tree is required before
-    invocation, executor mutations outside the source file are rejected, and
-    verification-time scope violations roll back the source file.
+    invocation, executor mutations outside the source file are reported without
+    automatic repair, and verification-time scope violations roll back the known
+    source edit.
   - >
     Executor files are validated before spawn: regular file, non-symlink,
     executable, inside the project.
@@ -48,12 +50,14 @@ definition_of_done:
     Public error codes, i18n, CLI help, agent-contract, per-task-loop, and
     troubleshooting documentation are updated for the new surface.
   - >
-    Public failure output is bounded: path lists, verification failure capsules,
-    and executor failure reasons stay within deterministic byte budgets.
+    Public failure reasons are bounded to 2,048 UTF-8 bytes. Path samples are
+    bounded to 4,096 raw UTF-8 bytes and 20 entries.
   - >
-    Regression tests cover CAS rollback, mutation/scope detection, agent
-    propagation, empty new_text, line boundaries, ambiguous old_text, bounded
-    stderr, verification side effects, and lifecycle dependency gates.
+    Regression tests cover known-edit CAS rollback, unknown-mutation no-rollback,
+    mutation/scope detection, agent propagation, empty new_text, line boundaries,
+    ambiguous old_text, bounded stderr, verification side effects, final
+    repository state, call counts, invalid porcelain status, invalid UTF-8 paths,
+    and coherent HEAD/status snapshots.
   - |
     Full verification suite is green and the final corrective pass is committed.
 verification:
@@ -457,5 +461,55 @@ tasks:
       - tests/unit/core/execute-once/output-schema.test.ts
       - tests/unit/core/execute-once/run.test.ts
       - tests/unit/core/execute-once/exact-replacement.test.ts
+      - tests/integration/task-execute-once.test.ts
+      - tests/integration/task-execute-cli.test.ts
+  - id: P78-T9
+    type: bugfix
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: planned
+    description: |
+      Make one-shot failure closure concurrency-safe: never overwrite unknown
+      external mutations, restore known Code Pact edits when Git inspection
+      fails, validate porcelain status and UTF-8 fail-closed, capture coherent
+      HEAD/status snapshots, and align public contracts and regression evidence.
+    depends_on:
+      - P78-T8
+    reads:
+      - src/core/execute-once/git-status.ts
+      - src/core/execute-once/run.ts
+      - src/core/execute-once/types.ts
+      - src/cli/commands/task-execute.ts
+      - src/cli/spec/task.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/per-task-loop.md
+      - docs/troubleshooting.md
+      - docs/cli-reference.generated.md
+      - tests/unit/core/execute-once/git-status.test.ts
+      - tests/unit/core/execute-once/run.test.ts
+      - tests/integration/task-execute-once.test.ts
+      - tests/integration/task-execute-cli.test.ts
+    writes:
+      - src/core/execute-once/git-status.ts
+      - src/core/execute-once/run.ts
+      - src/core/execute-once/types.ts
+      - src/cli/commands/task-execute.ts
+      - src/cli/spec/task.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/per-task-loop.md
+      - docs/troubleshooting.md
+      - docs/cli-reference.generated.md
+      - tests/unit/core/execute-once/git-status.test.ts
+      - tests/unit/core/execute-once/run.test.ts
       - tests/integration/task-execute-once.test.ts
       - tests/integration/task-execute-cli.test.ts
