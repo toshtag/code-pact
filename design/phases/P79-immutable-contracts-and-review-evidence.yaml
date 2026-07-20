@@ -1,0 +1,112 @@
+id: P79
+name: Immutable Contracts and Review Evidence
+weight: 3
+confidence: medium
+risk: medium
+status: planned
+objective: Lock task contracts after planning and produce review evidence
+  manifests that link CI results, done events, and tested HEAD.
+definition_of_done:
+  - All P79 tasks are done and review evidence is recorded.
+verification:
+  commands:
+    - pnpm test
+tasks:
+  - id: P79-T1
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: planned
+    description: Task contract lock command and TASK_CONTRACT_DRIFT gate.
+    reads:
+      - src/commands/task-finalize.ts
+      - src/core/finalize/safe-write.ts
+      - src/core/audit/index.ts
+      - src/core/schemas/task.ts
+      - src/core/plan/load-phase.ts
+      - src/core/plan/resolve-task.ts
+      - src/cli/spec/task.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - docs/cli-contract.md
+      - docs/per-task-loop.md
+      - docs/agent-contract.md
+      - docs/troubleshooting.md
+    writes:
+      - src/commands/task-lock.ts
+      - src/cli/commands/task-lock.ts
+      - src/cli/spec/task.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - src/commands/task-finalize.ts
+      - src/core/audit/index.ts
+      - docs/cli-contract.md
+      - docs/per-task-loop.md
+      - docs/agent-contract.md
+      - docs/troubleshooting.md
+      - tests/unit/commands/task-lock.test.ts
+      - tests/integration/task-lock.test.ts
+  - id: P79-T2
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: planned
+    description: Review evidence manifest and review-bundle command.
+    reads:
+      - src/core/progress/io.ts
+      - src/core/progress/events-io.ts
+      - src/core/progress/task-state.ts
+      - src/core/plan/resolve-task.ts
+      - src/core/plan/load-phase.ts
+      - src/core/evidence/failure-capsule.ts
+      - src/cli/spec/review.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - docs/cli-contract.md
+      - docs/per-task-loop.md
+    writes:
+      - src/commands/review-bundle.ts
+      - src/cli/commands/review-bundle.ts
+      - src/cli/spec/review.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - docs/cli-contract.md
+      - docs/per-task-loop.md
+      - tests/unit/commands/review-bundle.test.ts
+      - tests/integration/review-bundle.test.ts
+  - id: P79-T3
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: planned
+    description: CI parity gate and classifier parity.
+    reads:
+      - src/core/evidence/failure-capsule.ts
+      - src/core/classify/result.ts
+      - src/cli/spec/ci.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - docs/cli-contract.md
+      - docs/per-task-loop.md
+    writes:
+      - src/commands/ci-parity.ts
+      - src/cli/commands/ci-parity.ts
+      - src/cli/spec/ci.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - docs/cli-contract.md
+      - docs/per-task-loop.md
+      - tests/unit/commands/ci-parity.test.ts
+      - tests/integration/ci-parity.test.ts

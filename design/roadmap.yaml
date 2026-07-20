@@ -215,3 +215,6 @@ phases:
   - id: P78
     path: design/phases/P78-one-shot-single-file-execution.yaml
     weight: 4
+  - id: P79
+    path: design/phases/P79-immutable-contracts-and-review-evidence.yaml
+    weight: 3
