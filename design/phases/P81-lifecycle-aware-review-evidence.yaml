@@ -55,9 +55,12 @@ tasks:
       - tests/integration/review-bundle.test.ts
       - tests/unit/commands/review-bundle.test.ts
     writes:
+      - src/core/audit/write-audit.ts
       - src/core/review-bundle.ts
       - src/core/review-bundle-phase-lifecycle.ts
+      - tests/unit/core/audit/write-audit.test.ts
       - tests/unit/core/review-bundle-phase-lifecycle.test.ts
       - tests/integration/review-bundle.test.ts
+      - tests/unit/commands/ci-parity.test.ts
       - tests/unit/commands/review-bundle.test.ts
       - docs/cli-contract.md
