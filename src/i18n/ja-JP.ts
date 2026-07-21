@@ -36,6 +36,12 @@ export const messages = {
     missingTaskId: "review-bundle にはタスク ID が必要です。",
     written: (taskId: string, phaseId: string, path: string): string =>
       `"${taskId}" （フェーズ ${phaseId}）のレビュー bundle を ${path} に書きました。`,
+    stateMismatch: (taskId: string): string =>
+      `レビュー bundle を拒否しました: "${taskId}" のタスク／フェーズ状態が一致しません。`,
+    verificationMissing: (taskId: string): string =>
+      `レビュー bundle を拒否しました: "${taskId}" のタスク検証エビデンスがありません。`,
+    scopeImprecise: (declaredUnused: string[]): string =>
+      `レビュー bundle を拒否しました: 宣言された write のうち使用されなかったものがあります: ${declaredUnused.join(", ")}`,
   },
   ciParity: {
     missingTaskId: "ci-parity にはタスク ID が必要です。",

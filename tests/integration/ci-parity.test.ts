@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createTempProject,
@@ -81,6 +81,8 @@ async function setupReviewableTask(): Promise<
       "feature",
       "--description",
       "Parity task",
+      "--write",
+      "design/phases/P1-foundation.yaml",
       "--json",
     ]),
   );
@@ -122,6 +124,41 @@ async function setupReviewableTask(): Promise<
     "--quiet",
     "-m",
     "done",
+  ]);
+
+  expectJsonOk(p.run(["task", "finalize", "P1-T1", "--write", "--json"]));
+  git(p.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+  git(p.dir, [
+    "-c",
+    "user.email=t@t",
+    "-c",
+    "user.name=t",
+    "commit",
+    "--quiet",
+    "-m",
+    "finalize",
+  ]);
+
+  expectJsonOk(p.run(["phase", "reconcile", "P1", "--write", "--json"]));
+
+  // code-pact intentionally does not flip the phase status in phase reconcile.
+  const phasePath = join(p.dir, "design", "phases", "P1-foundation.yaml");
+  const phaseYaml = (await readFile(phasePath, "utf8")).replace(
+    /^status: .*$/m,
+    "status: done",
+  );
+  await writeFile(phasePath, phaseYaml, "utf8");
+
+  git(p.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+  git(p.dir, [
+    "-c",
+    "user.email=t@t",
+    "-c",
+    "user.name=t",
+    "commit",
+    "--quiet",
+    "-m",
+    "reconcile",
   ]);
 
   expectJsonOk(p.run(["task", "review-bundle", "P1-T1", "--json"]));

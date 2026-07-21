@@ -25,17 +25,67 @@ import {
   classifyVerification,
   runVerificationCommands,
 } from "./verify/classify.ts";
+import { loadEvidenceArtifact } from "./evidence/evidence-store.ts";
+import type { StoredEvidence } from "./evidence/evidence-store.ts";
 
 const execFileAsync = promisify(execFile);
+
+const MAX_EXCERPT_BYTES = 4096;
+
+function excerpt(text: string): string {
+  const bytes = Buffer.byteLength(text, "utf8");
+  if (bytes <= MAX_EXCERPT_BYTES) return text;
+  let cut = MAX_EXCERPT_BYTES;
+  while (cut > 0 && (text.charCodeAt(cut) & 0xc0) === 0x80) {
+    cut -= 1;
+  }
+  return `${text.slice(0, cut)}\n[code-pact: excerpt truncated]\n`;
+}
+
+function verificationEntryFromArtifact(
+  artifact: StoredEvidence["artifact"],
+  source: "task_verification" | "classifier_verification",
+) {
+  return {
+    source,
+    command: artifact.command,
+    exit_code: artifact.exit_code ?? -1,
+    duration_ms: artifact.elapsed_ms,
+    stdout_excerpt: excerpt(artifact.stdout),
+    stderr_excerpt: excerpt(artifact.stderr),
+  };
+}
+
+function derivePhaseStatus(
+  tasks: { id: string; status: string }[],
+  events: readonly import("./schemas/progress-event.ts").ProgressEvent[],
+): "planned" | "in_progress" | "done" {
+  if (tasks.length === 0) return "planned";
+  const derived = tasks.map(t => deriveTaskState(events, t.id).current);
+  if (derived.every(s => s === "done")) return "done";
+  if (
+    derived.some(
+      s =>
+        s === "started" || s === "blocked" || s === "resumed" || s === "failed",
+    )
+  ) {
+    return "in_progress";
+  }
+  if (tasks.some(t => t.status === "in_progress")) return "in_progress";
+  if (derived.some(s => s === "done")) return "in_progress";
+  return "planned";
+}
 
 export const DoneEventRef = z.object({
   at: z.string().datetime(),
   evidence: z.array(z.string()).optional(),
   source: z.enum(["loop", "external"]).optional(),
+  verification_ref: z.string().optional(),
   path: z.string().optional(),
 });
 
 export const LocalVerificationEntry = z.object({
+  source: z.enum(["task_verification", "classifier_verification"]),
   command: z.string(),
   exit_code: z.number(),
   duration_ms: z.number(),
@@ -74,7 +124,8 @@ export const ReviewManifest = z.object({
     declared_unused: z.array(z.string()),
     warnings: z.array(z.string()),
   }),
-  local_verification: z.array(LocalVerificationEntry),
+  task_verification: z.array(LocalVerificationEntry).default([]),
+  classifier_verification: z.array(LocalVerificationEntry).default([]),
   remote_ci: z.object({
     status: RemoteCiStatus,
     run_url: z.string().optional(),
@@ -275,6 +326,34 @@ export async function runReviewBundle(
 
   const phaseContent = await readOwnedPhaseRawByPath(cwd, phasePath);
 
+  // ---- State consistency gate ----
+  const derivedPhaseStatus = derivePhaseStatus(phase.tasks ?? [], log.events);
+  const phaseStatus = phase.status ?? "planned";
+  const taskDesignStatus = task.status ?? "planned";
+  if (
+    taskDesignStatus !== "done" ||
+    state.current !== "done" ||
+    phaseStatus !== derivedPhaseStatus
+  ) {
+    const err = new Error(
+      `Review bundle refused: task/phase state mismatch for "${taskId}".`,
+    );
+    (err as NodeJS.ErrnoException).code = "REVIEW_EVIDENCE_STATE_MISMATCH";
+    (err as NodeJS.ErrnoException & { task_id?: string }).task_id = taskId;
+    (err as NodeJS.ErrnoException & { phase_id?: string }).phase_id = phaseId;
+    (err as NodeJS.ErrnoException & { phase_status?: string }).phase_status =
+      phaseStatus;
+    (
+      err as NodeJS.ErrnoException & { derived_phase_status?: string }
+    ).derived_phase_status = derivedPhaseStatus;
+    (err as NodeJS.ErrnoException & { task_status?: string }).task_status =
+      taskDesignStatus;
+    (
+      err as NodeJS.ErrnoException & { derived_task_status?: string }
+    ).derived_task_status = state.current;
+    throw err;
+  }
+
   const actualChangedFiles = await changedFilesSince(cwd, lock.base_sha);
 
   const writeAudit = await auditWrites({
@@ -296,20 +375,68 @@ export async function runReviewBundle(
     throw err;
   }
 
+  if (writeAudit.declared_unused.length > 0) {
+    const err = new Error(
+      `Review bundle refused: declared writes were not used: ${writeAudit.declared_unused.join(", ")}`,
+    );
+    (err as NodeJS.ErrnoException).code = "REVIEW_EVIDENCE_SCOPE_IMPRECISE";
+    (err as NodeJS.ErrnoException & { task_id?: string }).task_id = taskId;
+    (err as NodeJS.ErrnoException & { phase_id?: string }).phase_id = phaseId;
+    (
+      err as NodeJS.ErrnoException & { declared_unused?: string[] }
+    ).declared_unused = writeAudit.declared_unused;
+    throw err;
+  }
+
+  // ---- Task verification evidence from the done event ----
+  const taskVerification: z.infer<typeof LocalVerificationEntry>[] = [];
+  if (
+    doneEventFile.event.verification_ref === undefined ||
+    doneEventFile.event.verification_ref.length === 0
+  ) {
+    const err = new Error(
+      `Review bundle refused: task verification evidence missing for "${taskId}".`,
+    );
+    (err as NodeJS.ErrnoException).code =
+      "REVIEW_EVIDENCE_VERIFICATION_MISSING";
+    (err as NodeJS.ErrnoException & { task_id?: string }).task_id = taskId;
+    (err as NodeJS.ErrnoException & { phase_id?: string }).phase_id = phaseId;
+    throw err;
+  }
+  const storedEvidence = await loadEvidenceArtifact(
+    cwd,
+    doneEventFile.event.verification_ref,
+  );
+  taskVerification.push(
+    verificationEntryFromArtifact(storedEvidence.artifact, "task_verification"),
+  );
+
+  // ---- Classifier verification ----
   const classification = await classifyVerification(cwd, lock.base_sha);
-  const verification = await runVerificationCommands(
+  const classifierVerification = await runVerificationCommands(
     cwd,
     classification.commands,
   );
 
-  if (!verification.ok) {
-    const failed = verification.results.find(r => r.exit_code !== 0);
+  if (!classifierVerification.ok) {
+    const failed = classifierVerification.results.find(r => r.exit_code !== 0);
     const err = new Error(
       `Review bundle refused: local verification failed (${failed?.command ?? "unknown"}).`,
     );
     (err as NodeJS.ErrnoException).code = "VERIFICATION_FAILED";
     throw err;
   }
+
+  const classifierVerificationEntries: z.infer<
+    typeof LocalVerificationEntry
+  >[] = classifierVerification.results.map(r => ({
+    source: "classifier_verification",
+    command: r.command,
+    exit_code: r.exit_code,
+    duration_ms: r.duration_ms,
+    stdout_excerpt: r.stdout_excerpt,
+    stderr_excerpt: r.stderr_excerpt,
+  }));
 
   const manifest: ReviewManifest = {
     schema_version: 1,
@@ -326,6 +453,7 @@ export async function runReviewBundle(
       at: doneEventFile.event.at,
       evidence: doneEventFile.event.evidence,
       source: doneEventFile.event.source,
+      verification_ref: doneEventFile.event.verification_ref,
       path: doneEventFile.file,
     },
     actual_changed_files: actualChangedFiles,
@@ -339,7 +467,8 @@ export async function runReviewBundle(
       declared_unused: writeAudit.declared_unused,
       warnings: writeAudit.warnings,
     },
-    local_verification: verification.results,
+    task_verification: taskVerification,
+    classifier_verification: classifierVerificationEntries,
     remote_ci: { status: "pending" },
     at: new Date().toISOString(),
     actor: opts.actor ?? "agent",
@@ -409,7 +538,14 @@ async function createReviewZip(
 
   await write(
     "verification.json",
-    JSON.stringify(manifest.local_verification, null, 2),
+    JSON.stringify(
+      {
+        task_verification: manifest.task_verification,
+        classifier_verification: manifest.classifier_verification,
+      },
+      null,
+      2,
+    ),
   );
   await write(
     "changed-files.json",

@@ -36,6 +36,12 @@ export const messages = {
     missingTaskId: "review-bundle requires a task id.",
     written: (taskId: string, phaseId: string, path: string): string =>
       `Review bundle written for "${taskId}" (phase ${phaseId}) at ${path}.`,
+    stateMismatch: (taskId: string): string =>
+      `Review bundle refused: task/phase state mismatch for "${taskId}".`,
+    verificationMissing: (taskId: string): string =>
+      `Review bundle refused: task verification evidence missing for "${taskId}".`,
+    scopeImprecise: (declaredUnused: string[]): string =>
+      `Review bundle refused: declared writes were not used: ${declaredUnused.join(", ")}.`,
   },
   ciParity: {
     missingTaskId: "ci-parity requires a task id.",

@@ -18,6 +18,7 @@ import {
   recallExactFailure,
   type ExactFailureRecall,
 } from "../core/loop-memory/recall.ts";
+import { storeEvidenceArtifact } from "../core/evidence/evidence-store.ts";
 
 export type PriorLocalSignal = {
   schema_version: 1;
@@ -232,6 +233,28 @@ export async function runTaskComplete(
   throwIfAborted(opts.signal);
   const author = await resolveEventAuthor(cwd);
   throwIfAborted(opts.signal);
+
+  const commandsCheck = verifyResult.checks.find(
+    check => check.name === "commands",
+  );
+  const firstCommand = commandsCheck?.commands?.[0];
+  let verificationRef: string | undefined;
+  if (firstCommand !== undefined) {
+    const artifact = await storeEvidenceArtifact(cwd, {
+      schema_version: 1,
+      command: firstCommand.command,
+      exit_code: firstCommand.exitCode,
+      timed_out: firstCommand.timedOut,
+      aborted: firstCommand.aborted,
+      elapsed_ms: firstCommand.elapsedMs,
+      stdout: firstCommand.stdout,
+      stderr: firstCommand.stderr,
+      stdout_capture_truncated: firstCommand.stdoutTruncated ?? false,
+      stderr_capture_truncated: firstCommand.stderrTruncated ?? false,
+    });
+    verificationRef = artifact.ref;
+  }
+
   const event: ProgressEvent = {
     task_id: taskId,
     status: "done",
@@ -242,6 +265,9 @@ export async function runTaskComplete(
       .filter(check => check.ok)
       .map(check => check.name),
     source: "loop",
+    ...(verificationRef !== undefined
+      ? { verification_ref: verificationRef }
+      : {}),
     ...(author !== undefined ? { author } : {}),
   };
   throwIfAborted(opts.signal);

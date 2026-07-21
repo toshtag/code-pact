@@ -541,6 +541,12 @@ contract shape.
   when the current conversation or diff proves the change is the same, and honor
   `stopOnRepeatedFingerprint` first when it is true.
 
+  On success, the `done` event carries a `verification_ref` pointing to the
+  cached evidence artifact for the first verification command. `task
+review-bundle` requires this artifact, refuses the bundle if the task or
+  phase design status is inconsistent with the derived state, and refuses if
+  any declared write was not used.
+
 - **`task record-done <task-id> --evidence "<text>"`** —
   records a `done` event with `source: external` **without** running
   verification commands; the proof is `--evidence`. Two uses: work

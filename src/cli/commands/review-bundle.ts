@@ -68,7 +68,11 @@ export async function cmdReviewBundle(
     return 0;
   } catch (err: unknown) {
     const code = (err as NodeJS.ErrnoException).code;
-    const message = err instanceof Error ? err.message : String(err);
+    const taskId =
+      (err as NodeJS.ErrnoException & { task_id?: string }).task_id ??
+      positionals[0] ??
+      "";
+    const rawMessage = err instanceof Error ? err.message : String(err);
     if (
       code === "TASK_NOT_FOUND" ||
       code === "TASK_NOT_DONE" ||
@@ -76,13 +80,50 @@ export async function cmdReviewBundle(
       code === "TASK_CONTRACT_DRIFT" ||
       code === "VERIFICATION_FAILED" ||
       code === "WORKTREE_NOT_CLEAN" ||
-      code === "ARCHIVE_BUNDLE_WRITE_FAILED"
+      code === "ARCHIVE_BUNDLE_WRITE_FAILED" ||
+      code === "REVIEW_EVIDENCE_STATE_MISMATCH" ||
+      code === "REVIEW_EVIDENCE_VERIFICATION_MISSING" ||
+      code === "REVIEW_EVIDENCE_SCOPE_IMPRECISE"
     ) {
-      emitError(json, code, message);
+      const declaredUnused =
+        (err as NodeJS.ErrnoException & { declared_unused?: string[] })
+          .declared_unused ?? [];
+      const message =
+        code === "REVIEW_EVIDENCE_STATE_MISMATCH"
+          ? m.reviewBundle.stateMismatch(taskId)
+          : code === "REVIEW_EVIDENCE_VERIFICATION_MISSING"
+            ? m.reviewBundle.verificationMissing(taskId)
+            : code === "REVIEW_EVIDENCE_SCOPE_IMPRECISE"
+              ? m.reviewBundle.scopeImprecise(declaredUnused)
+              : rawMessage;
+      const data: Record<string, unknown> | undefined =
+        code === "REVIEW_EVIDENCE_STATE_MISMATCH"
+          ? {
+              phase_status: (
+                err as NodeJS.ErrnoException & { phase_status?: string }
+              ).phase_status,
+              derived_phase_status: (
+                err as NodeJS.ErrnoException & { derived_phase_status?: string }
+              ).derived_phase_status,
+              task_status: (
+                err as NodeJS.ErrnoException & { task_status?: string }
+              ).task_status,
+              derived_task_status: (
+                err as NodeJS.ErrnoException & { derived_task_status?: string }
+              ).derived_task_status,
+            }
+          : code === "REVIEW_EVIDENCE_SCOPE_IMPRECISE"
+            ? { declared_unused: declaredUnused }
+            : undefined;
+      if (data !== undefined && Object.keys(data).length > 0) {
+        emitError(json, code, message, { data });
+      } else {
+        emitError(json, code, message);
+      }
       return 1;
     }
     if (code === "CONFIG_ERROR") {
-      emitError(json, "CONFIG_ERROR", message);
+      emitError(json, "CONFIG_ERROR", rawMessage);
       return 2;
     }
     throw err;
