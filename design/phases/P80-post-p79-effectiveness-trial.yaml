@@ -103,3 +103,24 @@ tasks:
     writes:
       - design/decisions/P80-T2-qualified-one-pair-trial.md
       - scripts/experiments/verify-p80-t2-evidence.mjs
+  - id: P80-T2E
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P80-T2D
+    description: >
+      Make P80-T2 evidence authenticity machine-verifiable by enforcing exact
+      P79 failure-record equality, matching failure codes to execution logs,
+      and executing deterministic semantic negative cases.
+    reads:
+      - design/decisions/P80-T2-qualified-one-pair-trial.md
+      - scripts/experiments/verify-p80-t2-evidence.mjs
+    writes:
+      - design/decisions/P80-T2-qualified-one-pair-trial.md
+      - scripts/experiments/verify-p80-t2-evidence.mjs
