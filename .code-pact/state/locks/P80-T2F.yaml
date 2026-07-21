@@ -1,0 +1,37 @@
+schema_version: 1
+task_id: P80-T2F
+phase_id: P80
+phase_path: design/phases/P80-post-p79-effectiveness-trial.yaml
+base_ref: HEAD
+base_sha: c1affc89efb28bcd2308cdd25fa557a5c1d4d1ab
+phase_blob_sha: 08fa55a34a4bf349c435f1116299f3a684b2f3ba
+contract_digest: 0954677d1446c8e20be820461c71e6018581ef0752d1e36305f70f0cc242d5d6
+contract:
+  description: >
+    Close the remaining P80-T2 negative-verifier authenticity gaps by enforcing
+    the exact P79 failure set, bidirectional command-evidence matching, semantic
+    self-test success criteria, and complete log evidence.
+  reads:
+    - design/decisions/P80-T2-qualified-one-pair-trial.md
+    - scripts/experiments/verify-p80-t2-evidence.mjs
+  writes:
+    - design/decisions/P80-T2-qualified-one-pair-trial.md
+    - scripts/experiments/verify-p80-t2-evidence.mjs
+  depends_on:
+    - P80-T2E
+  decision_refs: []
+  acceptance_refs: []
+  definition_of_done:
+    - |
+      The capability gate, baseline, and Code Pact conditions are executed
+      against one fixed local model with auditable evidence, and the result is
+      committed as design/decisions/P80-T2-qualified-one-pair-trial.md.
+  verification_commands:
+    - node scripts/experiments/verify-p80-t2-evidence.mjs
+      /tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip
+  base_sha: c1affc89efb28bcd2308cdd25fa557a5c1d4d1ab
+  phase_blob_sha: 08fa55a34a4bf349c435f1116299f3a684b2f3ba
+at: 2026-07-21T08:59:42.909Z
+actor: agent
+agent: claude-code
+author: Pocket

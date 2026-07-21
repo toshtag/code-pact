@@ -218,3 +218,6 @@ phases:
   - id: P79
     path: design/phases/P79-immutable-contracts-and-review-evidence.yaml
     weight: 3
+  - id: P80
+    path: design/phases/P80-post-p79-effectiveness-trial.yaml
+    weight: 1

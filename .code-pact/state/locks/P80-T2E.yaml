@@ -1,0 +1,37 @@
+schema_version: 1
+task_id: P80-T2E
+phase_id: P80
+phase_path: design/phases/P80-post-p79-effectiveness-trial.yaml
+base_ref: HEAD
+base_sha: 3b4d8fb6b82ce7a18ccc1b5c149f4f527971f120
+phase_blob_sha: e1fdf2d7a8588cca05dd2ce57a3d031a76f6b7f7
+contract_digest: 63e76e61a16c5fa1ba7b312352c031a1f94316312178f776c406662c54375044
+contract:
+  description: >
+    Make P80-T2 evidence authenticity machine-verifiable by enforcing exact P79
+    failure-record equality, matching failure codes to execution logs, and
+    executing deterministic semantic negative cases.
+  reads:
+    - design/decisions/P80-T2-qualified-one-pair-trial.md
+    - scripts/experiments/verify-p80-t2-evidence.mjs
+  writes:
+    - design/decisions/P80-T2-qualified-one-pair-trial.md
+    - scripts/experiments/verify-p80-t2-evidence.mjs
+  depends_on:
+    - P80-T2D
+  decision_refs: []
+  acceptance_refs: []
+  definition_of_done:
+    - |
+      The capability gate, baseline, and Code Pact conditions are executed
+      against one fixed local model with auditable evidence, and the result is
+      committed as design/decisions/P80-T2-qualified-one-pair-trial.md.
+  verification_commands:
+    - node scripts/experiments/verify-p80-t2-evidence.mjs
+      /tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip
+  base_sha: 3b4d8fb6b82ce7a18ccc1b5c149f4f527971f120
+  phase_blob_sha: e1fdf2d7a8588cca05dd2ce57a3d031a76f6b7f7
+at: 2026-07-21T08:28:49.491Z
+actor: agent
+agent: claude-code
+author: Pocket

@@ -1,0 +1,36 @@
+schema_version: 1
+task_id: P80-T2C
+phase_id: P80
+phase_path: design/phases/P80-post-p79-effectiveness-trial.yaml
+base_ref: HEAD
+base_sha: 1bf4c9df7933e62f76b8a8a2e1a96c5671552f00
+phase_blob_sha: 77c1c4ded6f863f9aa3c41cbee078ddd00141862
+contract_digest: cdff80dcac6875d1cce761bedec639f8a1013758df31c521615e9b4d638c67b8
+contract:
+  description: >
+    Correct the P80-T2 single-pair classification and strengthen the existing
+    trial-evidence verifier without rerunning the model or changing the trial.
+  reads:
+    - design/decisions/P80-T2-qualified-one-pair-trial.md
+    - scripts/experiments/verify-p80-t2-evidence.mjs
+  writes:
+    - design/decisions/P80-T2-qualified-one-pair-trial.md
+    - scripts/experiments/verify-p80-t2-evidence.mjs
+  depends_on:
+    - P80-T2
+  decision_refs: []
+  acceptance_refs: []
+  definition_of_done:
+    - |
+      The capability gate, baseline, and Code Pact conditions are executed
+      against one fixed local model with auditable evidence, and the result is
+      committed as design/decisions/P80-T2-qualified-one-pair-trial.md.
+  verification_commands:
+    - node scripts/experiments/verify-p80-t2-evidence.mjs
+      /tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip
+  base_sha: 1bf4c9df7933e62f76b8a8a2e1a96c5671552f00
+  phase_blob_sha: 77c1c4ded6f863f9aa3c41cbee078ddd00141862
+at: 2026-07-21T07:26:11.425Z
+actor: agent
+agent: claude-code
+author: Pocket
