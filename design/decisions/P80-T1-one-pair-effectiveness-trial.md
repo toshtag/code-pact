@@ -1,13 +1,25 @@
 # P80-T1: One-Pair Post-P79 Effectiveness Trial
 
-## Status
+## Trial status
 
-**Classification:** `model-limited`
+- **Pair status:** `non_discriminating`
+- **Failure attribution:** `provisional_model_output_invalid`
+- **Product effectiveness:** `unevaluated`
+- **Reproducibility:** `incomplete` (exact model digest recovered; however,
+  `gemma3:latest` remains a mutable alias and `gpt-oss:20b` could not be
+  evaluated due to local memory constraints)
 
-The one-pair trial completed with oracle preflight passing, but the chosen local
-model did not produce a usable patch in either the baseline or the Code Pact
-condition. No product feature was added. P64, P65, P67, and P68 were not
-started.
+## What this means
+
+One model invocation was completed in each condition with the same model,
+source, oracle, and sampling parameters. Both conditions produced the same
+invalid no-op replacement (`old_text` == `new_text` == `"needle"`) and no
+patch was applied or verified. A qualified pair (one condition reaching
+verification) was not established, so this result cannot discriminate between
+the baseline and Code Pact conditions. P79 dogfood gates were not exercised.
+
+`model-limited` is a provisional failure-attribution label, not a product
+comparison conclusion.
 
 ## Scope and intent
 
@@ -16,6 +28,7 @@ started.
 - Compare a minimal baseline against one Code Pact execution under identical
   model, source, oracle, and sampling parameters.
 - Stop after one pair and classify the result honestly.
+- Do not add product features or start P64, P65, P67, or P68.
 
 ## Historical bug
 
@@ -37,32 +50,48 @@ started.
     hidden oracle, P80 task definition, and external executor wrapper.
   - `baseline-run/` and `code-pact-run/` — independent clones of
     `PAIR_BASE_SHA`.
-  - `results/` — raw provider responses, prompts, and metrics.
+  - `results/` — raw provider responses, prompts, metrics, and final
+    summary JSON.
+- **Trial evidence archive:**
+  `/tmp/code-pact-p80/P80-T1-trial-evidence.zip`
+  (`sha256: 6155bb1a5b1fad9c8de41d1b93e162ace399b2a87a9a1b9b5b0aaace27cf664e`)
 
 The source file was trimmed to the `countOccurrences` function so it fit the
-Code Pact 120-line eligibility limit while preserving the historical bug.
+Code Pact 120-line one-shot eligibility limit while preserving the historical
+bug. The full original source and the historical SHAs are recorded above for
+audit.
 
 ## Oracle preflight
 
 - Buggy base hidden verification: **FAIL** (`exit 1`)
 - Reference patch applied to fixture source: **PASS** (`exit 0`)
-- Code Pact eligibility (`task prepare` + `task start`):
+- Code Pact eligibility and contract lock (`task prepare` / `task start`):
   - one declared read/write
   - read path == write path == `src/exact-replacement.ts`
   - source exists and is `<= 8192` bytes
   - verification command executable
   - working tree clean
+  - contract lock digest:
+    `5a5b43affd1c00a52d518d4ec2902bb1ee5c2a6409aca79e785c1528e5c75c89`
 
-## Model and sampling configuration
+## Execution order and model identity
 
+- **Execution order:** baseline first, then Code Pact.
 - **Provider:** Ollama (local)
-- **Model:** `gemma3:latest`
-- **Region:** local
+- **Ollama version:** `0.32.1`
+- **Model requested:** `gemma3:latest`
+- **Model resolved digest:**
+  `a2af6cc3eb7fa8be8504abaf9b04e88f17a119ec3f04a3addf55f92841195f5a`
 - **Temperature:** `0`
 - **Top-p:** `0.9`
 - **Max output tokens:** `2048`
-- **Max invocations:** `1`
+- **Max invocations:** `1` per condition
 - **Repair count:** `0`
+
+`gemma3:latest` is a mutable alias; the resolved digest above captures the
+manifest that was present at trial time. `gpt-oss:20b` was also available but
+failed to load due to a tensor size overflow, so it could not be used as an
+alternative.
 
 ## Results
 
@@ -80,10 +109,11 @@ Code Pact 120-line eligibility limit while preserving the historical bug.
   "verification_passed": false,
   "patch_applied": false,
   "changed_paths": [],
-  "out_of_scope_write_count": 0,
-  "contract_drift_count": 0,
-  "artifact_mismatch_count": 0,
+  "out_of_scope_write_count": null,
+  "contract_drift_count": null,
+  "artifact_mismatch_count": null,
   "corrective_pass_count": 0,
+  "p79_dogfood_status": "not_exercised",
   "stop_reason": "runner rejected model output (old_text occurs 4 times / no-op)",
   "raw_response_kind": "replace_exact",
   "raw_response_text": "{\"kind\":\"replace_exact\",\"expected_file_sha256\":\"9039accab4499195067f4f38aca2cc321870e16573e06c3ed19c34c628cfbbe6\",\"old_text\":\"needle\",\"new_text\":\"needle\"}"
@@ -104,32 +134,16 @@ Code Pact 120-line eligibility limit while preserving the historical bug.
   "verification_passed": false,
   "patch_applied": false,
   "changed_paths": [],
-  "out_of_scope_write_count": 0,
-  "contract_drift_count": 0,
-  "artifact_mismatch_count": 0,
+  "out_of_scope_write_count": null,
+  "contract_drift_count": null,
+  "artifact_mismatch_count": null,
   "corrective_pass_count": 0,
+  "p79_dogfood_status": "not_exercised",
   "stop_reason": "EDIT_REJECTED: OLD_TEXT_MULTIPLE_MATCHES",
   "raw_response_kind": "replace_exact",
   "raw_response_text": "{\"kind\":\"replace_exact\",\"expected_file_sha256\":\"9039accab4499195067f4f38aca2cc321870e16573e06c3ed19c34c628cfbbe6\",\"old_text\":\"needle\",\"new_text\":\"needle\"}"
 }
 ```
-
-## Classification
-
-`model-limited`
-
-Both the baseline and the Code Pact condition established a single model
-invocation with the same `gemma3:latest` model and identical source content.
-Both rejected the model's output because the model returned a no-op
-replacement (`old_text` == `new_text` == `"needle"`) that also occurred
-multiple times in the source. No patch was applied and no hidden verification
-ran in either condition.
-
-Because the failure is attributable to the model's inability to emit a valid
-exact-replacement JSON response, the trial is classified as `model-limited`
-per the P80 stop condition. P79 dogfood conditions (finalize strict audit,
-`outside_declared`, `declared_unused`, review bundle) could not be fully
-exercised because `task execute` did not complete.
 
 ## Token summary
 
@@ -138,37 +152,53 @@ exercised because `task execute` did not complete.
 - **Token delta (Code Pact - baseline):** +60 tokens
 - Both outputs were 84 tokens, but Code Pact's input included the task
   `done_when` and contract framing, adding 60 input tokens.
+- The +60 token difference is from an unsuccessful run only; it does not
+  reflect a successful verification or applied patch.
+
+## Why this is `non_discriminating`
+
+A discriminating pair requires at least one condition to reach patch
+application and verification so the other condition can be compared against
+it. Here both conditions failed at the same point: the model returned an
+invalid no-op replacement with a non-unique `old_text`. Neither condition
+produced an applied patch or ran the hidden oracle, so no comparison of
+execution integrity is possible.
+
+`provisional_model_output_invalid` is the failure attribution because the same
+model, with the same prompt schema and source content, emitted the same
+invalid JSON in both conditions. The prompt, fixture, and raw responses are
+included in the trial evidence archive for independent review.
 
 ## Limitations
 
 - The source was trimmed to the `countOccurrences` function to satisfy Code
   Pact's 120-line one-shot eligibility limit.
 - The trial used a local `gemma3:latest` model. A more capable model might
-  produce a valid patch, but that would exceed the available low-cost local
-  capacity (`gpt-oss:20b` failed to load due to a tensor size overflow).
+  produce a valid patch, but `gpt-oss:20b` failed to load due to a tensor
+  size overflow on the local workstation.
 - No Code Pact finalization, phase reconcile, `ci-parity`, or `review-bundle`
   was produced because `task execute` did not reach completion.
-- No out-of-scope writes, contract drift, or artifact mismatch occurred in
-  either condition because no patch was applied.
+- `contract_drift_count`, `artifact_mismatch_count`, and
+  `out_of_scope_write_count` are recorded as `null` because the P79
+  evidence/audit path was not exercised.
 
 ## Raw evidence
 
-`/tmp/code-pact-p80/results/`
+Raw prompts, provider responses, metrics, oracle results, fixture source,
+executor wrapper, baseline runner, contract lock, and start event are bundled
+in:
 
-Files include:
+```text
+/tmp/code-pact-p80/P80-T1-trial-evidence.zip
+sha256: 6155bb1a5b1fad9c8de41d1b93e162ace399b2a87a9a1b9b5b0aaace27cf664e
+```
 
-- `baseline-prompt.txt`
-- `baseline-ollama-response.json`
-- `code-pact-prompt.txt`
-- `code-pact-ollama-response.json`
-- `code-pact-metrics.json`
-- `P80-final-metrics.json`
-
-No provider credentials or full prompt/response text is committed to the
-repository.
+No provider credentials, authentication tokens, or full prompt/response text
+is committed to the repository.
 
 ## Product effect claim
 
 **No product effect is claimed.** This single pair did not establish a usable
 patch, so no conclusion about P78/P79 effectiveness can be drawn. Per the P80
-plan, the result is recorded and the scope stops here.
+plan, the result is recorded, the pair is classified as
+`non_discriminating`, and the scope stops here.
