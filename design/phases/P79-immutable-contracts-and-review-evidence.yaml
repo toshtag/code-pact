@@ -222,3 +222,42 @@ tasks:
       - src/commands/task-progress.ts
       - src/commands/tutorial.ts
       - src/core/execute-once/run.ts
+  - id: P79-T5
+    type: bugfix
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P79-T4
+    description: Enforce evidence consistency and prove the task-contract workflow using a lock created before any implementation change.
+    reads:
+      - src/core/contract-lock.ts
+      - src/core/audit/write-audit.ts
+      - src/core/verify/classify.ts
+      - src/core/evidence/evidence-store.ts
+      - src/core/evidence/evidence-schema.ts
+      - src/core/progress/events-io.ts
+      - src/core/progress/task-state.ts
+      - src/core/plan/resolve-task.ts
+      - src/core/plan/load-phase.ts
+      - src/core/project-fs/index.ts
+      - src/core/schemas/phase.ts
+      - src/core/schemas/task.ts
+      - src/core/process/bounded-command.ts
+      - src/commands/verify.ts
+    writes:
+      - design/phases/P79-immutable-contracts-and-review-evidence.yaml
+      - src/core/review-bundle.ts
+      - src/core/schemas/progress-event.ts
+      - src/commands/task-complete.ts
+      - src/cli/commands/review-bundle.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - tests/unit/commands/review-bundle.test.ts
+      - tests/integration/review-bundle.test.ts
+      - docs/cli-contract.md
+      - docs/agent-contract.md
