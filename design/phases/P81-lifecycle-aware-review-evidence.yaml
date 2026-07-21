@@ -3,7 +3,7 @@ name: Lifecycle-Aware Review Evidence
 weight: 1
 confidence: high
 risk: medium
-status: done
+status: in_progress
 objective: >
   Prevent Code Pact-owned lifecycle status mutations from being misclassified as
   undeclared task implementation writes while preserving fail-closed detection
@@ -64,3 +64,27 @@ tasks:
       - tests/unit/commands/ci-parity.test.ts
       - tests/unit/commands/review-bundle.test.ts
       - docs/cli-contract.md
+
+  - id: P81-T2
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: >
+      Restrict lifecycle phase reclassification to the reviewed task's own
+      phase file and complete the predeclared fail-closed replay coverage.
+    depends_on:
+      - P81-T1
+    reads:
+      - src/core/review-bundle.ts
+      - src/core/review-bundle-phase-lifecycle.ts
+      - tests/unit/core/review-bundle-phase-lifecycle.test.ts
+      - tests/integration/review-bundle.test.ts
+    writes:
+      - src/core/review-bundle.ts
+      - tests/unit/core/review-bundle-phase-lifecycle.test.ts
+      - tests/integration/review-bundle.test.ts
