@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createTempProject,
@@ -109,6 +109,12 @@ async function setupDoneTask(): Promise<
     "init",
   ]);
 
+  // Lock the task contract before any implementation work, then start.
+  const lock = expectJsonOk<{ base_sha: string }>(
+    p.run(["task", "lock", "P1-T1", "--json"]),
+  );
+  const baseSha = lock.data.base_sha;
+
   expectJsonOk(p.run(["task", "start", "P1-T1", "--json"]));
 
   // Task implementation happens after start and before complete.
@@ -127,7 +133,7 @@ async function setupDoneTask(): Promise<
     "commit",
     "--quiet",
     "-m",
-    "lock",
+    "impl",
   ]);
 
   expectJsonOk(p.run(["task", "complete", "P1-T1", "--json"]));
@@ -143,7 +149,19 @@ async function setupDoneTask(): Promise<
     "done",
   ]);
 
-  expectJsonOk(p.run(["task", "finalize", "P1-T1", "--write", "--json"]));
+  // Finalize using the actual locked base with strict audit.
+  expectJsonOk(
+    p.run([
+      "task",
+      "finalize",
+      "P1-T1",
+      "--audit-strict",
+      "--base-ref",
+      baseSha,
+      "--write",
+      "--json",
+    ]),
+  );
   git(p.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
   git(p.dir, [
     "-c",
@@ -176,14 +194,14 @@ async function setupDoneTask(): Promise<
     "commit",
     "--quiet",
     "-m",
-    "reconcile",
+    "closeout",
   ]);
 
   return p;
 }
 
 describe("task review-bundle", () => {
-  it("creates a review bundle for a done task with lifecycle-only phase changes reclassified", async () => {
+  it("creates a review bundle for a done task using the strict finalize replay", async () => {
     project = await setupDoneTask();
 
     const bundle = expectJsonOk(
@@ -258,5 +276,216 @@ describe("task review-bundle", () => {
       "TASK_NOT_DONE",
     );
     expect(err.error.message).toContain("no done event");
+  });
+
+  it("rejects a review bundle when an unrelated phase status changes", async () => {
+    project = await createTempProject();
+    await writeFakeClassifier(project.dir);
+    expectJsonOk(
+      project.run([
+        "phase",
+        "add",
+        "--id",
+        "P1",
+        "--name",
+        "Foundation",
+        "--weight",
+        "1",
+        "--objective",
+        "Test phase",
+        "--verify-command",
+        "echo ok",
+        "--json",
+      ]),
+    );
+    expectJsonOk(
+      project.run([
+        "task",
+        "add",
+        "P1",
+        "--type",
+        "feature",
+        "--description",
+        "Reviewable task",
+        "--write",
+        "src/example.ts",
+        "--json",
+      ]),
+    );
+
+    await mkdir(join(project.dir, "src"), { recursive: true });
+    await writeFile(
+      join(project.dir, "src", "example.ts"),
+      "export const x = 1;\n",
+      "utf8",
+    );
+
+    git(project.dir, ["init", "--quiet"]);
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "init",
+    ]);
+
+    // Add an unrelated phase P2.
+    expectJsonOk(
+      project.run([
+        "phase",
+        "add",
+        "--id",
+        "P2",
+        "--name",
+        "Other",
+        "--weight",
+        "1",
+        "--objective",
+        "Unrelated phase",
+        "--json",
+      ]),
+    );
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "add-p2",
+    ]);
+
+    const lock = expectJsonOk<{ base_sha: string }>(
+      project.run(["task", "lock", "P1-T1", "--json"]),
+    );
+    const baseSha = lock.data.base_sha;
+
+    expectJsonOk(project.run(["task", "start", "P1-T1", "--json"]));
+
+    await writeFile(
+      join(project.dir, "src", "example.ts"),
+      "export const x = 2;\n",
+      "utf8",
+    );
+
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "impl",
+    ]);
+
+    expectJsonOk(project.run(["task", "complete", "P1-T1", "--json"]));
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "done",
+    ]);
+
+    expectJsonOk(
+      project.run([
+        "task",
+        "finalize",
+        "P1-T1",
+        "--audit-strict",
+        "--base-ref",
+        baseSha,
+        "--write",
+        "--json",
+      ]),
+    );
+
+    // Close out P1 so the only remaining outside_declared is the P2 phase.
+    const p1Path = join(project.dir, "design", "phases", "P1-foundation.yaml");
+    const p1Yaml = (await readFile(p1Path, "utf8")).replace(
+      /^status: .*$/m,
+      "status: done",
+    );
+    await writeFile(p1Path, p1Yaml, "utf8");
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "p1-closeout",
+    ]);
+
+    // Mutate the unrelated P2 phase status to done.
+    const p2Files = await readdir(join(project.dir, "design", "phases"));
+    const p2File = p2Files.find((f: string) => f.startsWith("P2-"));
+    if (!p2File) throw new Error("P2 phase file not found");
+    const p2Full = join(project.dir, "design", "phases", p2File);
+    const p2Yaml = (await readFile(p2Full, "utf8")).replace(
+      /^status: .*$/m,
+      "status: done",
+    );
+    await writeFile(p2Full, p2Yaml, "utf8");
+
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "p2-status",
+    ]);
+
+    const err = expectJsonErr(
+      project.run(["task", "review-bundle", "P1-T1", "--json"]),
+      "TASK_CONTRACT_DRIFT",
+    );
+    expect(err.error.message).toContain("P2");
+  });
+
+  it("rejects a review bundle when an undeclared source file changes", async () => {
+    project = await setupDoneTask();
+
+    // Add an extra source file not declared by P1-T1.
+    await writeFile(
+      join(project.dir, "src", "extra.ts"),
+      "export const y = 1;\n",
+      "utf8",
+    );
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "extra",
+    ]);
+
+    const err = expectJsonErr(
+      project.run(["task", "review-bundle", "P1-T1", "--json"]),
+      "TASK_CONTRACT_DRIFT",
+    );
+    expect(err.error.message).toContain("src/extra.ts");
   });
 });

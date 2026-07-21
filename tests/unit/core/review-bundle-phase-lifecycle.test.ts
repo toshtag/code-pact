@@ -475,4 +475,110 @@ describe("classifyPhaseLifecycle", () => {
     expect(classification.lifecycleOnly).toBe(true);
     expect(classification.changedFields).toEqual([]);
   });
+
+  it("rejects a depends_on addition", async () => {
+    git(["init", "--quiet", "--initial-branch=main"]);
+    await commitPhase("P1-foundation.yaml", basePhase());
+
+    const updated = basePhase()
+      .replace("status: planned", "status: done")
+      .replace(
+        "    description: First task\n    writes:",
+        "    description: First task\n    depends_on:\n      - P1-T0\n    writes:",
+      );
+    await writeFile(
+      join(cwd, "design", "phases", "P1-foundation.yaml"),
+      updated,
+      "utf8",
+    );
+
+    const classification = await classifyPhaseLifecycle({
+      cwd,
+      phasePath: phasePath("P1-foundation.yaml"),
+      baseSha: baseSha(),
+      events: makeEvents("P1-T1"),
+      derivedPhaseStatus: "done",
+    });
+
+    expect(classification.lifecycleOnly).toBe(false);
+    expect(classification.reason).toContain("depends_on");
+  });
+
+  it("rejects a task addition", async () => {
+    git(["init", "--quiet", "--initial-branch=main"]);
+    await commitPhase("P1-foundation.yaml", basePhase());
+
+    const extraTask =
+      "\n" +
+      "  - id: P1-T2\n" +
+      "    type: feature\n" +
+      "    ambiguity: low\n" +
+      "    risk: low\n" +
+      "    context_size: small\n" +
+      "    write_surface: low\n" +
+      "    verification_strength: medium\n" +
+      "    expected_duration: short\n" +
+      "    status: done\n" +
+      "    description: Extra task\n" +
+      "    writes:\n" +
+      "      - src/example2.ts\n";
+    const updated =
+      basePhase()
+        .replace("status: planned", "status: done")
+        .replace(/\n$/, "") + extraTask;
+    await writeFile(
+      join(cwd, "design", "phases", "P1-foundation.yaml"),
+      updated,
+      "utf8",
+    );
+
+    const classification = await classifyPhaseLifecycle({
+      cwd,
+      phasePath: phasePath("P1-foundation.yaml"),
+      baseSha: baseSha(),
+      events: makeEvents("P1-T1"),
+      derivedPhaseStatus: "done",
+    });
+
+    expect(classification.lifecycleOnly).toBe(false);
+    expect(classification.reason).toContain("task");
+  });
+
+  it("rejects a task deletion", async () => {
+    git(["init", "--quiet", "--initial-branch=main"]);
+    const twoTasks =
+      `${basePhase()}\n` +
+      "  - id: P1-T2\n" +
+      "    type: feature\n" +
+      "    ambiguity: low\n" +
+      "    risk: low\n" +
+      "    context_size: small\n" +
+      "    write_surface: low\n" +
+      "    verification_strength: medium\n" +
+      "    expected_duration: short\n" +
+      "    status: planned\n" +
+      "    description: Second task\n" +
+      "    writes:\n" +
+      "      - src/example2.ts\n";
+    await commitPhase("P1-foundation.yaml", twoTasks);
+
+    const updated = basePhase().replace("status: planned", "status: done");
+    await writeFile(
+      join(cwd, "design", "phases", "P1-foundation.yaml"),
+      updated,
+      "utf8",
+    );
+
+    const events = [...makeEvents("P1-T1"), ...makeEvents("P1-T2")];
+    const classification = await classifyPhaseLifecycle({
+      cwd,
+      phasePath: phasePath("P1-foundation.yaml"),
+      baseSha: baseSha(),
+      events,
+      derivedPhaseStatus: "done",
+    });
+
+    expect(classification.lifecycleOnly).toBe(false);
+    expect(classification.reason).toContain("task");
+  });
 });

@@ -385,7 +385,10 @@ export async function runReviewBundle(
   const lifecycleControlPlane: LifecycleControlPlaneEntry[] = [];
   const reclassifiedOutsideDeclared: string[] = [];
   for (const file of writeAudit.outside_declared) {
-    if (file.startsWith("design/phases/") && file.endsWith(".yaml")) {
+    // Only the reviewed task's own phase file is eligible for lifecycle
+    // reclassification. Any other phase YAML must still be treated as an
+    // undeclared write and rejected.
+    if (file === phasePath) {
       const classification = await classifyPhaseLifecycle({
         cwd,
         phasePath: file,
