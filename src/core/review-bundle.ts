@@ -80,7 +80,10 @@ export const DoneEventRef = z.object({
   at: z.string().datetime(),
   evidence: z.array(z.string()).optional(),
   source: z.enum(["loop", "external"]).optional(),
-  verification_ref: z.string().optional(),
+  verification_ref: z
+    .string()
+    .regex(/^evidence:sha256:[0-9a-f]{64}$/)
+    .optional(),
   path: z.string().optional(),
 });
 

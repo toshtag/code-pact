@@ -3,7 +3,11 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runReviewBundle } from "../../../src/commands/review-bundle.ts";
-import { readReviewManifest } from "../../../src/core/review-bundle.ts";
+import {
+  DoneEventRef,
+  LocalVerificationEntry,
+  readReviewManifest,
+} from "../../../src/core/review-bundle.ts";
 
 let cwd: string;
 
@@ -148,5 +152,35 @@ describe("runReviewBundle", () => {
     await expect(
       runReviewBundle({ cwd, taskId: "P1-T1" }),
     ).rejects.toMatchObject({ code: "TASK_NOT_DONE" });
+  });
+});
+
+describe("review-bundle schemas", () => {
+  it("accepts a verification_ref on done event refs", () => {
+    const parsed = DoneEventRef.safeParse({
+      at: "2026-05-19T11:00:00.000Z",
+      verification_ref:
+        "evidence:sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("rejects a verification_ref on done event refs with a bad format", () => {
+    const parsed = DoneEventRef.safeParse({
+      at: "2026-05-19T11:00:00.000Z",
+      verification_ref: "not-a-ref",
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("requires a source on local verification entries", () => {
+    const parsed = LocalVerificationEntry.safeParse({
+      command: "pnpm test",
+      exit_code: 0,
+      duration_ms: 1000,
+      stdout_excerpt: "ok",
+      stderr_excerpt: "",
+    });
+    expect(parsed.success).toBe(false);
   });
 });

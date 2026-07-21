@@ -668,16 +668,18 @@ First match wins. Each candidate field is independently optional.
 All `spec import` failures reuse `CONFIG_ERROR` (exit 2). No new public error codes were added in v1.8. The structured `data.detail` enum is:
 
 <!-- @generated:spec-import-details — DO NOT EDIT by hand; regenerate with `pnpm gen:doc-blocks`. Source: SPEC_IMPORT_DETAILS in src/contracts/spec-import-details.ts. -->
-| `detail` | When |
-| --- | --- |
-| `unsafe_path` | `--from` / `--suggest-from` failed `assertSafeRelativePath` |
-| `file_not_found` | source file does not exist |
-| `unreadable` | source file exists but cannot be read |
-| `phase_id_invalid` | `--phase-id` does not match `/^[A-Za-z][A-Za-z0-9_-]*$/` |
-| `phase_yaml_exists` | `--write` would clobber an existing imported YAML (use `--force`) |
-| `no_sections_parsed` | input has no Heading 3 sections (importer mode only) |
-| `mutex_violation` | `--from` + `--suggest-from` both passed |
-| `missing_phase_id` | `--from` passed without `--phase-id` |
+
+| `detail`             | When                                                              |
+| -------------------- | ----------------------------------------------------------------- |
+| `unsafe_path`        | `--from` / `--suggest-from` failed `assertSafeRelativePath`       |
+| `file_not_found`     | source file does not exist                                        |
+| `unreadable`         | source file exists but cannot be read                             |
+| `phase_id_invalid`   | `--phase-id` does not match `/^[A-Za-z][A-Za-z0-9_-]*$/`          |
+| `phase_yaml_exists`  | `--write` would clobber an existing imported YAML (use `--force`) |
+| `no_sections_parsed` | input has no Heading 3 sections (importer mode only)              |
+| `mutex_violation`    | `--from` + `--suggest-from` both passed                           |
+| `missing_phase_id`   | `--from` passed without `--phase-id`                              |
+
 <!-- @generated:spec-import-details:end -->
 
 ### Post-import advisories
@@ -764,10 +766,12 @@ On success, `--json` emits `{ ok: true, data: { path: "..." } }` (same envelope 
 `plan brief` and `plan constitution` take the same non-interactive input, so their `--from-file` / `--stdin` failure `data.detail` values (all under `CONFIG_ERROR`, exit 2) are identical:
 
 <!-- @generated:plan-capture-details — DO NOT EDIT by hand; regenerate with `pnpm gen:doc-blocks`. Source: PLAN_CAPTURE_*_DETAILS in src/contracts/plan-capture-details.ts. -->
-| Surface | `detail` values |
-| --- | --- |
+
+| Surface                                                   | `detail` values                                               |
+| --------------------------------------------------------- | ------------------------------------------------------------- |
 | `plan brief --from-file`, `plan constitution --from-file` | `unsafe_path`, `unreadable`, `invalid_yaml`, `schema_invalid` |
-| `plan brief --stdin`, `plan constitution --stdin` | `stdin_read_failed`, `invalid_yaml`, `schema_invalid` |
+| `plan brief --stdin`, `plan constitution --stdin`         | `stdin_read_failed`, `invalid_yaml`, `schema_invalid`         |
+
 <!-- @generated:plan-capture-details:end -->
 
 ### `plan prompt`
@@ -2961,21 +2965,24 @@ The command refuses to create a lock if the working tree is not clean (`WORKTREE
 
 `code-pact task review-bundle <task-id> [--output <path>] [--json]` produces a ZIP bundle containing the review manifest, contract lock, phase YAML, done event, verification results, diff patch, and changed files for a task that has been recorded as `done`. The manifest is written to `.code-pact/cache/reviews/<task-id>/manifest.json` and the bundle to `.code-pact/cache/reviews/<task-id>/bundle.zip` unless `--output` overrides the ZIP path. It requires a clean working tree and a valid contract lock.
 
-The command re-runs the classifier-selected verification commands locally and refuses if any fail (`VERIFICATION_FAILED`, exit 1). It also refuses if files changed outside the declared writes (`TASK_CONTRACT_DRIFT`, exit 1) or if the task has no done event (`TASK_NOT_DONE`, exit 2).
+The command re-runs the classifier-selected verification commands locally and refuses if any fail (`VERIFICATION_FAILED`, exit 1). It also refuses if files changed outside the declared writes (`TASK_CONTRACT_DRIFT`, exit 1), declared writes were not actually changed (`REVIEW_EVIDENCE_SCOPE_IMPRECISE`, exit 1), the task or phase state is inconsistent (`REVIEW_EVIDENCE_STATE_MISMATCH`, exit 1), the done event is missing its task verification evidence (`REVIEW_EVIDENCE_VERIFICATION_MISSING`, exit 1), or if the task has no done event (`TASK_NOT_DONE`, exit 2).
 
 ### Errors
 
-| Code                          | Exit | When                                                                                        |
-| ----------------------------- | ---- | ------------------------------------------------------------------------------------------- |
-| `TASK_NOT_FOUND`              | 2    | Task id is not present in any phase                                                         |
-| `AMBIGUOUS_TASK_ID`           | 2    | Task id appears in more than one phase                                                      |
-| `TASK_NOT_DONE`               | 2    | No done event exists for the task                                                           |
-| `TASK_CONTRACT_LOCK_REQUIRED` | 2    | No contract lock exists for the task                                                        |
-| `WORKTREE_NOT_CLEAN`          | 1    | The git working tree is not clean                                                           |
-| `TASK_CONTRACT_DRIFT`         | 1    | Files changed outside the declared writes or the contract digest no longer matches the lock |
-| `VERIFICATION_FAILED`         | 1    | A classifier-selected local verification command failed                                     |
-| `ARCHIVE_BUNDLE_WRITE_FAILED` | 1    | The `zip` utility could not create the bundle                                               |
-| `CONFIG_ERROR`                | 2    | Missing positional task id or unknown flag                                                  |
+| Code                                   | Exit | When                                                                                        |
+| -------------------------------------- | ---- | ------------------------------------------------------------------------------------------- |
+| `TASK_NOT_FOUND`                       | 2    | Task id is not present in any phase                                                         |
+| `AMBIGUOUS_TASK_ID`                    | 2    | Task id appears in more than one phase                                                      |
+| `TASK_NOT_DONE`                        | 2    | No done event exists for the task                                                           |
+| `TASK_CONTRACT_LOCK_REQUIRED`          | 2    | No contract lock exists for the task                                                        |
+| `WORKTREE_NOT_CLEAN`                   | 1    | The git working tree is not clean                                                           |
+| `TASK_CONTRACT_DRIFT`                  | 1    | Files changed outside the declared writes or the contract digest no longer matches the lock |
+| `REVIEW_EVIDENCE_SCOPE_IMPRECISE`      | 1    | Declared writes were not used (empty `declared_unused` is required)                         |
+| `REVIEW_EVIDENCE_STATE_MISMATCH`       | 1    | Task design/derived status or phase design/derived status are inconsistent                  |
+| `REVIEW_EVIDENCE_VERIFICATION_MISSING` | 1    | The done event has no `verification_ref` task verification artifact                         |
+| `VERIFICATION_FAILED`                  | 1    | A classifier-selected local verification command failed                                     |
+| `ARCHIVE_BUNDLE_WRITE_FAILED`          | 1    | The `zip` utility could not create the bundle                                               |
+| `CONFIG_ERROR`                         | 2    | Missing positional task id or unknown flag                                                  |
 
 ## `task ci-parity` — re-run verification and verify manifest parity (v2.7+, P79-T4)
 
