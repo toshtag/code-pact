@@ -64,7 +64,6 @@ tasks:
       - tests/unit/commands/ci-parity.test.ts
       - tests/unit/commands/review-bundle.test.ts
       - docs/cli-contract.md
-
   - id: P81-T2
     type: bugfix
     ambiguity: low
@@ -73,10 +72,10 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
-      Restrict lifecycle phase reclassification to the reviewed task's own
-      phase file and complete the predeclared fail-closed replay coverage.
+      Restrict lifecycle phase reclassification to the reviewed task's own phase
+      file and complete the predeclared fail-closed replay coverage.
     depends_on:
       - P81-T1
     reads:
