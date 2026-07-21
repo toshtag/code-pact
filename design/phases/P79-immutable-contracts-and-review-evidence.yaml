@@ -115,7 +115,7 @@ tasks:
     write_surface: high
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: Replace self-reported evidence with verifiable evidence.
     reads:
       - src/core/contract-lock.ts
