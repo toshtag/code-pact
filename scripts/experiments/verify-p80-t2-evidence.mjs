@@ -68,6 +68,17 @@ function canonicalP79Failures(values) {
     .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 }
 
+function canonicalCommandFailures(values) {
+  return values
+    .map(v => ({
+      scope: v.scope,
+      stage: v.stage,
+      code: v.error_code,
+      review_bundle_generated: false,
+    }))
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+}
+
 function assertDeepEqual(label, actual, expected) {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
@@ -75,6 +86,27 @@ function assertDeepEqual(label, actual, expected) {
     fail(`${label}: expected ${e}, got ${a}`);
   }
 }
+
+const EXPECTED_P79_FAILURES = [
+  {
+    scope: "fixture_P80-C2",
+    stage: "finalize",
+    code: "TASK_WRITES_AUDIT_DECLARED_UNUSED",
+    review_bundle_generated: false,
+  },
+  {
+    scope: "fixture_P80-C2",
+    stage: "review_bundle",
+    code: "FIXTURE_CLASSIFIER_UNAVAILABLE",
+    review_bundle_generated: false,
+  },
+  {
+    scope: "main_P80-T2",
+    stage: "review_bundle",
+    code: "TASK_CONTRACT_DRIFT",
+    review_bundle_generated: false,
+  },
+];
 
 const REQUIRED_CASES = [
   "wrong_model_digest",
@@ -93,6 +125,31 @@ const REQUIRED_CASES = [
   "start_event_has_done_status",
 ];
 
+const EXCLUDED_FROM_BASE_DIGEST = new Set([
+  "manifest.json",
+  "hashes.json",
+  "negative-verifier-results.json",
+  "verifier-negative-log.txt",
+]);
+
+function baseEvidenceDigest(dir) {
+  const files = fs
+    .readdirSync(dir)
+    .filter(
+      f =>
+        fs.statSync(path.join(dir, f)).isFile() &&
+        !EXCLUDED_FROM_BASE_DIGEST.has(f),
+    )
+    .sort();
+  const h = crypto.createHash("sha256");
+  for (const f of files) {
+    h.update(f);
+    h.update("\0");
+    h.update(sha256File(path.join(dir, f)));
+  }
+  return h.digest("hex");
+}
+
 function rebuildManifestAndHashes(dir) {
   fs.rmSync(path.join(dir, "hashes.json"), { force: true });
   fs.rmSync(path.join(dir, "manifest.json"), { force: true });
@@ -106,6 +163,7 @@ function rebuildManifestAndHashes(dir) {
   const capMetrics = readJson(dir, "capability-metrics.json");
   const baseMetrics = readJson(dir, "baseline-metrics.json");
   const codeMetrics = readJson(dir, "code-pact-metrics.json");
+  const baseDigest = baseEvidenceDigest(dir);
   const manifest = {
     schema_version: 1,
     trial_id: "P80-T2",
@@ -134,6 +192,7 @@ function rebuildManifestAndHashes(dir) {
     artifact_mismatch_count: final.artifact_mismatch_count,
     artifact_integrity_status: final.artifact_integrity_status,
     review_bundle_generated: final.review_bundle_generated,
+    base_evidence_digest: baseDigest,
     raw_file_hashes: hashes,
   };
   writeJson(dir, "manifest.json", manifest);
@@ -146,20 +205,92 @@ function rebuildManifestAndHashes(dir) {
   writeJson(dir, "hashes.json", hashes2);
 }
 
-function writeStubNegative(dir) {
+function writeStubNegative(dir, baseDigest) {
+  const stubCases = REQUIRED_CASES.map(name => ({
+    name,
+    hashes_recomputed: true,
+    exit_code: 1,
+    expected_error: "stub",
+    actual_stderr_excerpt: "stub",
+    hash_mismatch: false,
+    expected_error_matched: true,
+    rejected: true,
+  }));
   writeJson(dir, "negative-verifier-results.json", {
     schema_version: 1,
-    base_archive_sha256: "stub",
-    cases: REQUIRED_CASES.map(name => ({
-      name,
-      hashes_recomputed: true,
-      exit_code: 1,
-      expected_error: "stub",
-      actual_stderr_excerpt: "stub",
-    })),
+    base_evidence_digest: baseDigest,
+    cases: stubCases,
     total: REQUIRED_CASES.length,
     rejected: REQUIRED_CASES.length,
   });
+  const logLines = [];
+  for (const c of stubCases) {
+    logLines.push(
+      `CASE ${c.name}`,
+      `EXIT ${c.exit_code}`,
+      `EXPECTED ${c.expected_error}`,
+      `STDERR ${c.actual_stderr_excerpt}`,
+      `HASH_MISMATCH ${c.hash_mismatch}`,
+      `EXPECTED_HIT ${c.expected_error_matched}`,
+      `RESULT ${c.rejected ? "REJECTED" : "ACCEPTED (BAD)"}`,
+      "",
+    );
+  }
+  fs.writeFileSync(
+    path.join(dir, "verifier-negative-log.txt"),
+    logLines.join("\n"),
+  );
+}
+
+function parseNegativeLog(text) {
+  const blocks = [];
+  let current = {};
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") {
+      if (Object.keys(current).length) {
+        blocks.push(current);
+        current = {};
+      }
+      continue;
+    }
+    const caseMatch = line.match(/^CASE (.+)$/);
+    if (caseMatch) {
+      current.name = caseMatch[1];
+      continue;
+    }
+    const exitMatch = line.match(/^EXIT (\d+)$/);
+    if (exitMatch) {
+      current.exit_code = parseInt(exitMatch[1], 10);
+      continue;
+    }
+    const expectedMatch = line.match(/^EXPECTED (.+)$/);
+    if (expectedMatch) {
+      current.expected_error = expectedMatch[1];
+      continue;
+    }
+    const stderrMatch = line.match(/^STDERR (.+)$/);
+    if (stderrMatch) {
+      current.actual_stderr_excerpt = stderrMatch[1];
+      continue;
+    }
+    const hashMatch = line.match(/^HASH_MISMATCH (true|false)$/);
+    if (hashMatch) {
+      current.hash_mismatch = hashMatch[1] === "true";
+      continue;
+    }
+    const hitMatch = line.match(/^EXPECTED_HIT (true|false)$/);
+    if (hitMatch) {
+      current.expected_error_matched = hitMatch[1] === "true";
+      continue;
+    }
+    const resultMatch = line.match(/^RESULT (REJECTED|ACCEPTED \(BAD\))$/);
+    if (resultMatch) {
+      current.rejected = resultMatch[1] === "REJECTED";
+      continue;
+    }
+  }
+  if (Object.keys(current).length) blocks.push(current);
+  return blocks;
 }
 
 function runSelfTest(zip) {
@@ -308,9 +439,9 @@ function runSelfTest(zip) {
       try {
         execSync(`cp -R "${baseDir}/." "${caseDir}/"`);
         c.mutate(caseDir);
-        writeStubNegative(caseDir);
+        const caseBaseDigest = baseEvidenceDigest(caseDir);
+        writeStubNegative(caseDir, caseBaseDigest);
         rebuildManifestAndHashes(caseDir);
-        const outZip = path.join(caseDir, "P80-T2-evidence-bad.zip");
         fs.mkdirSync(path.join(caseDir, "out"), { recursive: true });
         execSync(`cd "${caseDir}" && zip -rq out/P80-T2-evidence-bad.zip .`);
         let exitCode = 0;
@@ -333,7 +464,11 @@ function runSelfTest(zip) {
           stderr.split("\n").find(l => l.startsWith("FAIL:")) ||
           stderr.split("\n")[1] ||
           "";
-        const hashMismatch = failLine.toLowerCase().includes("hash mismatch");
+        const lowerFail = failLine.toLowerCase();
+        const hashMismatch =
+          lowerFail.includes("hash mismatch") ||
+          (lowerFail.includes("base_evidence_digest") &&
+            lowerFail.includes("mismatch"));
         const expectedHit = failLine.includes(c.expected_error);
         const rejected = exitCode !== 0 && !hashMismatch && expectedHit;
         results.push({
@@ -342,15 +477,19 @@ function runSelfTest(zip) {
           exit_code: exitCode,
           expected_error: c.expected_error,
           actual_stderr_excerpt: failLine.replace(/^FAIL: /, ""),
+          hash_mismatch: hashMismatch,
+          expected_error_matched: expectedHit,
+          rejected,
         });
+        const stderrForLog = failLine.replace(/^FAIL: /, "");
         logLines.push(
           `CASE ${c.name}`,
           `EXIT ${exitCode}`,
           `EXPECTED ${c.expected_error}`,
-          `STDERR ${failLine}`,
+          `STDERR ${stderrForLog}`,
           `HASH_MISMATCH ${hashMismatch}`,
           `EXPECTED_HIT ${expectedHit}`,
-          rejected ? "RESULT REJECTED" : "RESULT ACCEPTED (BAD)",
+          `RESULT ${rejected ? "REJECTED" : "ACCEPTED (BAD)"}`,
           "",
         );
       } finally {
@@ -358,12 +497,14 @@ function runSelfTest(zip) {
       }
     }
 
+    const rejectedCount = results.filter(r => r.rejected).length;
+    const baseDigest = baseEvidenceDigest(baseDir);
     const negativeResults = {
       schema_version: 1,
-      base_archive_sha256: sha256Buffer(fs.readFileSync(zip)),
+      base_evidence_digest: baseDigest,
       cases: results,
       total: results.length,
-      rejected: results.filter(r => r.exit_code === 1).length,
+      rejected: rejectedCount,
     };
 
     const outDir = path.dirname(zip);
@@ -376,8 +517,8 @@ function runSelfTest(zip) {
     console.log(
       `Total: ${negativeResults.total}, Rejected: ${negativeResults.rejected}`,
     );
-    if (negativeResults.rejected !== negativeResults.total) {
-      fail("not all negative cases were rejected");
+    if (rejectedCount !== results.length) {
+      fail("not all negative cases were semantically rejected");
     }
     return negativeResults;
   } finally {
@@ -743,7 +884,7 @@ try {
     false,
   );
 
-  // P79 failures canonical equality across all four sources
+  // Exact expected P79 failure set across all four sources
   const finalFailures = canonicalP79Failures(final.p79_failures || []);
   const manifestFailures = canonicalP79Failures(manifest.p79_failures || []);
   const codeFailures = canonicalP79Failures(code.p79_failures || []);
@@ -751,50 +892,33 @@ try {
     manifest.code_pact?.p79_failures || [],
   );
 
+  assertDeepEqual("final p79_failures", finalFailures, EXPECTED_P79_FAILURES);
   assertDeepEqual(
-    "final vs manifest p79_failures",
-    finalFailures,
+    "manifest p79_failures",
     manifestFailures,
+    EXPECTED_P79_FAILURES,
   );
   assertDeepEqual(
-    "final vs code_pact p79_failures",
-    finalFailures,
+    "code_pact p79_failures",
     codeFailures,
+    EXPECTED_P79_FAILURES,
   );
   assertDeepEqual(
-    "final vs manifest.code_pact p79_failures",
-    finalFailures,
+    "manifest.code_pact p79_failures",
     manifestCodeFailures,
+    EXPECTED_P79_FAILURES,
   );
 
-  // Counts computed from p79_failures must equal stored counts
-  const driftCount = finalFailures.filter(
-    f => f.code === "TASK_CONTRACT_DRIFT",
-  ).length;
-  const scopeAuditCount = finalFailures.filter(
-    f => f.code === "TASK_WRITES_AUDIT_DECLARED_UNUSED",
-  ).length;
-  const classifierCount = finalFailures.filter(
-    f => f.code === "FIXTURE_CLASSIFIER_UNAVAILABLE",
-  ).length;
-
+  // Counts must equal the expected counts derived from the exact set
+  assertEq("contract_drift_count", final.contract_drift_count, 1);
+  assertEq("scope_audit_failure_count", final.scope_audit_failure_count, 1);
   assertEq(
-    "computed contract_drift_count",
-    driftCount,
-    final.contract_drift_count,
-  );
-  assertEq(
-    "computed scope_audit_failure_count",
-    scopeAuditCount,
-    final.scope_audit_failure_count,
-  );
-  assertEq(
-    "computed classifier_unavailable_count",
-    classifierCount,
+    "classifier_unavailable_count",
     final.classifier_unavailable_count,
+    1,
   );
 
-  // Structured command evidence matching
+  // Bidirectional command-evidence matching
   const commandLog = readJson(tmpDir, "command-log.json");
   const mainCommandLog = readJson(tmpDir, "main-command-log.json");
   const allCommandFailures = [
@@ -802,29 +926,44 @@ try {
     ...(mainCommandLog.failures || []),
   ];
 
-  for (const failure of final.p79_failures) {
+  const canonicalCommand = canonicalCommandFailures(allCommandFailures);
+  if (
+    JSON.stringify(canonicalCommand) !== JSON.stringify(EXPECTED_P79_FAILURES)
+  ) {
+    fail("p79_failures not matched in command evidence");
+  }
+
+  for (const failure of allCommandFailures) {
+    if (failure.exit_code === 0) {
+      fail(`command failure ${failure.scope}/${failure.stage} has exit_code 0`);
+    }
     const stage = failure.stage.toLowerCase();
-    const match = allCommandFailures.find(
-      c =>
-        c.scope === failure.scope &&
-        c.stage === failure.stage &&
-        c.error_code === failure.code &&
-        c.exit_code !== 0 &&
-        (c.command.toLowerCase().includes(stage) ||
-          (stage === "review_bundle" &&
-            c.command.toLowerCase().includes("review-bundle")) ||
-          (stage === "finalize" &&
-            c.command.toLowerCase().includes("finalize"))) &&
-        ((c.stdout_excerpt || "") + (c.stderr_excerpt || "")).includes(
-          failure.code,
-        ),
-    );
-    if (!match) {
+    const commandLower = failure.command.toLowerCase();
+    const verbMatch =
+      commandLower.includes(stage) ||
+      (stage === "review_bundle" && commandLower.includes("review-bundle")) ||
+      (stage === "finalize" && commandLower.includes("finalize"));
+    if (!verbMatch) {
       fail(
-        `p79_failure ${failure.scope}/${failure.stage}/${failure.code} not matched in command evidence`,
+        `command failure ${failure.scope}/${failure.stage} command verb mismatch`,
+      );
+    }
+    const output =
+      (failure.stdout_excerpt || "") + (failure.stderr_excerpt || "");
+    if (!output.includes(failure.error_code)) {
+      fail(
+        `command failure ${failure.scope}/${failure.stage} output missing error_code`,
       );
     }
   }
+
+  // Base evidence digest
+  const computedBaseDigest = baseEvidenceDigest(tmpDir);
+  assertEq(
+    "manifest.base_evidence_digest",
+    manifest.base_evidence_digest,
+    computedBaseDigest,
+  );
 
   // Lifecycle event semantics
   const startEvent = readYaml(tmpDir, "start-event.yaml");
@@ -846,11 +985,11 @@ try {
 
   // Negative verifier evidence
   const neg = readJson(tmpDir, "negative-verifier-results.json");
-  if (!/^[a-f0-9]{64}$/.test(neg.base_archive_sha256)) {
-    fail(
-      "negative-verifier-results base_archive_sha256 is not a valid SHA-256 string",
-    );
-  }
+  assertEq(
+    "negative.base_evidence_digest",
+    neg.base_evidence_digest,
+    computedBaseDigest,
+  );
   assertEq("negative-verifier-results total", neg.total, REQUIRED_CASES.length);
   assertEq("negative-verifier-results rejected", neg.rejected, neg.total);
 
@@ -866,6 +1005,13 @@ try {
   for (const c of neg.cases) {
     assertEq(`${c.name} hashes_recomputed`, c.hashes_recomputed, true);
     assertEq(`${c.name} exit_code`, c.exit_code, 1);
+    assertEq(`${c.name} hash_mismatch`, c.hash_mismatch, false);
+    assertEq(
+      `${c.name} expected_error_matched`,
+      c.expected_error_matched,
+      true,
+    );
+    assertEq(`${c.name} rejected`, c.rejected, true);
     assertTrue(
       `${c.name} actual_stderr_excerpt present`,
       typeof c.actual_stderr_excerpt === "string" &&
@@ -875,9 +1021,6 @@ try {
       `${c.name} expected_error present`,
       typeof c.expected_error === "string" && c.expected_error.length > 0,
     );
-    const excerpt = c.actual_stderr_excerpt.toLowerCase();
-    if (excerpt.includes("hash mismatch"))
-      fail(`${c.name} failed due to hash mismatch`);
     if (!c.actual_stderr_excerpt.includes(c.expected_error)) {
       fail(
         `${c.name} stderr does not include expected_error ${c.expected_error}`,
@@ -886,9 +1029,47 @@ try {
   }
 
   const log = readText(tmpDir, "verifier-negative-log.txt");
+  const logBlocks = parseNegativeLog(log);
+  if (logBlocks.length !== REQUIRED_CASES.length) {
+    fail(
+      `verifier-negative-log has ${logBlocks.length} blocks, expected ${REQUIRED_CASES.length}`,
+    );
+  }
+  const logNames = logBlocks.map(b => b.name);
   for (const name of REQUIRED_CASES) {
-    if (!log.includes(`CASE ${name}`))
+    if (!logNames.includes(name))
       fail(`verifier-negative-log missing CASE ${name}`);
+  }
+  const dupLog = logNames.filter(
+    (item, index) => logNames.indexOf(item) !== index,
+  );
+  if (dupLog.length) fail(`duplicate log case names: ${dupLog.join(", ")}`);
+
+  for (const c of neg.cases) {
+    const block = logBlocks.find(b => b.name === c.name);
+    if (!block) fail(`log block missing for ${c.name}`);
+    assertEq(`${c.name} log exit_code`, block.exit_code, c.exit_code);
+    assertEq(
+      `${c.name} log expected_error`,
+      block.expected_error,
+      c.expected_error,
+    );
+    assertEq(
+      `${c.name} log actual_stderr_excerpt`,
+      block.actual_stderr_excerpt,
+      c.actual_stderr_excerpt,
+    );
+    assertEq(
+      `${c.name} log hash_mismatch`,
+      block.hash_mismatch,
+      c.hash_mismatch,
+    );
+    assertEq(
+      `${c.name} log expected_error_matched`,
+      block.expected_error_matched,
+      c.expected_error_matched,
+    );
+    assertEq(`${c.name} log rejected`, block.rejected, c.rejected);
   }
 
   console.log(

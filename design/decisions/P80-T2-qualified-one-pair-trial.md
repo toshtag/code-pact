@@ -109,10 +109,11 @@ the qualified pair classification.
 ## Evidence
 
 - Evidence archive: `/tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip`
-- Archive SHA-256: `1d92e2b0807c09e0a3aab661118f53c31c40264b7539cc474ac1dcc2ab9aed30`
+- Archive SHA-256: `b80a6c3700982b3fd440ba50d43fb81d763b6816073f031e7e66c3c478877bd1`
 - Verification: `node scripts/experiments/verify-p80-t2-evidence.mjs /tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip`
-- Negative verifier evidence: `negative-verifier-results.json` and `verifier-negative-log.txt`; 14/14 semantic cases rejected with `hashes_recomputed: true`.
+- Negative verifier evidence: `negative-verifier-results.json` and `verifier-negative-log.txt`; 14/14 semantic cases rejected with `hashes_recomputed: true`, `hash_mismatch: false`, `expected_error_matched: true`, `rejected: true`.
 - Self-test: `node scripts/experiments/verify-p80-t2-evidence.mjs /tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip --self-test`
+- Base evidence digest: computed from raw evidence files excluding `manifest.json`, `hashes.json`, `negative-verifier-results.json`, `verifier-negative-log.txt`.
 
 ## Writes
 
