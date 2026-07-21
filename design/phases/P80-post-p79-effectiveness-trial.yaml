@@ -82,3 +82,24 @@ tasks:
     writes:
       - design/decisions/P80-T2-qualified-one-pair-trial.md
       - scripts/experiments/verify-p80-t2-evidence.mjs
+  - id: P80-T2D
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P80-T2C
+    description: >
+      Converge P80-T2 evidence semantics by aligning nested P79 status,
+      validating lifecycle events, separating fixture and main-repository
+      failures, preserving negative verifier evidence, and recording issue URLs.
+    reads:
+      - design/decisions/P80-T2-qualified-one-pair-trial.md
+      - scripts/experiments/verify-p80-t2-evidence.mjs
+    writes:
+      - design/decisions/P80-T2-qualified-one-pair-trial.md
+      - scripts/experiments/verify-p80-t2-evidence.mjs
