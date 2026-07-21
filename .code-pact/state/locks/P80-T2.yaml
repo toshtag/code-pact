@@ -4,7 +4,7 @@ phase_id: P80
 phase_path: design/phases/P80-post-p79-effectiveness-trial.yaml
 base_ref: HEAD
 base_sha: 53202b0f5a7cd0f44b91c71ed5560a891609fb04
-phase_blob_sha: b0f6424bdb2ada9a51d40370e23f9849625e1bc8
+phase_blob_sha: 3bb8a20878d9cc82ddafb7e2ccf9a74fc8c0e523
 contract_digest: 62d14d16c4e299148ce2e5fae016f48140c6c3fc4635dff649625a7a41c6c670
 contract:
   description: >
@@ -28,7 +28,7 @@ contract:
     - node scripts/experiments/verify-p80-t2-evidence.mjs
       /tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip
   base_sha: 53202b0f5a7cd0f44b91c71ed5560a891609fb04
-  phase_blob_sha: b0f6424bdb2ada9a51d40370e23f9849625e1bc8
+  phase_blob_sha: 3bb8a20878d9cc82ddafb7e2ccf9a74fc8c0e523
 at: 2026-07-21T06:51:44.056Z
 actor: agent
 agent: claude-code
