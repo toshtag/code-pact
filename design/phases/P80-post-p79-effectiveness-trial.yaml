@@ -124,3 +124,24 @@ tasks:
     writes:
       - design/decisions/P80-T2-qualified-one-pair-trial.md
       - scripts/experiments/verify-p80-t2-evidence.mjs
+  - id: P80-T2F
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P80-T2E
+    description: >
+      Close the remaining P80-T2 negative-verifier authenticity gaps by
+      enforcing the exact P79 failure set, bidirectional command-evidence
+      matching, semantic self-test success criteria, and complete log evidence.
+    reads:
+      - design/decisions/P80-T2-qualified-one-pair-trial.md
+      - scripts/experiments/verify-p80-t2-evidence.mjs
+    writes:
+      - design/decisions/P80-T2-qualified-one-pair-trial.md
+      - scripts/experiments/verify-p80-t2-evidence.mjs
