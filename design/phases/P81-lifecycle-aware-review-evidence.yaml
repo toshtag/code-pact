@@ -3,13 +3,13 @@ name: Lifecycle-Aware Review Evidence
 weight: 1
 confidence: high
 risk: medium
-status: in_progress
+status: done
 objective: >
-  Prevent Code Pact-owned lifecycle status mutations from being misclassified
-  as undeclared task implementation writes while preserving fail-closed
-  detection of every non-lifecycle phase mutation.
+  Prevent Code Pact-owned lifecycle status mutations from being misclassified as
+  undeclared task implementation writes while preserving fail-closed detection
+  of every non-lifecycle phase mutation.
 non_goals:
-  - Fix dependency omission (Issue #544).
+  - Fix dependency omission (Issue
   - Add a `task add` CLI.
   - Change `phase reconcile` so it does not write phase status.
   - Strengthen the P80 evidence verifier.
@@ -19,8 +19,8 @@ non_goals:
 definition_of_done:
   - A task that declares only its implementation file can complete, finalize,
     reconcile, and create a review bundle on the first attempt.
-  - Status-only phase mutations are explicitly recorded as control-plane
-    changes rather than silently discarded.
+  - Status-only phase mutations are explicitly recorded as control-plane changes
+    rather than silently discarded.
   - Any non-status phase mutation remains a hard review-bundle failure.
   - The former skipped review-bundle success test is enabled.
   - Local CI-equivalent verification passes before PR submission.
@@ -40,7 +40,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Classify lifecycle-only phase status mutations as Code Pact control-plane
       changes during review-bundle generation, while rejecting every other
