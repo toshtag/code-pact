@@ -55,7 +55,7 @@ invocation each. The pair is classified `qualified` and `product_effectiveness`
 - `pair_status`: `qualified`
 - `failure_attribution`: `none`
 - `product_effectiveness`: `promising_single_pair`
-- `p79_dogfood_status`: `passed` (P80-T2 main task finalize/review-bundle completed on the main repository)
+- `p79_dogfood_status`: `failed` (`task finalize` and `phase reconcile` passed, but `task review-bundle` refused due to `TASK_CONTRACT_DRIFT` because `design/phases/P80-post-p79-effectiveness-trial.yaml` changed outside the declared writes; per protocol writes were not expanded after the gate failure)
 
 ## Code Pact condition notes
 
@@ -69,7 +69,7 @@ the qualified pair classification.
 ## Evidence
 
 - Evidence archive: `/tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip`
-- Archive SHA-256: `d90745f03511bd4c3ff0bce2cbf9cc7f2ef294a85ac9089709b13c1637baebcd`
+- Archive SHA-256: `49b222b8abb7909025ce34ad32bcb57f4ff2bca8923a68e7d387b0f551536976`
 - Verification: `node scripts/experiments/verify-p80-t2-evidence.mjs /tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip`
 
 ## Writes
