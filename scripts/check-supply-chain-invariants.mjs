@@ -830,7 +830,11 @@ function checkFastCiWorkflow(ciDoc, ciContent) {
       );
     }
     const ciStatusScripts = collectRunScripts(ciDoc, "ci-status");
-    const ciStatusStep = findStepByName(ciDoc, "ci-status", "Verify CI results");
+    const ciStatusStep = findStepByName(
+      ciDoc,
+      "ci-status",
+      "Verify CI results",
+    );
     const ciStatusEnv = ciStatusStep?.get("env");
     const expectedCiStatusEnv = {
       DOCS_OUTPUT: "needs.classify.outputs.docs",
@@ -863,9 +867,7 @@ function checkFastCiWorkflow(ciDoc, ciContent) {
       /!=\s*['"]true['"]/.test(script) && /!=\s*['"]false['"]/.test(script);
     if (
       !ciStatusScripts.some(
-        script =>
-          script.includes("DOCS_OUTPUT") &&
-          hasBooleanCheck(script),
+        script => script.includes("DOCS_OUTPUT") && hasBooleanCheck(script),
       )
     ) {
       violations.push(
@@ -874,9 +876,7 @@ function checkFastCiWorkflow(ciDoc, ciContent) {
     }
     if (
       !ciStatusScripts.some(
-        script =>
-          script.includes("STANDARD_OUTPUT") &&
-          hasBooleanCheck(script),
+        script => script.includes("STANDARD_OUTPUT") && hasBooleanCheck(script),
       )
     ) {
       violations.push(
@@ -1450,7 +1450,7 @@ export function checkCancellationCoverage(testContent) {
     );
   }
   if (
-    !/describe\.runIf\(process\.platform === "win32"\)\("Windows bounded-command cancellation contract"/.test(
+    !/describe\.runIf\s*\(\s*process\.platform\s*===\s*"win32"\s*\)\s*\(\s*"Windows bounded-command cancellation contract"/.test(
       testContent,
     )
   ) {

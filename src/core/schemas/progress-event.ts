@@ -41,6 +41,12 @@ export const ProgressEvent = z
     reason: z.string().min(1).optional(),
     // Completion provenance. Only valid on `done` events.
     source: EventSource.optional(),
+    // Opaque reference to a cached verification evidence artifact
+    // (e.g. "evidence:sha256:<digest>"). Only valid on `done` events.
+    verification_ref: z
+      .string()
+      .regex(/^evidence:sha256:[0-9a-f]{64}$/)
+      .optional(),
   })
   .superRefine((value, ctx) => {
     if (value.status === "blocked" && !value.reason) {
@@ -55,6 +61,13 @@ export const ProgressEvent = z
         code: "custom",
         path: ["source"],
         message: 'source is only valid on "done" events',
+      });
+    }
+    if (value.verification_ref !== undefined && value.status !== "done") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["verification_ref"],
+        message: 'verification_ref is only valid on "done" events',
       });
     }
   });

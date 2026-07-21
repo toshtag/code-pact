@@ -1,5 +1,6 @@
 import { beforeAll, afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -58,7 +59,10 @@ async function setupTask(opts: {
   );
 
   const phasePath = join(project.dir, "design", "phases", "P1-foundation.yaml");
-  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
+  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+    string,
+    unknown
+  >;
   doc.verification = {
     commands: [opts.command],
   };
@@ -84,6 +88,19 @@ async function setupTask(opts: {
       "utf8",
     );
   }
+
+  execSync("git init", { cwd: project.dir, stdio: "ignore" });
+  execSync("git config user.email test@example.com", {
+    cwd: project.dir,
+    stdio: "ignore",
+  });
+  execSync("git config user.name Test", { cwd: project.dir, stdio: "ignore" });
+  execSync("git add .", { cwd: project.dir, stdio: "ignore" });
+  execSync("git commit -m init", { cwd: project.dir, stdio: "ignore" });
+  if (!opts.progressDone) {
+    expectJsonOk(project.run(["task", "lock", taskId, "--json"]));
+  }
+
   return project;
 }
 
@@ -110,10 +127,18 @@ function worstCaseCommand(): string {
 function expectAgentErrorBounded(
   result: ReturnType<Project["run"]>,
   code: string,
-): { data: { failure?: { kind?: string; check?: string }; omitted_fields?: string[] } } {
+): {
+  data: {
+    failure?: { kind?: string; check?: string };
+    omitted_fields?: string[];
+  };
+} {
   expect(Buffer.byteLength(result.stdout, "utf8")).toBeLessThan(24 * 1024);
   const env = expectJsonErr(result, code) as {
-    data: { failure?: { kind?: string; check?: string }; omitted_fields?: string[] };
+    data: {
+      failure?: { kind?: string; check?: string };
+      omitted_fields?: string[];
+    };
   };
   expect(env.data.failure?.kind).toEqual(expect.any(String));
   return env;
@@ -147,8 +172,12 @@ describe("agent detail evidence envelope", () => {
     };
 
     expect(env.data.failure.kind).toBe("command_failed");
-    expect(env.data.failure.evidence_ref).toMatch(/^evidence:sha256:[0-9a-f]{64}$/);
-    expect(env.data.failure.retrieve_command).toContain("code-pact evidence show");
+    expect(env.data.failure.evidence_ref).toMatch(
+      /^evidence:sha256:[0-9a-f]{64}$/,
+    );
+    expect(env.data.failure.retrieve_command).toContain(
+      "code-pact evidence show",
+    );
     expect(failed.stdout.length).toBeLessThan(24 * 1024);
     expect(failed.stdout).not.toContain('"stdout":');
     expect(failed.stdout).not.toContain('"stderr":');
@@ -206,8 +235,15 @@ describe("agent detail evidence envelope", () => {
     const env = expectJsonErr(failed, "VERIFICATION_FAILED") as {
       data: { failure: { evidence_ref: string } };
     };
-    const shown = p.run(["evidence", "show", env.data.failure.evidence_ref, "--json"]);
-    const shownEnv = expectJsonOk<{ artifact: { stdout: string; stderr: string } }>(shown);
+    const shown = p.run([
+      "evidence",
+      "show",
+      env.data.failure.evidence_ref,
+      "--json",
+    ]);
+    const shownEnv = expectJsonOk<{
+      artifact: { stdout: string; stderr: string };
+    }>(shown);
 
     expect(shownEnv.data.artifact.stdout).toBe("¢あ𠮷");
     expect(shownEnv.data.artifact.stderr).toBe("𠮷あ¢");
@@ -261,10 +297,18 @@ describe("agent detail evidence envelope", () => {
       data: { failure: { evidence_ref: string } };
     };
     const outside = await mkdtemp(join(tmpdir(), "code-pact-evidence-read-"));
-    await rm(join(p.dir, ".code-pact", "cache"), { recursive: true, force: true });
+    await rm(join(p.dir, ".code-pact", "cache"), {
+      recursive: true,
+      force: true,
+    });
     await symlink(outside, join(p.dir, ".code-pact", "cache"));
     try {
-      const shown = p.run(["evidence", "show", env.data.failure.evidence_ref, "--json"]);
+      const shown = p.run([
+        "evidence",
+        "show",
+        env.data.failure.evidence_ref,
+        "--json",
+      ]);
       expect(shown.code).toBe(1);
       const shownEnv = expectJsonErr(shown, "EVIDENCE_PATH_UNSAFE") as {
         data?: { system_code?: string };
@@ -292,15 +336,29 @@ describe("agent detail evidence envelope", () => {
     };
     const digest = env.data.failure.evidence_ref.split(":").at(-1);
     if (!digest) throw new Error("missing evidence digest");
-    const artifactPath = join(p.dir, ".code-pact", "cache", "evidence", `${digest}.json`);
-    const artifact = JSON.parse(await readFile(artifactPath, "utf8")) as Record<string, unknown>;
+    const artifactPath = join(
+      p.dir,
+      ".code-pact",
+      "cache",
+      "evidence",
+      `${digest}.json`,
+    );
+    const artifact = JSON.parse(await readFile(artifactPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
     await writeFile(
       artifactPath,
       JSON.stringify({ ...artifact, unexpected_field: "modified" }),
       "utf8",
     );
 
-    const shown = p.run(["evidence", "show", env.data.failure.evidence_ref, "--json"]);
+    const shown = p.run([
+      "evidence",
+      "show",
+      env.data.failure.evidence_ref,
+      "--json",
+    ]);
     expect(shown.code).toBe(1);
     expectJsonErr(shown, "EVIDENCE_INVALID");
   });
@@ -321,7 +379,10 @@ describe("agent detail evidence envelope", () => {
       "agent",
     ]);
     expect(missingPhase.code).toBe(2);
-    const missingPhaseEnv = expectAgentErrorBounded(missingPhase, "PHASE_NOT_FOUND");
+    const missingPhaseEnv = expectAgentErrorBounded(
+      missingPhase,
+      "PHASE_NOT_FOUND",
+    );
     expect(missingPhaseEnv.data.failure?.check).toBe("preflight");
 
     const missingTask = p.run([
@@ -335,7 +396,10 @@ describe("agent detail evidence envelope", () => {
       "agent",
     ]);
     expect(missingTask.code).toBe(2);
-    const missingTaskEnv = expectAgentErrorBounded(missingTask, "TASK_NOT_FOUND");
+    const missingTaskEnv = expectAgentErrorBounded(
+      missingTask,
+      "TASK_NOT_FOUND",
+    );
     expect(missingTaskEnv.data.omitted_fields).toContain("task_id");
   });
 
@@ -353,7 +417,10 @@ describe("agent detail evidence envelope", () => {
       "agent",
     ]);
     expect(missingTask.code).toBe(2);
-    const missingTaskEnv = expectAgentErrorBounded(missingTask, "TASK_NOT_FOUND");
+    const missingTaskEnv = expectAgentErrorBounded(
+      missingTask,
+      "TASK_NOT_FOUND",
+    );
     expect(missingTaskEnv.data.omitted_fields).toContain("task_id");
 
     const missingAgent = p.run([
@@ -367,7 +434,10 @@ describe("agent detail evidence envelope", () => {
       "agent",
     ]);
     expect(missingAgent.code).toBe(2);
-    const missingAgentEnv = expectAgentErrorBounded(missingAgent, "AGENT_NOT_FOUND");
+    const missingAgentEnv = expectAgentErrorBounded(
+      missingAgent,
+      "AGENT_NOT_FOUND",
+    );
     expect(missingAgentEnv.data.omitted_fields).toContain("agent");
   });
 
@@ -382,11 +452,11 @@ describe("agent detail evidence envelope", () => {
         "events:",
         "  - task_id: P1-T1",
         "    status: started",
-        "    at: \"2026-07-10T00:00:00.000Z\"",
+        '    at: "2026-07-10T00:00:00.000Z"',
         "    actor: agent",
         "  - task_id: P1-T1",
         "    status: blocked",
-        "    at: \"2026-07-10T00:01:00.000Z\"",
+        '    at: "2026-07-10T00:01:00.000Z"',
         "    actor: agent",
         "    reason: waiting",
         "",
@@ -564,7 +634,9 @@ describe("agent detail evidence envelope", () => {
       projection_truncated?: boolean;
       omitted_fields?: string[];
     }>(alreadyDoneResult);
-    expect(Buffer.byteLength(alreadyDoneResult.stdout, "utf8")).toBeLessThan(24 * 1024);
+    expect(Buffer.byteLength(alreadyDoneResult.stdout, "utf8")).toBeLessThan(
+      24 * 1024,
+    );
     expect(alreadyDoneEnv.data.projection_truncated).toBe(true);
     expect(alreadyDoneEnv.data.omitted_fields).toContain("task_id");
     await alreadyDone.cleanup();
@@ -590,9 +662,13 @@ describe("agent detail evidence envelope", () => {
       omitted_fields?: string[];
       suggested_next_command?: string;
     }>(dryRunResult);
-    expect(Buffer.byteLength(dryRunResult.stdout, "utf8")).toBeLessThan(24 * 1024);
+    expect(Buffer.byteLength(dryRunResult.stdout, "utf8")).toBeLessThan(
+      24 * 1024,
+    );
     expect(dryRunEnv.data.projection_truncated).toBe(true);
-    expect(dryRunEnv.data.omitted_fields).toEqual(expect.arrayContaining(["would_append", "task_id"]));
+    expect(dryRunEnv.data.omitted_fields).toEqual(
+      expect.arrayContaining(["would_append", "task_id"]),
+    );
     expect(dryRunEnv.data.suggested_next_command).toBeUndefined();
     await dryRun.cleanup();
     project = null;
@@ -602,7 +678,16 @@ describe("agent detail evidence envelope", () => {
     const p = await setupFailingTask();
     for (const args of [
       ["verify", "--phase", "P1", "--task", "P1-T1", "--json"],
-      ["verify", "--phase", "P1", "--task", "P1-T1", "--json", "--detail", "full"],
+      [
+        "verify",
+        "--phase",
+        "P1",
+        "--task",
+        "P1-T1",
+        "--json",
+        "--detail",
+        "full",
+      ],
     ]) {
       const failed = p.run(args);
       expect(failed.code).toBe(1);
@@ -632,9 +717,15 @@ describe("agent detail evidence envelope", () => {
       const failed = p.run(args);
       expect(failed.code).toBe(1);
       const env = expectJsonErr(failed, "VERIFICATION_FAILED") as {
-        data: { verify: { checks: Array<{ commands?: Array<Record<string, unknown>> }> } };
+        data: {
+          verify: {
+            checks: Array<{ commands?: Array<Record<string, unknown>> }>;
+          };
+        };
       };
-      expect(Object.keys(env.data.verify.checks[0]!.commands![0]!).sort()).toEqual([
+      expect(
+        Object.keys(env.data.verify.checks[0]!.commands![0]!).sort(),
+      ).toEqual([
         "aborted",
         "command",
         "elapsedMs",
@@ -653,7 +744,16 @@ describe("agent detail evidence envelope", () => {
   it("default and full JSON keep legacy success shapes", async () => {
     for (const args of [
       ["verify", "--phase", "P1", "--task", "P1-T1", "--json"],
-      ["verify", "--phase", "P1", "--task", "P1-T1", "--json", "--detail", "full"],
+      [
+        "verify",
+        "--phase",
+        "P1",
+        "--task",
+        "P1-T1",
+        "--json",
+        "--detail",
+        "full",
+      ],
     ]) {
       const p = await setupTask({
         command: "node --version",
@@ -661,7 +761,9 @@ describe("agent detail evidence envelope", () => {
         progressDone: true,
       });
       const passed = p.run(args);
-      const env = expectJsonOk<{ checks: Array<{ commands?: Array<Record<string, unknown>> }> }>(passed);
+      const env = expectJsonOk<{
+        checks: Array<{ commands?: Array<Record<string, unknown>> }>;
+      }>(passed);
       expect(Object.keys(env.data.checks[0]!.commands![0]!).sort()).toEqual([
         "aborted",
         "command",
@@ -684,9 +786,13 @@ describe("agent detail evidence envelope", () => {
       const p = await setupTask({ command: "node --version" });
       const passed = p.run(args);
       const env = expectJsonOk<{
-        verify: { checks: Array<{ commands?: Array<Record<string, unknown>> }> };
+        verify: {
+          checks: Array<{ commands?: Array<Record<string, unknown>> }>;
+        };
       }>(passed);
-      expect(Object.keys(env.data.verify.checks[0]!.commands![0]!).sort()).toEqual([
+      expect(
+        Object.keys(env.data.verify.checks[0]!.commands![0]!).sort(),
+      ).toEqual([
         "aborted",
         "command",
         "elapsedMs",

@@ -8,7 +8,10 @@ import { cliPath, ensureCliBuilt, run } from "../helpers/cli.ts";
 import { loadMergedProgress } from "../../src/core/progress/io.ts";
 import { runBoundedCommand } from "../../src/core/process/bounded-command.ts";
 
-function phase(command: string, taskStatus: "planned" | "done" = "planned"): string {
+function phase(
+  command: string,
+  taskStatus: "planned" | "done" = "planned",
+): string {
   return [
     "id: P1",
     "name: Timeout integration",
@@ -79,6 +82,19 @@ async function setupProject(
     join(dir, "design", "phases", "P1.yaml"),
     phase(command, opts.taskStatus),
   );
+
+  // Contract lock drift gates require a committed git tree and a lock.
+  spawnSync("git", ["init"], { cwd: dir, stdio: "ignore" });
+  spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."], {
+    cwd: dir,
+    stdio: "ignore",
+  });
+  spawnSync(
+    "git",
+    ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init"],
+    { cwd: dir, stdio: "ignore" },
+  );
+  run(dir, ["task", "lock", "P1-T1", "--json"]);
 }
 
 async function installLongProcessFixture(dir: string): Promise<void> {
@@ -124,7 +140,9 @@ async function waitForPidExit(pid: number, timeoutMs = 3_000): Promise<void> {
   if (pidExists(pid)) throw new Error(`Process ${pid} did not exit`);
 }
 
-async function readPids(dir: string): Promise<{ parent: number; child: number } | undefined> {
+async function readPids(
+  dir: string,
+): Promise<{ parent: number; child: number } | undefined> {
   try {
     return JSON.parse(await readFile(join(dir, "long-pids.json"), "utf8")) as {
       parent: number;
@@ -144,7 +162,9 @@ async function waitForFile(path: string, timeoutMs = 5_000): Promise<void> {
   throw new Error(`Timed out waiting for ${path}`);
 }
 
-async function forceCleanupTree(pids: { parent: number; child: number } | undefined): Promise<void> {
+async function forceCleanupTree(
+  pids: { parent: number; child: number } | undefined,
+): Promise<void> {
   if (!pids) return;
   if (process.platform === "win32") {
     spawnSync("taskkill", ["/PID", String(pids.parent), "/T", "/F"], {
@@ -276,7 +296,9 @@ describe.runIf(process.platform !== "win32")("CLI timeout contract", () => {
     expect(result.code).toBe(1);
     const envelope = JSON.parse(result.stdout) as {
       error: { code: string; cause_code?: string };
-      data: { verify: { checks: Array<{ commands?: Array<{ timedOut: boolean }> }> } };
+      data: {
+        verify: { checks: Array<{ commands?: Array<{ timedOut: boolean }> }> };
+      };
     };
     expect(envelope.error).toMatchObject({
       code: "VERIFICATION_FAILED",
@@ -293,7 +315,10 @@ describe.runIf(process.platform !== "win32")("CLI timeout contract", () => {
   }, 15_000);
 
   it("honours a longer task-complete timeout", async () => {
-    await writeFile(join(dir, "short.mjs"), "setTimeout(() => process.exit(0), 100);\n");
+    await writeFile(
+      join(dir, "short.mjs"),
+      "setTimeout(() => process.exit(0), 100);\n",
+    );
     await setupProject(dir, "node short.mjs");
     const result = run(dir, [
       "task",
@@ -309,58 +334,66 @@ describe.runIf(process.platform !== "win32")("CLI timeout contract", () => {
   });
 });
 
-describe.runIf(process.platform === "win32")("Windows bounded-command cancellation contract", () => {
-  it("times out a command tree through taskkill cleanup", async () => {
-    await installLongProcessFixture(dir);
-    const result = await runBoundedCommand("node long-parent.mjs", dir, 750);
+describe.runIf(process.platform === "win32")(
+  "Windows bounded-command cancellation contract",
+  () => {
+    it("times out a command tree through taskkill cleanup", async () => {
+      await installLongProcessFixture(dir);
+      const result = await runBoundedCommand("node long-parent.mjs", dir, 750);
 
-    expect(result).toMatchObject({
-      timedOut: true,
-      aborted: false,
-      termination: {
-        attempted: true,
-        completed: true,
-        strategy: "taskkill",
-        closeObserved: true,
-      },
-    });
-    const pids = await readPids(dir);
-    expect(pids).toBeDefined();
-    await waitForPidExit(pids!.parent);
-    await waitForPidExit(pids!.child);
-    expect(pidExists(pids!.parent)).toBe(false);
-    expect(pidExists(pids!.child)).toBe(false);
-    expect(existsSync(join(dir, "long-child-survived"))).toBe(false);
-  }, 15_000);
+      expect(result).toMatchObject({
+        timedOut: true,
+        aborted: false,
+        termination: {
+          attempted: true,
+          completed: true,
+          strategy: "taskkill",
+          closeObserved: true,
+        },
+      });
+      const pids = await readPids(dir);
+      expect(pids).toBeDefined();
+      await waitForPidExit(pids!.parent);
+      await waitForPidExit(pids!.child);
+      expect(pidExists(pids!.parent)).toBe(false);
+      expect(pidExists(pids!.child)).toBe(false);
+      expect(existsSync(join(dir, "long-child-survived"))).toBe(false);
+    }, 15_000);
 
-  it("aborts a command tree through taskkill cleanup", async () => {
-    await installLongProcessFixture(dir);
-    const controller = new AbortController();
-    const pending = runBoundedCommand("node long-parent.mjs", dir, 10_000, controller.signal);
+    it("aborts a command tree through taskkill cleanup", async () => {
+      await installLongProcessFixture(dir);
+      const controller = new AbortController();
+      const pending = runBoundedCommand(
+        "node long-parent.mjs",
+        dir,
+        10_000,
+        controller.signal,
+      );
 
-    await waitForFile(join(dir, "long-ready"));
-    controller.abort();
-    const result = await pending;
+      await waitForFile(join(dir, "long-ready"));
+      controller.abort();
+      const result = await pending;
 
-    expect(result).toMatchObject({
-      timedOut: false,
-      aborted: true,
-      termination: {
-        attempted: true,
-        completed: true,
-        strategy: "taskkill",
-        closeObserved: true,
-      },
-    });
-    const pids = await readPids(dir);
-    expect(pids).toBeDefined();
-    await waitForPidExit(pids!.parent);
-    await waitForPidExit(pids!.child);
-    expect(pidExists(pids!.parent)).toBe(false);
-    expect(pidExists(pids!.child)).toBe(false);
-    expect(existsSync(join(dir, "long-child-survived"))).toBe(false);
-  }, 15_000);
-});
+      expect(result).toMatchObject({
+        timedOut: false,
+        aborted: true,
+        termination: {
+          attempted: true,
+          completed: true,
+          strategy: "taskkill",
+          closeObserved: true,
+        },
+      });
+      const pids = await readPids(dir);
+      expect(pids).toBeDefined();
+      await waitForPidExit(pids!.parent);
+      await waitForPidExit(pids!.child);
+      expect(pidExists(pids!.parent)).toBe(false);
+      expect(pidExists(pids!.child)).toBe(false);
+      expect(existsSync(join(dir, "long-child-survived"))).toBe(false);
+    }, 15_000);
+  },
+);
 
 if (process.platform !== "win32") {
   describe("CLI cancellation contract", () => {
@@ -371,7 +404,15 @@ if (process.platform !== "win32") {
         await setupProject(dir, "node long-parent.mjs");
         activeCli = spawn(
           process.execPath,
-          [cliPath, "task", "complete", "P1-T1", "--timeout", "10000", "--json"],
+          [
+            cliPath,
+            "task",
+            "complete",
+            "P1-T1",
+            "--timeout",
+            "10000",
+            "--json",
+          ],
           { cwd: dir, stdio: ["ignore", "pipe", "pipe"] },
         );
         const resultPromise = collectProcess(activeCli);

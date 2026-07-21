@@ -18,7 +18,7 @@ const PROJECT_YAML = (defaultAgent = "claude-code", agents = ["claude-code"]) =>
     "locale: en-US",
     `default_agent: ${defaultAgent}`,
     "agents:",
-    ...agents.flatMap((a) => [
+    ...agents.flatMap(a => [
       `  - name: ${a}`,
       `    profile: agent-profiles/${a}.yaml`,
       `    enabled: true`,
@@ -86,6 +86,26 @@ async function setupProject(
     join(dir, "design", "phases", "P1-foundation.yaml"),
     PHASE_YAML,
     "utf8",
+  );
+
+  const { spawnSync } = await import("node:child_process");
+  spawnSync("git", ["init", "--quiet"], { cwd: dir });
+  spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."], {
+    cwd: dir,
+  });
+  spawnSync(
+    "git",
+    [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "initial",
+    ],
+    { cwd: dir },
   );
 }
 
@@ -176,7 +196,8 @@ describe("runTaskStart — invalid transitions", () => {
     reason: waiting
 `;
 
-  const resumedYaml = blockedYaml +
+  const resumedYaml =
+    blockedYaml +
     `  - task_id: P1-T1
     status: resumed
     at: "2026-05-18T11:00:00+00:00"
@@ -269,7 +290,11 @@ describe("runTaskStart — author attribution (Collaboration UX RFC D1)", () => 
 
   it("stamps the recorded event with author", async () => {
     await setupProject(dir);
-    const result = await runTaskStart({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    const result = await runTaskStart({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
     if (result.kind !== "started") throw new Error("type narrow");
     expect(result.event.author).toBe("Ada Lovelace");
     // and it is persisted to the event file (round-trips through the ledger)
@@ -281,7 +306,11 @@ describe("runTaskStart — author attribution (Collaboration UX RFC D1)", () => 
     await setupProject(dir, {
       projectYaml: PROJECT_YAML() + "collaboration:\n  author: off\n",
     });
-    const result = await runTaskStart({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    const result = await runTaskStart({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
     if (result.kind !== "started") throw new Error("type narrow");
     expect(result.event.author).toBeUndefined();
     const { log } = await readProgress(dir);

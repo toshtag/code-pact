@@ -43,8 +43,7 @@ const PROJECT_SCAFFOLD_PATHS = new Set([
 function isProjectScaffoldPath(path: string): boolean {
   return (
     PROJECT_SCAFFOLD_PATHS.has(path) ||
-    (path.startsWith(".code-pact/agent-profiles/") &&
-      path.endsWith(".yaml")) ||
+    (path.startsWith(".code-pact/agent-profiles/") && path.endsWith(".yaml")) ||
     (path.startsWith(".code-pact/model-profiles/") && path.endsWith(".yaml"))
   );
 }
@@ -68,6 +67,35 @@ function isProjectRuntimeLockFile(path: string): boolean {
 
 function isProgressEventsDir(path: string): boolean {
   return path === ".code-pact/state/events";
+}
+
+function isContractLockDir(path: string): boolean {
+  return path === ".code-pact/state/locks";
+}
+
+function isContractLockPath(path: string): boolean {
+  return (
+    path.startsWith(".code-pact/state/locks/") &&
+    !path.slice(".code-pact/state/locks/".length).includes("/") &&
+    path.endsWith(".yaml")
+  );
+}
+
+const REVIEWS_CACHE_PREFIX = ".code-pact/cache/reviews";
+
+function isReviewCacheDir(path: string): boolean {
+  if (path === REVIEWS_CACHE_PREFIX) return true;
+  if (!path.startsWith(`${REVIEWS_CACHE_PREFIX}/`)) return false;
+  const tail = path.slice(`${REVIEWS_CACHE_PREFIX}/`.length);
+  const first = tail.split("/")[0];
+  return first !== undefined && first.length > 0;
+}
+
+function isReviewManifestPath(path: string): boolean {
+  if (!path.startsWith(`${REVIEWS_CACHE_PREFIX}/`)) return false;
+  const tail = path.slice(`${REVIEWS_CACHE_PREFIX}/`.length);
+  const parts = tail.split("/");
+  return parts.length === 2 && parts[1] === "manifest.json";
 }
 
 function isProgressEventPath(path: string): boolean {
@@ -238,6 +266,70 @@ export async function resolveProgressEventDeletePath(
     cwd,
     [".code-pact/state/events", file].join("/"),
     isProgressEventPath,
+  );
+}
+
+export async function resolveContractLockDirWritePath(
+  cwd: string,
+): Promise<OwnedWritePath> {
+  return resolveAndBrandWriteForAuthority(
+    cwd,
+    ".code-pact/state/locks",
+    isContractLockDir,
+  );
+}
+
+export async function resolveContractLockReadPath(
+  cwd: string,
+  file: string,
+): Promise<OwnedReadPath> {
+  return resolveAndBrandReadForAuthority(
+    cwd,
+    [".code-pact/state/locks", file].join("/"),
+    isContractLockPath,
+  );
+}
+
+export async function resolveContractLockWritePath(
+  cwd: string,
+  file: string,
+): Promise<OwnedWritePath> {
+  return resolveAndBrandWriteForAuthority(
+    cwd,
+    [".code-pact/state/locks", file].join("/"),
+    isContractLockPath,
+  );
+}
+
+export async function resolveReviewCacheDirWritePath(
+  cwd: string,
+  relPath?: string,
+): Promise<OwnedWritePath> {
+  const target = relPath
+    ? [".code-pact/cache/reviews", relPath].join("/")
+    : ".code-pact/cache/reviews";
+  return resolveAndBrandWriteForAuthority(cwd, target, isReviewCacheDir);
+}
+
+export async function resolveReviewManifestReadPath(
+  cwd: string,
+  file: string,
+): Promise<OwnedReadPath> {
+  return resolveAndBrandReadForAuthority(
+    cwd,
+    [".code-pact/cache/reviews", file].join("/"),
+    isReviewManifestPath,
+  );
+}
+
+export async function resolveReviewManifestWritePath(
+  cwd: string,
+  file: string,
+): Promise<OwnedWritePath> {
+  return resolveAndBrandWriteForAuthority(
+    cwd,
+    [".code-pact/cache/reviews", file].join("/"),
+    isReviewManifestPath,
   );
 }
 

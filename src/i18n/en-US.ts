@@ -32,6 +32,22 @@ export const messages = {
     "      --locale     ja-JP | en-US (defaults to LANG)",
   ].join("\n"),
   unknownCommand: (cmd: string): string => `Unknown command: ${cmd}`,
+  reviewBundle: {
+    missingTaskId: "review-bundle requires a task id.",
+    written: (taskId: string, phaseId: string, path: string): string =>
+      `Review bundle written for "${taskId}" (phase ${phaseId}) at ${path}.`,
+    stateMismatch: (taskId: string): string =>
+      `Review bundle refused: task/phase state mismatch for "${taskId}".`,
+    verificationMissing: (taskId: string): string =>
+      `Review bundle refused: task verification evidence missing for "${taskId}".`,
+    scopeImprecise: (declaredUnused: string[]): string =>
+      `Review bundle refused: declared writes were not used: ${declaredUnused.join(", ")}.`,
+  },
+  ciParity: {
+    missingTaskId: "ci-parity requires a task id.",
+    ok: (taskId: string): string =>
+      `ci-parity: review evidence for "${taskId}" matches current HEAD and local verification passed.`,
+  },
   init: {
     alreadyInitialized: (dir: string): string =>
       `".code-pact/" already exists in ${dir}. Use --force to overwrite.`,
@@ -277,6 +293,72 @@ export const messages = {
       agentNotFound: (name: string): string =>
         `Agent "${name}" is not configured in project.yaml.`,
     },
+    lock: {
+      missingTaskId: "task lock requires a task id.",
+      locked: (taskId: string, phaseId: string, path: string): string =>
+        `Locked contract for task "${taskId}" in phase "${phaseId}" at ${path}.`,
+      contractDrift: (taskId: string, reasons: string[]): string =>
+        `TASK_CONTRACT_DRIFT for "${taskId}": ${reasons.join("; ")}`,
+    },
+    execute: {
+      missingTaskId: "task execute requires a task id.",
+      missingExecutorFile: "task execute requires --executor-file <path>.",
+      done: (taskId: string, changed_file: string): string =>
+        `Task ${taskId} done: ${changed_file}`,
+      ineligible: (taskId: string, reasons: string[]): string =>
+        `Task ${taskId} is not eligible for one-shot execution:` +
+        reasons.map(r => `\n  - ${r}`).join(""),
+      worktreeNotClean: (summary: {
+        changed_path_count: number;
+        changed_paths: string[];
+        paths_truncated: boolean;
+      }): string =>
+        `Working tree is not clean before execution (${summary.changed_path_count} path${summary.changed_path_count === 1 ? "" : "s"} changed${summary.paths_truncated ? ", list truncated" : ""}).`,
+      executorMutatedWorktree: (
+        summary: {
+          changed_path_count: number;
+          changed_paths: string[];
+          paths_truncated: boolean;
+        },
+        rollback: string,
+        head_changed: boolean,
+        index_changed: boolean,
+      ): string =>
+        `Executor modified the working tree before returning (${summary.changed_path_count} file${summary.changed_path_count === 1 ? "" : "s"}${summary.paths_truncated ? ", list truncated" : ""}); rollback=${rollback}, head_changed=${head_changed}, index_changed=${index_changed}. Review and restore the repository manually.`,
+      gitStateUnavailable: (reason: string, source_rollback: string): string =>
+        `Git state is unavailable after edit: ${reason}; source_rollback=${source_rollback}. The repository may not be clean.`,
+      executionScopeViolation: (
+        summary: {
+          changed_path_count: number;
+          changed_paths: string[];
+          paths_truncated: boolean;
+        },
+        rollback: string,
+        head_changed: boolean,
+        index_changed: boolean,
+      ): string =>
+        `Execution scope violation: ${summary.changed_path_count} file${summary.changed_path_count === 1 ? "" : "s"} changed outside the target source file${summary.paths_truncated ? " (list truncated)" : ""}; rollback=${rollback}, head_changed=${head_changed}, index_changed=${index_changed}.`,
+      blocked: (taskId: string, reason: string): string =>
+        `Task ${taskId} blocked: ${reason}`,
+      editRejected: (taskId: string, reason: string): string =>
+        `Edit rejected for ${taskId}: ${reason}`,
+      executorFailed: (taskId: string, reason: string): string =>
+        `Executor failed for ${taskId}: ${reason}`,
+      verificationFailed: (taskId: string): string =>
+        `Verification failed for ${taskId}; file rolled back.`,
+      rollbackFailed: (taskId: string, reason: string): string =>
+        `Rollback failed for ${taskId}: ${reason}`,
+      rollbackStaleFile: (taskId: string, reason: string): string =>
+        `Rollback stale file for ${taskId}: ${reason}`,
+      rollbackIncomplete: (summary: {
+        changed_path_count: number;
+        changed_paths: string[];
+        paths_truncated: boolean;
+      }): string =>
+        `Rollback incomplete: ${summary.changed_path_count} extra change${summary.changed_path_count === 1 ? "" : "s"} remain${summary.paths_truncated ? " (list truncated)" : ""}.`,
+      unknownResult: (result: string): string =>
+        `Unknown execute result kind: ${result}`,
+    },
     complete: {
       taskNotFound: (taskId: string): string =>
         `Task "${taskId}" not found in any phase.`,
@@ -306,6 +388,8 @@ export const messages = {
         `Dry run: would append done event for "${taskId}". no progress event was recorded.`,
       invalidTransition: (taskId: string, current: string): string =>
         `Task "${taskId}" is ${current}. Run \`code-pact task resume ${taskId}\` before completing.`,
+      dependencyIncomplete: (taskId: string, deps: string[]): string =>
+        `Task "${taskId}" cannot be completed: dependencies are not done: ${deps.join(", ")}.`,
     },
     failure: {
       cause: (name: string, reason: string): string =>
@@ -327,6 +411,8 @@ export const messages = {
         `Dry run: would append external done event for "${taskId}". no progress event was recorded.`,
       invalidTransition: (taskId: string, current: string): string =>
         `Task "${taskId}" is ${current}. Run \`code-pact task resume ${taskId}\` before recording done.`,
+      dependencyIncomplete: (taskId: string, deps: string[]): string =>
+        `Task "${taskId}" cannot be recorded as done: dependencies are not done: ${deps.join(", ")}.`,
     },
     finalize: {
       taskNotFound: (taskId: string): string =>
@@ -337,6 +423,8 @@ export const messages = {
         `Task "${taskId}" is not finalize-eligible: derived state is "${current}", expected "done". Run \`code-pact task complete ${taskId}\` first.`,
       writeRefused: (taskId: string, reason: string): string =>
         `Refused to finalize "${taskId}": ${reason}.`,
+      contractDrift: (taskId: string, reasons: string[]): string =>
+        `TASK_CONTRACT_DRIFT for "${taskId}": ${reasons.join("; ")}`,
       alreadyFinalized: (taskId: string): string =>
         `Task "${taskId}" design status is already "done". No change written.`,
       success: (taskId: string, file: string): string =>

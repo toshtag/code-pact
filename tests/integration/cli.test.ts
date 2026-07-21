@@ -14,6 +14,7 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { execSync } from "node:child_process";
 import {
   run as cliRun,
   ensureCliBuilt,
@@ -848,6 +849,11 @@ describe("CLI: task complete (v0.2)", () => {
   // Replace P1's verification commands with `echo ok` (or `false` for the
   // failing variant) so the spawned CLI does not need pnpm in tmpDir.
   async function rewritePhaseCommands(failing: boolean): Promise<string> {
+    // The contract lock was created against the original phase; replace it
+    // with a lock that matches the rewritten verification command.
+    const lockPath = join(tmpDir, ".code-pact", "state", "locks", "P1-T1.yaml");
+    await rm(lockPath, { force: true });
+
     const phasePath = join(tmpDir, "design", "phases", "P1-foundation.yaml");
     const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
       string,
@@ -857,6 +863,13 @@ describe("CLI: task complete (v0.2)", () => {
       commands: failing ? ["false"] : ["echo ok"],
     };
     await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+    execSync("git add .", { cwd: tmpDir, stdio: "ignore" });
+    execSync('git -c user.email="t@t" -c user.name="t" commit -m rewrite', {
+      cwd: tmpDir,
+      stdio: "ignore",
+    });
+    expectJsonOk(run(["task", "lock", "P1-T1", "--json"]));
     return phasePath;
   }
 
@@ -907,6 +920,16 @@ describe("CLI: task complete (v0.2)", () => {
       },
     ];
     await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+    execSync("git init", { cwd: tmpDir, stdio: "ignore" });
+    execSync("git config user.email test@example.com", {
+      cwd: tmpDir,
+      stdio: "ignore",
+    });
+    execSync("git config user.name Test", { cwd: tmpDir, stdio: "ignore" });
+    execSync("git add .", { cwd: tmpDir, stdio: "ignore" });
+    execSync("git commit -m init", { cwd: tmpDir, stdio: "ignore" });
+    expectJsonOk(run(["task", "lock", "P1-T1", "--json"]));
   }
 
   it("happy path: appends done event, idempotent on re-run", async () => {
@@ -1236,6 +1259,16 @@ describe("CLI: status (v1.32)", () => {
       },
     ];
     await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+    execSync("git init", { cwd: tmpDir, stdio: "ignore" });
+    execSync("git config user.email test@example.com", {
+      cwd: tmpDir,
+      stdio: "ignore",
+    });
+    execSync("git config user.name Test", { cwd: tmpDir, stdio: "ignore" });
+    execSync("git add .", { cwd: tmpDir, stdio: "ignore" });
+    execSync("git commit -m init", { cwd: tmpDir, stdio: "ignore" });
+    expectJsonOk(run(["task", "lock", "P1-T1", "--json"]));
   }
 
   it("lists a planned task as available, then in_flight (with author) after start", async () => {
@@ -1489,6 +1522,16 @@ describe("CLI: task record-done (v1.21)", () => {
       },
     ];
     await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+    execSync("git init", { cwd: tmpDir, stdio: "ignore" });
+    execSync("git config user.email test@example.com", {
+      cwd: tmpDir,
+      stdio: "ignore",
+    });
+    execSync("git config user.name Test", { cwd: tmpDir, stdio: "ignore" });
+    execSync("git add .", { cwd: tmpDir, stdio: "ignore" });
+    execSync("git commit -m init", { cwd: tmpDir, stdio: "ignore" });
+    expectJsonOk(run(["task", "lock", "P1-T1", "--json"]));
   }
 
   it("happy path: appends external done event despite failing verify command; idempotent on re-run", async () => {
@@ -1698,6 +1741,16 @@ describe("CLI: task state machine (v0.6)", () => {
     ];
     doc.verification = { commands: ["echo ok"] };
     await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+    execSync("git init", { cwd: tmpDir, stdio: "ignore" });
+    execSync("git config user.email test@example.com", {
+      cwd: tmpDir,
+      stdio: "ignore",
+    });
+    execSync("git config user.name Test", { cwd: tmpDir, stdio: "ignore" });
+    execSync("git add .", { cwd: tmpDir, stdio: "ignore" });
+    execSync("git commit -m init", { cwd: tmpDir, stdio: "ignore" });
+    expectJsonOk(run(["task", "lock", "P1-T1", "--json"]));
   }
 
   async function readProgress(): Promise<{ raw: string; events: unknown[] }> {

@@ -376,6 +376,131 @@ const runbook: CommandSpec = {
   examples: ["code-pact task runbook P1-T1 --json"],
 };
 
+const execute: CommandSpec = {
+  cluster: "task",
+  command: "execute",
+  positional: "<task-id>",
+  summary: [
+    "EXPERIMENTAL: Run a single-file one-shot execution via an external executor.",
+    "Requires a clean git working tree and an unmodified HEAD and index. The",
+    "executor-file must be the raw project-relative POSIX path to a regular,",
+    "non-symlink, executable file inside the project (no './', '../', or empty",
+    "segments; hidden directories such as '.agents/one-shot.mjs' are allowed).",
+    "The executor is a trusted executable: it runs with its cwd set to an OS",
+    "temporary directory, a sanitized environment (known repository-path variables",
+    "removed), and the same process privileges as code-pact. It is not an OS sandbox.",
+    "The executor receives a JSON input with the task goal and source file content,",
+    "and must respond with either a replace_exact payload",
+    "(expected_file_sha256, old_text, new_text) or a blocked reason. On",
+    "verification failure or any scope violation the source file is rolled back",
+    "with a reported rollback status (complete/incomplete/stale). The runtime never",
+    "automatically rolls back mutations of unknown provenance (the executor or an",
+    "external process may change the working tree before returning, which is reported",
+    "as executor_mutated_worktree with rollback=not_attempted). When git state cannot",
+    "be captured after a known Code Pact edit, the source edit is still rolled back",
+    "and a GIT_STATE_UNAVAILABLE error is emitted. The runtime never resets HEAD or",
+    "unstages changes. Scope auditing covers HEAD, the Git index,",
+    "and Git-visible tracked/untracked paths; ignored paths and repository-external",
+    "side effects are not prevented. All public failure reasons and path lists are",
+    "bounded. This command is experimental and its contract may change without a",
+    "major version bump.",
+  ].join("\n"),
+  flags: [
+    {
+      name: "executor-file",
+      value: "<path>",
+      required: true,
+      description:
+        "Project-relative POSIX path to the trusted external one-shot executor executable. Must be given exactly as stored in the project (no leading './', no '..' or '.' segments, no empty segments, no '\\\\'), and must be executable and accept JSON on stdin.",
+    },
+    {
+      name: "agent",
+      value: "<name>",
+      description: "Agent name. Defaults to project default_agent.",
+    },
+    {
+      name: "timeout",
+      value: "<ms>",
+      description:
+        "Per-command timeout in decimal milliseconds (default: 120000).",
+    },
+    { name: "json", description: "Emit JSON." },
+  ],
+  examples: [
+    "code-pact task execute P78-T1 --executor-file agents/one-shot.sh --json",
+  ],
+};
+
+const lock: CommandSpec = {
+  cluster: "task",
+  command: "lock",
+  positional: "<task-id>",
+  summary: [
+    "Lock a task's declared reads/writes and base ref as an immutable contract.",
+    "After locking, `task finalize` (and other mutating verbs) compare the",
+    "current task declaration and --base-ref against the lock. Any mismatch",
+    "raises TASK_CONTRACT_DRIFT and aborts the operation.",
+  ].join("\n"),
+  flags: [
+    {
+      name: "base-ref",
+      value: "<ref>",
+      description:
+        "Git ref to record as the contract base (default: HEAD, resolved to a SHA).",
+    },
+    {
+      name: "agent",
+      value: "<name>",
+      description: "Agent name. Defaults to project default_agent.",
+    },
+    { name: "json", description: "Emit JSON." },
+  ],
+  examples: [
+    "code-pact task lock P1-T1",
+    "code-pact task lock P1-T1 --base-ref origin/main --json",
+  ],
+};
+
+const reviewBundle: CommandSpec = {
+  cluster: "task",
+  command: "review-bundle",
+  positional: "<task-id>",
+  summary: [
+    "Generate a review evidence manifest and ZIP bundle for a done task.",
+    "Runs the same classifier and verification commands used in CI, stores the",
+    "manifest under .code-pact/cache/reviews/<task-id>/manifest.json, and writes",
+    "a ZIP with manifest, contract lock, phase YAML, done event, verification",
+    "results, changed files, and diff patch.",
+  ].join("\n"),
+  flags: [
+    {
+      name: "output",
+      value: "<path>",
+      description:
+        "Path for the review ZIP bundle (default: .code-pact/cache/reviews/<task-id>/bundle.zip).",
+    },
+    { name: "json", description: "Emit JSON." },
+  ],
+  examples: [
+    "code-pact task review-bundle P1-T1",
+    "code-pact task review-bundle P1-T1 --output /tmp/P1-T1-review.zip --json",
+  ],
+};
+
+const ciParity: CommandSpec = {
+  cluster: "task",
+  command: "ci-parity",
+  positional: "<task-id>",
+  summary: [
+    "Verify that the review evidence for a task is consistent with the current",
+    "repository HEAD, re-run the classifier-selected verification commands, and",
+    "confirm local verification passed. Remote CI cannot be self-reported; it is",
+    "always pending unless an external run is supplied.",
+  ].join("\n"),
+  flags: [{ name: "json", description: "Emit JSON." }],
+  examples: ["code-pact task ci-parity P1-T1 --json"],
+};
+
 const recordDone: CommandSpec = {
   cluster: "task",
   command: "record-done",
@@ -433,5 +558,9 @@ export const TASK_SPECS: Record<string, CommandSpec> = {
   block,
   resume,
   runbook,
+  execute,
+  lock,
+  "review-bundle": reviewBundle,
+  "ci-parity": ciParity,
   "record-done": recordDone,
 };

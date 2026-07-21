@@ -32,6 +32,22 @@ export const messages = {
     "      --locale     ja-JP | en-US (既定は LANG)",
   ].join("\n"),
   unknownCommand: (cmd: string): string => `未知のコマンド: ${cmd}`,
+  reviewBundle: {
+    missingTaskId: "review-bundle にはタスク ID が必要です。",
+    written: (taskId: string, phaseId: string, path: string): string =>
+      `"${taskId}" （フェーズ ${phaseId}）のレビュー bundle を ${path} に書きました。`,
+    stateMismatch: (taskId: string): string =>
+      `レビュー bundle を拒否しました: "${taskId}" のタスク／フェーズ状態が一致しません。`,
+    verificationMissing: (taskId: string): string =>
+      `レビュー bundle を拒否しました: "${taskId}" のタスク検証エビデンスがありません。`,
+    scopeImprecise: (declaredUnused: string[]): string =>
+      `レビュー bundle を拒否しました: 宣言された write のうち使用されなかったものがあります: ${declaredUnused.join(", ")}`,
+  },
+  ciParity: {
+    missingTaskId: "ci-parity にはタスク ID が必要です。",
+    ok: (taskId: string): string =>
+      `ci-parity: "${taskId}" のレビュー証拠は現在の HEAD と一致し、ローカル検証が通過しました。`,
+  },
   init: {
     alreadyInitialized: (dir: string): string =>
       `"${dir}" に ".code-pact/" が既に存在します。上書きするには --force を使ってください。`,
@@ -279,6 +295,73 @@ export const messages = {
       agentNotFound: (name: string): string =>
         `エージェント "${name}" は project.yaml に設定されていません。`,
     },
+    lock: {
+      missingTaskId: "task lock にはタスク ID が必要です。",
+      locked: (taskId: string, phaseId: string, path: string): string =>
+        `タスク "${taskId}" （フェーズ "${phaseId}"）の契約を ${path} にロックしました。`,
+      contractDrift: (taskId: string, reasons: string[]): string =>
+        `"${taskId}" で TASK_CONTRACT_DRIFT: ${reasons.join("; ")}`,
+    },
+    execute: {
+      missingTaskId: "task execute にはタスク ID が必要です。",
+      missingExecutorFile:
+        "task execute には --executor-file <path> が必要です。",
+      done: (taskId: string, changed_file: string): string =>
+        `タスク ${taskId} 完了: ${changed_file}`,
+      ineligible: (taskId: string, reasons: string[]): string =>
+        `タスク ${taskId} は one-shot 実行の対象外です:` +
+        reasons.map(r => `\n  - ${r}`).join(""),
+      worktreeNotClean: (summary: {
+        changed_path_count: number;
+        changed_paths: string[];
+        paths_truncated: boolean;
+      }): string =>
+        `実行前に working tree がクリーンではありません (${summary.changed_path_count} 件の変更${summary.paths_truncated ? "、一覧は打ち切り" : ""})。`,
+      executorMutatedWorktree: (
+        summary: {
+          changed_path_count: number;
+          changed_paths: string[];
+          paths_truncated: boolean;
+        },
+        rollback: string,
+        head_changed: boolean,
+        index_changed: boolean,
+      ): string =>
+        `executor が source ファイルを含む working tree に ${summary.changed_path_count} 件の変更を加えました${summary.paths_truncated ? " (一覧は打ち切り)" : ""}; rollback=${rollback}, head_changed=${head_changed}, index_changed=${index_changed}。手動で確認・復元してください。`,
+      gitStateUnavailable: (reason: string, source_rollback: string): string =>
+        `edit 後に Git 状態を取得できません: ${reason}; source_rollback=${source_rollback}。リポジトリがクリーンであることは保証されません。`,
+      executionScopeViolation: (
+        summary: {
+          changed_path_count: number;
+          changed_paths: string[];
+          paths_truncated: boolean;
+        },
+        rollback: string,
+        head_changed: boolean,
+        index_changed: boolean,
+      ): string =>
+        `実行スコープ違反: source ファイル外に ${summary.changed_path_count} 件の変更があります${summary.paths_truncated ? " (一覧は打ち切り)" : ""}; rollback=${rollback}, head_changed=${head_changed}, index_changed=${index_changed}。`,
+      blocked: (taskId: string, reason: string): string =>
+        `タスク ${taskId} はブロックされました: ${reason}`,
+      editRejected: (taskId: string, reason: string): string =>
+        `タスク ${taskId} の edit が拒否されました: ${reason}`,
+      executorFailed: (taskId: string, reason: string): string =>
+        `タスク ${taskId} の executor が失敗しました: ${reason}`,
+      verificationFailed: (taskId: string): string =>
+        `タスク ${taskId} の verify が失敗しました; ファイルを復元しました。`,
+      rollbackFailed: (taskId: string, reason: string): string =>
+        `タスク ${taskId} の rollback に失敗しました: ${reason}`,
+      rollbackStaleFile: (taskId: string, reason: string): string =>
+        `タスク ${taskId} の rollback が stale file により拒否されました: ${reason}`,
+      rollbackIncomplete: (summary: {
+        changed_path_count: number;
+        changed_paths: string[];
+        paths_truncated: boolean;
+      }): string =>
+        `rollback は不完全です: ${summary.changed_path_count} 件の追加変更が残っています${summary.paths_truncated ? " (一覧は打ち切り)" : ""}。`,
+      unknownResult: (result: string): string =>
+        `未知の execute 結果 kind です: ${result}`,
+    },
     complete: {
       taskNotFound: (taskId: string): string =>
         `タスク "${taskId}" がどのフェーズにも見つかりません。`,
@@ -308,6 +391,8 @@ export const messages = {
         `Dry run: タスク "${taskId}" の done イベントを追記する想定です。progress イベントは記録されていません。`,
       invalidTransition: (taskId: string, current: string): string =>
         `タスク "${taskId}" は ${current} 状態です。先に \`code-pact task resume ${taskId}\` を実行してください。`,
+      dependencyIncomplete: (taskId: string, deps: string[]): string =>
+        `タスク "${taskId}" は完了できません: 依存タスクが未完了です: ${deps.join(", ")}。`,
     },
     failure: {
       cause: (name: string, reason: string): string =>
@@ -329,6 +414,8 @@ export const messages = {
         `Dry run: タスク "${taskId}" の external done イベントを追記する想定です。progress イベントは記録されていません。`,
       invalidTransition: (taskId: string, current: string): string =>
         `タスク "${taskId}" は ${current} 状態です。先に \`code-pact task resume ${taskId}\` を実行してください。`,
+      dependencyIncomplete: (taskId: string, deps: string[]): string =>
+        `タスク "${taskId}" を done に記録できません: 依存タスクが未完了です: ${deps.join(", ")}。`,
     },
     finalize: {
       taskNotFound: (taskId: string): string =>
@@ -339,6 +426,8 @@ export const messages = {
         `タスク "${taskId}" は finalize できません: derived 状態が "${current}" で、"done" が必要です。先に \`code-pact task complete ${taskId}\` を実行してください。`,
       writeRefused: (taskId: string, reason: string): string =>
         `タスク "${taskId}" の finalize は拒否されました: ${reason}`,
+      contractDrift: (taskId: string, reasons: string[]): string =>
+        `"${taskId}" で TASK_CONTRACT_DRIFT: ${reasons.join("; ")}`,
       alreadyFinalized: (taskId: string): string =>
         `タスク "${taskId}" の design status は既に "done" です。書き込みは行いませんでした。`,
       success: (taskId: string, file: string): string =>

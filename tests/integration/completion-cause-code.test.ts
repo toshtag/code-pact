@@ -7,11 +7,23 @@
 // built CLI and exercise the decision-gate path (no ADR / proposed ADR) and the
 // command-failure path. See design/decisions/root-cause-completion-errors-rfc.md.
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, readFile, writeFile, mkdir, readdir } from "node:fs/promises";
+import {
+  mkdtemp,
+  rm,
+  readFile,
+  writeFile,
+  mkdir,
+  readdir,
+} from "node:fs/promises";
+import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
+import {
+  run as cliRun,
+  ensureCliBuilt,
+  type RunResult,
+} from "../helpers/cli.ts";
 
 let tmpDir: string;
 
@@ -33,8 +45,9 @@ type Envelope = {
 async function phaseP1Path(): Promise<string> {
   const dir = join(tmpDir, "design", "phases");
   const entries = await readdir(dir);
-  const file = entries.find((e) => e === "P1.yaml" || e.startsWith("P1-"));
-  if (!file) throw new Error(`P1 phase file not found in ${entries.join(", ")}`);
+  const file = entries.find(e => e === "P1.yaml" || e.startsWith("P1-"));
+  if (!file)
+    throw new Error(`P1 phase file not found in ${entries.join(", ")}`);
   return join(dir, file);
 }
 
@@ -74,7 +87,10 @@ async function setupTask(
   ).toBe(0);
 
   const phasePath = await phaseP1Path();
-  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
+  const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+    string,
+    unknown
+  >;
   doc.verification = { commands };
   const task: Record<string, unknown> = {
     id: "P1-T1",
@@ -91,6 +107,16 @@ async function setupTask(
   patch(task);
   doc.tasks = [task];
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+  execSync("git init", { cwd: tmpDir, stdio: "ignore" });
+  execSync("git config user.email test@example.com", {
+    cwd: tmpDir,
+    stdio: "ignore",
+  });
+  execSync("git config user.name Test", { cwd: tmpDir, stdio: "ignore" });
+  execSync("git add .", { cwd: tmpDir, stdio: "ignore" });
+  execSync("git commit -m init", { cwd: tmpDir, stdio: "ignore" });
+  expect(run(["task", "lock", "P1-T1", "--json"]).code).toBe(0);
 }
 
 async function writeAdr(filename: string, body: string): Promise<void> {
@@ -115,7 +141,7 @@ describe("P39: task complete cause_code", () => {
   });
 
   it("decision gate with no ADR -> cause_code DECISION_REQUIRED; progress.yaml unchanged", async () => {
-    await setupTask((t) => {
+    await setupTask(t => {
       t.requires_decision = true;
     });
 
@@ -154,7 +180,7 @@ describe("P39: task complete cause_code", () => {
     expect(env.data.failed_checks).toContain("decision");
     expect(env.data.first_failure?.name).toBe("decision");
     expect(
-      env.data.verify.checks.some((c) => c.name === "decision" && !c.ok),
+      env.data.verify.checks.some(c => c.name === "decision" && !c.ok),
     ).toBe(true);
 
     const after = await readFile(progressPath, "utf8");
@@ -162,7 +188,7 @@ describe("P39: task complete cause_code", () => {
   });
 
   it("decision gate with a proposed (not accepted) ADR -> same cause_code, accepted required", async () => {
-    await setupTask((t) => {
+    await setupTask(t => {
       t.requires_decision = true;
     });
     await writeAdr(
@@ -216,9 +242,12 @@ describe("P39: task complete cause_code", () => {
   // command the cause. This is the accepted behavior — pinned so a future
   // reorder or a switch to priority-based selection is a conscious change.
   it("command + decision both fail -> COMMANDS_FAILED wins; both in failed_checks", async () => {
-    await setupTask((t) => {
-      t.requires_decision = true;
-    }, ["false"]);
+    await setupTask(
+      t => {
+        t.requires_decision = true;
+      },
+      ["false"],
+    );
 
     // Real completion (not --dry-run): --dry-run previews commands rather than
     // executing them, so the command must actually run for `commands` to be the
@@ -245,7 +274,7 @@ describe("P39: task complete cause_code", () => {
   // reading stderr is not left with only the generic message. The command-cause
   // human case is covered in cli.test.ts; this pins the decision cause.
   it("human output (decision failure): actionable headline + cause + rerun line", async () => {
-    await setupTask((t) => {
+    await setupTask(t => {
       t.requires_decision = true;
     });
 
@@ -256,7 +285,9 @@ describe("P39: task complete cause_code", () => {
     expect(res.stderr).not.toBe(GENERIC);
     // The shared failure-summary lines below it.
     expect(res.stderr).toMatch(/cause: decision —/);
-    expect(res.stderr).toMatch(/rerun after fixing: code-pact task complete P1-T1/);
+    expect(res.stderr).toMatch(
+      /rerun after fixing: code-pact task complete P1-T1/,
+    );
   });
 
   it("human output (command failure): actionable headline + cause + rerun line", async () => {
@@ -266,7 +297,9 @@ describe("P39: task complete cause_code", () => {
     expect(res.code).toBe(1);
     expect(res.stderr).toMatch(/a verification command failed/i);
     expect(res.stderr).toMatch(/cause: commands —/);
-    expect(res.stderr).toMatch(/rerun after fixing: code-pact task complete P1-T1/);
+    expect(res.stderr).toMatch(
+      /rerun after fixing: code-pact task complete P1-T1/,
+    );
   });
 
   // P39 contract boundary: error.cause_code is a `task complete`-only surface.
@@ -276,7 +309,7 @@ describe("P39: task complete cause_code", () => {
   // COMMANDS_FAILED) is added only by `task complete`. Pinned so a future change
   // to verify's surface is a conscious decision.
   it("standalone verify failure has NO error.cause_code (cause_code is task complete-only)", async () => {
-    await setupTask((t) => {
+    await setupTask(t => {
       t.requires_decision = true;
     });
 
@@ -292,7 +325,7 @@ describe("P39: task complete cause_code", () => {
     expect(env.ok).toBe(false);
     expect(env.error?.code).toBe("VERIFICATION_FAILED");
     expect(env.error).not.toHaveProperty("cause_code");
-    expect(env.data.checks.some((c) => c.name === "decision" && !c.ok)).toBe(
+    expect(env.data.checks.some(c => c.name === "decision" && !c.ok)).toBe(
       true,
     );
   });

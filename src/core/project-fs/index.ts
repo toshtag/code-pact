@@ -80,8 +80,10 @@ export {
   resolveRulesDirectoryReadPath,
   resolveDoctorConfigReadPath,
   resolveExplicitUserReadPath,
+  resolveExecuteSourceReadPath,
   // Write resolvers
   resolveDecisionWritePath,
+  resolveExecuteSourceWritePath,
   resolvePhaseWritePath,
   resolveRoadmapWritePath,
   resolveProgressWritePath,
@@ -100,6 +102,12 @@ export {
 export {
   resolveProjectScaffoldReadPath,
   resolveProjectScaffoldWritePath,
+  resolveContractLockDirWritePath,
+  resolveContractLockReadPath,
+  resolveContractLockWritePath,
+  resolveReviewCacheDirWritePath,
+  resolveReviewManifestReadPath,
+  resolveReviewManifestWritePath,
 } from "./authorities/project-config-authority.ts";
 export {
   resolveContextManifestReadPath,

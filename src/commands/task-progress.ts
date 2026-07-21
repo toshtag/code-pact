@@ -16,6 +16,10 @@ import {
   deriveTaskState,
 } from "../core/progress/task-state.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
+import {
+  createTaskContractLock,
+  readContractLock,
+} from "../core/contract-lock.ts";
 
 // Resolve the agent (against project.yaml), the task's phase, and its current
 // derived state. Identical across the three runners; agent validation runs
@@ -111,6 +115,17 @@ export async function runTaskStart(
   }
 
   assertTransition(state.current, "started");
+
+  const lock = await readContractLock(cwd, taskId);
+  if (lock === null) {
+    await createTaskContractLock({
+      cwd,
+      taskId,
+      agent: agentName,
+      author: await resolveEventAuthor(cwd),
+      actor: "agent",
+    });
+  }
 
   const event = await appendProgressEvent(cwd, {
     taskId,

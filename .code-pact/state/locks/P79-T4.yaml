@@ -1,0 +1,128 @@
+schema_version: 1
+task_id: P79-T4
+phase_id: P79
+phase_path: design/phases/P79-immutable-contracts-and-review-evidence.yaml
+base_ref: HEAD
+base_sha: dfbaa7d9f8976bc85f311132cf94b1421f414930
+phase_blob_sha: 0e1c96cde973dc8613cb84192cd9a6b261508a26
+contract_digest: 5791e7962df306cbabf0d4d84a789cd81ffb0ac5bac243af3d41fac03d609db9
+contract:
+  description: Replace self-reported evidence with verifiable evidence.
+  reads:
+    - docs/agent-contract.md
+    - docs/cli-contract.md
+    - docs/per-task-loop.md
+    - docs/troubleshooting.md
+    - scripts/verification-scope.mjs
+    - src/cli/commands/ci-parity.ts
+    - src/cli/commands/review-bundle.ts
+    - src/cli/commands/task-execute.ts
+    - src/cli/commands/task-lock.ts
+    - src/cli/commands/task.ts
+    - src/cli/spec/task.ts
+    - src/cli/usage.ts
+    - src/commands/ci-parity.ts
+    - src/commands/review-bundle.ts
+    - src/commands/task-complete.ts
+    - src/commands/task-finalize.ts
+    - src/commands/task-lock.ts
+    - src/commands/task-record-done.ts
+    - src/core/audit/write-audit.ts
+    - src/core/classify/result.ts
+    - src/core/contract-lock.ts
+    - src/core/evidence/failure-capsule.ts
+    - src/core/plan/load-phase.ts
+    - src/core/plan/resolve-task.ts
+    - src/core/progress/events-io.ts
+    - src/core/progress/io.ts
+    - src/core/progress/task-state.ts
+    - src/core/project-fs/authorities/project-config-authority.ts
+    - src/core/project-fs/index.ts
+    - src/core/review-bundle.ts
+    - src/core/schemas/task.ts
+    - src/core/verify/classify.ts
+    - src/i18n/en-US.ts
+    - src/i18n/ja-JP.ts
+    - tests/integration/ci-parity.test.ts
+    - tests/integration/review-bundle.test.ts
+    - tests/integration/task-lock.test.ts
+    - tests/unit/commands/ci-parity.test.ts
+    - tests/unit/commands/review-bundle.test.ts
+    - tests/unit/commands/task-complete.test.ts
+    - tests/unit/commands/task-finalize.test.ts
+    - tests/unit/commands/task-lock.test.ts
+    - tests/unit/commands/task-record-done.test.ts
+  writes:
+    - design/phases/P79-immutable-contracts-and-review-evidence.yaml
+    - docs/agent-contract.md
+    - docs/cli-contract.md
+    - docs/cli-reference.generated.md
+    - docs/per-task-loop.md
+    - docs/troubleshooting.md
+    - package.json
+    - pnpm-lock.yaml
+    - scripts/check-supply-chain-invariants.mjs
+    - scripts/verification-scope.mjs
+    - src/cli/commands/ci-parity.ts
+    - src/cli/commands/review-bundle.ts
+    - src/cli/commands/task-execute.ts
+    - src/cli/commands/task-lock.ts
+    - src/cli/commands/task.ts
+    - src/cli/spec/task.ts
+    - src/cli/usage.ts
+    - src/commands/ci-parity.ts
+    - src/commands/review-bundle.ts
+    - src/commands/task-complete.ts
+    - src/commands/task-finalize.ts
+    - src/commands/task-lock.ts
+    - src/commands/task-progress.ts
+    - src/commands/task-record-done.ts
+    - src/commands/tutorial.ts
+    - src/core/audit/write-audit.ts
+    - src/core/contract-lock.ts
+    - src/core/execute-once/run.ts
+    - src/core/project-fs/authorities/project-config-authority.ts
+    - src/core/project-fs/index.ts
+    - src/core/review-bundle.ts
+    - src/core/verify/classify.ts
+    - src/i18n/en-US.ts
+    - src/i18n/ja-JP.ts
+    - tests/integration/ci-parity.test.ts
+    - tests/integration/cli-aliases.test.ts
+    - tests/integration/cli.test.ts
+    - tests/integration/completion-cause-code.test.ts
+    - tests/integration/e2e-workflow.test.ts
+    - tests/integration/evidence-agent-detail.test.ts
+    - tests/integration/helpers/execute-once.ts
+    - tests/integration/json-stdout.test.ts
+    - tests/integration/migration.test.ts
+    - tests/integration/review-bundle.test.ts
+    - tests/integration/task-context-budget.test.ts
+    - tests/integration/task-execute-cli.test.ts
+    - tests/integration/task-execute-once.test.ts
+    - tests/integration/task-finalize-audit-strict.test.ts
+    - tests/integration/task-finalize-write-audit.test.ts
+    - tests/integration/task-lock.test.ts
+    - tests/integration/task-prepare-commands-contract.test.ts
+    - tests/integration/verify-timeout-abort.test.ts
+    - tests/unit/commands/ci-parity.test.ts
+    - tests/unit/commands/review-bundle.test.ts
+    - tests/unit/commands/task-complete.test.ts
+    - tests/unit/commands/task-finalize.test.ts
+    - tests/unit/commands/task-lock.test.ts
+    - tests/unit/commands/task-record-done.test.ts
+    - tests/unit/commands/task-start.test.ts
+    - tests/unit/error-code-surface.test.ts
+  depends_on: []
+  decision_refs: []
+  acceptance_refs: []
+  definition_of_done:
+    - All P79 tasks are done and review evidence is recorded.
+  verification_commands:
+    - pnpm test
+  base_sha: dfbaa7d9f8976bc85f311132cf94b1421f414930
+  phase_blob_sha: 0e1c96cde973dc8613cb84192cd9a6b261508a26
+at: 2026-07-21T00:09:02.240Z
+actor: agent
+agent: claude-code
+author: Pocket

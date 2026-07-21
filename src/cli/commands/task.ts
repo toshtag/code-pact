@@ -9,6 +9,10 @@
 
 import { parseArgs } from "node:util";
 import { strictParse, strictParseAlias, ConfigError } from "../../lib/argv.ts";
+import { cmdTaskExecute } from "./task-execute.ts";
+import { cmdTaskLock } from "./task-lock.ts";
+import { cmdReviewBundle } from "./review-bundle.ts";
+import { cmdCiParity } from "./ci-parity.ts";
 import {
   clusterUsage,
   emitUsage,
@@ -195,8 +199,20 @@ export async function cmdTask(
   if (subcommand === "runbook" || subcommand === "next") {
     return cmdTaskRunbook(rest, locale, globalJson, `task ${subcommand}`);
   }
+  if (subcommand === "execute") {
+    return cmdTaskExecute(rest, locale, globalJson);
+  }
+  if (subcommand === "lock") {
+    return cmdTaskLock(rest, locale, globalJson);
+  }
+  if (subcommand === "review-bundle") {
+    return cmdReviewBundle(rest, locale, globalJson);
+  }
+  if (subcommand === "ci-parity") {
+    return cmdCiParity(rest, locale, globalJson);
+  }
 
-  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook (aliases: reconcile = finalize, next = runbook)`;
+  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook | execute | lock | review-bundle | ci-parity (aliases: reconcile = finalize, next = runbook)`;
   emitError(globalJson, "CONFIG_ERROR", msg);
   return 2;
 }
@@ -1441,6 +1457,7 @@ async function cmdTaskComplete(
 
     let message: string;
     let outCode: string;
+    let errorData: Record<string, unknown> | undefined;
     switch (code) {
       case "TASK_NOT_FOUND":
         message = m.task.complete.taskNotFound(taskId);
@@ -1461,6 +1478,14 @@ async function cmdTaskComplete(
         message = m.task.complete.agentNotFound(agent ?? "");
         outCode = "AGENT_NOT_FOUND";
         break;
+      case "TASK_DEPENDENCY_INCOMPLETE": {
+        const deps =
+          (error as NodeJS.ErrnoException & { deps?: string[] }).deps ?? [];
+        message = m.task.complete.dependencyIncomplete(taskId, deps);
+        outCode = "TASK_DEPENDENCY_INCOMPLETE";
+        errorData = { deps };
+        break;
+      }
       case "INVALID_TASK_TRANSITION": {
         const current =
           (error as NodeJS.ErrnoException & { current?: string }).current ?? "";
@@ -1472,6 +1497,32 @@ async function cmdTaskComplete(
         message = error.message;
         outCode = "PHASE_SNAPSHOT_INVALID";
         break;
+      case "TASK_CONTRACT_LOCK_REQUIRED": {
+        message = error.message;
+        outCode = "TASK_CONTRACT_LOCK_REQUIRED";
+        break;
+      }
+      case "TASK_CONTRACT_DRIFT": {
+        const drift =
+          (error as NodeJS.ErrnoException & { drift?: { message: string }[] })
+            .drift ?? [];
+        const changed =
+          (error as NodeJS.ErrnoException & { changed_fields?: string[] })
+            .changed_fields ?? [];
+        message = `TASK_CONTRACT_DRIFT for "${taskId}": ${drift.map(d => d.message).join("; ")}`;
+        outCode = "TASK_CONTRACT_DRIFT";
+        errorData = {
+          locked_digest:
+            (error as NodeJS.ErrnoException & { locked_digest?: string })
+              .locked_digest ?? "",
+          current_digest:
+            (error as NodeJS.ErrnoException & { current_digest?: string })
+              .current_digest ?? "",
+          changed_fields: changed,
+          drift,
+        };
+        break;
+      }
       case "CONFIG_ERROR":
         message = error.message;
         outCode = "CONFIG_ERROR";
@@ -1483,10 +1534,15 @@ async function cmdTaskComplete(
       emitAgentTaskCompleteError(
         { code: outCode, message: messageForAgentError(outCode) },
         message,
-        { task_id: taskId, agent },
+        { task_id: taskId, agent, ...(errorData ?? {}) },
       );
     } else {
-      emitError(json, outCode, message);
+      emitError(
+        json,
+        outCode,
+        message,
+        errorData !== undefined ? { data: errorData } : {},
+      );
     }
     return 2;
   } finally {
@@ -1613,6 +1669,7 @@ async function cmdTaskRecordDone(
 
     let msg: string;
     let outCode: string;
+    let errorData: Record<string, unknown> | undefined;
     switch (code) {
       case "TASK_NOT_FOUND":
         msg = m.task.complete.taskNotFound(taskId);
@@ -1633,11 +1690,44 @@ async function cmdTaskRecordDone(
         msg = m.task.complete.agentNotFound(agent ?? "");
         outCode = "AGENT_NOT_FOUND";
         break;
+      case "TASK_DEPENDENCY_INCOMPLETE": {
+        const deps =
+          (err as NodeJS.ErrnoException & { deps?: string[] }).deps ?? [];
+        msg = m.task.recordDone.dependencyIncomplete(taskId, deps);
+        outCode = "TASK_DEPENDENCY_INCOMPLETE";
+        errorData = { deps };
+        break;
+      }
       case "INVALID_TASK_TRANSITION": {
         const current =
           (err as NodeJS.ErrnoException & { current?: string }).current ?? "";
         msg = m.task.recordDone.invalidTransition(taskId, current);
         outCode = "INVALID_TASK_TRANSITION";
+        break;
+      }
+      case "TASK_CONTRACT_LOCK_REQUIRED":
+        msg = err.message;
+        outCode = "TASK_CONTRACT_LOCK_REQUIRED";
+        break;
+      case "TASK_CONTRACT_DRIFT": {
+        const drift =
+          (err as NodeJS.ErrnoException & { drift?: { message: string }[] })
+            .drift ?? [];
+        const changed =
+          (err as NodeJS.ErrnoException & { changed_fields?: string[] })
+            .changed_fields ?? [];
+        msg = `TASK_CONTRACT_DRIFT for "${taskId}": ${drift.map(d => d.message).join("; ")}`;
+        outCode = "TASK_CONTRACT_DRIFT";
+        errorData = {
+          locked_digest:
+            (err as NodeJS.ErrnoException & { locked_digest?: string })
+              .locked_digest ?? "",
+          current_digest:
+            (err as NodeJS.ErrnoException & { current_digest?: string })
+              .current_digest ?? "",
+          changed_fields: changed,
+          drift,
+        };
         break;
       }
       case "PHASE_SNAPSHOT_INVALID":
@@ -1654,8 +1744,16 @@ async function cmdTaskRecordDone(
       default:
         throw err;
     }
-    emitError(json, outCode, msg);
-    return 2;
+    emitError(
+      json,
+      outCode,
+      msg,
+      errorData !== undefined ? { data: errorData } : {},
+    );
+    return code === "TASK_CONTRACT_DRIFT" ||
+      code === "TASK_CONTRACT_LOCK_REQUIRED"
+      ? 1
+      : 2;
   }
 }
 
@@ -1900,6 +1998,21 @@ async function cmdTaskFinalize(
           };
           break;
         }
+        case "TASK_CONTRACT_DRIFT": {
+          const drift =
+            (err as NodeJS.ErrnoException & { drift?: { message: string }[] })
+              .drift ?? [];
+          msg = m.task.finalize.contractDrift(
+            taskId,
+            drift.map(d => d.message),
+          );
+          outCode = "TASK_CONTRACT_DRIFT";
+          break;
+        }
+        case "TASK_CONTRACT_LOCK_REQUIRED":
+          msg = err.message;
+          outCode = "TASK_CONTRACT_LOCK_REQUIRED";
+          break;
         case "PHASE_SNAPSHOT_INVALID":
           msg = err.message;
           outCode = "PHASE_SNAPSHOT_INVALID";
@@ -2074,8 +2187,19 @@ function emitTaskCommonError(
         (err as NodeJS.ErrnoException & { current?: string }).current ?? "";
       msg = m.task[key].invalidTransition(taskId, current);
       outCode = "INVALID_TASK_TRANSITION";
-      break;
+      emitError(json, outCode, msg);
+      return 1;
     }
+    case "WORKTREE_NOT_CLEAN":
+      msg = err.message;
+      outCode = "WORKTREE_NOT_CLEAN";
+      emitError(json, outCode, msg);
+      return 1;
+    case "TASK_CONTRACT_LOCK_EXISTS":
+      msg = err.message;
+      outCode = "TASK_CONTRACT_LOCK_EXISTS";
+      emitError(json, outCode, msg);
+      return 1;
     // Control-plane integrity error from the shared resolver / plan-state loaders.
     case "PHASE_SNAPSHOT_INVALID":
       msg = err.message;

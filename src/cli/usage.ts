@@ -18,7 +18,7 @@ import { TASK_SPECS } from "./spec/task.ts";
 /** The subcommand list shown for each cluster, mirroring the unknown-subcommand hints. */
 const CLUSTER_SUBCOMMANDS: Record<string, string> = {
   plan: `${PLAN_SPEC_ORDER.join(" | ")} | import (alias for "phase import")`,
-  task: "add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook (aliases: reconcile = finalize, next = runbook)",
+  task: "add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook | execute | lock | review-bundle | ci-parity (aliases: reconcile = finalize, next = runbook)",
   phase: `${PHASE_SPEC_ORDER.join(" | ")} (alias: next = runbook)`,
   adapter: ADAPTER_SPEC_ORDER.join(" | "),
   decision: DECISION_SPEC_ORDER.join(" | "),
@@ -33,7 +33,7 @@ const PHASE_NEXT_SPEC = {
   ...PHASE_SPECS.runbook,
   command: "next",
   summary: `${PHASE_SPECS.runbook.summary}\n\nAlias for \`phase runbook\`.`,
-  examples: PHASE_SPECS.runbook.examples.map((example) =>
+  examples: PHASE_SPECS.runbook.examples.map(example =>
     example.replace("phase runbook", "phase next"),
   ),
 };
@@ -45,7 +45,7 @@ export function isHelpToken(token: string | undefined): boolean {
 
 /** True when `--help`/`-h` appears anywhere in a subcommand's argument list. */
 export function hasHelpFlag(args: string[]): boolean {
-  return args.some((a) => a === "--help" || a === "-h");
+  return args.some(a => a === "--help" || a === "-h");
 }
 
 /** Cluster-level usage: the list of subcommands. */
@@ -137,6 +137,14 @@ const LEAF_USAGE: Record<string, () => string> = {
 
   "task runbook": () => renderLeafHelp(TASK_SPECS.runbook!),
 
+  "task execute": () => renderLeafHelp(TASK_SPECS.execute!),
+
+  "task lock": () => renderLeafHelp(TASK_SPECS.lock!),
+
+  "task review-bundle": () => renderLeafHelp(TASK_SPECS["review-bundle"]!),
+
+  "task ci-parity": () => renderLeafHelp(TASK_SPECS["ci-parity"]!),
+
   "evidence show": () => renderLeafHelp(EVIDENCE_SPECS.show),
 
   "memory status": () => renderLeafHelp(MEMORY_SPECS.status),
@@ -163,9 +171,11 @@ const LEAF_USAGE: Record<string, () => string> = {
 
   "state compact-archive": () => renderLeafHelp(STATE_SPECS["compact-archive"]),
 
-  "state archive-retention": () => renderLeafHelp(STATE_SPECS["archive-retention"]),
+  "state archive-retention": () =>
+    renderLeafHelp(STATE_SPECS["archive-retention"]),
 
-  "state archive-maintain": () => renderLeafHelp(STATE_SPECS["archive-maintain"]),
+  "state archive-maintain": () =>
+    renderLeafHelp(STATE_SPECS["archive-maintain"]),
 
   "spec import": () => renderLeafHelp(SPEC_SPECS.import),
 };
@@ -176,7 +186,7 @@ const LEAF_USAGE: Record<string, () => string> = {
  * validates) without reaching into the private LEAF_USAGE registry.
  */
 export function allLeafUsages(): string[] {
-  return Object.values(LEAF_USAGE).map((render) => render());
+  return Object.values(LEAF_USAGE).map(render => render());
 }
 
 /**

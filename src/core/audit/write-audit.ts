@@ -61,10 +61,12 @@ export type AuditWritesOptions = {
   baseRef?: string;
 };
 
-export type GitRun = { ok: true; stdout: string } | { ok: false; reason: "spawn" | "exit" };
+export type GitRun =
+  | { ok: true; stdout: string }
+  | { ok: false; reason: "spawn" | "exit" };
 
 export function runGit(cwd: string, args: readonly string[]): Promise<GitRun> {
-  return new Promise((resolve) => {
+  return new Promise(resolve => {
     let proc;
     try {
       proc = spawn("git", ["-c", "core.quotePath=false", ...args], {
@@ -85,7 +87,7 @@ export function runGit(cwd: string, args: readonly string[]): Promise<GitRun> {
     proc.on("error", () => {
       resolve({ ok: false, reason: "spawn" });
     });
-    proc.on("close", (code) => {
+    proc.on("close", code => {
       if (code === 0) resolve({ ok: true, stdout });
       else resolve({ ok: false, reason: "exit" });
     });
@@ -111,6 +113,8 @@ function isCodePactRuntimeState(file: string): boolean {
   return (
     file === ".code-pact/state/progress.yaml" ||
     file.startsWith(".code-pact/state/events/") ||
+    file.startsWith(".code-pact/state/locks/") ||
+    file.startsWith(".code-pact/cache/reviews/") ||
     file.startsWith(".code-pact/locks/")
   );
 }
@@ -118,8 +122,8 @@ function isCodePactRuntimeState(file: string): boolean {
 function parseLines(out: string): string[] {
   return out
     .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
+    .map(line => line.trim())
+    .filter(line => line.length > 0);
 }
 
 function unavailableShape(reason: GitUnavailableReason): WriteAuditResult {
@@ -188,17 +192,18 @@ export async function auditWrites(
         "HEAD",
       ]);
       if (branchDiff.ok) {
-        for (const line of parseLines(branchDiff.stdout)) fileSet.add(toPosix(line));
+        for (const line of parseLines(branchDiff.stdout))
+          fileSet.add(toPosix(line));
       }
     }
   }
 
   const filesTouched = [...fileSet]
-    .filter((file) => !isCodePactRuntimeState(file))
+    .filter(file => !isCodePactRuntimeState(file))
     .sort();
 
   const validGlobs = declaredWrites.filter(
-    (glob) => validateGlobSyntax(glob) === null,
+    glob => validateGlobSyntax(glob) === null,
   );
 
   const outsideDeclared: string[] = [];
@@ -215,7 +220,9 @@ export async function auditWrites(
     if (!matched) outsideDeclared.push(file);
   }
 
-  const declaredUnused = validGlobs.filter((_, idx) => !matchedGlobIdx.has(idx));
+  const declaredUnused = validGlobs.filter(
+    (_, idx) => !matchedGlobIdx.has(idx),
+  );
 
   const warnings: WriteAuditWarning[] = [];
   if (outsideDeclared.length > 0) {

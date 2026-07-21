@@ -32,7 +32,7 @@ beforeAll(() => {
 }, 60_000);
 
 afterEach(async () => {
-  await Promise.all(cleanups.map((c) => c()));
+  await Promise.all(cleanups.map(c => c()));
   cleanups = [];
 });
 
@@ -55,7 +55,11 @@ function git(cwd: string, args: readonly string[]): void {
 
 async function projectWithFinalizableTask(
   prefix: string,
-  opts: { declaredWrites?: string[]; initGit?: boolean; complete?: boolean } = {},
+  opts: {
+    declaredWrites?: string[];
+    initGit?: boolean;
+    complete?: boolean;
+  } = {},
 ): Promise<Project> {
   const p = await createTempProject({
     prefix: `code-pact-task-finalize-audit-strict-${prefix}-`,
@@ -103,15 +107,15 @@ async function projectWithFinalizableTask(
   ];
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
 
+  // Contract lock gates require a committed git tree. Initialize before
+  // start/complete so task start can create the lock on a clean worktree.
+  git(p.dir, ["init", "--quiet", "--initial-branch=main"]);
+  git(p.dir, ["add", "."]);
+  git(p.dir, ["commit", "--quiet", "-m", "initial"]);
+
   if (opts.complete ?? true) {
     p.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]);
     p.run(["task", "complete", "P1-T1", "--agent", "claude-code", "--json"]);
-  }
-
-  if (opts.initGit ?? false) {
-    git(p.dir, ["init", "--quiet", "--initial-branch=main"]);
-    git(p.dir, ["add", "."]);
-    git(p.dir, ["commit", "--quiet", "-m", "initial"]);
   }
 
   return p;
@@ -169,7 +173,7 @@ describe("task finalize --audit-strict clean path", () => {
     expect(env.ok).toBe(true);
     if (env.ok) {
       expect(env.data.kind).toBe("would_finalize");
-      expect(env.data.write_audit.git_available).toBe(false);
+      expect(env.data.write_audit.git_available).toBe(true);
       expect(env.data.write_audit.warnings).toEqual([]);
     }
   });
@@ -180,7 +184,11 @@ describe("task finalize --audit-strict clean path", () => {
       declaredWrites: ["src/x.ts"],
     });
     await mkdir(join(p.dir, "src"), { recursive: true });
-    await writeFile(join(p.dir, "src/x.ts"), "// declared and touched\n", "utf8");
+    await writeFile(
+      join(p.dir, "src/x.ts"),
+      "// declared and touched\n",
+      "utf8",
+    );
     const res = p.run([
       "task",
       "finalize",

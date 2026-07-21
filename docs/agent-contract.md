@@ -518,9 +518,11 @@ contract shape.
 - **`task complete <task-id>`** — runs verification and, on pass,
   appends a `done` event (`source: loop`). Idempotent — a second call
   from `done` state returns success without appending a duplicate event.
-  On failure it exits 1 with `error.code: VERIFICATION_FAILED`; read
-  `error.cause_code` **first** to know what to fix:
-  `COMMANDS_FAILED` → fix the failing verification command;
+  If any `depends_on` task is not `done`, exits 2 with
+  `error.code: TASK_DEPENDENCY_INCOMPLETE` and lists the incomplete
+  dependency ids in `data.deps`. On verification failure it exits 1 with
+  `error.code: VERIFICATION_FAILED`; read `error.cause_code` **first** to
+  know what to fix: `COMMANDS_FAILED` → fix the failing verification command;
   `DECISION_REQUIRED` → write or accept the required ADR; `ABORTED` →
   retry only after the interruption is resolved. With
   `--json --detail agent`, `error.message` is intentionally short. Read
@@ -539,17 +541,64 @@ contract shape.
   when the current conversation or diff proves the change is the same, and honor
   `stopOnRepeatedFingerprint` first when it is true.
 
+  On success, the `done` event carries a `verification_ref` pointing to the
+  cached evidence artifact for the first verification command. `task
+review-bundle` requires this artifact, refuses the bundle if the task or
+  phase design status is inconsistent with the derived state, and refuses if
+  any declared write was not used.
+
 - **`task record-done <task-id> --evidence "<text>"`** —
   records a `done` event with `source: external` **without** running
   verification commands; the proof is `--evidence`. Two uses: work
   completed **outside** the loop (already merged / not verifiable from
-  the tree), and the `record_only` lane. The decision gate
+  the tree), and the `record_only` lane. If any `depends_on` task is
+  not `done`, exits 2 with `error.code: TASK_DEPENDENCY_INCOMPLETE` and
+  lists the incomplete dependency ids in `data.deps`. The decision gate
   still applies — a `requires_decision` task with no resolvable ADR
   returns `DECISION_REQUIRED` (exit 2) and records no progress event
   (the ledger is unchanged). It is a distinct path from `task complete`, not a way to
   skip verification. See
   [`per-task-loop.md` § Recording a done without task complete](per-task-loop.md#recording-a-done-without-task-complete)
   for the lifecycle explanation (a lighter loop, not lighter verification).
+
+- **`task execute <task-id> --executor-file <project-relative-posix-path>
+[--agent <a>] [--timeout <ms>] [--json]`** — experimental single-file
+  one-shot execution. The task must read and write one existing source file,
+  HEAD and the git index must be unchanged, and the working tree must be
+  clean. The executor file must be given as the raw project-relative POSIX path
+  exactly as stored in the project: no leading `/` or `~`, no `..` or `.`
+  segments, no empty segments, and no backslashes. It must resolve to a regular,
+  non-symlink, executable file inside the project. The executor is a trusted
+  executable: it runs with `cwd` set to an OS temporary directory, a sanitized
+  environment (known repository-path variables such as `PWD`, `INIT_CWD`,
+  `npm_package_json`, etc. are removed), and the same process privileges as
+  code-pact. It is **not** an OS sandbox. The executor receives a JSON input
+  with the task goal, `source_path`, source content, and verification command; it
+  must emit either a `replace_exact` payload (`expected_file_sha256` is 64
+  lowercase hex, `old_text` is non-empty, `new_text` is a string) or a `blocked`
+  reason. The runtime validates the executor output at the controller boundary,
+  applies the replacement atomically, and re-runs the verification command. The
+  resulting source file is also bounded to `MAX_SOURCE_BYTES` (`8192` bytes),
+  producing `EDIT_REJECTED` with reason `RESULTING_SOURCE_TOO_LARGE` if exceeded.
+  The runtime records `done` only when HEAD, the git index, and the working tree
+  contain exactly the expected source-file change. Scope auditing covers HEAD,
+  the index, and Git-visible tracked/untracked paths; ignored paths and
+  repository-external side effects are not prevented. On `EXECUTOR_FAILED` or
+  `EDIT_REJECTED` the public envelope carries `data.reason`. On
+  `EXECUTOR_MUTATED_WORKTREE` and `EXECUTION_SCOPE_VIOLATION` the runtime reports
+  `data.rollback`, `data.head_changed`, and `data.index_changed`; it never resets
+  HEAD or unstages changes. Unknown executor or external mutations detected
+  before Code Pact applies its own edit are reported with
+  `data.rollback: "not_attempted"` and `data.rollback_reason`; they are not
+  rolled back because their provenance cannot be proven. Known Code Pact edits
+  are always rolled back using the captured applied content as the CAS expected
+  value, even when git state inspection later fails; such snapshot failures emit
+  `GIT_STATE_UNAVAILABLE` with `data.source_rollback`
+  (`complete`/`stale`/`failed`/`not_needed`). Porcelain status characters and
+  UTF-8 paths are validated fail-closed, and HEAD is read before and after status
+  capture; a HEAD mismatch yields `GIT_SNAPSHOT_CHANGED_DURING_READ`. Path samples
+  are bounded to 4,096 raw UTF-8 bytes and 20 entries; public failure reasons are
+  bounded to 2,048 UTF-8 bytes.
 
 - **`task finalize <task-id> --json [--write] [--audit-strict] [--base-ref
 <ref>]`** — reports the task's design-YAML finalization candidate and
