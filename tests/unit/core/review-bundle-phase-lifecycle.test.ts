@@ -25,6 +25,10 @@ function git(args: string[]): void {
 }
 
 async function commitPhase(name: string, content: string): Promise<void> {
+  // CI runners often have no global git identity; set a local one so
+  // `git commit` works regardless of environment.
+  git(["config", "user.email", "t@t"]);
+  git(["config", "user.name", "t"]);
   await writeFile(join(cwd, "design", "phases", name), content, "utf8");
   git(["add", `design/phases/${name}`]);
   git(["commit", "--quiet", "-m", name]);
@@ -143,7 +147,10 @@ describe("classifyPhaseLifecycle", () => {
     });
 
     expect(classification.lifecycleOnly).toBe(true);
-    expect(classification.changedFields).toEqual(["status", "tasks[P1-T1].status"]);
+    expect(classification.changedFields).toEqual([
+      "status",
+      "tasks[P1-T1].status",
+    ]);
   });
 
   it("allows multiple task done status updates", async () => {
@@ -165,8 +172,14 @@ describe("classifyPhaseLifecycle", () => {
     await commitPhase("P1-foundation.yaml", twoTasks);
 
     const updated = twoTasks
-      .replace("    status: planned\n    description: First task", "    status: done\n    description: First task")
-      .replace("    status: planned\n    description: Second task", "    status: done\n    description: Second task");
+      .replace(
+        "    status: planned\n    description: First task",
+        "    status: done\n    description: First task",
+      )
+      .replace(
+        "    status: planned\n    description: Second task",
+        "    status: done\n    description: Second task",
+      );
     await writeFile(
       join(cwd, "design", "phases", "P1-foundation.yaml"),
       updated,
@@ -246,7 +259,10 @@ describe("classifyPhaseLifecycle", () => {
 
     const updated = basePhase()
       .replace("status: planned", "status: done")
-      .replace("      - src/example.ts", "      - src/example.ts\n      - src/extra.ts");
+      .replace(
+        "      - src/example.ts",
+        "      - src/example.ts\n      - src/extra.ts",
+      );
     await writeFile(
       join(cwd, "design", "phases", "P1-foundation.yaml"),
       updated,
@@ -309,8 +325,8 @@ describe("classifyPhaseLifecycle", () => {
     await commitPhase("P1-foundation.yaml", twoTasks);
 
     const lines = twoTasks.split("\n");
-    const t1Start = lines.findIndex((l) => l.startsWith("  - id: P1-T1"));
-    const t2Start = lines.findIndex((l) => l.startsWith("  - id: P1-T2"));
+    const t1Start = lines.findIndex(l => l.startsWith("  - id: P1-T1"));
+    const t2Start = lines.findIndex(l => l.startsWith("  - id: P1-T2"));
     const reordered = [
       ...lines.slice(0, t1Start),
       ...lines.slice(t2Start),
@@ -339,7 +355,10 @@ describe("classifyPhaseLifecycle", () => {
     git(["init", "--quiet", "--initial-branch=main"]);
     await commitPhase("P1-foundation.yaml", basePhase());
 
-    const updated = basePhase().replace("status: planned", "status: in_progress");
+    const updated = basePhase().replace(
+      "status: planned",
+      "status: in_progress",
+    );
     await writeFile(
       join(cwd, "design", "phases", "P1-foundation.yaml"),
       updated,
