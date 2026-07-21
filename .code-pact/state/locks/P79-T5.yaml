@@ -1,0 +1,55 @@
+schema_version: 1
+task_id: P79-T5
+phase_id: P79
+phase_path: design/phases/P79-immutable-contracts-and-review-evidence.yaml
+base_ref: HEAD
+base_sha: 625916e271fc1be0ba90c9cb5d1260f8d1ffcfec
+phase_blob_sha: ffa7eda7ed55884a5198b70e3f059d7d88dde431
+contract_digest: 7b3c3857c3869b17f40b77546859dcceaebcf619b32acd1ffe8ee87ed88d7755
+contract:
+  description: Enforce evidence consistency and prove the task-contract workflow
+    using a lock created before any implementation change.
+  reads:
+    - src/commands/verify.ts
+    - src/core/audit/write-audit.ts
+    - src/core/contract-lock.ts
+    - src/core/evidence/evidence-schema.ts
+    - src/core/evidence/evidence-store.ts
+    - src/core/plan/load-phase.ts
+    - src/core/plan/resolve-task.ts
+    - src/core/process/bounded-command.ts
+    - src/core/progress/events-io.ts
+    - src/core/progress/task-state.ts
+    - src/core/project-fs/index.ts
+    - src/core/schemas/phase.ts
+    - src/core/schemas/task.ts
+    - src/core/verify/classify.ts
+  writes:
+    - design/phases/P79-immutable-contracts-and-review-evidence.yaml
+    - docs/agent-contract.md
+    - docs/cli-contract.md
+    - src/cli/commands/review-bundle.ts
+    - src/commands/task-complete.ts
+    - src/core/review-bundle.ts
+    - src/core/schemas/progress-event.ts
+    - src/i18n/en-US.ts
+    - src/i18n/ja-JP.ts
+    - tests/integration/ci-parity.test.ts
+    - tests/integration/review-bundle.test.ts
+    - tests/unit/commands/ci-parity.test.ts
+    - tests/unit/commands/review-bundle.test.ts
+    - tests/unit/error-code-surface.test.ts
+  depends_on:
+    - P79-T4
+  decision_refs: []
+  acceptance_refs: []
+  definition_of_done:
+    - All P79 tasks are done and review evidence is recorded.
+  verification_commands:
+    - pnpm test
+  base_sha: 625916e271fc1be0ba90c9cb5d1260f8d1ffcfec
+  phase_blob_sha: ffa7eda7ed55884a5198b70e3f059d7d88dde431
+at: 2026-07-21T02:34:41.331Z
+actor: agent
+agent: claude-code
+author: Pocket
