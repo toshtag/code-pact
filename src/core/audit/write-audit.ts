@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { matchGlob, validateGlobSyntax } from "../glob.ts";
+import type { LifecycleControlPlaneEntry } from "../review-bundle-phase-lifecycle.ts";
 
 // ---------------------------------------------------------------------------
 // Declared-writes audit
@@ -52,6 +53,7 @@ export type WriteAuditResult = {
   outside_declared: string[];
   declared_unused: string[];
   warnings: WriteAuditWarning[];
+  lifecycle_control_plane: LifecycleControlPlaneEntry[];
 };
 
 export type AuditWritesOptions = {
@@ -136,6 +138,7 @@ function unavailableShape(reason: GitUnavailableReason): WriteAuditResult {
     outside_declared: [],
     declared_unused: [],
     warnings: [],
+    lifecycle_control_plane: [],
   };
 }
 
@@ -247,6 +250,7 @@ export async function auditWrites(
     outside_declared: outsideDeclared,
     declared_unused: declaredUnused,
     warnings,
+    lifecycle_control_plane: [],
   };
   if (baseError !== null) result.base_error = baseError;
   return result;

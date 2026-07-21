@@ -72,6 +72,8 @@ async function setupDoneTask(): Promise<
       "--json",
     ]),
   );
+  // src/example.ts is the only declared write; phase YAML lifecycle changes
+  // must be reclassified by review-bundle, not declared by the task.
   expectJsonOk(
     p.run([
       "task",
@@ -82,9 +84,16 @@ async function setupDoneTask(): Promise<
       "--description",
       "Reviewable task",
       "--write",
-      "design/phases/P1-foundation.yaml",
+      "src/example.ts",
       "--json",
     ]),
+  );
+
+  await mkdir(join(p.dir, "src"), { recursive: true });
+  await writeFile(
+    join(p.dir, "src", "example.ts"),
+    "export const x = 1;\n",
+    "utf8",
   );
 
   git(p.dir, ["init", "--quiet"]);
@@ -101,6 +110,14 @@ async function setupDoneTask(): Promise<
   ]);
 
   expectJsonOk(p.run(["task", "start", "P1-T1", "--json"]));
+
+  // Task implementation happens after start and before complete.
+  await writeFile(
+    join(p.dir, "src", "example.ts"),
+    "export const x = 2;\n",
+    "utf8",
+  );
+
   git(p.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
   git(p.dir, [
     "-c",
@@ -166,7 +183,7 @@ async function setupDoneTask(): Promise<
 }
 
 describe("task review-bundle", () => {
-  it("creates a review bundle for a done task", async () => {
+  it("creates a review bundle for a done task with lifecycle-only phase changes reclassified", async () => {
     project = await setupDoneTask();
 
     const bundle = expectJsonOk(
@@ -186,6 +203,23 @@ describe("task review-bundle", () => {
     expect(data.bundle_path).toContain(
       ".code-pact/cache/reviews/P1-T1/bundle.zip",
     );
+
+    // The manifest must record the phase status change as a control-plane
+    // change, not as an undeclared implementation write.
+    const manifestRaw = await readFile(data.manifest_path, "utf8");
+    const manifest = JSON.parse(manifestRaw);
+    expect(manifest.write_audit.outside_declared).toEqual([]);
+    expect(manifest.write_audit.declared_unused).toEqual([]);
+    expect(manifest.write_audit.files_touched).toContain("src/example.ts");
+    expect(manifest.write_audit.files_touched).toContain(
+      "design/phases/P1-foundation.yaml",
+    );
+    expect(manifest.write_audit.lifecycle_control_plane).toEqual([
+      {
+        file: "design/phases/P1-foundation.yaml",
+        changed_fields: ["status", "tasks[P1-T1].status"],
+      },
+    ]);
   });
 
   it("refuses to bundle a task that is not done", async () => {

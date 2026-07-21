@@ -114,6 +114,7 @@ function emptyManifest(
       outside_declared: [],
       declared_unused: [],
       warnings: [],
+      lifecycle_control_plane: [],
     },
     task_verification: [],
     classifier_verification: [],

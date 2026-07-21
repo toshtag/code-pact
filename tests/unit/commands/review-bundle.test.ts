@@ -1,13 +1,17 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { runReviewBundle } from "../../../src/commands/review-bundle.ts";
 import {
   DoneEventRef,
   LocalVerificationEntry,
   readReviewManifest,
 } from "../../../src/core/review-bundle.ts";
+import { createTaskContractLock } from "../../../src/core/contract-lock.ts";
+import { writeEventFile } from "../../../src/core/progress/events-io.ts";
+import { storeEvidenceArtifact } from "../../../src/core/evidence/evidence-store.ts";
 
 let cwd: string;
 
@@ -19,111 +23,173 @@ afterEach(async () => {
   if (cwd) await rm(cwd, { recursive: true, force: true });
 });
 
-async function setupProject(
-  events: {
-    task_id: string;
-    status: string;
-    at: string;
-    evidence?: string[];
-  }[],
-): Promise<void> {
+function git(args: string[]): void {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+  if (r.status !== 0) {
+    throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  }
+}
+
+function basePhase(): string {
+  return [
+    "id: P1",
+    "name: Foundation",
+    "weight: 10",
+    "confidence: medium",
+    "risk: low",
+    "status: in_progress",
+    "objective: Establish the project foundation",
+    "definition_of_done:",
+    "  - All tasks done",
+    "verification:",
+    "  commands:",
+    "    - echo ok",
+    "tasks:",
+    "  - id: P1-T1",
+    "    type: feature",
+    "    ambiguity: low",
+    "    risk: low",
+    "    context_size: small",
+    "    write_surface: low",
+    "    verification_strength: medium",
+    "    expected_duration: short",
+    "    status: planned",
+    "    description: Test task",
+    "    writes:",
+    "      - src/example.ts",
+    "",
+  ].join("\n");
+}
+
+async function setupDoneTaskProject(): Promise<void> {
   await mkdir(join(cwd, "design", "phases"), { recursive: true });
   await mkdir(join(cwd, ".code-pact", "state"), { recursive: true });
+  await mkdir(join(cwd, "src"), { recursive: true });
+  await mkdir(join(cwd, "scripts"), { recursive: true });
 
+  await writeFile(
+    join(cwd, ".gitignore"),
+    ["/.code-pact/locks/", "/.code-pact/cache/", ""].join("\n"),
+    "utf8",
+  );
   await writeFile(
     join(cwd, "design", "roadmap.yaml"),
     `phases:\n  - id: P1\n    path: design/phases/P1-foundation.yaml\n    weight: 10\n`,
     "utf8",
   );
-
   await writeFile(
     join(cwd, "design", "phases", "P1-foundation.yaml"),
-    [
-      "id: P1",
-      "name: Foundation",
-      "weight: 10",
-      "confidence: medium",
-      "risk: low",
-      "status: planned",
-      "objective: Establish the project foundation",
-      "definition_of_done:",
-      "  - All tasks done",
-      "verification:",
-      "  commands:",
-      "    - node --version",
-      "tasks:",
-      "  - id: P1-T1",
-      "    type: feature",
-      "    ambiguity: low",
-      "    risk: low",
-      "    context_size: small",
-      "    write_surface: low",
-      "    verification_strength: medium",
-      "    expected_duration: short",
-      "    status: planned",
-      "    description: Test task",
-      "",
-    ].join("\n"),
+    basePhase(),
+    "utf8",
+  );
+  await writeFile(
+    join(cwd, "src", "example.ts"),
+    "export const x = 1;\n",
+    "utf8",
+  );
+  await writeFile(
+    join(cwd, "scripts", "verification-scope.mjs"),
+    `#!/usr/bin/env node
+import { parseArgs } from "node:util";
+const { values } = parseArgs({
+  args: process.argv.slice(2),
+  options: { base: { type: "string" }, commands: { type: "boolean" }, format: { type: "string" } },
+  allowPositionals: true,
+});
+if (values.commands && values.format === "json") {
+  process.stdout.write(JSON.stringify({
+    scope: { changed: [], added: [], removed: [], mergeBase: values.base ?? null, failSafe: false },
+    commands: [["echo", ["ok"]]],
+    failSafe: false,
+  }));
+} else {
+  process.stdout.write("ok\\n");
+}
+`,
     "utf8",
   );
 
-  const progressEvents = events.map(e => {
-    const base = [
-      `  - task_id: ${e.task_id}`,
-      `    status: ${e.status}`,
-      `    at: "${e.at}"`,
-      "    actor: agent",
-      "    agent: claude-code",
-    ];
-    if (e.evidence) {
-      base.push("    evidence:");
-      for (const x of e.evidence) base.push(`      - ${x}`);
-    }
-    return base.join("\n");
+  git(["init", "--quiet"]);
+  git(["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+  git([
+    "-c",
+    "user.email=t@t",
+    "-c",
+    "user.name=t",
+    "commit",
+    "--quiet",
+    "-m",
+    "initial",
+  ]);
+
+  // Lock the task contract against the initial commit.
+  await createTaskContractLock({ cwd, taskId: "P1-T1" });
+
+  // Record a start event.
+  await writeEventFile(cwd, {
+    task_id: "P1-T1",
+    status: "started",
+    at: "2026-05-19T10:00:00.000Z",
+    actor: "agent",
+    agent: "claude-code",
   });
 
+  // Simulate task implementation.
   await writeFile(
-    join(cwd, ".code-pact", "state", "progress.yaml"),
-    `events:\n${progressEvents.join("\n")}\n`,
+    join(cwd, "src", "example.ts"),
+    "export const x = 2;\n",
     "utf8",
   );
 
-  const { spawnSync } = await import("node:child_process");
-  spawnSync("git", ["init", "--quiet"], { cwd });
-  spawnSync(
-    "git",
-    [
-      "-c",
-      "user.email=t@t",
-      "-c",
-      "user.name=t",
-      "commit",
-      "--quiet",
-      "--allow-empty",
-      "-m",
-      "initial",
-    ],
-    { cwd },
-  );
+  // Store evidence for the done event.
+  const stored = await storeEvidenceArtifact(cwd, {
+    schema_version: 1,
+    command: "echo ok",
+    exit_code: 0,
+    timed_out: false,
+    aborted: false,
+    elapsed_ms: 10,
+    stdout: "ok\n",
+    stderr: "",
+    stdout_capture_truncated: false,
+    stderr_capture_truncated: false,
+  });
+
+  // Record the done event with the evidence reference.
+  await writeEventFile(cwd, {
+    task_id: "P1-T1",
+    status: "done",
+    at: "2026-05-19T11:00:00.000Z",
+    actor: "agent",
+    agent: "claude-code",
+    evidence: ["commands"],
+    verification_ref: stored.ref,
+    source: "loop",
+  });
+
+  // Lifecycle-only mutations: flip task and phase status to done.
+  const phasePath = join(cwd, "design", "phases", "P1-foundation.yaml");
+  const updatedPhase = (await readFile(phasePath, "utf8"))
+    .replace("status: in_progress", "status: done")
+    .replace("    status: planned", "    status: done");
+  await writeFile(phasePath, updatedPhase, "utf8");
+
+  git(["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+  git([
+    "-c",
+    "user.email=t@t",
+    "-c",
+    "user.name=t",
+    "commit",
+    "--quiet",
+    "-m",
+    "done",
+  ]);
 }
 
 describe("runReviewBundle", () => {
-  it.skip("writes a review manifest and ZIP bundle for a done task", async () => {
-    // TODO(P79-T4): set up a committed phase, contract lock, done event file,
-    // and mock classifyVerification before re-enabling.
-    await setupProject([
-      {
-        task_id: "P1-T1",
-        status: "started",
-        at: "2026-05-19T10:00:00.000Z",
-      },
-      {
-        task_id: "P1-T1",
-        status: "done",
-        at: "2026-05-19T11:00:00.000Z",
-        evidence: ["node --version"],
-      },
-    ]);
+  it("writes a review manifest and ZIP bundle for a done task", async () => {
+    await setupDoneTaskProject();
 
     const result = await runReviewBundle({
       cwd,
@@ -137,17 +203,38 @@ describe("runReviewBundle", () => {
     const manifest = await readReviewManifest(cwd, "P1-T1");
     expect(manifest).not.toBeNull();
     expect(manifest?.remote_ci.status).toBe("pending");
-    expect(manifest?.done_event?.evidence).toEqual(["node --version"]);
+    expect(manifest?.done_event?.evidence).toEqual(["commands"]);
+    // Lifecycle-only phase status changes are reclassified to
+    // lifecycle_control_plane, not treated as outside declared writes.
+    expect(manifest?.write_audit.outside_declared).toEqual([]);
+    expect(manifest?.write_audit.lifecycle_control_plane).toEqual([
+      {
+        file: "design/phases/P1-foundation.yaml",
+        changed_fields: ["status", "tasks[P1-T1].status"],
+      },
+    ]);
   });
 
   it("throws TASK_NOT_DONE when no done event exists", async () => {
-    await setupProject([
-      {
-        task_id: "P1-T1",
-        status: "started",
-        at: "2026-05-19T10:00:00.000Z",
-      },
-    ]);
+    await mkdir(join(cwd, "design", "phases"), { recursive: true });
+    await mkdir(join(cwd, ".code-pact", "state"), { recursive: true });
+    await writeFile(
+      join(cwd, "design", "roadmap.yaml"),
+      `phases:\n  - id: P1\n    path: design/phases/P1-foundation.yaml\n    weight: 10\n`,
+      "utf8",
+    );
+    await writeFile(
+      join(cwd, "design", "phases", "P1-foundation.yaml"),
+      basePhase(),
+      "utf8",
+    );
+    await writeEventFile(cwd, {
+      task_id: "P1-T1",
+      status: "started",
+      at: "2026-05-19T10:00:00.000Z",
+      actor: "agent",
+      agent: "claude-code",
+    });
 
     await expect(
       runReviewBundle({ cwd, taskId: "P1-T1" }),
