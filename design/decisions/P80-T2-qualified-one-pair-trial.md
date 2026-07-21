@@ -1,30 +1,78 @@
 # P80-T2: Qualified One-Pair Effectiveness Trial
 
-## Trial plan
+## Summary
 
-P80-T2 adds a capability gate before the one-pair comparison. The same local
-model (`gemma3:latest`) is used for the gate, the baseline condition, and the
-Code Pact condition. One invocation is allowed per stage; repair is not used.
+P80-T2 added a capability gate before a one-pair comparison of a local
+`gemma3:latest` model against the same bug. The model passed the capability
+gate, the baseline condition, and the Code Pact condition on the first
+invocation each. The pair is classified `qualified` and `product_effectiveness`
+`promising_single_pair`.
 
-This file will be updated with results after the trial completes.
+## Model identity
 
-## Fixed scope
+- Provider: Ollama 0.32.1
+- Model requested: `gemma3:latest`
+- Model resolved digest: `a2af6cc3eb7fa8be8504abaf9b04e88f17a119ec3f04a3addf55f92841195f5a`
+- Sampling: temperature 0, top_p 0.9, max output tokens 512
+- Identity was verified before every model invocation.
 
-- Capability gate: 1 invocation
-- If the gate passes:
-  - Baseline: 1 invocation
-  - Code Pact: 1 invocation
-- Maximum total model invocations: 3
-- Repair: 0
+## Scope guardrails
+
+- Maximum model invocations: 3 (capability gate, baseline, Code Pact)
+- Repairs: 0
 - Model switching: 0
 - Provider switching: 0
 - Corrective pass maximum: 1
+- No product feature changes
+- No generalization beyond the single pair
+
+## Capability gate
+
+- Fixture: `src/status-label.ts` returning `"wrong"`
+- Oracle: `capability-oracle.mjs` expects `statusLabel()` to return `"ready"`
+- Result: passed on first invocation
+- Tokens: 319 input / 90 output / 409 total
+
+## Pair comparison
+
+- Fixture: `src/is-even.ts` with `return value % 2 === 1;`
+- Oracle: `hidden-oracle.mjs` tests `isEven(2)=true`, `isEven(3)=false`, `isEven(0)=true`, `isEven(-1)=false`
+- Reference patch: change `=== 1` to `=== 0`
+- Baseline result: passed on first invocation (338 input / 94 output / 432 total)
+- Code Pact result: passed on first invocation (362 input / 106 output / 468 total)
+
+## Token summary
+
+| stage           | input | output | total |
+| --------------- | ----: | -----: | ----: |
+| capability gate |   319 |     90 |   409 |
+| baseline        |   338 |     94 |   432 |
+| code-pact       |   362 |    106 |   468 |
+| **total**       |  1019 |    290 |  1309 |
+
+## Classification
+
+- `pair_status`: `qualified`
+- `failure_attribution`: `none`
+- `product_effectiveness`: `promising_single_pair`
+- `p79_dogfood_status`: `passed` (P80-T2 main task finalize/review-bundle completed on the main repository)
+
+## Code Pact condition notes
+
+The P80-C2 `task execute` applied the correct patch and the hidden oracle
+passed. Fixture-repo phase-file writes (the `design/phases/*.yaml` mutation
+done by `task finalize`) conflicted with the fixture's declared write surface,
+so the P80-C2 finalize/review-bundle steps were not completed inside the
+fixture. This is recorded as an experimental limitation and does not affect
+the qualified pair classification.
+
+## Evidence
+
+- Evidence archive: `/tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip`
+- Archive SHA-256: `175f1ec289c55ac4b4d0791d58721d82f0db5a8b2608b6ca370c864f4a90fa92`
+- Verification: `node scripts/experiments/verify-p80-t2-evidence.mjs /tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip`
 
 ## Writes
 
 - `design/decisions/P80-T2-qualified-one-pair-trial.md`
 - `scripts/experiments/verify-p80-t2-evidence.mjs`
-
-## Evidence archive
-
-`/tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip`

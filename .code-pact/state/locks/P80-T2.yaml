@@ -1,0 +1,35 @@
+schema_version: 1
+task_id: P80-T2
+phase_id: P80
+phase_path: design/phases/P80-post-p79-effectiveness-trial.yaml
+base_ref: HEAD
+base_sha: 53202b0f5a7cd0f44b91c71ed5560a891609fb04
+phase_blob_sha: b0f6424bdb2ada9a51d40370e23f9849625e1bc8
+contract_digest: 62d14d16c4e299148ce2e5fae016f48140c6c3fc4635dff649625a7a41c6c670
+contract:
+  description: >
+    Run a capability-qualified one-pair trial using one fixed local model, one
+    invocation per comparison condition, no repair, and complete auditable
+    evidence. The model must first pass an exact-replacement capability gate
+    before the baseline / Code Pact pair is attempted.
+  reads: []
+  writes:
+    - design/decisions/P80-T2-qualified-one-pair-trial.md
+    - scripts/experiments/verify-p80-t2-evidence.mjs
+  depends_on: []
+  decision_refs: []
+  acceptance_refs: []
+  definition_of_done:
+    - |
+      The capability gate, baseline, and Code Pact conditions are executed
+      against one fixed local model with auditable evidence, and the result is
+      committed as design/decisions/P80-T2-qualified-one-pair-trial.md.
+  verification_commands:
+    - node scripts/experiments/verify-p80-t2-evidence.mjs
+      /tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip
+  base_sha: 53202b0f5a7cd0f44b91c71ed5560a891609fb04
+  phase_blob_sha: b0f6424bdb2ada9a51d40370e23f9849625e1bc8
+at: 2026-07-21T06:51:44.056Z
+actor: agent
+agent: claude-code
+author: Pocket
