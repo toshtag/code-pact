@@ -1,0 +1,44 @@
+schema_version: 1
+task_id: P81-T2
+phase_id: P81
+phase_path: design/phases/P81-lifecycle-aware-review-evidence.yaml
+base_ref: HEAD
+base_sha: 493f8ea7dfcb8134486385974c883d2814bec6be
+phase_blob_sha: 2417767cf2a673a1d7a97932012bfb06f88b0b70
+contract_digest: 6390ba4b77e62558f8e9f2a5a50ab141833f921805c707b7976ebabebfe454c0
+contract:
+  description: >
+    Restrict lifecycle phase reclassification to the reviewed task's own phase
+    file and complete the predeclared fail-closed replay coverage.
+  reads:
+    - src/core/review-bundle-phase-lifecycle.ts
+    - src/core/review-bundle.ts
+    - tests/integration/review-bundle.test.ts
+    - tests/unit/core/review-bundle-phase-lifecycle.test.ts
+  writes:
+    - src/core/review-bundle.ts
+    - tests/integration/review-bundle.test.ts
+    - tests/unit/core/review-bundle-phase-lifecycle.test.ts
+  depends_on:
+    - P81-T1
+  decision_refs: []
+  acceptance_refs: []
+  definition_of_done:
+    - A task that declares only its implementation file can complete, finalize,
+      reconcile, and create a review bundle on the first attempt.
+    - Any non-status phase mutation remains a hard review-bundle failure.
+    - Local CI-equivalent verification passes before PR submission.
+    - Status-only phase mutations are explicitly recorded as control-plane
+      changes rather than silently discarded.
+    - The former skipped review-bundle success test is enabled.
+  verification_commands:
+    - pnpm build
+    - pnpm check:docs
+    - pnpm test:integration
+    - pnpm test:unit
+    - pnpm typecheck
+  base_sha: 493f8ea7dfcb8134486385974c883d2814bec6be
+  phase_blob_sha: 2417767cf2a673a1d7a97932012bfb06f88b0b70
+at: 2026-07-21T13:33:26.346Z
+actor: agent
+author: Pocket

@@ -27,9 +27,10 @@ function git(cwd: string, args: readonly string[]): Promise<void> {
     proc.stderr?.on("data", (chunk: Buffer) => {
       stderr += chunk.toString("utf8");
     });
-    proc.on("close", (code) => {
+    proc.on("close", code => {
       if (code === 0) resolve();
-      else reject(new Error(`git ${args.join(" ")} failed (${code}): ${stderr}`));
+      else
+        reject(new Error(`git ${args.join(" ")} failed (${code}): ${stderr}`));
     });
     proc.on("error", reject);
   });
@@ -70,6 +71,7 @@ describe("auditWrites — non-git", () => {
       outside_declared: [],
       declared_unused: [],
       warnings: [],
+      lifecycle_control_plane: [],
     });
   });
 });
@@ -140,9 +142,7 @@ describe("auditWrites — working-tree mode", () => {
       cwd,
       declaredWrites: ["src/core/audit/**"],
     });
-    expect(result.outside_declared).toEqual([
-      "src/commands/task-finalize.ts",
-    ]);
+    expect(result.outside_declared).toEqual(["src/commands/task-finalize.ts"]);
     expect(result.declared_unused).toEqual(["src/core/audit/**"]);
     expect(result.warnings).toEqual([
       "TASK_WRITES_AUDIT_OUTSIDE_DECLARED",
@@ -156,9 +156,7 @@ describe("auditWrites — working-tree mode", () => {
       cwd,
       declaredWrites: [],
     });
-    expect(result.outside_declared).toEqual([
-      "src/core/audit/write-audit.ts",
-    ]);
+    expect(result.outside_declared).toEqual(["src/core/audit/write-audit.ts"]);
     expect(result.warnings).toEqual(["TASK_WRITES_AUDIT_OUTSIDE_DECLARED"]);
   });
 
@@ -170,9 +168,7 @@ describe("auditWrites — working-tree mode", () => {
       cwd,
       declaredWrites: ["src/core/audit/**"],
     });
-    expect(result.files_touched).toEqual([
-      "src/core/audit/write-audit.ts",
-    ]);
+    expect(result.files_touched).toEqual(["src/core/audit/write-audit.ts"]);
   });
 
   it("includes staged changes in files_touched", async () => {
@@ -182,9 +178,7 @@ describe("auditWrites — working-tree mode", () => {
       cwd,
       declaredWrites: ["src/core/audit/**"],
     });
-    expect(result.files_touched).toEqual([
-      "src/core/audit/write-audit.ts",
-    ]);
+    expect(result.files_touched).toEqual(["src/core/audit/write-audit.ts"]);
   });
 
   it("includes unstaged modifications to tracked files in files_touched", async () => {
@@ -272,7 +266,11 @@ describe("auditWrites — excludes code-pact runtime state", () => {
   });
 
   it("does NOT exclude .code-pact/agent-profiles/** — adapter/profile edits are real work product", async () => {
-    await touch(cwd, ".code-pact/agent-profiles/claude-code.yaml", "model: x\n");
+    await touch(
+      cwd,
+      ".code-pact/agent-profiles/claude-code.yaml",
+      "model: x\n",
+    );
     const result = await auditWrites({
       cwd,
       declaredWrites: [".code-pact/agent-profiles/**"],
@@ -331,9 +329,7 @@ describe("auditWrites — --base-ref mode", () => {
       requested_ref: "origin/does-not-exist",
     });
     // Working-tree audit still runs.
-    expect(result.files_touched).toEqual([
-      "src/core/audit/write-audit.ts",
-    ]);
+    expect(result.files_touched).toEqual(["src/core/audit/write-audit.ts"]);
     expect(result.warnings).toEqual([]);
   });
 
