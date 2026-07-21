@@ -56,8 +56,7 @@ tasks:
     verification_strength: strong
     expected_duration: short
     status: planned
-    depends_on:
-      - P80-T1
+    depends_on: []
     description: >
       Run a capability-qualified one-pair trial using one fixed local model,
       one invocation per comparison condition, no repair, and complete
