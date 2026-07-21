@@ -3,7 +3,7 @@ name: Lifecycle-Aware Review Evidence
 weight: 1
 confidence: high
 risk: medium
-status: in_progress
+status: done
 objective: >
   Prevent Code Pact-owned lifecycle status mutations from being misclassified as
   undeclared task implementation writes while preserving fail-closed detection
