@@ -1,0 +1,63 @@
+id: P81
+name: Lifecycle-Aware Review Evidence
+weight: 1
+confidence: high
+risk: medium
+status: in_progress
+objective: >
+  Prevent Code Pact-owned lifecycle status mutations from being misclassified
+  as undeclared task implementation writes while preserving fail-closed
+  detection of every non-lifecycle phase mutation.
+non_goals:
+  - Fix dependency omission (Issue #544).
+  - Add a `task add` CLI.
+  - Change `phase reconcile` so it does not write phase status.
+  - Strengthen the P80 evidence verifier.
+  - Modify model prompts or model comparison.
+  - Introduce multiple task corpus support.
+  - Generalize token reduction claims.
+definition_of_done:
+  - A task that declares only its implementation file can complete, finalize,
+    reconcile, and create a review bundle on the first attempt.
+  - Status-only phase mutations are explicitly recorded as control-plane
+    changes rather than silently discarded.
+  - Any non-status phase mutation remains a hard review-bundle failure.
+  - The former skipped review-bundle success test is enabled.
+  - Local CI-equivalent verification passes before PR submission.
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm build
+    - pnpm test:integration
+    - pnpm check:docs
+tasks:
+  - id: P81-T1
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: >
+      Classify lifecycle-only phase status mutations as Code Pact control-plane
+      changes during review-bundle generation, while rejecting every other
+      undeclared phase mutation.
+    depends_on: []
+    reads:
+      - src/core/review-bundle.ts
+      - src/core/audit/write-audit.ts
+      - src/core/contract-lock.ts
+      - src/commands/task-finalize.ts
+      - src/commands/phase-reconcile.ts
+      - tests/integration/review-bundle.test.ts
+      - tests/unit/commands/review-bundle.test.ts
+    writes:
+      - src/core/review-bundle.ts
+      - src/core/review-bundle-phase-lifecycle.ts
+      - tests/unit/core/review-bundle-phase-lifecycle.test.ts
+      - tests/integration/review-bundle.test.ts
+      - tests/unit/commands/review-bundle.test.ts
+      - docs/cli-contract.md

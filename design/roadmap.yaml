@@ -221,3 +221,6 @@ phases:
   - id: P80
     path: design/phases/P80-post-p79-effectiveness-trial.yaml
     weight: 1
+  - id: P81
+    path: design/phases/P81-lifecycle-aware-review-evidence.yaml
+    weight: 1
