@@ -5,8 +5,14 @@
 P80-T2 added a capability gate before a one-pair comparison of a local
 `gemma3:latest` model against the same bug. The model passed the capability
 gate, the baseline condition, and the Code Pact condition on the first
-invocation each. The pair is classified `qualified` and `product_effectiveness`
-`promising_single_pair`.
+invocation each. The pair is therefore `qualified`, but the single-pair signal
+is not a Code Pact advantage:
+
+- `first_pass_result`: `tie` (both conditions passed)
+- `token_result`: `code_pact_overhead` (Code Pact used 36 more tokens, +8.33%)
+- `p79_dogfood_status`: `failed` (review bundle refused with `TASK_CONTRACT_DRIFT`)
+- `artifact_integrity_status`: `not_evaluated` (review bundle not generated)
+- `product_effectiveness`: `not_demonstrated_single_pair`
 
 ## Model identity
 
@@ -50,12 +56,38 @@ invocation each. The pair is classified `qualified` and `product_effectiveness`
 | code-pact       |   362 |    106 |   468 |
 | **total**       |  1019 |    290 |  1309 |
 
+Pair delta: Code Pact - Baseline = +36 tokens (+8.33%).
+
 ## Classification
 
 - `pair_status`: `qualified`
+- `first_pass_result`: `tie`
+- `token_result`: `code_pact_overhead`
 - `failure_attribution`: `none`
-- `product_effectiveness`: `promising_single_pair`
-- `p79_dogfood_status`: `failed` (`task finalize` and `phase reconcile` passed, but `task review-bundle` refused due to `TASK_CONTRACT_DRIFT` because `design/phases/P80-post-p79-effectiveness-trial.yaml` changed outside the declared writes; per protocol writes were not expanded after the gate failure)
+- `product_effectiveness`: `not_demonstrated_single_pair`
+- `p79_dogfood_status`: `failed`
+- `contract_drift_count`: `1`
+- `artifact_mismatch_count`: `null`
+- `artifact_integrity_status`: `not_evaluated`
+- `review_bundle_generated`: `false`
+
+Both conditions passed on the first invocation. Code Pact used 36 more model
+tokens than the baseline. P79 review evidence generation failed with contract
+drift. This single pair therefore shows no success advantage and contains token
+and artifact-integrity regression signals. It must not be classified as
+promising, and no generalization is made.
+
+## P79 and lifecycle anomalies
+
+- `dependency_conformance`: `failed`. The planned P80-T2 dependency on P80-T1
+  was omitted from the locked task contract (`depends_on: []`), and P80-T2 was
+  recorded done before P80-T1 was started. Historical locks and events were not
+  rewritten.
+- P79 review bundle for P80-T2 refused with `TASK_CONTRACT_DRIFT` because
+  `design/phases/P80-post-p79-effectiveness-trial.yaml` was mutated by
+  `task finalize` / `phase reconcile` but was outside the declared
+  implementation writes. Per protocol, writes were not expanded after the gate
+  failure.
 
 ## Code Pact condition notes
 
@@ -69,10 +101,15 @@ the qualified pair classification.
 ## Evidence
 
 - Evidence archive: `/tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip`
-- Archive SHA-256: `49b222b8abb7909025ce34ad32bcb57f4ff2bca8923a68e7d387b0f551536976`
+- Archive SHA-256: `3e5e5b454a321fc53167ba7e33d216e09177b19a4dd3c9a92ec6aea8f97f25b6`
 - Verification: `node scripts/experiments/verify-p80-t2-evidence.mjs /tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip`
 
 ## Writes
 
 - `design/decisions/P80-T2-qualified-one-pair-trial.md`
 - `scripts/experiments/verify-p80-t2-evidence.mjs`
+
+## Related issues
+
+- P79 lifecycle issue: <https://github.com/toshtag/code-pact/issues/543>
+- Dependency omission issue: <https://github.com/toshtag/code-pact/issues/544>

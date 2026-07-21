@@ -70,12 +70,12 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
-    depends_on:
-      - P80-T2
+    status: done
     description: >
       Correct the P80-T2 single-pair classification and strengthen the existing
       trial-evidence verifier without rerunning the model or changing the trial.
+    depends_on:
+      - P80-T2
     reads:
       - design/decisions/P80-T2-qualified-one-pair-trial.md
       - scripts/experiments/verify-p80-t2-evidence.mjs
