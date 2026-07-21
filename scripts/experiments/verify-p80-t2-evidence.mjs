@@ -26,10 +26,24 @@ function readText(tmp, f) {
   return fs.readFileSync(path.join(tmp, f), "utf8");
 }
 
+function readYaml(tmp, f) {
+  const text = readText(tmp, f);
+  const out = {};
+  for (const line of text.split("\n")) {
+    const m = line.match(/^([a-zA-Z0-9_]+):\s*(.*)$/);
+    if (m) out[m[1]] = m[2].trim();
+  }
+  return out;
+}
+
 function assertEq(label, actual, expected) {
   if (actual !== expected) {
     fail(`${label}: expected ${expected}, got ${actual}`);
   }
+}
+
+function assertTrue(label, cond) {
+  if (!cond) fail(label);
 }
 
 if (!zipPath || !fs.existsSync(zipPath)) {
@@ -59,6 +73,9 @@ const required = [
   "p80-task.yaml",
   "contract-lock.yaml",
   "start-event.yaml",
+  "done-event.yaml",
+  "negative-verifier-results.json",
+  "verifier-negative-log.txt",
   "hashes.json",
 ];
 
@@ -97,6 +114,17 @@ try {
     fail(`unexpected pair_status: ${manifest.pair_status}`);
   }
   assertEq(
+    "manifest.product_effectiveness",
+    manifest.product_effectiveness,
+    "not_demonstrated_single_pair",
+  );
+  assertEq("manifest.first_pass_result", manifest.first_pass_result, "tie");
+  assertEq(
+    "manifest.token_result",
+    manifest.token_result,
+    "code_pact_overhead",
+  );
+  assertEq(
     "manifest.capability_gate.passed",
     manifest.capability_gate?.passed,
     true,
@@ -105,7 +133,7 @@ try {
   const final = readJson(tmpDir, "final-metrics.json");
   const modelIdentity = readJson(tmpDir, "model-identity.json");
 
-  // Model identity consistency between manifest / model-identity.json / final-metrics
+  // Model identity consistency
   assertEq("model.provider", manifest.provider?.name, "ollama");
   assertEq("model.version", modelIdentity.provider_version, "0.32.1");
   assertEq(
@@ -241,28 +269,181 @@ try {
     }
   }
 
-  // P79 lifecycle / artifact integrity fields
-  assertEq("p79_dogfood_status", manifest.p79_dogfood_status, "failed");
-  assertEq("contract_drift_count", manifest.contract_drift_count, 1);
-  assertEq("artifact_mismatch_count", manifest.artifact_mismatch_count, null);
+  // P79 status consistency (top-level, final-metrics, code-pact-metrics, manifest nested)
+  const p79Status = "failed";
+  assertEq("final p79_dogfood_status", final.p79_dogfood_status, p79Status);
   assertEq(
-    "artifact_integrity_status",
+    "manifest p79_dogfood_status",
+    manifest.p79_dogfood_status,
+    p79Status,
+  );
+  assertEq("code_pact p79_dogfood_status", code.p79_dogfood_status, p79Status);
+  assertEq(
+    "manifest.code_pact p79_dogfood_status",
+    manifest.code_pact?.p79_dogfood_status,
+    p79Status,
+  );
+
+  assertEq("final contract_drift_count", final.contract_drift_count, 1);
+  assertEq("manifest contract_drift_count", manifest.contract_drift_count, 1);
+  assertEq("code_pact contract_drift_count", code.contract_drift_count, 1);
+  assertEq(
+    "manifest.code_pact contract_drift_count",
+    manifest.code_pact?.contract_drift_count,
+    1,
+  );
+
+  assertEq(
+    "final artifact_mismatch_count",
+    final.artifact_mismatch_count,
+    null,
+  );
+  assertEq(
+    "manifest artifact_mismatch_count",
+    manifest.artifact_mismatch_count,
+    null,
+  );
+  assertEq(
+    "code_pact artifact_mismatch_count",
+    code.artifact_mismatch_count,
+    null,
+  );
+  assertEq(
+    "manifest.code_pact artifact_mismatch_count",
+    manifest.code_pact?.artifact_mismatch_count,
+    null,
+  );
+
+  assertEq(
+    "final artifact_integrity_status",
+    final.artifact_integrity_status,
+    "not_evaluated",
+  );
+  assertEq(
+    "manifest artifact_integrity_status",
     manifest.artifact_integrity_status,
     "not_evaluated",
   );
-  assertEq("review_bundle_generated", manifest.review_bundle_generated, false);
+  assertEq(
+    "code_pact artifact_integrity_status",
+    code.artifact_integrity_status,
+    "not_evaluated",
+  );
+  assertEq(
+    "manifest.code_pact artifact_integrity_status",
+    manifest.code_pact?.artifact_integrity_status,
+    "not_evaluated",
+  );
 
-  // Classification consistency
-  if (manifest.product_effectiveness === "promising_single_pair") {
-    fail(
-      "product_effectiveness must not be promising_single_pair when both conditions pass and Code Pact uses more tokens",
-    );
+  assertEq(
+    "final review_bundle_generated",
+    final.review_bundle_generated,
+    false,
+  );
+  assertEq(
+    "manifest review_bundle_generated",
+    manifest.review_bundle_generated,
+    false,
+  );
+  assertEq(
+    "code_pact review_bundle_generated",
+    code.review_bundle_generated,
+    false,
+  );
+  assertEq(
+    "manifest.code_pact review_bundle_generated",
+    manifest.code_pact?.review_bundle_generated,
+    false,
+  );
+
+  // P79 failures structure
+  const p79Failures = final.p79_failures || manifest.p79_failures;
+  if (!Array.isArray(p79Failures) || p79Failures.length === 0) {
+    fail("p79_failures must be a non-empty array");
   }
   assertEq(
-    "product_effectiveness",
-    manifest.product_effectiveness,
-    "not_demonstrated_single_pair",
+    "final/manifest p79_failures length consistency",
+    final.p79_failures?.length,
+    manifest.p79_failures?.length,
   );
+
+  const driftCount = p79Failures.filter(
+    f => f.code === "TASK_CONTRACT_DRIFT",
+  ).length;
+  const scopeAuditCount = p79Failures.filter(
+    f => f.code === "TASK_WRITES_AUDIT_DECLARED_UNUSED",
+  ).length;
+  const classifierCount = p79Failures.filter(
+    f => f.code === "FIXTURE_CLASSIFIER_UNAVAILABLE",
+  ).length;
+
+  assertEq(
+    "contract_drift_count matches p79_failures",
+    driftCount,
+    final.contract_drift_count,
+  );
+  assertEq(
+    "scope_audit_failure_count matches p79_failures",
+    scopeAuditCount,
+    final.scope_audit_failure_count ?? 0,
+  );
+  assertEq(
+    "classifier_unavailable_count matches p79_failures",
+    classifierCount,
+    final.classifier_unavailable_count ?? 0,
+  );
+
+  for (const f of p79Failures) {
+    if (!f.scope || !f.stage || !f.code) {
+      fail("each p79_failure must have scope, stage, and code");
+    }
+  }
+
+  // command-log must contain at least the fixture-side failures
+  const commandLog = readJson(tmpDir, "command-log.json");
+  for (const failure of p79Failures.filter(f =>
+    f.scope.startsWith("fixture_"),
+  )) {
+    const stage = failure.stage.toLowerCase();
+    const match = commandLog.commands.some(
+      c =>
+        c.exit_code === 1 &&
+        (c.command.toLowerCase().includes(stage) ||
+          (stage === "review_bundle" &&
+            c.command.toLowerCase().includes("review-bundle")) ||
+          (stage === "finalize" &&
+            c.command.toLowerCase().includes("finalize"))),
+    );
+    if (!match) {
+      fail(
+        `p79_failure ${failure.scope}/${failure.stage}/${failure.code} not matched in command-log`,
+      );
+    }
+  }
+
+  // Lifecycle event semantics
+  const startEvent = readYaml(tmpDir, "start-event.yaml");
+  const doneEvent = readYaml(tmpDir, "done-event.yaml");
+
+  assertEq("start_event task_id", startEvent.task_id, "P80-C2");
+  assertEq("done_event task_id", doneEvent.task_id, "P80-C2");
+  assertEq("start_event status", startEvent.status, "started");
+  assertEq("done_event status", doneEvent.status, "done");
+
+  const startAt = new Date(startEvent.at).getTime();
+  const doneAt = new Date(doneEvent.at).getTime();
+  if (Number.isNaN(startAt) || Number.isNaN(doneAt))
+    fail("event timestamps invalid");
+  if (startAt >= doneAt) fail("start event must be before done event");
+  if (!/^evidence:sha256:[a-f0-9]{64}$/.test(doneEvent.verification_ref)) {
+    fail("done event verification_ref format invalid");
+  }
+
+  // Negative verifier evidence
+  const neg = readJson(tmpDir, "negative-verifier-results.json");
+  assertTrue("negative-verifier-results.total > 0", neg.total > 0);
+  assertEq("negative-verifier-results rejected", neg.rejected, neg.total);
+  assertEq("negative-verifier-results accepted", neg.total - neg.rejected, 0);
 
   console.log(
     "OK: P80-T2 evidence archive is complete, hash-verified, and semantically consistent.",

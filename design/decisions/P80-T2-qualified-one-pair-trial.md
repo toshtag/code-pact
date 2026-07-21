@@ -83,11 +83,19 @@ promising, and no generalization is made.
   was omitted from the locked task contract (`depends_on: []`), and P80-T2 was
   recorded done before P80-T1 was started. Historical locks and events were not
   rewritten.
-- P79 review bundle for P80-T2 refused with `TASK_CONTRACT_DRIFT` because
-  `design/phases/P80-post-p79-effectiveness-trial.yaml` was mutated by
-  `task finalize` / `phase reconcile` but was outside the declared
-  implementation writes. Per protocol, writes were not expanded after the gate
-  failure.
+- `p79_dogfood_status`: `failed` at both the top-level and the Code Pact
+  condition level. `p79_failures` is structured as:
+  - `fixture_P80-C2` / `finalize` / `TASK_WRITES_AUDIT_DECLARED_UNUSED`
+  - `fixture_P80-C2` / `review_bundle` / `FIXTURE_CLASSIFIER_UNAVAILABLE`
+  - `main_P80-T2` / `review_bundle` / `TASK_CONTRACT_DRIFT`
+- `contract_drift_count`: `1` (the main P80-T2 `TASK_CONTRACT_DRIFT`)
+- `scope_audit_failure_count`: `1` (the fixture P80-C2 `TASK_WRITES_AUDIT_DECLARED_UNUSED`)
+- `classifier_unavailable_count`: `1` (the fixture P80-C2 `review_bundle` missing `scripts/verification-scope.mjs`)
+- `artifact_mismatch_count`: `null`; `artifact_integrity_status`: `not_evaluated`;
+  `review_bundle_generated`: `false`.
+- Lifecycle event evidence: `start-event.yaml` (P80-C2 `started`) and
+  `done-event.yaml` (P80-C2 `done`) are present with correct time order.
+- Per protocol, writes were not expanded after the gate failure.
 
 ## Code Pact condition notes
 
@@ -101,8 +109,9 @@ the qualified pair classification.
 ## Evidence
 
 - Evidence archive: `/tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip`
-- Archive SHA-256: `3e5e5b454a321fc53167ba7e33d216e09177b19a4dd3c9a92ec6aea8f97f25b6`
+- Archive SHA-256: `0d94e463779f8cf363c4a526696023c9e7ab42072035b14423dff6a4ba4adc18`
 - Verification: `node scripts/experiments/verify-p80-t2-evidence.mjs /tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip`
+- Negative verifier evidence: `negative-verifier-results.json` and `verifier-negative-log.txt`; 14/14 cases rejected.
 
 ## Writes
 

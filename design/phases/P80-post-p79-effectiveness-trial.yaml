@@ -90,13 +90,13 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
-    depends_on:
-      - P80-T2C
+    status: done
     description: >
       Converge P80-T2 evidence semantics by aligning nested P79 status,
       validating lifecycle events, separating fixture and main-repository
       failures, preserving negative verifier evidence, and recording issue URLs.
+    depends_on:
+      - P80-T2C
     reads:
       - design/decisions/P80-T2-qualified-one-pair-trial.md
       - scripts/experiments/verify-p80-t2-evidence.mjs

@@ -1,0 +1,37 @@
+schema_version: 1
+task_id: P80-T2D
+phase_id: P80
+phase_path: design/phases/P80-post-p79-effectiveness-trial.yaml
+base_ref: HEAD
+base_sha: cc48ce8ad628baf4205ccd06f2b9d1e319d7c43e
+phase_blob_sha: 268500568b93432c8b486b5fdd40c7a0500610e8
+contract_digest: 02a00bf5198fc5feed6c1b7de8415706927a0fdfa31474d272734caeb3c57830
+contract:
+  description: >
+    Converge P80-T2 evidence semantics by aligning nested P79 status, validating
+    lifecycle events, separating fixture and main-repository failures,
+    preserving negative verifier evidence, and recording issue URLs.
+  reads:
+    - design/decisions/P80-T2-qualified-one-pair-trial.md
+    - scripts/experiments/verify-p80-t2-evidence.mjs
+  writes:
+    - design/decisions/P80-T2-qualified-one-pair-trial.md
+    - scripts/experiments/verify-p80-t2-evidence.mjs
+  depends_on:
+    - P80-T2C
+  decision_refs: []
+  acceptance_refs: []
+  definition_of_done:
+    - |
+      The capability gate, baseline, and Code Pact conditions are executed
+      against one fixed local model with auditable evidence, and the result is
+      committed as design/decisions/P80-T2-qualified-one-pair-trial.md.
+  verification_commands:
+    - node scripts/experiments/verify-p80-t2-evidence.mjs
+      /tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip
+  base_sha: cc48ce8ad628baf4205ccd06f2b9d1e319d7c43e
+  phase_blob_sha: 268500568b93432c8b486b5fdd40c7a0500610e8
+at: 2026-07-21T07:54:13.479Z
+actor: agent
+agent: claude-code
+author: Pocket
