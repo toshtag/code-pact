@@ -230,10 +230,11 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
+    description: Enforce evidence consistency and prove the task-contract workflow
+      using a lock created before any implementation change.
     depends_on:
       - P79-T4
-    description: Enforce evidence consistency and prove the task-contract workflow using a lock created before any implementation change.
     reads:
       - src/core/contract-lock.ts
       - src/core/audit/write-audit.ts
