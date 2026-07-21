@@ -1,0 +1,53 @@
+schema_version: 1
+task_id: P81-T1
+phase_id: P81
+phase_path: design/phases/P81-lifecycle-aware-review-evidence.yaml
+base_ref: HEAD~1
+base_sha: 3278cf1a1052cc62c86b822123f889bfacf7f550
+phase_blob_sha: 4061745150455fc93392115cf205dee18f305aba
+contract_digest: babe814f8740075d686a6fedcf817ca5aacc0cc429e5966420a2919fb093bdb3
+contract:
+  description: >
+    Classify lifecycle-only phase status mutations as Code Pact control-plane
+    changes during review-bundle generation, while rejecting every other
+    undeclared phase mutation.
+  reads:
+    - src/commands/phase-reconcile.ts
+    - src/commands/task-finalize.ts
+    - src/core/audit/write-audit.ts
+    - src/core/contract-lock.ts
+    - src/core/review-bundle.ts
+    - tests/integration/review-bundle.test.ts
+    - tests/unit/commands/review-bundle.test.ts
+  writes:
+    - docs/cli-contract.md
+    - src/core/audit/write-audit.ts
+    - src/core/review-bundle-phase-lifecycle.ts
+    - src/core/review-bundle.ts
+    - tests/integration/review-bundle.test.ts
+    - tests/unit/commands/ci-parity.test.ts
+    - tests/unit/commands/review-bundle.test.ts
+    - tests/unit/core/audit/write-audit.test.ts
+    - tests/unit/core/review-bundle-phase-lifecycle.test.ts
+  depends_on: []
+  decision_refs: []
+  acceptance_refs: []
+  definition_of_done:
+    - A task that declares only its implementation file can complete, finalize,
+      reconcile, and create a review bundle on the first attempt.
+    - Any non-status phase mutation remains a hard review-bundle failure.
+    - Local CI-equivalent verification passes before PR submission.
+    - Status-only phase mutations are explicitly recorded as control-plane
+      changes rather than silently discarded.
+    - The former skipped review-bundle success test is enabled.
+  verification_commands:
+    - pnpm build
+    - pnpm check:docs
+    - pnpm test:integration
+    - pnpm test:unit
+    - pnpm typecheck
+  base_sha: 3278cf1a1052cc62c86b822123f889bfacf7f550
+  phase_blob_sha: 4061745150455fc93392115cf205dee18f305aba
+at: 2026-07-21T13:02:37.068Z
+actor: agent
+author: Pocket
