@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Verify P80-T2 trial evidence archive.
-// Usage: node scripts/experiments/verify-p80-t2-evidence.mjs <zip-path>
+// Usage: node verify-p80-t2-evidence.mjs <zip-path> [--self-test]
 
 import fs from "node:fs";
 import path from "node:path";
@@ -8,6 +8,7 @@ import crypto from "node:crypto";
 import { execSync } from "node:child_process";
 
 const zipPath = process.argv[2];
+const selfTest = process.argv.includes("--self-test");
 
 function fail(message) {
   console.error(`FAIL: ${message}`);
@@ -18,8 +19,16 @@ function sha256File(p) {
   return crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
 }
 
+function sha256Buffer(b) {
+  return crypto.createHash("sha256").update(b).digest("hex");
+}
+
 function readJson(tmp, f) {
   return JSON.parse(fs.readFileSync(path.join(tmp, f), "utf8"));
+}
+
+function writeJson(tmp, f, o) {
+  fs.writeFileSync(path.join(tmp, f), JSON.stringify(o, null, 2));
 }
 
 function readText(tmp, f) {
@@ -38,12 +47,347 @@ function readYaml(tmp, f) {
 
 function assertEq(label, actual, expected) {
   if (actual !== expected) {
-    fail(`${label}: expected ${expected}, got ${actual}`);
+    fail(
+      `${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+    );
   }
 }
 
 function assertTrue(label, cond) {
   if (!cond) fail(label);
+}
+
+function canonicalP79Failures(values) {
+  return values
+    .map(v => ({
+      scope: v.scope,
+      stage: v.stage,
+      code: v.code,
+      review_bundle_generated: v.review_bundle_generated,
+    }))
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+}
+
+function assertDeepEqual(label, actual, expected) {
+  const a = JSON.stringify(actual);
+  const e = JSON.stringify(expected);
+  if (a !== e) {
+    fail(`${label}: expected ${e}, got ${a}`);
+  }
+}
+
+const REQUIRED_CASES = [
+  "wrong_model_digest",
+  "wrong_execution_order",
+  "wrong_capability_token_total",
+  "wrong_baseline_token_total",
+  "wrong_code_pact_token_total",
+  "buggy_oracle_unexpected_pass",
+  "source_fixture_mismatch",
+  "repair_count_nonzero",
+  "promising_classification",
+  "artifact_mismatch_zero",
+  "nested_p79_status_mismatch",
+  "p79_failure_array_mismatch",
+  "p79_failure_code_not_in_command_log",
+  "start_event_has_done_status",
+];
+
+function rebuildManifestAndHashes(dir) {
+  fs.rmSync(path.join(dir, "hashes.json"), { force: true });
+  fs.rmSync(path.join(dir, "manifest.json"), { force: true });
+  const files = fs
+    .readdirSync(dir)
+    .filter(f => fs.statSync(path.join(dir, f)).isFile())
+    .sort();
+  const hashes = {};
+  for (const f of files) hashes[f] = sha256File(path.join(dir, f));
+  const final = readJson(dir, "final-metrics.json");
+  const capMetrics = readJson(dir, "capability-metrics.json");
+  const baseMetrics = readJson(dir, "baseline-metrics.json");
+  const codeMetrics = readJson(dir, "code-pact-metrics.json");
+  const manifest = {
+    schema_version: 1,
+    trial_id: "P80-T2",
+    pair_status: final.pair_status,
+    first_pass_result: final.first_pass_result,
+    token_result: final.token_result,
+    product_effectiveness: final.product_effectiveness,
+    failure_attribution: "none",
+    reproducibility: final.reproducibility,
+    lifecycle_evidence: final.lifecycle_evidence,
+    buggy_base_sha: null,
+    reference_fix_sha: null,
+    reference_patch_sha256: hashes["reference.patch"],
+    pair_base_sha: "7fc93b0643fed81381e600586c9b2e1ad31cee96",
+    execution_order: final.execution_order,
+    provider: final.provider,
+    sampling: final.sampling,
+    capability_gate: { ...capMetrics, passed: true },
+    baseline: baseMetrics,
+    code_pact: codeMetrics,
+    p79_failures: final.p79_failures,
+    p79_dogfood_status: final.p79_dogfood_status,
+    contract_drift_count: final.contract_drift_count,
+    scope_audit_failure_count: final.scope_audit_failure_count,
+    classifier_unavailable_count: final.classifier_unavailable_count,
+    artifact_mismatch_count: final.artifact_mismatch_count,
+    artifact_integrity_status: final.artifact_integrity_status,
+    review_bundle_generated: final.review_bundle_generated,
+    raw_file_hashes: hashes,
+  };
+  writeJson(dir, "manifest.json", manifest);
+  const files2 = fs
+    .readdirSync(dir)
+    .filter(f => fs.statSync(path.join(dir, f)).isFile())
+    .sort();
+  const hashes2 = {};
+  for (const f of files2) hashes2[f] = sha256File(path.join(dir, f));
+  writeJson(dir, "hashes.json", hashes2);
+}
+
+function writeStubNegative(dir) {
+  writeJson(dir, "negative-verifier-results.json", {
+    schema_version: 1,
+    base_archive_sha256: "stub",
+    cases: REQUIRED_CASES.map(name => ({
+      name,
+      hashes_recomputed: true,
+      exit_code: 1,
+      expected_error: "stub",
+      actual_stderr_excerpt: "stub",
+    })),
+    total: REQUIRED_CASES.length,
+    rejected: REQUIRED_CASES.length,
+  });
+}
+
+function runSelfTest(zip) {
+  if (!zip || !fs.existsSync(zip)) fail("archive not found for self-test");
+  const baseDir = fs.mkdtempSync("/tmp/p80-t2-selftest-base-");
+  try {
+    execSync(`unzip -q "${zip}" -d "${baseDir}"`);
+
+    const cases = [
+      {
+        name: "wrong_model_digest",
+        expected_error: "model-identity digest",
+        mutate(d) {
+          const mi = readJson(d, "model-identity.json");
+          mi.model_resolved_digest = "bad";
+          writeJson(d, "model-identity.json", mi);
+        },
+      },
+      {
+        name: "wrong_execution_order",
+        expected_error: "execution_order",
+        mutate(d) {
+          const fm = readJson(d, "final-metrics.json");
+          fm.execution_order = ["baseline", "capability_gate", "code_pact"];
+          writeJson(d, "final-metrics.json", fm);
+        },
+      },
+      {
+        name: "wrong_capability_token_total",
+        expected_error: "capability total_tokens",
+        mutate(d) {
+          const cm = readJson(d, "capability-metrics.json");
+          cm.total_tokens = 999;
+          writeJson(d, "capability-metrics.json", cm);
+        },
+      },
+      {
+        name: "wrong_baseline_token_total",
+        expected_error: "baseline total_tokens",
+        mutate(d) {
+          const bm = readJson(d, "baseline-metrics.json");
+          bm.total_tokens = 999;
+          writeJson(d, "baseline-metrics.json", bm);
+        },
+      },
+      {
+        name: "wrong_code_pact_token_total",
+        expected_error: "code_pact total_tokens",
+        mutate(d) {
+          const cm = readJson(d, "code-pact-metrics.json");
+          cm.total_tokens = 999;
+          writeJson(d, "code-pact-metrics.json", cm);
+        },
+      },
+      {
+        name: "buggy_oracle_unexpected_pass",
+        expected_error: "pair_buggy_oracle",
+        mutate(d) {
+          const pf = readJson(d, "oracle-preflight.json");
+          pf.checks.find(c => c.name === "pair_buggy_oracle").exit_code = 0;
+          writeJson(d, "oracle-preflight.json", pf);
+        },
+      },
+      {
+        name: "source_fixture_mismatch",
+        expected_error: "pair-source.ts",
+        mutate(d) {
+          fs.writeFileSync(
+            path.join(d, "pair-source.ts"),
+            "export function isEven(value: number): boolean { return value % 2 === 0; }\n",
+          );
+        },
+      },
+      {
+        name: "repair_count_nonzero",
+        expected_error: "corrective pass used",
+        mutate(d) {
+          const cm = readJson(d, "capability-metrics.json");
+          cm.corrective_pass_count = 1;
+          writeJson(d, "capability-metrics.json", cm);
+        },
+      },
+      {
+        name: "promising_classification",
+        expected_error: "product_effectiveness",
+        mutate(d) {
+          const fm = readJson(d, "final-metrics.json");
+          fm.product_effectiveness = "promising_single_pair";
+          writeJson(d, "final-metrics.json", fm);
+        },
+      },
+      {
+        name: "artifact_mismatch_zero",
+        expected_error: "artifact_mismatch_count",
+        mutate(d) {
+          const fm = readJson(d, "final-metrics.json");
+          fm.artifact_mismatch_count = 0;
+          writeJson(d, "final-metrics.json", fm);
+        },
+      },
+      {
+        name: "nested_p79_status_mismatch",
+        expected_error: "p79_dogfood_status",
+        mutate(d) {
+          const cm = readJson(d, "code-pact-metrics.json");
+          cm.p79_dogfood_status = "not_exercised";
+          writeJson(d, "code-pact-metrics.json", cm);
+        },
+      },
+      {
+        name: "p79_failure_array_mismatch",
+        expected_error: "p79_failures",
+        mutate(d) {
+          const fm = readJson(d, "final-metrics.json");
+          fm.p79_failures[0].code = "INVENTED_ERROR";
+          writeJson(d, "final-metrics.json", fm);
+        },
+      },
+      {
+        name: "p79_failure_code_not_in_command_log",
+        expected_error: "not matched in command evidence",
+        mutate(d) {
+          const cl = readJson(d, "command-log.json");
+          cl.failures[0].error_code = "DIFFERENT_CODE";
+          cl.failures[0].stderr_excerpt = "different error";
+          writeJson(d, "command-log.json", cl);
+        },
+      },
+      {
+        name: "start_event_has_done_status",
+        expected_error: "start_event status",
+        mutate(d) {
+          let text = fs.readFileSync(path.join(d, "start-event.yaml"), "utf8");
+          text = text.replace("status: started", "status: done");
+          fs.writeFileSync(path.join(d, "start-event.yaml"), text);
+        },
+      },
+    ];
+
+    const script = new URL(import.meta.url).pathname;
+    const results = [];
+    const logLines = [];
+
+    for (const c of cases) {
+      const caseDir = fs.mkdtempSync("/tmp/p80-t2-selftest-case-");
+      try {
+        execSync(`cp -R "${baseDir}/." "${caseDir}/"`);
+        c.mutate(caseDir);
+        writeStubNegative(caseDir);
+        rebuildManifestAndHashes(caseDir);
+        const outZip = path.join(caseDir, "P80-T2-evidence-bad.zip");
+        fs.mkdirSync(path.join(caseDir, "out"), { recursive: true });
+        execSync(`cd "${caseDir}" && zip -rq out/P80-T2-evidence-bad.zip .`);
+        let exitCode = 0;
+        let stderr = "";
+        let stdout = "";
+        try {
+          stdout = execSync(
+            `node "${script}" "${caseDir}/out/P80-T2-evidence-bad.zip"`,
+            {
+              encoding: "utf8",
+              stdio: "pipe",
+            },
+          );
+        } catch (e) {
+          exitCode = e.status ?? 1;
+          stderr = e.stderr ? e.stderr.toString() : e.message;
+          stdout = e.stdout ? e.stdout.toString() : "";
+        }
+        const failLine =
+          stderr.split("\n").find(l => l.startsWith("FAIL:")) ||
+          stderr.split("\n")[1] ||
+          "";
+        const hashMismatch = failLine.toLowerCase().includes("hash mismatch");
+        const expectedHit = failLine.includes(c.expected_error);
+        const rejected = exitCode !== 0 && !hashMismatch && expectedHit;
+        results.push({
+          name: c.name,
+          hashes_recomputed: true,
+          exit_code: exitCode,
+          expected_error: c.expected_error,
+          actual_stderr_excerpt: failLine.replace(/^FAIL: /, ""),
+        });
+        logLines.push(
+          `CASE ${c.name}`,
+          `EXIT ${exitCode}`,
+          `EXPECTED ${c.expected_error}`,
+          `STDERR ${failLine}`,
+          `HASH_MISMATCH ${hashMismatch}`,
+          `EXPECTED_HIT ${expectedHit}`,
+          rejected ? "RESULT REJECTED" : "RESULT ACCEPTED (BAD)",
+          "",
+        );
+      } finally {
+        fs.rmSync(caseDir, { recursive: true, force: true });
+      }
+    }
+
+    const negativeResults = {
+      schema_version: 1,
+      base_archive_sha256: sha256Buffer(fs.readFileSync(zip)),
+      cases: results,
+      total: results.length,
+      rejected: results.filter(r => r.exit_code === 1).length,
+    };
+
+    const outDir = path.dirname(zip);
+    const outJson = path.join(outDir, "negative-verifier-results.json");
+    const outLog = path.join(outDir, "verifier-negative-log.txt");
+    writeJson(outDir, "negative-verifier-results.json", negativeResults);
+    fs.writeFileSync(outLog, logLines.join("\n"));
+
+    console.log(`Self-test results written to ${outJson} and ${outLog}`);
+    console.log(
+      `Total: ${negativeResults.total}, Rejected: ${negativeResults.rejected}`,
+    );
+    if (negativeResults.rejected !== negativeResults.total) {
+      fail("not all negative cases were rejected");
+    }
+    return negativeResults;
+  } finally {
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  }
+}
+
+if (selfTest) {
+  runSelfTest(zipPath);
+  process.exit(0);
 }
 
 if (!zipPath || !fs.existsSync(zipPath)) {
@@ -70,6 +414,7 @@ const required = [
   "code-pact-metrics.json",
   "final-metrics.json",
   "command-log.json",
+  "main-command-log.json",
   "p80-task.yaml",
   "contract-lock.yaml",
   "start-event.yaml",
@@ -162,11 +507,11 @@ try {
   );
 
   // Execution order
-  assertEq(
-    "execution_order",
-    JSON.stringify(final.execution_order),
-    JSON.stringify(["capability_gate", "baseline", "code_pact"]),
-  );
+  assertDeepEqual("execution_order", final.execution_order, [
+    "capability_gate",
+    "baseline",
+    "code_pact",
+  ]);
 
   // Capability gate metrics
   const cap = readJson(tmpDir, "capability-metrics.json");
@@ -294,6 +639,48 @@ try {
   );
 
   assertEq(
+    "final scope_audit_failure_count",
+    final.scope_audit_failure_count,
+    1,
+  );
+  assertEq(
+    "manifest scope_audit_failure_count",
+    manifest.scope_audit_failure_count,
+    1,
+  );
+  assertEq(
+    "code_pact scope_audit_failure_count",
+    code.scope_audit_failure_count,
+    1,
+  );
+  assertEq(
+    "manifest.code_pact scope_audit_failure_count",
+    manifest.code_pact?.scope_audit_failure_count,
+    1,
+  );
+
+  assertEq(
+    "final classifier_unavailable_count",
+    final.classifier_unavailable_count,
+    1,
+  );
+  assertEq(
+    "manifest classifier_unavailable_count",
+    manifest.classifier_unavailable_count,
+    1,
+  );
+  assertEq(
+    "code_pact classifier_unavailable_count",
+    code.classifier_unavailable_count,
+    1,
+  );
+  assertEq(
+    "manifest.code_pact classifier_unavailable_count",
+    manifest.code_pact?.classifier_unavailable_count,
+    1,
+  );
+
+  assertEq(
     "final artifact_mismatch_count",
     final.artifact_mismatch_count,
     null,
@@ -356,67 +743,85 @@ try {
     false,
   );
 
-  // P79 failures structure
-  const p79Failures = final.p79_failures || manifest.p79_failures;
-  if (!Array.isArray(p79Failures) || p79Failures.length === 0) {
-    fail("p79_failures must be a non-empty array");
-  }
-  assertEq(
-    "final/manifest p79_failures length consistency",
-    final.p79_failures?.length,
-    manifest.p79_failures?.length,
+  // P79 failures canonical equality across all four sources
+  const finalFailures = canonicalP79Failures(final.p79_failures || []);
+  const manifestFailures = canonicalP79Failures(manifest.p79_failures || []);
+  const codeFailures = canonicalP79Failures(code.p79_failures || []);
+  const manifestCodeFailures = canonicalP79Failures(
+    manifest.code_pact?.p79_failures || [],
   );
 
-  const driftCount = p79Failures.filter(
+  assertDeepEqual(
+    "final vs manifest p79_failures",
+    finalFailures,
+    manifestFailures,
+  );
+  assertDeepEqual(
+    "final vs code_pact p79_failures",
+    finalFailures,
+    codeFailures,
+  );
+  assertDeepEqual(
+    "final vs manifest.code_pact p79_failures",
+    finalFailures,
+    manifestCodeFailures,
+  );
+
+  // Counts computed from p79_failures must equal stored counts
+  const driftCount = finalFailures.filter(
     f => f.code === "TASK_CONTRACT_DRIFT",
   ).length;
-  const scopeAuditCount = p79Failures.filter(
+  const scopeAuditCount = finalFailures.filter(
     f => f.code === "TASK_WRITES_AUDIT_DECLARED_UNUSED",
   ).length;
-  const classifierCount = p79Failures.filter(
+  const classifierCount = finalFailures.filter(
     f => f.code === "FIXTURE_CLASSIFIER_UNAVAILABLE",
   ).length;
 
   assertEq(
-    "contract_drift_count matches p79_failures",
+    "computed contract_drift_count",
     driftCount,
     final.contract_drift_count,
   );
   assertEq(
-    "scope_audit_failure_count matches p79_failures",
+    "computed scope_audit_failure_count",
     scopeAuditCount,
-    final.scope_audit_failure_count ?? 0,
+    final.scope_audit_failure_count,
   );
   assertEq(
-    "classifier_unavailable_count matches p79_failures",
+    "computed classifier_unavailable_count",
     classifierCount,
-    final.classifier_unavailable_count ?? 0,
+    final.classifier_unavailable_count,
   );
 
-  for (const f of p79Failures) {
-    if (!f.scope || !f.stage || !f.code) {
-      fail("each p79_failure must have scope, stage, and code");
-    }
-  }
-
-  // command-log must contain at least the fixture-side failures
+  // Structured command evidence matching
   const commandLog = readJson(tmpDir, "command-log.json");
-  for (const failure of p79Failures.filter(f =>
-    f.scope.startsWith("fixture_"),
-  )) {
+  const mainCommandLog = readJson(tmpDir, "main-command-log.json");
+  const allCommandFailures = [
+    ...(commandLog.failures || []),
+    ...(mainCommandLog.failures || []),
+  ];
+
+  for (const failure of final.p79_failures) {
     const stage = failure.stage.toLowerCase();
-    const match = commandLog.commands.some(
+    const match = allCommandFailures.find(
       c =>
-        c.exit_code === 1 &&
+        c.scope === failure.scope &&
+        c.stage === failure.stage &&
+        c.error_code === failure.code &&
+        c.exit_code !== 0 &&
         (c.command.toLowerCase().includes(stage) ||
           (stage === "review_bundle" &&
             c.command.toLowerCase().includes("review-bundle")) ||
           (stage === "finalize" &&
-            c.command.toLowerCase().includes("finalize"))),
+            c.command.toLowerCase().includes("finalize"))) &&
+        ((c.stdout_excerpt || "") + (c.stderr_excerpt || "")).includes(
+          failure.code,
+        ),
     );
     if (!match) {
       fail(
-        `p79_failure ${failure.scope}/${failure.stage}/${failure.code} not matched in command-log`,
+        `p79_failure ${failure.scope}/${failure.stage}/${failure.code} not matched in command evidence`,
       );
     }
   }
@@ -441,9 +846,50 @@ try {
 
   // Negative verifier evidence
   const neg = readJson(tmpDir, "negative-verifier-results.json");
-  assertTrue("negative-verifier-results.total > 0", neg.total > 0);
+  if (!/^[a-f0-9]{64}$/.test(neg.base_archive_sha256)) {
+    fail(
+      "negative-verifier-results base_archive_sha256 is not a valid SHA-256 string",
+    );
+  }
+  assertEq("negative-verifier-results total", neg.total, REQUIRED_CASES.length);
   assertEq("negative-verifier-results rejected", neg.rejected, neg.total);
-  assertEq("negative-verifier-results accepted", neg.total - neg.rejected, 0);
+
+  const caseNames = neg.cases.map(c => c.name);
+  for (const name of REQUIRED_CASES) {
+    if (!caseNames.includes(name)) fail(`missing negative case: ${name}`);
+  }
+  const dup = caseNames.filter(
+    (item, index) => caseNames.indexOf(item) !== index,
+  );
+  if (dup.length) fail(`duplicate negative case names: ${dup.join(", ")}`);
+
+  for (const c of neg.cases) {
+    assertEq(`${c.name} hashes_recomputed`, c.hashes_recomputed, true);
+    assertEq(`${c.name} exit_code`, c.exit_code, 1);
+    assertTrue(
+      `${c.name} actual_stderr_excerpt present`,
+      typeof c.actual_stderr_excerpt === "string" &&
+        c.actual_stderr_excerpt.length > 0,
+    );
+    assertTrue(
+      `${c.name} expected_error present`,
+      typeof c.expected_error === "string" && c.expected_error.length > 0,
+    );
+    const excerpt = c.actual_stderr_excerpt.toLowerCase();
+    if (excerpt.includes("hash mismatch"))
+      fail(`${c.name} failed due to hash mismatch`);
+    if (!c.actual_stderr_excerpt.includes(c.expected_error)) {
+      fail(
+        `${c.name} stderr does not include expected_error ${c.expected_error}`,
+      );
+    }
+  }
+
+  const log = readText(tmpDir, "verifier-negative-log.txt");
+  for (const name of REQUIRED_CASES) {
+    if (!log.includes(`CASE ${name}`))
+      fail(`verifier-negative-log missing CASE ${name}`);
+  }
 
   console.log(
     "OK: P80-T2 evidence archive is complete, hash-verified, and semantically consistent.",
