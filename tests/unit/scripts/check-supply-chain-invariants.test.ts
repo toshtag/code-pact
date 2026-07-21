@@ -18,7 +18,7 @@ describe("checkActionShaPins", () => {
       "  build:",
       "    steps:",
       "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
-      "      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0",
+      "      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
     ].join("\n");
     expect(checkActionShaPins(content)).toEqual([]);
   });
@@ -171,7 +171,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          name: release-artifact",
     "          path: release-artifact",
     "      - name: Set up Node",
-    "        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0",
+    "        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
     "        with:",
     "          node-version: 24",
     "          package-manager-cache: false",
@@ -259,7 +259,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          name: release-artifact",
     "          path: release-artifact",
     "      - name: Set up Node",
-    "        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0",
+    "        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
     "        with:",
     "          node-version: 24",
     "      - name: Verify registry tarball",
@@ -393,7 +393,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "        with:",
     "          persist-credentials: false",
     "      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9",
-    "      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0",
+    "      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
     "        with:",
     "          node-version: 22",
     "          cache: pnpm",
@@ -410,7 +410,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "        with:",
     "          persist-credentials: false",
     "      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9",
-    "      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0",
+    "      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
     "        with:",
     "          node-version: 22",
     "          cache: pnpm",
@@ -481,7 +481,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "        with:",
     "          persist-credentials: false",
     "      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9",
-    "      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0",
+    "      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
     "        with:",
     "          node-version: 22",
     "          cache: pnpm",
@@ -497,7 +497,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "        with:",
     "          persist-credentials: false",
     "      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9",
-    "      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0",
+    "      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
     "        with:",
     "          node-version: 24",
     "          cache: pnpm",
@@ -517,7 +517,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "        with:",
     "          persist-credentials: false",
     "      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9",
-    "      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0",
+    "      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
     "        with:",
     "          node-version: 22",
     "          cache: pnpm",
@@ -782,10 +782,13 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when classify inlines the base ref expression into shell", async () => {
     root = await buildTree({
       ciContent: wellFormedCi
-        .replace("        env:\n          BASE_REF: ${{ steps.base.outputs.ref }}\n", "")
+        .replace(
+          "        env:\n          BASE_REF: ${{ steps.base.outputs.ref }}\n",
+          "",
+        )
         .replace(
           '            node "$trusted_classifier" --base "$BASE_REF" --format github',
-          "            node \"$trusted_classifier\" --base ${{ steps.base.outputs.ref }} --format github",
+          '            node "$trusted_classifier" --base ${{ steps.base.outputs.ref }} --format github',
         ),
     });
     const { failures } = checkSupplyChainInvariants(root);
