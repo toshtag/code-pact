@@ -101,10 +101,11 @@ export async function resolveGitRef(cwd: string, ref: string): Promise<string> {
 export async function resolvePhaseBlobSha(
   cwd: string,
   phasePath: string,
+  ref = "HEAD",
 ): Promise<string> {
   const { stdout } = await execFileAsync(
     "git",
-    ["rev-parse", "--verify", `HEAD:${phasePath}`],
+    ["rev-parse", "--verify", `${ref}:${phasePath}`],
     { cwd, encoding: "utf8" },
   );
   return stdout.trim();
@@ -289,10 +290,10 @@ export async function createTaskContractLock(
 
   let phaseBlobSha: string;
   try {
-    phaseBlobSha = await resolvePhaseBlobSha(cwd, phasePath);
+    phaseBlobSha = await resolvePhaseBlobSha(cwd, phasePath, baseSha);
   } catch {
     const err = new Error(
-      `Cannot lock task contract: phase file "${phasePath}" is not committed at HEAD.`,
+      `Cannot lock task contract: phase file "${phasePath}" is not committed at base ref "${baseRef}".`,
     );
     (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw err;
@@ -469,10 +470,14 @@ export async function assertTaskContractCurrent(
 
   let currentPhaseBlobSha: string;
   try {
-    currentPhaseBlobSha = await resolvePhaseBlobSha(cwd, lock.phase_path);
+    currentPhaseBlobSha = await resolvePhaseBlobSha(
+      cwd,
+      lock.phase_path,
+      currentBaseSha,
+    );
   } catch {
     const err = new Error(
-      `TASK_CONTRACT_DRIFT: locked phase file "${lock.phase_path}" is no longer reachable at HEAD.`,
+      `TASK_CONTRACT_DRIFT: locked phase file "${lock.phase_path}" is no longer reachable at base ref "${currentBaseSha}".`,
     );
     (err as NodeJS.ErrnoException).code = "TASK_CONTRACT_DRIFT";
     (err as NodeJS.ErrnoException & { task_id?: string }).task_id = taskId;
