@@ -3,7 +3,7 @@ name: Immutable Contracts and Review Evidence
 weight: 3
 confidence: medium
 risk: medium
-status: in_progress
+status: done
 objective: Lock task contracts after planning and produce review evidence
   manifests that link CI results, done events, and tested HEAD.
 definition_of_done:
@@ -231,7 +231,8 @@ tasks:
     verification_strength: strong
     expected_duration: short
     status: done
-    description: Enforce evidence consistency and prove the task-contract workflow
+    description:
+      Enforce evidence consistency and prove the task-contract workflow
       using a lock created before any implementation change.
     depends_on:
       - P79-T4
