@@ -207,6 +207,7 @@ describe("runReviewBundle", () => {
     // Lifecycle-only phase status changes are reclassified to
     // lifecycle_control_plane, not treated as outside declared writes.
     expect(manifest?.write_audit.outside_declared).toEqual([]);
+    expect(manifest?.write_audit.warnings).toEqual([]);
     expect(manifest?.write_audit.lifecycle_control_plane).toEqual([
       {
         file: "design/phases/P1-foundation.yaml",

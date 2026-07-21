@@ -210,6 +210,7 @@ describe("task review-bundle", () => {
     const manifest = JSON.parse(manifestRaw);
     expect(manifest.write_audit.outside_declared).toEqual([]);
     expect(manifest.write_audit.declared_unused).toEqual([]);
+    expect(manifest.write_audit.warnings).toEqual([]);
     expect(manifest.write_audit.files_touched).toContain("src/example.ts");
     expect(manifest.write_audit.files_touched).toContain(
       "design/phases/P1-foundation.yaml",

@@ -20,7 +20,11 @@ import { loadProgressLog } from "./progress/io.ts";
 import { resolveTaskInRoadmap } from "./plan/resolve-task.ts";
 import { loadPhase } from "./plan/load-phase.ts";
 import { assertTaskContractCurrent } from "./contract-lock.ts";
-import { auditWrites, type WriteAuditResult } from "./audit/write-audit.ts";
+import {
+  auditWrites,
+  type WriteAuditResult,
+  type WriteAuditWarning,
+} from "./audit/write-audit.ts";
 import {
   classifyPhaseLifecycle,
   type LifecycleControlPlaneEntry,
@@ -413,6 +417,18 @@ export async function runReviewBundle(
     throw err;
   }
 
+  // Recompute warnings from the post-reclassification state. The original
+  // audit emitted TASK_WRITES_AUDIT_OUTSIDE_DECLARED because phase YAML was
+  // in outside_declared; once reclassified to lifecycle_control_plane that
+  // warning is no longer accurate.
+  const warnings: WriteAuditWarning[] = [];
+  if (reclassifiedOutsideDeclared.length > 0) {
+    warnings.push("TASK_WRITES_AUDIT_OUTSIDE_DECLARED");
+  }
+  if (writeAudit.declared_unused.length > 0) {
+    warnings.push("TASK_WRITES_AUDIT_DECLARED_UNUSED");
+  }
+
   if (writeAudit.declared_unused.length > 0) {
     const err = new Error(
       `Review bundle refused: declared writes were not used: ${writeAudit.declared_unused.join(", ")}`,
@@ -503,7 +519,7 @@ export async function runReviewBundle(
       files_touched: writeAudit.files_touched,
       outside_declared: reclassifiedOutsideDeclared,
       declared_unused: writeAudit.declared_unused,
-      warnings: writeAudit.warnings,
+      warnings,
       lifecycle_control_plane: lifecycleControlPlane,
     },
     task_verification: taskVerification,
