@@ -258,6 +258,9 @@ tasks:
       - src/i18n/en-US.ts
       - src/i18n/ja-JP.ts
       - tests/unit/commands/review-bundle.test.ts
+      - tests/unit/commands/ci-parity.test.ts
+      - tests/unit/error-code-surface.test.ts
       - tests/integration/review-bundle.test.ts
+      - tests/integration/ci-parity.test.ts
       - docs/cli-contract.md
       - docs/agent-contract.md
