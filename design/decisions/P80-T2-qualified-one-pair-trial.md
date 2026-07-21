@@ -69,7 +69,7 @@ the qualified pair classification.
 ## Evidence
 
 - Evidence archive: `/tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip`
-- Archive SHA-256: `175f1ec289c55ac4b4d0791d58721d82f0db5a8b2608b6ca370c864f4a90fa92`
+- Archive SHA-256: `d90745f03511bd4c3ff0bce2cbf9cc7f2ef294a85ac9089709b13c1637baebcd`
 - Verification: `node scripts/experiments/verify-p80-t2-evidence.mjs /tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip`
 
 ## Writes

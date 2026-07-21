@@ -1,0 +1,34 @@
+schema_version: 1
+task_id: P80-T1
+phase_id: P80
+phase_path: design/phases/P80-post-p79-effectiveness-trial.yaml
+base_ref: HEAD
+base_sha: f680906862af5f4a949fddef1c282d76028ad40a
+phase_blob_sha: 3bb8a20878d9cc82ddafb7e2ccf9a74fc8c0e523
+contract_digest: 5bd4b72c386e5aeb0d5a9ef6e7b7ca6a8a08b9a88e505fa9b252fdbe27de6645
+contract:
+  description: >
+    Run an unqualified one-pair post-P79 effectiveness trial on the historical
+    exact-replacement bug. Both conditions returned the same invalid no-op
+    replacement, so the pair is recorded as non_discriminating with
+    product_effectiveness unevaluated.
+  reads:
+    - design/decisions/P80-T1-one-pair-effectiveness-trial.md
+  writes: []
+  depends_on: []
+  decision_refs: []
+  acceptance_refs: []
+  definition_of_done:
+    - |
+      The capability gate, baseline, and Code Pact conditions are executed
+      against one fixed local model with auditable evidence, and the result is
+      committed as design/decisions/P80-T2-qualified-one-pair-trial.md.
+  verification_commands:
+    - node scripts/experiments/verify-p80-t2-evidence.mjs
+      /tmp/code-pact-p80-t2/P80-T2-trial-evidence.zip
+  base_sha: f680906862af5f4a949fddef1c282d76028ad40a
+  phase_blob_sha: 3bb8a20878d9cc82ddafb7e2ccf9a74fc8c0e523
+at: 2026-07-21T06:55:43.829Z
+actor: agent
+agent: claude-code
+author: Pocket
