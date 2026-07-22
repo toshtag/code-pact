@@ -1,0 +1,72 @@
+schema_version: 1
+task_id: P83-T1
+phase_id: P83
+phase_path: design/phases/P83-lossless-task-registration.yaml
+base_ref: HEAD
+base_sha: 7096db8a7d1907bb9bee36bb8bf54f834d7b4df2
+phase_blob_sha: f07264ce989f69d0d272707d6575ecfa4e5bd0a8
+contract_digest: d4e663512cabbd1f22a1348c2d86338bfa5495a8c436dc4baac3c2aa8e1f3d2e
+contract:
+  description: >
+    Implement lossless task registration from a strict machine-readable spec
+    file. Add --spec-file support to task add and task lock, compute and store a
+    SHA-256 digest of the canonical registration, and fail side-effect-free when
+    the spec does not round-trip or does not match the current phase task.
+  reads:
+    - design/phases/P83-lossless-task-registration.yaml
+    - design/roadmap.yaml
+    - design/specs/P83-T1-task-spec.yaml
+    - docs/**/*.md
+    - src/cli/**/*.ts
+    - src/commands/**/*.ts
+    - src/core/**/*.ts
+    - tests/**/*.ts
+  writes:
+    - design/phases/P83-lossless-task-registration.yaml
+    - design/roadmap.yaml
+    - design/specs/P83-T1-task-spec.yaml
+    - docs/cli-contract.md
+    - docs/cli-reference.generated.md
+    - src/cli/commands/task-lock.ts
+    - src/cli/commands/task.ts
+    - src/cli/spec/task.ts
+    - src/commands/task-add.ts
+    - src/commands/task-lock.ts
+    - src/core/contract-lock.ts
+    - src/core/review-bundle.ts
+    - src/core/schemas/task-registration-spec.ts
+    - src/core/task-registration-spec.ts
+    - tests/integration/task-registration-spec.test.ts
+    - tests/unit/cli/spec-render.test.ts
+    - tests/unit/error-code-surface.test.ts
+  depends_on:
+    - P82-T2
+  decision_refs: []
+  acceptance_refs:
+    - design/specs/P83-T1-task-spec.yaml
+  definition_of_done:
+    - A spec-locked task detects registration-field drift after lock.
+    - A strict task spec containing depends_on is stored losslessly in the phase.
+    - Focused verification, local CI, and review-bundle complete without
+      corrective code commits.
+    - Removing depends_on between add and lock causes a side-effect-free failure.
+    - The P80 dependency-omission replay is blocked before implementation.
+    - The same spec is verified again before contract lock creation.
+  verification_commands:
+    - pnpm build
+    - pnpm check:docs
+    - pnpm test:ci
+    - pnpm test:integration
+    - pnpm test:integration:smoke
+    - pnpm test:unit
+    - pnpm typecheck
+  base_sha: 7096db8a7d1907bb9bee36bb8bf54f834d7b4df2
+  phase_blob_sha: f07264ce989f69d0d272707d6575ecfa4e5bd0a8
+registration:
+  mode: spec_file
+  spec_digest: 06a1ab4f3c1b36b1d0a6340c6cf8206035eb9a18ef0b1f179d4525d705f69a75
+  spec_canonical: |
+    {"phase_id":"P83","schema_version":1,"task":{"acceptance_refs":["design/specs/P83-T1-task-spec.yaml"],"ambiguity":"low","context_size":"medium","decision_refs":[],"depends_on":["P82-T2"],"description":"Implement lossless task registration from a strict machine-readable spec file. Add --spec-file support to task add and task lock, compute and store a SHA-256 digest of the canonical registration, and fail side-effect-free when the spec does not round-trip or does not match the current phase task.\n","expected_duration":"long","id":"P83-T1","reads":["src/core/**/*.ts","src/commands/**/*.ts","src/cli/**/*.ts","tests/**/*.ts","docs/**/*.md","design/roadmap.yaml","design/phases/P83-lossless-task-registration.yaml","design/specs/P83-T1-task-spec.yaml"],"requires_decision":false,"risk":"medium","type":"feature","verification_strength":"strong","write_surface":"medium","writes":["src/core/schemas/task-registration-spec.ts","src/core/task-registration-spec.ts","src/core/contract-lock.ts","src/core/review-bundle.ts","src/commands/task-add.ts","src/commands/task-lock.ts","src/cli/spec/task.ts","src/cli/commands/task.ts","src/cli/commands/task-lock.ts","tests/integration/task-registration-spec.test.ts","tests/unit/cli/spec-render.test.ts","tests/unit/error-code-surface.test.ts","docs/cli-reference.generated.md","docs/cli-contract.md","design/roadmap.yaml","design/phases/P83-lossless-task-registration.yaml","design/specs/P83-T1-task-spec.yaml"]}}
+at: 2026-07-22T05:28:46.826Z
+actor: agent
+author: Pocket
