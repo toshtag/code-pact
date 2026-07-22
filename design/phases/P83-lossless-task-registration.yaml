@@ -171,3 +171,47 @@ tasks:
       - design/phases/P83-lossless-task-registration.yaml
     acceptance_refs:
       - design/specs/P83-T3-task-spec.yaml
+  - id: P83-T4
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: long
+    status: planned
+    description: >
+      Spec authority and snapshot atomicity closeout. Ensure phase source bytes
+      and CAS expected bytes are the same single snapshot, detect spec-file
+      drift after spec-file contract lock, and pass strict finalize without
+      treating planning artifacts as implementation writes.
+    requires_decision: false
+    depends_on:
+      - P83-T3
+    decision_refs: []
+    reads:
+      - src/commands/task-add.ts
+      - src/core/contract-lock.ts
+      - src/commands/task-lock.ts
+      - src/core/task-registration-spec.ts
+      - src/core/schemas/task-registration-spec.ts
+      - src/io/atomic-text.ts
+      - src/core/project-fs/index.ts
+      - src/core/project-fs/branded-paths.ts
+      - src/core/plan/load-phase.ts
+      - src/core/schemas/phase.ts
+      - src/core/task-dependencies.ts
+      - tests/unit/commands/task-add.test.ts
+      - tests/unit/core/contract-lock.test.ts
+      - tests/integration/task-registration-spec.test.ts
+      - design/specs/P83-T4-task-spec.yaml
+      - design/phases/P83-lossless-task-registration.yaml
+    writes:
+      - src/commands/task-add.ts
+      - src/core/contract-lock.ts
+      - src/commands/task-lock.ts
+      - tests/unit/commands/task-add.test.ts
+      - tests/unit/core/contract-lock.test.ts
+      - tests/integration/task-registration-spec.test.ts
+    acceptance_refs:
+      - design/specs/P83-T4-task-spec.yaml
