@@ -365,10 +365,14 @@ inspect_decision` with a `next.command` that points to the full-detail
   use those strings verbatim so verification failures arrive as compact
   capsules instead of duplicated raw stdout/stderr.
 
-- **`task start <task-id>`** — record a `started` event. The agent
-  invokes this exactly once per implementation pass for a task; the
-  command is idempotent — a second call from `started` state returns
-  `kind: "already_started"` without appending a duplicate event.
+- **`task start <task-id>`** — record a `started` event. Before any
+  lock or event is written, `task start` checks every `depends_on` task:
+  if any dependency is not `done`, it exits with
+  `error.code: TASK_DEPENDENCY_INCOMPLETE` and returns the incomplete
+  ids in `data.deps`. The agent invokes this exactly once per
+  implementation pass for a task; the command is idempotent — a second
+  call from `started` state returns `kind: "already_started"` without
+  appending a duplicate event.
 
 - **Implement the task.** This is the agent's own work. `code-pact`
   does not run during this phase; it is invoked again only at the

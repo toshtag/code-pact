@@ -3602,6 +3602,8 @@ Any disallowed transition exits 2 with `INVALID_TASK_TRANSITION` and records no 
 
 Records a `started` event. Validates `--agent` against `project.yaml` (defaults to `default_agent` when omitted) and emits the standard `AGENT_NOT_FOUND` / `AGENT_NOT_ENABLED` errors.
 
+**Dependency gate:** If any `depends_on` task's derived state is not `done`, exits 1 with `TASK_DEPENDENCY_INCOMPLETE` and lists the incomplete dependency ids in `data.deps`. No contract lock or progress event is written.
+
 Idempotency: if the current state is already `started`, the command exits 0 with `{ ok: true, data: { already_started: true, ... } }` and records no progress event.
 
 ### `task status <task-id> [--json]`
