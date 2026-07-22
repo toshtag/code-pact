@@ -88,7 +88,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: long
-    status: planned
+    status: done
     description: >
       Close out lossless task registration. Eliminate side effects on task add
       round-trip failure, detect loss of required registration fields including
