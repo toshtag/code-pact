@@ -3,7 +3,7 @@ name: Lossless Task Registration
 weight: 1
 confidence: high
 risk: medium
-status: done
+status: in_progress
 objective: Preserve an explicitly supplied machine-readable task contract from
   task registration through contract locking, preventing readiness-field loss
   caused by manual CLI-flag transcription.
