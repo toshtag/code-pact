@@ -179,7 +179,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: long
-    status: planned
+    status: done
     description: >
       Spec authority and snapshot atomicity closeout. Ensure phase source bytes
       and CAS expected bytes are the same single snapshot, detect spec-file
