@@ -3,7 +3,7 @@ name: Pre-Implementation Dependency Gate
 weight: 1
 confidence: high
 risk: medium
-status: in_progress
+status: done
 objective: >
   Prevent agents from starting implementation while declared task dependencies
   are incomplete, before any contract lock or progress event is written.
@@ -74,7 +74,6 @@ tasks:
       - tests/integration/json-stdout.test.ts
       - docs/cli-contract.md
       - docs/agent-contract.md
-
   - id: P82-T2
     type: bugfix
     ambiguity: low
@@ -83,12 +82,12 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
-    depends_on:
-      - P82-T1
+    status: done
     description: >
       Align the task-start dependency error contract and complete the
       predeclared side-effect, parity, and cross-phase acceptance coverage.
+    depends_on:
+      - P82-T1
     reads:
       - src/cli/commands/task.ts
       - src/i18n/en-US.ts
