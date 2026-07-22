@@ -26,6 +26,8 @@ function arraysEqual(
  * Return the list of registration field names that differ between two task
  * descriptions. Used for both lock-time spec mismatch and post-lock drift.
  *
+ * - `status` is intentionally excluded: it is a lifecycle field (planned →
+ *   started → done) and not part of the lossless registration contract.
  * - Empty arrays are treated as different from missing fields.
  * - `requires_decision: undefined` and `false` are treated as equal.
  */
@@ -45,7 +47,6 @@ export function registrationChangedFields(
     fields.push("verification_strength");
   if (expected.expected_duration !== actual.expected_duration)
     fields.push("expected_duration");
-  if (expected.status !== actual.status) fields.push("status");
   if (expected.description !== actual.description) fields.push("description");
   if (Boolean(expected.requires_decision) !== Boolean(actual.requires_decision))
     fields.push("requires_decision");
@@ -66,6 +67,9 @@ export function registrationChangedFields(
  *
  * - Top-level key order is canonicalized by `canonicalJson`.
  * - Array order is preserved as-is; `depends_on` is NOT sorted.
+ - `status` is excluded from the digest; it is a lifecycle field managed by
+ *   `task start`, `task complete`, and `task finalize`, not the registration
+ *   contract.
  * - Explicit empty arrays are kept; missing optional arrays are omitted,
  *   so "empty array" and "field omitted" produce different digests.
  * - `undefined` values are filtered out by `canonicalJson`.
@@ -87,7 +91,6 @@ export function canonicalTaskRegistration(phaseId: string, task: Task): string {
       write_surface: task.write_surface,
       verification_strength: task.verification_strength,
       expected_duration: task.expected_duration,
-      status: task.status,
       description: task.description,
       requires_decision:
         task.requires_decision === undefined ? false : task.requires_decision,
