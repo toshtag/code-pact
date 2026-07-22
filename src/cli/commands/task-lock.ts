@@ -38,10 +38,6 @@ export async function cmdTaskLock(
       : undefined;
   const agent =
     typeof values.agent === "string" ? (values.agent as string) : undefined;
-  const specFile =
-    typeof values["spec-file"] === "string"
-      ? (values["spec-file"] as string)
-      : undefined;
   const cwd = process.cwd();
 
   return withWriteLock(
@@ -58,7 +54,6 @@ export async function cmdTaskLock(
           agent,
           author,
           actor: "agent",
-          specFile,
         });
         if (json) {
           emitOk({
@@ -90,23 +85,6 @@ export async function cmdTaskLock(
         ) {
           emitError(json, code, message);
           return 1;
-        }
-        if (code === "TASK_REGISTRATION_SPEC_MISMATCH") {
-          const mismatch = err as NodeJS.ErrnoException & {
-            task_id?: string;
-            expected_spec_digest?: string;
-            actual_task_digest?: string;
-            changed_fields?: string[];
-          };
-          emitError(json, code, message, {
-            data: {
-              task_id: mismatch.task_id,
-              expected_spec_digest: mismatch.expected_spec_digest,
-              actual_task_digest: mismatch.actual_task_digest,
-              changed_fields: mismatch.changed_fields,
-            },
-          });
-          return 2;
         }
         if (code === "CONFIG_ERROR") {
           emitError(json, "CONFIG_ERROR", message);

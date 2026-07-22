@@ -227,6 +227,3 @@ phases:
   - id: P82
     path: design/phases/P82-pre-implementation-dependency-gate.yaml
     weight: 1
-  - id: P83
-    path: design/phases/P83-lossless-task-registration.yaml
-    weight: 1

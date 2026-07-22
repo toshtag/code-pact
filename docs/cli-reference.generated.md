@@ -139,13 +139,11 @@ is required. For bulk creation from a draft, use `phase import` instead.
 | `--write-surface` | `<size>` | Optional sizing/readiness field; see the task schema for allowed values. |
 | `--verification-strength` | `<level>` | Optional sizing/readiness field; see the task schema for allowed values. |
 | `--expected-duration` | `<dur>` | Optional sizing/readiness field; see the task schema for allowed values. |
-| `--spec-file` | `<path>` | Register from a strict task-registration spec file. Mutually exclusive with all task-field flags. |
 | `--json` | — | Emit JSON. Valid in both paths. |
 
 ```sh
 code-pact task add P1                         # interactive wizard (TTY)
 code-pact task add P1 --description "Add X" --type feature --json
-code-pact task add P83 --spec-file /tmp/P83-T1-task-spec.yaml --json
 ```
 
 ### `task context`
@@ -405,13 +403,11 @@ raises TASK_CONTRACT_DRIFT and aborts the operation.
 | --- | --- | --- |
 | `--base-ref` | `<ref>` | Git ref to record as the contract base (default: HEAD, resolved to a SHA). |
 | `--agent` | `<name>` | Agent name. Defaults to project default_agent. |
-| `--spec-file` | `<path>` | Verify the current phase task matches a strict registration spec before locking. |
 | `--json` | — | Emit JSON. |
 
 ```sh
 code-pact task lock P1-T1
 code-pact task lock P1-T1 --base-ref origin/main --json
-code-pact task lock P83-T1 --spec-file /tmp/P83-T1-task-spec.yaml --json
 ```
 
 ### `task review-bundle`

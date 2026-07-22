@@ -2,20 +2,11 @@ import { loadPhase } from "../core/plan/load-phase.ts";
 import { stringify as toYaml } from "yaml";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { resolvePhaseInRoadmap } from "../core/plan/resolve-phase.ts";
-import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
-import {
-  resolvePhaseWritePath,
-  resolveExplicitUserReadPath,
-  readExplicitUserText,
-} from "../core/project-fs/index.ts";
+import { resolvePhaseWritePath } from "../core/project-fs/index.ts";
 import type { OwnedWritePath } from "../core/project-fs/branded-paths.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { TaskType, type Task } from "../core/schemas/task.ts";
 import { assertSafePlanId } from "../core/schemas/plan-id.ts";
-import {
-  parseTaskRegistrationSpec,
-  taskRegistrationDigest,
-} from "../core/task-registration-spec.ts";
 import { Prompter } from "../lib/prompt.ts";
 import { messages as messageCatalog, type Locale } from "../i18n/index.ts";
 
@@ -53,11 +44,6 @@ export type TaskAddOptions = {
    * wizard prompter is bypassed and the spec is applied directly.
    */
   nonInteractive?: TaskAddNonInteractiveSpec;
-  /**
-   * Machine-readable task spec file path. Mutually exclusive with the
-   * flag-driven non-interactive path and with all task-field flags.
-   */
-  specFile?: string;
   prompter?: Prompter;
 };
 
@@ -65,10 +51,6 @@ export type TaskAddResult = {
   phaseId: string;
   taskId: string;
   phasePath: string;
-  registrationMode?: "spec_file";
-  specDigest?: string;
-  storedTaskDigest?: string;
-  roundTripEqual?: boolean;
 };
 
 const TASK_TYPE_LABELS: Record<string, string> = {
@@ -132,114 +114,11 @@ function buildNonInteractiveTask(
   };
 }
 
-async function assertTaskIdUnusedGlobally(
-  cwd: string,
-  taskId: string,
-): Promise<void> {
-  try {
-    await resolveTaskInRoadmap(cwd, taskId);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "TASK_NOT_FOUND") return;
-    if (code === "AMBIGUOUS_TASK_ID") {
-      const dup = new Error(
-        `Task "${taskId}" already exists in multiple phases.`,
-      );
-      (dup as NodeJS.ErrnoException).code = "DUPLICATE_TASK_ID";
-      throw dup;
-    }
-    throw err;
-  }
-  const dup = new Error(`Task "${taskId}" already exists.`);
-  (dup as NodeJS.ErrnoException).code = "DUPLICATE_TASK_ID";
-  throw dup;
-}
-
-type ValidatedTaskSpec = {
-  newTask: Task;
-  spec: {
-    schema_version: 1;
-    phase_id: string;
-    task: Task;
-  };
-};
-
-async function loadAndValidateTaskSpec(
-  cwd: string,
-  phaseId: string,
-  specFile: string,
-): Promise<ValidatedTaskSpec> {
-  let specPath;
-  try {
-    specPath = await resolveExplicitUserReadPath(cwd, specFile);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
-      const wrapped = new Error(
-        `task add: --spec-file "${specFile}" is outside the project or not a safe path.`,
-      );
-      (wrapped as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-      throw wrapped;
-    }
-    throw err;
-  }
-
-  let raw: string;
-  try {
-    raw = await readExplicitUserText(specPath);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") {
-      const wrapped = new Error(`task add: spec file "${specFile}" not found.`);
-      (wrapped as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-      throw wrapped;
-    }
-    throw err;
-  }
-
-  const spec = parseTaskRegistrationSpec(raw);
-
-  if (spec.phase_id !== phaseId) {
-    const err = new Error(
-      `task add: spec phase_id "${spec.phase_id}" does not match positional phase id "${phaseId}".`,
-    );
-    (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-    throw err;
-  }
-
-  if (spec.task.status !== "planned") {
-    const err = new Error(
-      `task add: spec task status must be "planned" (got "${spec.task.status}").`,
-    );
-    (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-    throw err;
-  }
-
-  assertSafePlanId(spec.task.id, "Task id");
-  await assertTaskIdUnusedGlobally(cwd, spec.task.id);
-
-  const newTask: Task = {
-    ...spec.task,
-    // Ensure optional fields are explicit in the stored task so the canonical
-    // round-trip digest is stable.
-    description: spec.task.description,
-    requires_decision: spec.task.requires_decision,
-    depends_on: spec.task.depends_on,
-    decision_refs: spec.task.decision_refs,
-    reads: spec.task.reads,
-    writes: spec.task.writes,
-    acceptance_refs: spec.task.acceptance_refs,
-  };
-
-  return { newTask, spec };
-}
-
 export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
-  // When `nonInteractive` or `specFile` is set we bypass the prompter entirely —
-  // no stdin/stderr handle is opened, which is essential for CI / scripted
+  // When `nonInteractive` is set we bypass the prompter entirely — no
+  // stdin/stderr handle is opened, which is essential for CI / scripted
   // bootstrap paths.
-  const useNonInteractive =
-    opts.nonInteractive !== undefined || opts.specFile !== undefined;
+  const useNonInteractive = opts.nonInteractive !== undefined;
   const prompter = useNonInteractive
     ? undefined
     : (opts.prompter ?? Prompter.fromIO());
@@ -271,50 +150,13 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
     }
     const existingTasks = phase.tasks ?? [];
 
-    let specResult: ValidatedTaskSpec | undefined;
-    let taskId: string;
-    let newTask: Task;
+    const taskId = opts.id ?? nextTaskId(opts.phaseId, existingTasks);
 
-    if (opts.specFile) {
-      specResult = await loadAndValidateTaskSpec(
-        opts.cwd,
-        opts.phaseId,
-        opts.specFile,
-      );
-      newTask = specResult.newTask;
-      taskId = specResult.spec.task.id;
-    } else {
-      taskId = opts.id ?? nextTaskId(opts.phaseId, existingTasks);
-
-      // A user-supplied `--id` flows into the phase YAML (and downstream into
-      // command strings / decision-stub paths), so validate it before writing.
-      // Generated ids from nextTaskId are always safe, but guard unconditionally
-      // for defense-in-depth — it is a no-op for valid ids.
-      assertSafePlanId(taskId, "Task id");
-
-      if (opts.nonInteractive) {
-        newTask = buildNonInteractiveTask(taskId, opts.nonInteractive);
-      } else {
-        const description = await askRequired(prompter!, m.descriptionPrompt);
-
-        const typeLabels = TASK_TYPE_VALUES.map(v => TASK_TYPE_LABELS[v] ?? v);
-        const typeIdx = await prompter!.askChoice(m.typePrompt, typeLabels);
-        const type = TASK_TYPE_VALUES[typeIdx]!;
-
-        newTask = {
-          id: taskId,
-          type,
-          ambiguity: "medium",
-          risk: "medium",
-          context_size: "medium",
-          write_surface: "medium",
-          verification_strength: "medium",
-          expected_duration: "medium",
-          status: "planned",
-          description,
-        };
-      }
-    }
+    // A user-supplied `--id` flows into the phase YAML (and downstream into
+    // command strings / decision-stub paths), so validate it before writing.
+    // Generated ids from nextTaskId are always safe, but guard unconditionally
+    // for defense-in-depth — it is a no-op for valid ids.
+    assertSafePlanId(taskId, "Task id");
 
     if (existingTasks.some(t => t.id === taskId)) {
       const err = new Error(
@@ -322,6 +164,30 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
       );
       (err as NodeJS.ErrnoException).code = "DUPLICATE_TASK_ID";
       throw err;
+    }
+
+    let newTask: Task;
+    if (opts.nonInteractive) {
+      newTask = buildNonInteractiveTask(taskId, opts.nonInteractive);
+    } else {
+      const description = await askRequired(prompter!, m.descriptionPrompt);
+
+      const typeLabels = TASK_TYPE_VALUES.map(v => TASK_TYPE_LABELS[v] ?? v);
+      const typeIdx = await prompter!.askChoice(m.typePrompt, typeLabels);
+      const type = TASK_TYPE_VALUES[typeIdx]!;
+
+      newTask = {
+        id: taskId,
+        type,
+        ambiguity: "medium",
+        risk: "medium",
+        context_size: "medium",
+        write_surface: "medium",
+        verification_strength: "medium",
+        expected_duration: "medium",
+        status: "planned",
+        description,
+      };
     }
 
     // Parse the assembled phase before writing so no invalid plan state is
@@ -332,39 +198,6 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
     });
 
     await atomicWriteText(absPath, toYaml(updatedPhase));
-
-    if (specResult) {
-      const reloaded = await loadPhase(opts.cwd, ref.path);
-      const storedTask = reloaded.tasks?.find(t => t.id === taskId);
-      if (!storedTask) {
-        const err = new Error(
-          `Task "${taskId}" was written to "${ref.path}" but could not be re-read.`,
-        );
-        (err as NodeJS.ErrnoException).code = "TASK_REGISTRATION_ROUND_TRIP";
-        throw err;
-      }
-      const inputDigest = taskRegistrationDigest(
-        specResult.spec.phase_id,
-        specResult.spec.task,
-      );
-      const storedDigest = taskRegistrationDigest(reloaded.id, storedTask);
-      if (inputDigest !== storedDigest) {
-        const err = new Error(
-          `Task registration round-trip mismatch for "${taskId}" (spec digest ${inputDigest} != stored digest ${storedDigest}).`,
-        );
-        (err as NodeJS.ErrnoException).code = "TASK_REGISTRATION_ROUND_TRIP";
-        throw err;
-      }
-      return {
-        phaseId: opts.phaseId,
-        taskId,
-        phasePath: ref.path,
-        registrationMode: "spec_file",
-        specDigest: inputDigest,
-        storedTaskDigest: storedDigest,
-        roundTripEqual: true,
-      };
-    }
 
     return { phaseId: opts.phaseId, taskId, phasePath: ref.path };
   } finally {
