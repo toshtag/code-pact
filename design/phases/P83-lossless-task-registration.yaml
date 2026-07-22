@@ -64,6 +64,7 @@ tasks:
       - src/core/schemas/task-registration-spec.ts
       - src/core/task-registration-spec.ts
       - src/core/contract-lock.ts
+      - src/core/review-bundle.ts
       - src/commands/task-add.ts
       - src/commands/task-lock.ts
       - src/cli/spec/task.ts
