@@ -1,0 +1,77 @@
+schema_version: 1
+task_id: P83-T2
+phase_id: P83
+phase_path: design/phases/P83-lossless-task-registration.yaml
+base_ref: HEAD
+base_sha: 16ce2a2804649155a388b70c90fb7ed9f0ba3921
+phase_blob_sha: c2ef9a972dff2997c4783cd94cfa8972ab0893d0
+contract_digest: 7ec6b638bed199ddfdce0e1cb6a417eb2bd45129e783ecdd9ba4fa3f8f9d7288
+contract:
+  description: >
+    Close out lossless task registration. Eliminate side effects on task add
+    round-trip failure, detect loss of required registration fields including
+    explicit false values and status drift, revert the review-bundle audit-base
+    widening, align agent contract and CLI examples with project-relative
+    spec-file paths, and add regression tests.
+  reads:
+    - docs/agent-contract.md
+    - docs/cli-contract.md
+    - src/cli/commands/task-lock.ts
+    - src/cli/commands/task.ts
+    - src/cli/spec/task.ts
+    - src/commands/task-add.ts
+    - src/commands/task-lock.ts
+    - src/core/contract-lock.ts
+    - src/core/review-bundle.ts
+    - src/core/schemas/task-registration-spec.ts
+    - src/core/task-registration-spec.ts
+    - tests/integration/task-registration-spec.test.ts
+    - tests/unit/core/contract-lock.test.ts
+    - tests/unit/core/review-bundle.test.ts
+    - tests/unit/core/task-registration-spec.test.ts
+  writes:
+    - docs/agent-contract.md
+    - docs/cli-contract.md
+    - docs/cli-reference.generated.md
+    - src/cli/spec/task.ts
+    - src/commands/task-add.ts
+    - src/commands/task-lock.ts
+    - src/core/contract-lock.ts
+    - src/core/review-bundle.ts
+    - src/core/schemas/task-registration-spec.ts
+    - src/core/task-registration-spec.ts
+    - tests/integration/task-registration-spec.test.ts
+    - tests/unit/core/contract-lock.test.ts
+    - tests/unit/core/review-bundle.test.ts
+    - tests/unit/core/task-registration-spec.test.ts
+  depends_on:
+    - P82-T2
+  decision_refs: []
+  acceptance_refs:
+    - design/specs/P83-T2-task-spec.yaml
+  definition_of_done:
+    - A spec-locked task detects registration-field drift after lock.
+    - A strict task spec containing depends_on is stored losslessly in the phase.
+    - Focused verification, local CI, and review-bundle complete without
+      corrective code commits.
+    - Removing depends_on between add and lock causes a side-effect-free failure.
+    - The P80 dependency-omission replay is blocked before implementation.
+    - The same spec is verified again before contract lock creation.
+  verification_commands:
+    - pnpm build
+    - pnpm check:docs
+    - pnpm test:ci
+    - pnpm test:integration
+    - pnpm test:integration:smoke
+    - pnpm test:unit
+    - pnpm typecheck
+  base_sha: 16ce2a2804649155a388b70c90fb7ed9f0ba3921
+  phase_blob_sha: c2ef9a972dff2997c4783cd94cfa8972ab0893d0
+registration:
+  mode: spec_file
+  spec_digest: 7dad389f0f8b0e619e3ca06c17c76ee734aefd5c9cc262509d45accdf3e42313
+  spec_canonical: |
+    {"phase_id":"P83","schema_version":1,"task":{"acceptance_refs":["design/specs/P83-T2-task-spec.yaml"],"ambiguity":"low","context_size":"medium","decision_refs":[],"depends_on":["P82-T2"],"description":"Close out lossless task registration. Eliminate side effects on task add round-trip failure, detect loss of required registration fields including explicit false values and status drift, revert the review-bundle audit-base widening, align agent contract and CLI examples with project-relative spec-file paths, and add regression tests.\n","expected_duration":"long","id":"P83-T2","reads":["src/core/task-registration-spec.ts","src/core/schemas/task-registration-spec.ts","src/core/contract-lock.ts","src/core/review-bundle.ts","src/commands/task-add.ts","src/commands/task-lock.ts","src/cli/spec/task.ts","src/cli/commands/task.ts","src/cli/commands/task-lock.ts","docs/agent-contract.md","docs/cli-contract.md","tests/integration/task-registration-spec.test.ts","tests/unit/core/task-registration-spec.test.ts","tests/unit/core/contract-lock.test.ts","tests/unit/core/review-bundle.test.ts"],"requires_decision":false,"risk":"medium","type":"bugfix","verification_strength":"strong","write_surface":"medium","writes":["src/core/task-registration-spec.ts","src/core/schemas/task-registration-spec.ts","src/core/contract-lock.ts","src/core/review-bundle.ts","src/commands/task-add.ts","src/commands/task-lock.ts","src/cli/spec/task.ts","docs/agent-contract.md","docs/cli-contract.md","docs/cli-reference.generated.md","tests/integration/task-registration-spec.test.ts","tests/unit/core/task-registration-spec.test.ts","tests/unit/core/contract-lock.test.ts","tests/unit/core/review-bundle.test.ts"]}}
+at: 2026-07-22T07:00:39.006Z
+actor: agent
+author: Pocket
