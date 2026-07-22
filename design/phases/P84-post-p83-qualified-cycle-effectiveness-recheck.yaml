@@ -1,0 +1,62 @@
+id: P84
+name: Post-P83 Qualified Cycle Effectiveness Recheck
+weight: 1
+confidence: medium
+risk: low
+status: in_progress
+objective: >
+  Re-run one capability-qualified implementation pair after P81-P83 and
+  determine whether Code Pact reduces total model tokens or corrective model
+  invocations while preserving verification, scope, lifecycle, and artifact
+  integrity.
+non_goals:
+  - Add or modify production runtime behavior.
+  - Start P64, P65, P67, or P68.
+  - Generalize from one pair.
+  - Change the model during the trial.
+  - Add repeated corrective evidence tasks.
+  - Count CLI bytes as model-token reduction.
+  - Claim savings from prompt size alone.
+definition_of_done:
+  - Baseline and Code Pact conditions use identical source, oracle, model,
+    sampling, task facts, allowed writes, and repair limit.
+  - Raw provider usage records support all token totals.
+  - Both conditions include first invocation and at most one repair invocation.
+  - Verification, scope, and artifact results are recorded separately from
+    model-token results.
+  - The result is classified without generalizing beyond the pair.
+  - At most one implementation review and one fix-confirmation review occur.
+verification:
+  commands:
+    - node /tmp/P84-T1-evidence/verify.mjs
+      /tmp/P84-T1-evidence/P84-T1-evidence.zip
+    - pnpm check:docs
+    - pnpm check:development-efficiency
+tasks:
+  - id: P84-T1
+    type: test
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: >
+      Run one post-P83 qualified Baseline versus Code Pact cycle on the
+      historical pre-P83-T6 public task-start drift bug, record all model
+      invocations and lifecycle results, and classify whether total model-token
+      or repair-round reduction is demonstrated.
+    requires_decision: false
+    depends_on:
+      - P83-T6
+    decision_refs: []
+    reads:
+      - design/decisions/P80-T2-qualified-one-pair-trial.md
+      - design/decisions/P66-T2-token-reduction-evidence-rfc.md
+      - docs/maintainers/token-efficient-development.md
+      - design/specs/P83-T6-task-spec.yaml
+    writes:
+      - design/decisions/P84-T1-post-p83-qualified-cycle-trial.md
+    acceptance_refs:
+      - design/decisions/P80-T2-qualified-one-pair-trial.md

@@ -230,3 +230,6 @@ phases:
   - id: P83
     path: design/phases/P83-lossless-task-registration.yaml
     weight: 1
+  - id: P84
+    path: design/phases/P84-post-p83-qualified-cycle-effectiveness-recheck.yaml
+    weight: 1
