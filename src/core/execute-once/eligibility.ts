@@ -4,6 +4,7 @@ import {
   resolveExecuteSourceReadPath,
 } from "../project-fs/index.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
+import { incompleteTaskDependencyIds } from "../task-dependencies.ts";
 import { RelativePosixPath } from "../schemas/relative-path.ts";
 import type { Phase } from "../schemas/phase.ts";
 import type { ProgressEvent } from "../schemas/progress-event.ts";
@@ -84,11 +85,9 @@ export async function resolveOneShotEligibility(
     reasons.push(INELIGIBLE_REASONS.DECISION_REQUIRED);
   }
 
-  for (const depId of task.depends_on ?? []) {
-    const depState = deriveTaskState(events, depId).current;
-    if (depState !== "done") {
-      reasons.push(INELIGIBLE_REASONS.DEPENDENCY_INCOMPLETE);
-    }
+  const incompleteDeps = incompleteTaskDependencyIds(events, task);
+  if (incompleteDeps.length > 0) {
+    reasons.push(INELIGIBLE_REASONS.DEPENDENCY_INCOMPLETE);
   }
 
   const reads = task.reads ?? [];

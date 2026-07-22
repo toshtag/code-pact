@@ -4,6 +4,7 @@ import { loadProgressLog } from "../core/progress/io.ts";
 import { writeEventFile } from "../core/progress/events-io.ts";
 import { resolveEventAuthor } from "../core/progress/author.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
+import { incompleteTaskDependencyIds } from "../core/task-dependencies.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { runVerify, throwIfAborted, type CheckResult } from "./verify.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
@@ -147,12 +148,7 @@ export async function runTaskComplete(
     throw error;
   }
 
-  const incompleteDeps: string[] = [];
-  for (const depId of task.depends_on ?? []) {
-    if (deriveTaskState(log.events, depId).current !== "done") {
-      incompleteDeps.push(depId);
-    }
-  }
+  const incompleteDeps = incompleteTaskDependencyIds(log.events, task);
   if (incompleteDeps.length > 0) {
     const err = new Error(
       `Task "${taskId}" cannot be completed: dependencies are not done: ${incompleteDeps.join(", ")}.`,
