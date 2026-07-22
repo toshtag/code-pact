@@ -2246,6 +2246,37 @@ function emitTaskCommonError(
       emitError(json, outCode, msg, { data: { deps } });
       return 2;
     }
+    case "TASK_CONTRACT_DRIFT": {
+      const drift =
+        (
+          err as NodeJS.ErrnoException & {
+            drift?: { kind: string; message: string }[];
+          }
+        ).drift ?? [];
+      const changed =
+        (err as NodeJS.ErrnoException & { changed_fields?: string[] })
+          .changed_fields ?? [];
+      msg = m.task.lock.contractDrift(
+        taskId,
+        drift.map(d => d.message),
+      );
+      outCode = "TASK_CONTRACT_DRIFT";
+      const lockedDigest = (
+        err as NodeJS.ErrnoException & { locked_digest?: string }
+      ).locked_digest;
+      const currentDigest = (
+        err as NodeJS.ErrnoException & { current_digest?: string }
+      ).current_digest;
+      emitError(json, outCode, msg, {
+        data: {
+          locked_digest: lockedDigest,
+          current_digest: currentDigest,
+          changed_fields: changed,
+          drift,
+        },
+      });
+      return 2;
+    }
     case "WORKTREE_NOT_CLEAN":
       msg = err.message;
       outCode = "WORKTREE_NOT_CLEAN";

@@ -18,6 +18,7 @@ import {
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
 import {
+  assertTaskContractCurrent,
   createTaskContractLock,
   readContractLock,
 } from "../core/contract-lock.ts";
@@ -134,7 +135,9 @@ export async function runTaskStart(
   }
 
   const lock = await readContractLock(cwd, taskId);
-  if (lock === null) {
+  if (lock !== null) {
+    await assertTaskContractCurrent({ cwd, taskId, requireLock: true });
+  } else {
     await createTaskContractLock({
       cwd,
       taskId,

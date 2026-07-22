@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { execSync } from "node:child_process";
 import { runTaskStart } from "../../../src/commands/task-progress.ts";
 import { loadMergedProgress } from "../../../src/core/progress/io.ts";
+import { writeEventFile } from "../../../src/core/progress/events-io.ts";
 
 const ROADMAP_YAML = `phases:
   - id: P1
@@ -106,6 +108,14 @@ async function setupProject(
       "-m",
       "initial",
     ],
+    { cwd: dir },
+  );
+}
+
+function commitAll(dir: string, message: string): void {
+  execSync("git add .", { cwd: dir });
+  execSync(
+    `git -c user.email=t@t -c user.name=t commit --quiet -m "${message}"`,
     { cwd: dir },
   );
 }
@@ -500,5 +510,150 @@ describe("runTaskStart — dependency gate", () => {
       code: "TASK_DEPENDENCY_INCOMPLETE",
       deps: ["P1-T3", "P1-T1"],
     });
+  });
+});
+
+describe("runTaskStart — contract drift gate (P83-T6)", () => {
+  it("rejects with TASK_CONTRACT_DRIFT when the phase contract drifts", async () => {
+    await setupProject(dir);
+    const startTime = new Date("2026-05-18T09:00:00Z");
+    await runTaskStart({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      now: () => startTime,
+    });
+
+    // Move to failed so a retry reaches the drift gate rather than already_started.
+    await writeEventFile(dir, {
+      task_id: "P1-T1",
+      status: "failed",
+      at: "2026-05-18T11:00:00+00:00",
+      actor: "agent",
+      agent: "claude-code",
+    });
+
+    const phasePath = join(dir, "design", "phases", "P1-foundation.yaml");
+    const original = await readFile(phasePath, "utf8");
+    const drifted = original.replace("    - echo ok", "    - echo drifted");
+    await writeFile(phasePath, drifted, "utf8");
+
+    const lockPath = join(dir, ".code-pact", "state", "locks", "P1-T1.yaml");
+    const beforeLock = await readFile(lockPath, "utf8").catch(() => "");
+    const { log: logBefore } = await loadMergedProgress(dir);
+
+    await expect(
+      runTaskStart({
+        cwd: dir,
+        taskId: "P1-T1",
+        agent: "claude-code",
+        now: () => new Date("2026-05-18T13:00:00Z"),
+      }),
+    ).rejects.toMatchObject({ code: "TASK_CONTRACT_DRIFT" });
+
+    const afterLock = await readFile(lockPath, "utf8").catch(() => "");
+    const { log: logAfter } = await loadMergedProgress(dir);
+    expect(afterLock).toBe(beforeLock);
+    expect(logAfter.events).toHaveLength(logBefore.events.length);
+  });
+
+  it("preserves dependency gate priority over contract drift", async () => {
+    const phaseYaml = `${PHASE_YAML}  - id: P1-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    description: dependent task
+    status: planned
+    depends_on:
+      - P1-T1
+`;
+    await setupProject(dir, { phaseYaml });
+
+    const at = (h: number, m = 0) =>
+      new Date(
+        `2026-05-18T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00Z`,
+      );
+
+    // Start P1-T1, then mark it done so P1-T2 can start and create its lock.
+    await runTaskStart({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      now: () => at(9),
+    });
+    await writeEventFile(dir, {
+      task_id: "P1-T1",
+      status: "done",
+      at: "2026-05-18T10:00:00+00:00",
+      actor: "agent",
+      agent: "claude-code",
+    });
+
+    // Lock creation requires a clean worktree.
+    commitAll(dir, "p1-t1 done");
+
+    // Start P1-T2, creating its contract lock.
+    await runTaskStart({
+      cwd: dir,
+      taskId: "P1-T2",
+      agent: "claude-code",
+      now: () => at(11),
+    });
+
+    // Make P1-T2 failed and P1-T1 not done again, so the dependency gate is
+    // evaluated on retry. The P1-T2 lock still exists and the phase is drifted,
+    // but dependencies are checked before contract drift.
+    await writeEventFile(dir, {
+      task_id: "P1-T2",
+      status: "failed",
+      at: "2026-05-18T12:00:00+00:00",
+      actor: "agent",
+      agent: "claude-code",
+    });
+    await writeEventFile(dir, {
+      task_id: "P1-T1",
+      status: "started",
+      at: "2026-05-18T13:00:00+00:00",
+      actor: "agent",
+      agent: "claude-code",
+    });
+
+    const phasePath = join(dir, "design", "phases", "P1-foundation.yaml");
+    const original = await readFile(phasePath, "utf8");
+    const drifted = original.replace("    - echo ok", "    - echo drifted");
+    await writeFile(phasePath, drifted, "utf8");
+
+    await expect(
+      runTaskStart({
+        cwd: dir,
+        taskId: "P1-T2",
+        agent: "claude-code",
+        now: () => at(14),
+      }),
+    ).rejects.toMatchObject({
+      code: "TASK_DEPENDENCY_INCOMPLETE",
+      deps: ["P1-T1"],
+    });
+  });
+
+  it("preserves already_started priority over contract drift", async () => {
+    await setupProject(dir);
+    await runTaskStart({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+
+    const phasePath = join(dir, "design", "phases", "P1-foundation.yaml");
+    const original = await readFile(phasePath, "utf8");
+    const drifted = original.replace("    - echo ok", "    - echo drifted");
+    await writeFile(phasePath, drifted, "utf8");
+
+    const result = await runTaskStart({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+    expect(result.kind).toBe("already_started");
   });
 });

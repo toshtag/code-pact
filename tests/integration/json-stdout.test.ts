@@ -713,6 +713,35 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
     );
   });
 
+  it("task start P1-T1 --json returns TASK_CONTRACT_DRIFT on phase contract drift", async () => {
+    const p = await projectWithTask("task-start-contract-drift");
+    const phasePath = join(p.dir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    (doc.tasks as Record<string, unknown>[])[0]!["description"] =
+      "drifted description";
+    await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+    const res = p.run([
+      "task",
+      "start",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(res.code).toBe(2);
+    expect(res.stderr).toBe("");
+    expectStdoutIsJson(res, "task start contract drift");
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
+    expect(parsed.error.code).toBe("TASK_CONTRACT_DRIFT");
+  });
+
   it("task block P1-T1 --reason ... --json", async () => {
     const p = await projectWithTask("task-block");
     p.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]);

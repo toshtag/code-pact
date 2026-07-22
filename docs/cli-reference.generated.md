@@ -203,8 +203,10 @@ code-pact task prepare P1-T1 --agent claude-code --budget-bytes 100000 --json
 `code-pact task start <task-id> [options]`
 
 Record a `started` event in the progress ledger. Idempotent — a second call from
-`started` returns already_started without a duplicate event. Run once per
-implementation pass; then `task complete` when verification passes.
+`started` returns already_started without a duplicate event. After the first
+start, a changed contract lock or registration spec file raises
+TASK_CONTRACT_DRIFT (exit 2). Run once per implementation pass; then `task
+complete` when verification passes.
 
 | Flag | Value | Description |
 | --- | --- | --- |

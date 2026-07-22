@@ -258,7 +258,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Pre-start spec drift gate for the public task start CLI. Reject task start
       with exit 2 and a TASK_CONTRACT_DRIFT JSON envelope when an existing

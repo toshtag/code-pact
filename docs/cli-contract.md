@@ -3612,6 +3612,8 @@ Records a `started` event. Validates `--agent` against `project.yaml` (defaults 
 
 **Dependency gate:** If any `depends_on` task's derived state is not `done`, exits 2 with `TASK_DEPENDENCY_INCOMPLETE` and lists the incomplete dependency ids in `data.deps`. No contract lock or progress event is written.
 
+**Contract-lock drift gate:** Requires a contract lock for the task (created by `task start` or `code-pact task lock`). If the lock is missing, it is created from the current task declaration before the first `started` event. If the locked contract no longer matches the current task declaration, base ref, or registration spec file, exits 2 with `TASK_CONTRACT_DRIFT` and supplies `data.locked_digest`, `data.current_digest`, `data.changed_fields`, and `data.drift[]`. No progress event is recorded.
+
 Idempotency: if the current state is already `started`, the command exits 0 with `{ ok: true, data: { already_started: true, ... } }` and records no progress event.
 
 ### `task status <task-id> [--json]`

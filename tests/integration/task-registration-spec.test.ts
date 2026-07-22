@@ -361,6 +361,148 @@ describe("task lock --spec-file", () => {
     expect(startRes.data.event.status).toBe("started");
   });
 
+  it("rejects start with TASK_CONTRACT_DRIFT when spec file drifts (P83-T6)", async () => {
+    project = await createTempProject();
+    await setupPhase(project);
+
+    const baseSpec = join(project.dir, "p1-t1-spec.yaml");
+    writeFileSync(baseSpec, specBody({ phaseId: "P1", taskId: "P1-T1" }));
+    expectJsonOk(
+      project.run([
+        "task",
+        "add",
+        "P1",
+        "--spec-file",
+        "p1-t1-spec.yaml",
+        "--json",
+      ]),
+    );
+
+    const depSpec = join(project.dir, "p1-t2-spec.yaml");
+    writeFileSync(
+      depSpec,
+      specBody({ phaseId: "P1", taskId: "P1-T2", dependsOn: ["P1-T1"] }),
+    );
+    expectJsonOk(
+      project.run([
+        "task",
+        "add",
+        "P1",
+        "--spec-file",
+        "p1-t2-spec.yaml",
+        "--json",
+      ]),
+    );
+
+    git(project.dir, ["init", "--quiet"]);
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "init",
+    ]);
+
+    expectJsonOk(
+      project.run([
+        "task",
+        "lock",
+        "P1-T2",
+        "--spec-file",
+        "p1-t2-spec.yaml",
+        "--json",
+      ]),
+    );
+
+    const lockPath = join(
+      project.dir,
+      ".code-pact",
+      "state",
+      "locks",
+      "P1-T2.yaml",
+    );
+    const phasePath = join(
+      project.dir,
+      "design",
+      "phases",
+      "P1-foundation.yaml",
+    );
+    const eventsDir = join(project.dir, ".code-pact", "state", "events");
+
+    git(project.dir, ["add", "."]);
+    git(project.dir, ["commit", "--quiet", "-m", "lock P1-T2"]);
+
+    // Complete P1-T1 so P1-T2 reaches the spec-drift gate rather than the
+    // dependency gate.
+    expectJsonOk(project.run(["task", "start", "P1-T1", "--json"]));
+    expectJsonOk(project.run(["task", "complete", "P1-T1", "--json"]));
+    git(project.dir, ["add", "."]);
+    git(project.dir, ["commit", "--quiet", "-m", "complete P1-T1"]);
+
+    const lockBefore = readFileSync(lockPath, "utf8");
+    const phaseBefore = readFileSync(phasePath, "utf8");
+    const eventsBefore = existsSync(eventsDir)
+      ? readdirSync(eventsDir).sort()
+      : [];
+    const statusBefore = git(project.dir, [
+      "status",
+      "--porcelain",
+      "--untracked-files=all",
+    ]);
+    expect(statusBefore.stdout).toBe("");
+
+    const drifted = specBody({
+      phaseId: "P1",
+      taskId: "P1-T2",
+      dependsOn: ["P1-T1"],
+    }).replace("reads: []", "reads:\n    - src/commands/task-progress.ts");
+    writeFileSync(depSpec, drifted);
+
+    const driftStart = project.run(["task", "start", "P1-T2", "--json"]);
+    expect(driftStart.code).toBe(2);
+    expect(driftStart.stderr).toBe("");
+    expect(driftStart.stdout.trim().split("\n").length).toBe(1);
+    const driftParsed = expectJsonErr(driftStart, "TASK_CONTRACT_DRIFT");
+    expect(
+      (driftParsed.data as { changed_fields?: string[] } | undefined)
+        ?.changed_fields,
+    ).toEqual(["registration_spec_file"]);
+
+    const lockAfter = readFileSync(lockPath, "utf8");
+    const phaseAfter = readFileSync(phasePath, "utf8");
+    const eventsAfter = existsSync(eventsDir)
+      ? readdirSync(eventsDir).sort()
+      : [];
+
+    expect(lockAfter).toBe(lockBefore);
+    expect(phaseAfter).toBe(phaseBefore);
+    expect(eventsAfter).toEqual(eventsBefore);
+
+    // Restore the spec file. The failed start must not have produced any
+    // code-pact-side side effects.
+    writeFileSync(
+      depSpec,
+      specBody({ phaseId: "P1", taskId: "P1-T2", dependsOn: ["P1-T1"] }),
+    );
+
+    const statusAfter = git(project.dir, [
+      "status",
+      "--porcelain",
+      "--untracked-files=all",
+    ]);
+    expect(statusAfter.stdout).toBe("");
+
+    const startRes = expectJsonOk<{
+      event: { task_id: string; status: string };
+    }>(project.run(["task", "start", "P1-T2", "--json"]));
+    expect(startRes.data.event.task_id).toBe("P1-T2");
+    expect(startRes.data.event.status).toBe("started");
+  });
+
   it("fails with TASK_REGISTRATION_SPEC_MISMATCH when status changed", async () => {
     project = await createTempProject();
     await setupPhase(project);
