@@ -139,7 +139,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: long
-    status: planned
+    status: done
     description: >
       Atomic round-trip and ordered dogfood closeout. Ensure post-write re-read
       failures during task add roll the phase YAML back to the original bytes,

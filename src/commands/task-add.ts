@@ -28,6 +28,34 @@ import {
 import { Prompter } from "../lib/prompt.ts";
 import { messages as messageCatalog, type Locale } from "../i18n/index.ts";
 
+// Test-only seams for concurrent writers and post-write load failures.
+// Production code leaves these unset and follows the normal path.
+type PreWriteInjector = (args: {
+  absPath: OwnedWritePath;
+  readPath: OwnedReadPath;
+  originalBytes: string;
+  candidateYaml: string;
+}) => Promise<void>;
+
+type PostWriteLoadInjector = () => Promise<Phase>;
+
+let preWriteInjector: PreWriteInjector | null = null;
+let postWriteLoadInjector: PostWriteLoadInjector | null = null;
+
+/** Test-only seam: mutate the phase file before the candidate write, or return normally to proceed. */
+export function __setTaskAddPreWriteInjectorForTests(
+  fn: PreWriteInjector | null,
+): void {
+  preWriteInjector = fn;
+}
+
+/** Test-only seam: throw from this injector to simulate a post-write loadPhase failure. */
+export function __setTaskAddPostWriteLoadInjectorForTests(
+  fn: PostWriteLoadInjector | null,
+): void {
+  postWriteLoadInjector = fn;
+}
+
 /**
  * Non-interactive task spec. When `TaskAddOptions.nonInteractive`
  * is provided, `runTaskAdd` bypasses the prompter entirely and uses the
@@ -371,21 +399,62 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
       throw err;
     }
 
-    await atomicWriteText(absPath, candidateYaml);
+    // Test-only seam: simulate a concurrent writer before the atomic write.
+    if (preWriteInjector) {
+      await preWriteInjector({
+        absPath,
+        readPath,
+        originalBytes,
+        candidateYaml,
+      });
+    }
+
+    try {
+      await atomicWriteText(absPath, candidateYaml, {
+        kind: "present",
+        content: originalBytes,
+      });
+    } catch (writeErr) {
+      if ((writeErr as Error).message === "destination changed before write") {
+        const err = new Error(
+          `Task registration write conflict for "${taskId}": phase file changed before write.`,
+        );
+        (err as NodeJS.ErrnoException).code = "TASK_REGISTRATION_ROUND_TRIP";
+        throw err;
+      }
+      throw writeErr;
+    }
 
     // Post-write sanity check: the bytes on disk must round-trip to the same
-    // canonical registration. If they do not, attempt a CAS rollback to the
-    // original bytes when the file still contains exactly what we wrote.
-    const reloaded = await loadPhase(opts.cwd, ref.path);
-    const storedTask = reloaded.tasks?.find(t => t.id === taskId);
-    const storedDiff =
-      storedTask == null
-        ? ["missing"]
-        : lockTimeRegistrationChangedFields(
-            specResult ? specResult.spec.task : newTask,
-            storedTask,
-          );
-    if (storedDiff.length > 0) {
+    // canonical registration. If they do not (or if the re-read itself fails),
+    // attempt a CAS rollback to the original bytes when the file still contains
+    // exactly what we wrote.
+    let reloaded: Phase | undefined;
+    let postWriteError: unknown;
+    let storedTask: Task | undefined;
+
+    try {
+      reloaded = postWriteLoadInjector
+        ? await postWriteLoadInjector()
+        : await loadPhase(opts.cwd, ref.path);
+    } catch (e) {
+      postWriteError = e;
+    }
+
+    let storedDiff: string[] = [];
+    if (!postWriteError && reloaded) {
+      storedTask = reloaded.tasks?.find(t => t.id === taskId);
+      storedDiff =
+        storedTask == null
+          ? ["missing"]
+          : lockTimeRegistrationChangedFields(
+              specResult ? specResult.spec.task : newTask,
+              storedTask,
+            );
+    }
+
+    if (postWriteError || storedDiff.length > 0) {
+      let rollbackStatus: "rolled_back" | "not_owned" | "failed" | undefined;
       let currentBytes: string | undefined;
       try {
         currentBytes = await readOwnedText(readPath);
@@ -393,12 +462,32 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
         currentBytes = undefined;
       }
       if (currentBytes === candidateYaml) {
-        await atomicReplaceExistingText(absPath, originalBytes, candidateYaml);
+        try {
+          await atomicReplaceExistingText(
+            absPath,
+            originalBytes,
+            candidateYaml,
+          );
+          rollbackStatus = "rolled_back";
+        } catch {
+          rollbackStatus = "failed";
+        }
+      } else {
+        rollbackStatus = "not_owned";
       }
-      const err = new Error(
-        `Task registration round-trip mismatch for "${taskId}" after write (${storedDiff.join(", ")}).`,
-      );
-      (err as NodeJS.ErrnoException).code = "TASK_REGISTRATION_ROUND_TRIP";
+
+      const message = postWriteError
+        ? `Task registration round-trip failed for "${taskId}" after write: post-write read error.`
+        : `Task registration round-trip mismatch for "${taskId}" after write (${storedDiff.join(", ")}).`;
+      const err = new Error(message) as NodeJS.ErrnoException & {
+        rollback_status?: string;
+        cause?: unknown;
+      };
+      err.code = "TASK_REGISTRATION_ROUND_TRIP";
+      err.rollback_status = rollbackStatus;
+      if (postWriteError) {
+        err.cause = postWriteError;
+      }
       throw err;
     }
 
@@ -407,7 +496,7 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
         specResult.spec.phase_id,
         specResult.spec.task,
       );
-      const storedDigest = taskRegistrationDigest(reloaded.id, storedTask!);
+      const storedDigest = taskRegistrationDigest(reloaded!.id, storedTask!);
       return {
         phaseId: opts.phaseId,
         taskId,

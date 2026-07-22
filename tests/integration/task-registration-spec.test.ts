@@ -239,14 +239,17 @@ describe("task lock --spec-file", () => {
       "init",
     ]);
 
-    // Simulate P80-style omission: remove depends_on from P1-T2 in the phase YAML.
+    // Capture original phase bytes before the P80-style omission.
     const phasePath = join(
       project.dir,
       "design",
       "phases",
       "P1-foundation.yaml",
     );
-    const phase = parseYaml(readFileSync(phasePath, "utf8")) as {
+    const originalBytes = readFileSync(phasePath, "utf8");
+
+    // Simulate P80-style omission: remove depends_on from P1-T2 in the phase YAML.
+    const phase = parseYaml(originalBytes) as {
       tasks: { id: string; depends_on?: string[] }[];
     };
     const p1t2 = phase.tasks.find(t => t.id === "P1-T2");
@@ -278,6 +281,53 @@ describe("task lock --spec-file", () => {
 
     // No lock file should have been written as a side effect.
     expect(existsSync(lockPath)).toBe(false);
+
+    // Restore the correct phase and lock the downstream task.
+    writeFileSync(phasePath, originalBytes);
+    git(project.dir, ["add", "."]);
+    git(project.dir, ["commit", "--quiet", "-m", "restore phase"]);
+
+    const lockRes = expectJsonOk<{ task_id: string }>(
+      project.run([
+        "task",
+        "lock",
+        "P1-T2",
+        "--spec-file",
+        "p1-t2-spec.yaml",
+        "--json",
+      ]),
+    );
+    expect(lockRes.data.task_id).toBe("P1-T2");
+    expect(existsSync(lockPath)).toBe(true);
+
+    const lock = parseYaml(readFileSync(lockPath, "utf8")) as {
+      contract?: { depends_on?: string[] };
+    };
+    expect(lock.contract?.depends_on).toEqual(["P1-T1"]);
+
+    // Commit the lock so the start commands run against a clean worktree.
+    git(project.dir, ["add", "."]);
+    git(project.dir, ["commit", "--quiet", "-m", "lock P1-T2"]);
+
+    // P82 start gate: P1-T2 cannot start while P1-T1 is incomplete.
+    const blockedStart = project.run(["task", "start", "P1-T2", "--json"]);
+    expect(blockedStart.code).toBe(2);
+    const blockedParsed = expectJsonErr(
+      blockedStart,
+      "TASK_DEPENDENCY_INCOMPLETE",
+    );
+    expect(blockedParsed.error.message).toContain("P1-T1");
+
+    // Complete P1-T1 through the normal lifecycle.
+    expectJsonOk(project.run(["task", "start", "P1-T1", "--json"]));
+    expectJsonOk(project.run(["task", "complete", "P1-T1", "--json"]));
+
+    // Now P1-T2 can start.
+    const startRes = expectJsonOk<{
+      event: { task_id: string; status: string };
+    }>(project.run(["task", "start", "P1-T2", "--json"]));
+    expect(startRes.data.event.task_id).toBe("P1-T2");
+    expect(startRes.data.event.status).toBe("started");
   });
 
   it("fails with TASK_REGISTRATION_SPEC_MISMATCH when status changed", async () => {
