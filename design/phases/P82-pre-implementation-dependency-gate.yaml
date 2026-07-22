@@ -5,13 +5,12 @@ confidence: high
 risk: medium
 status: in_progress
 objective: >
-  Prevent agents from starting implementation while declared task
-  dependencies are incomplete, before any contract lock or progress event
-  is written.
+  Prevent agents from starting implementation while declared task dependencies
+  are incomplete, before any contract lock or progress event is written.
 non_goals:
   - Infer omitted dependencies.
   - Modify task registration semantics.
-  - Fix Issue #544.
+  - Fix Issue
   - Gate task lock.
   - Change task resume.
   - Run model effectiveness trials.
@@ -20,7 +19,8 @@ definition_of_done:
   - the rejection uses TASK_DEPENDENCY_INCOMPLETE and returns all incomplete ids.
   - task prepare and task start derive the same incomplete dependency list.
   - a completed dependency allows task start on the first attempt.
-  - existing task complete, record-done, execute, and finalize behavior remains compatible.
+  - existing task complete, record-done, execute, and finalize behavior remains
+    compatible.
   - local CI and review-bundle pass without corrective code commits.
 verification:
   commands:
@@ -40,7 +40,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Add a side-effect-free dependency gate to task start and centralize
       dependency-state derivation across lifecycle commands.
