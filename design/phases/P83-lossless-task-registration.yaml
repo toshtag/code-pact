@@ -80,3 +80,55 @@ tasks:
       - design/specs/P83-T1-task-spec.yaml
     acceptance_refs:
       - design/specs/P83-T1-task-spec.yaml
+  - id: P83-T2
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: long
+    status: planned
+    description: >
+      Close out lossless task registration. Eliminate side effects on task add
+      round-trip failure, detect loss of required registration fields including
+      explicit false values and status drift, revert the review-bundle
+      audit-base widening, align agent contract and CLI examples with
+      project-relative spec-file paths, and add regression tests.
+    requires_decision: false
+    depends_on:
+      - P82-T2
+    decision_refs: []
+    reads:
+      - src/core/task-registration-spec.ts
+      - src/core/schemas/task-registration-spec.ts
+      - src/core/contract-lock.ts
+      - src/core/review-bundle.ts
+      - src/commands/task-add.ts
+      - src/commands/task-lock.ts
+      - src/cli/spec/task.ts
+      - src/cli/commands/task.ts
+      - src/cli/commands/task-lock.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - tests/integration/task-registration-spec.test.ts
+      - tests/unit/core/task-registration-spec.test.ts
+      - tests/unit/core/contract-lock.test.ts
+      - tests/unit/core/review-bundle.test.ts
+    writes:
+      - src/core/task-registration-spec.ts
+      - src/core/schemas/task-registration-spec.ts
+      - src/core/contract-lock.ts
+      - src/core/review-bundle.ts
+      - src/commands/task-add.ts
+      - src/commands/task-lock.ts
+      - src/cli/spec/task.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/cli-reference.generated.md
+      - tests/integration/task-registration-spec.test.ts
+      - tests/unit/core/task-registration-spec.test.ts
+      - tests/unit/core/contract-lock.test.ts
+      - tests/unit/core/review-bundle.test.ts
+    acceptance_refs:
+      - design/specs/P83-T2-task-spec.yaml
