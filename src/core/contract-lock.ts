@@ -12,6 +12,11 @@ import { loadProgressLog } from "./progress/io.ts";
 import { deriveTaskState } from "./progress/task-state.ts";
 import { canonicalJson } from "./content-addressed-store/canonical-json.ts";
 import {
+  taskRegistrationDigest,
+  canonicalTaskRegistration,
+  registrationChangedFields,
+} from "./task-registration-spec.ts";
+import {
   readOwnedText,
   mkdirOwned,
   writeOwnedText,
@@ -45,6 +50,15 @@ const Contract = z.object({
 
 type Contract = z.infer<typeof Contract>;
 
+export const ContractLockRegistration = z.object({
+  mode: z.literal("spec_file"),
+  spec_digest: z.string(),
+  /** Canonical registration JSON stored at lock time for field-level drift. */
+  spec_canonical: z.string().optional(),
+});
+
+export type ContractLockRegistration = z.infer<typeof ContractLockRegistration>;
+
 export const ContractLock = z.object({
   schema_version: z.literal(1),
   task_id: z.string(),
@@ -55,6 +69,7 @@ export const ContractLock = z.object({
   phase_blob_sha: z.string(),
   contract_digest: z.string(),
   contract: Contract,
+  registration: ContractLockRegistration.optional(),
   at: z.string().datetime(),
   actor: z.enum(["agent", "user"]),
   agent: z.string().optional(),
@@ -227,6 +242,8 @@ export type CreateContractLockOptions = {
   agent?: string;
   author?: string;
   actor?: "agent" | "user";
+  /** Optional registration proof for spec-file locks. */
+  registration?: ContractLockRegistration;
 };
 
 export type ContractLockResult = {
@@ -302,6 +319,13 @@ export async function createTaskContractLock(
   const contract = buildContract(task, phase, baseSha, phaseBlobSha);
   const digest = contractDigest(contract);
 
+  const registration = opts.registration
+    ? {
+        ...opts.registration,
+        spec_canonical: canonicalTaskRegistration(phaseId, task),
+      }
+    : undefined;
+
   const lock: ContractLock = {
     schema_version: 1,
     task_id: taskId,
@@ -312,6 +336,7 @@ export async function createTaskContractLock(
     phase_blob_sha: phaseBlobSha,
     contract_digest: digest,
     contract,
+    ...(registration ? { registration } : {}),
     at: new Date().toISOString(),
     actor: opts.actor ?? "agent",
     agent: opts.agent,
@@ -536,6 +561,53 @@ export async function assertTaskContractCurrent(
       message: `contract field "${f}" drifted from lock`,
     }));
     throw err;
+  }
+
+  // For spec-file locks, also verify the original registration digest so that
+  // any edit to readiness fields that the contract digest might tolerate
+  // (e.g. `depends_on` order, because the contract sorts it) still fails.
+  if (lock.registration) {
+    const currentRegistrationDigest = taskRegistrationDigest(phaseId, task);
+    if (currentRegistrationDigest !== lock.registration.spec_digest) {
+      let changedFields: string[];
+      if (lock.registration.spec_canonical) {
+        try {
+          const parsed = JSON.parse(lock.registration.spec_canonical) as {
+            task: Task;
+          };
+          changedFields = registrationChangedFields(parsed.task, task);
+        } catch {
+          changedFields = ["registration_spec"];
+        }
+      } else {
+        changedFields = ["registration_spec"];
+      }
+      if (changedFields.length === 0) changedFields = ["registration_spec"];
+      const err = new Error(
+        `TASK_CONTRACT_DRIFT: task registration digest mismatch (${changedFields.join(", ")}).`,
+      );
+      (err as NodeJS.ErrnoException).code = "TASK_CONTRACT_DRIFT";
+      (err as NodeJS.ErrnoException & { task_id?: string }).task_id = taskId;
+      (err as NodeJS.ErrnoException & { phase_id?: string }).phase_id = phaseId;
+      (
+        err as NodeJS.ErrnoException & { locked_digest?: string }
+      ).locked_digest = lock.contract_digest;
+      (
+        err as NodeJS.ErrnoException & { current_digest?: string }
+      ).current_digest = currentDigest;
+      (
+        err as NodeJS.ErrnoException & { changed_fields?: string[] }
+      ).changed_fields = changedFields;
+      (
+        err as NodeJS.ErrnoException & {
+          drift?: { kind: string; message: string }[];
+        }
+      ).drift = changedFields.map(f => ({
+        kind: f,
+        message: `registration field "${f}" drifted from lock`,
+      }));
+      throw err;
+    }
   }
 
   return { ok: true, lock };
