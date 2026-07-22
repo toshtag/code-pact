@@ -4,8 +4,8 @@ phase_id: P83
 phase_path: design/phases/P83-lossless-task-registration.yaml
 base_ref: HEAD
 base_sha: 7096db8a7d1907bb9bee36bb8bf54f834d7b4df2
-phase_blob_sha: f07264ce989f69d0d272707d6575ecfa4e5bd0a8
-contract_digest: 3645f92aa616c85461009a4108f7389388194b7b5c6e8ff3e3be0da433e86c8a
+phase_blob_sha: d6f22c168dace781d62945825bc909d3f3f15266
+contract_digest: 99a301f8c5c8ead67ce1e37f95c0abd8c8aad5e600aa5b6385892aaf410031a7
 contract:
   description: >
     Implement lossless task registration from a strict machine-readable spec
@@ -60,7 +60,7 @@ contract:
     - pnpm test:unit
     - pnpm typecheck
   base_sha: 7096db8a7d1907bb9bee36bb8bf54f834d7b4df2
-  phase_blob_sha: f07264ce989f69d0d272707d6575ecfa4e5bd0a8
+  phase_blob_sha: d6f22c168dace781d62945825bc909d3f3f15266
 registration:
   mode: spec_file
   spec_digest: d2a78f73878ce46e6b26d1c4763bf01ede7f17e32ed875c6a46098800f988e10
