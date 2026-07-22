@@ -16,10 +16,12 @@ import {
   deriveTaskState,
 } from "../core/progress/task-state.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
+import { loadPhase } from "../core/plan/load-phase.ts";
 import {
   createTaskContractLock,
   readContractLock,
 } from "../core/contract-lock.ts";
+import { incompleteTaskDependencyIds } from "../core/task-dependencies.ts";
 
 // Resolve the agent (against project.yaml), the task's phase, and its current
 // derived state. Identical across the three runners; agent validation runs
@@ -31,10 +33,10 @@ async function resolveProgressRuntime(
 ) {
   const project = await loadProject(cwd);
   const agentName = resolveEnabledAgent(project, agent);
-  const { phaseId } = await resolveTaskInRoadmap(cwd, taskId);
+  const { phaseId, phasePath } = await resolveTaskInRoadmap(cwd, taskId);
   const { log } = await loadProgressLog(cwd);
   const state = deriveTaskState(log.events, taskId);
-  return { agentName, phaseId, state };
+  return { agentName, phaseId, phasePath, state, events: log.events };
 }
 
 // Build the ProgressEvent and append it. Field order
@@ -99,11 +101,8 @@ export async function runTaskStart(
   const { cwd, taskId } = opts;
   const now = opts.now ?? (() => new Date());
 
-  const { agentName, phaseId, state } = await resolveProgressRuntime(
-    cwd,
-    taskId,
-    opts.agent,
-  );
+  const { agentName, phaseId, phasePath, state, events } =
+    await resolveProgressRuntime(cwd, taskId, opts.agent);
 
   if (state.current === "started") {
     return {
@@ -115,6 +114,24 @@ export async function runTaskStart(
   }
 
   assertTransition(state.current, "started");
+
+  // Dependency gate: evaluated before any contract lock or progress write.
+  const phase = await loadPhase(cwd, phasePath);
+  const task = phase.tasks?.find(t => t.id === taskId);
+  if (!task) {
+    const err = new Error(`Task "${taskId}" not found in phase "${phaseId}".`);
+    (err as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
+    throw err;
+  }
+  const incompleteDeps = incompleteTaskDependencyIds(events, task);
+  if (incompleteDeps.length > 0) {
+    const err = new Error(
+      `Task "${taskId}" cannot be started: dependencies are not done: ${incompleteDeps.join(", ")}.`,
+    );
+    (err as NodeJS.ErrnoException).code = "TASK_DEPENDENCY_INCOMPLETE";
+    (err as NodeJS.ErrnoException & { deps?: string[] }).deps = incompleteDeps;
+    throw err;
+  }
 
   const lock = await readContractLock(cwd, taskId);
   if (lock === null) {

@@ -224,3 +224,6 @@ phases:
   - id: P81
     path: design/phases/P81-lifecycle-aware-review-evidence.yaml
     weight: 1
+  - id: P82
+    path: design/phases/P82-pre-implementation-dependency-gate.yaml
+    weight: 1

@@ -21,6 +21,7 @@ import {
   deriveTaskState,
   type TaskCurrentState,
 } from "../core/progress/task-state.ts";
+import { incompleteTaskDependencyIds } from "../core/task-dependencies.ts";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import {
   assertAgentProfileNameMatches,
@@ -466,14 +467,10 @@ export async function runTaskPrepare(
   );
 
   // 6. Compute blocked-by (used by both modes).
-  const blockedBy: string[] = [];
-  if (currentState !== "blocked") {
-    const dependsOn = task.depends_on ?? [];
-    for (const depId of dependsOn) {
-      const depState = deriveTaskState(progress.log.events, depId).current;
-      if (depState !== "done") blockedBy.push(depId);
-    }
-  }
+  const blockedBy: string[] =
+    currentState === "blocked"
+      ? []
+      : incompleteTaskDependencyIds(progress.log.events, task);
 
   // 7. Minimal mode: return compact work order without heavy loaders.
   if (detail === "minimal") {

@@ -2190,6 +2190,15 @@ function emitTaskCommonError(
       emitError(json, outCode, msg);
       return 1;
     }
+    case "TASK_DEPENDENCY_INCOMPLETE": {
+      if (key !== "start") throw err;
+      const deps =
+        (err as NodeJS.ErrnoException & { deps?: string[] }).deps ?? [];
+      msg = m.task.start.dependencyIncomplete(taskId, deps);
+      outCode = "TASK_DEPENDENCY_INCOMPLETE";
+      emitError(json, outCode, msg, { data: { deps } });
+      return 2;
+    }
     case "WORKTREE_NOT_CLEAN":
       msg = err.message;
       outCode = "WORKTREE_NOT_CLEAN";

@@ -4,6 +4,7 @@ import {
   deriveTaskState,
   type TaskCurrentState,
 } from "../core/progress/task-state.ts";
+import { resolveTaskDependencyStates } from "../core/task-dependencies.ts";
 import {
   applyPlannedWrite,
   classifyWriteRequest,
@@ -234,15 +235,9 @@ export async function runTaskFinalize(
     acceptanceRefsCheck.push({ path: ref, exists });
   }
 
-  const dependsOnCheck: DependsOnCheck[] = (task.depends_on ?? []).map(
-    depId => {
-      const depState = deriveTaskState(log.events, depId);
-      return {
-        task_id: depId,
-        current: depState.current,
-        satisfied: depState.current === "done",
-      };
-    },
+  const dependsOnCheck: DependsOnCheck[] = resolveTaskDependencyStates(
+    log.events,
+    task,
   );
 
   const baseContext: FinalizeContext = {

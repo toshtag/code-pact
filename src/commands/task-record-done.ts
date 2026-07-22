@@ -4,6 +4,7 @@ import { loadProgressLog } from "../core/progress/io.ts";
 import { writeEventFile } from "../core/progress/events-io.ts";
 import { resolveEventAuthor } from "../core/progress/author.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
+import { incompleteTaskDependencyIds } from "../core/task-dependencies.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
 import { assertTaskContractCurrent } from "../core/contract-lock.ts";
@@ -152,12 +153,7 @@ export async function runTaskRecordDone(
   const phase = await loadPhase(cwd, phasePath);
   const task = phase.tasks!.find(t => t.id === taskId)!;
 
-  const incompleteDeps: string[] = [];
-  for (const depId of task.depends_on ?? []) {
-    if (deriveTaskState(log.events, depId).current !== "done") {
-      incompleteDeps.push(depId);
-    }
-  }
+  const incompleteDeps = incompleteTaskDependencyIds(log.events, task);
   if (incompleteDeps.length > 0) {
     const err = new Error(
       `Task "${taskId}" cannot be recorded as done: dependencies are not done: ${incompleteDeps.join(", ")}.`,
