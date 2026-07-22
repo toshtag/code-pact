@@ -1,0 +1,76 @@
+id: P82
+name: Pre-Implementation Dependency Gate
+weight: 1
+confidence: high
+risk: medium
+status: in_progress
+objective: >
+  Prevent agents from starting implementation while declared task
+  dependencies are incomplete, before any contract lock or progress event
+  is written.
+non_goals:
+  - Infer omitted dependencies.
+  - Modify task registration semantics.
+  - Fix Issue #544.
+  - Gate task lock.
+  - Change task resume.
+  - Run model effectiveness trials.
+definition_of_done:
+  - task start rejects an incomplete declared dependency before any write.
+  - the rejection uses TASK_DEPENDENCY_INCOMPLETE and returns all incomplete ids.
+  - task prepare and task start derive the same incomplete dependency list.
+  - a completed dependency allows task start on the first attempt.
+  - existing task complete, record-done, execute, and finalize behavior remains compatible.
+  - local CI and review-bundle pass without corrective code commits.
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm build
+    - pnpm test:integration
+    - pnpm test:integration:smoke
+    - pnpm check:docs
+    - pnpm test:ci
+tasks:
+  - id: P82-T1
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: >
+      Add a side-effect-free dependency gate to task start and centralize
+      dependency-state derivation across lifecycle commands.
+    depends_on:
+      - P81-T2
+    reads:
+      - src/commands/task-progress.ts
+      - src/commands/task-prepare.ts
+      - src/commands/task-complete.ts
+      - src/commands/task-record-done.ts
+      - src/commands/task-finalize.ts
+      - src/core/execute-once/eligibility.ts
+      - src/core/runbook/depends-on.ts
+      - src/cli/commands/task.ts
+      - tests/unit/commands/task-start.test.ts
+      - tests/integration/json-stdout.test.ts
+    writes:
+      - src/core/task-dependencies.ts
+      - src/commands/task-progress.ts
+      - src/commands/task-prepare.ts
+      - src/commands/task-complete.ts
+      - src/commands/task-record-done.ts
+      - src/commands/task-finalize.ts
+      - src/core/execute-once/eligibility.ts
+      - src/cli/commands/task.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - tests/unit/core/task-dependencies.test.ts
+      - tests/unit/commands/task-start.test.ts
+      - tests/integration/task-start-dependency-gate.test.ts
+      - tests/integration/json-stdout.test.ts
+      - docs/cli-contract.md
+      - docs/agent-contract.md
