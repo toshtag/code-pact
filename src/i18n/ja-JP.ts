@@ -474,6 +474,8 @@ export const messages = {
         `タスク "${taskId}" は既に started 状態です。progress イベントは記録されていません。`,
       invalidTransition: (taskId: string, current: string): string =>
         `状態 "${current}" からタスク "${taskId}" を start できません。`,
+      dependencyIncomplete: (taskId: string, deps: string[]): string =>
+        `タスク "${taskId}" は開始できません: 依存タスクが未完了です: ${deps.join(", ")}。`,
     },
     block: {
       success: (taskId: string, reason: string): string =>

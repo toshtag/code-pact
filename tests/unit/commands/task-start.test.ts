@@ -67,6 +67,7 @@ async function setupProject(
   opts: {
     projectYaml?: string;
     progressYaml?: string;
+    phaseYaml?: string;
   } = {},
 ): Promise<void> {
   await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
@@ -84,7 +85,7 @@ async function setupProject(
   await writeFile(join(dir, "design", "roadmap.yaml"), ROADMAP_YAML, "utf8");
   await writeFile(
     join(dir, "design", "phases", "P1-foundation.yaml"),
-    PHASE_YAML,
+    opts.phaseYaml ?? PHASE_YAML,
     "utf8",
   );
 
@@ -315,5 +316,66 @@ describe("runTaskStart — author attribution (Collaboration UX RFC D1)", () => 
     expect(result.event.author).toBeUndefined();
     const { log } = await readProgress(dir);
     expect(log.events[0]?.author).toBeUndefined();
+  });
+});
+
+describe("runTaskStart — dependency gate", () => {
+  const DEPENDENT_PHASE_YAML = `${PHASE_YAML}  - id: P1-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P1-T1
+`;
+
+  it("rejects start when a declared dependency is not done", async () => {
+    await setupProject(dir, { phaseYaml: DEPENDENT_PHASE_YAML });
+    await expect(
+      runTaskStart({ cwd: dir, taskId: "P1-T2", agent: "claude-code" }),
+    ).rejects.toMatchObject({
+      code: "TASK_DEPENDENCY_INCOMPLETE",
+      deps: ["P1-T1"],
+    });
+  });
+
+  it("allows start when every declared dependency is done", async () => {
+    await setupProject(dir, {
+      phaseYaml: DEPENDENT_PHASE_YAML,
+      progressYaml: `events:
+  - task_id: P1-T1
+    status: done
+    at: "2026-05-18T09:00:00+00:00"
+    actor: agent
+    agent: claude-code
+`,
+    });
+    const result = await runTaskStart({
+      cwd: dir,
+      taskId: "P1-T2",
+      agent: "claude-code",
+    });
+    expect(result.kind).toBe("started");
+  });
+
+  it("does not write a contract lock or progress event when rejected", async () => {
+    await setupProject(dir, { phaseYaml: DEPENDENT_PHASE_YAML });
+    const lockPath = join(dir, ".code-pact", "state", "locks", "P1-T2.yaml");
+    const { log: logBefore } = await readProgress(dir);
+    await expect(
+      runTaskStart({ cwd: dir, taskId: "P1-T2", agent: "claude-code" }),
+    ).rejects.toMatchObject({ code: "TASK_DEPENDENCY_INCOMPLETE" });
+
+    const lockExists = await readFile(lockPath, "utf8").then(
+      () => true,
+      () => false,
+    );
+    expect(lockExists).toBe(false);
+    const { log: logAfter } = await readProgress(dir);
+    expect(logAfter.events).toHaveLength(logBefore.events.length);
   });
 });

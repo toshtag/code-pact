@@ -471,6 +471,8 @@ export const messages = {
         `Task "${taskId}" is already started. no progress event was recorded.`,
       invalidTransition: (taskId: string, current: string): string =>
         `Cannot start task "${taskId}" from state "${current}".`,
+      dependencyIncomplete: (taskId: string, deps: string[]): string =>
+        `Task "${taskId}" cannot be started: dependencies are not done: ${deps.join(", ")}.`,
     },
     block: {
       success: (taskId: string, reason: string): string =>
