@@ -40,7 +40,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: long
-    status: planned
+    status: done
     description: >
       Implement lossless task registration from a strict machine-readable spec
       file. Add --spec-file support to task add and task lock, compute and store
