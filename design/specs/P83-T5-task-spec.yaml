@@ -1,0 +1,38 @@
+schema_version: 1
+phase_id: P83
+task:
+  id: P83-T5
+  type: bugfix
+  ambiguity: low
+  risk: medium
+  context_size: medium
+  write_surface: low
+  verification_strength: strong
+  expected_duration: short
+  status: planned
+  description: >
+    Pre-start spec drift gate. Reject task start without side effects when an
+    existing spec-file contract lock has drifted, been deleted, or corrupted.
+  requires_decision: false
+  depends_on:
+    - P83-T4
+  decision_refs: []
+  reads:
+    - src/commands/task-progress.ts
+    - src/core/contract-lock.ts
+    - src/core/task-registration-spec.ts
+    - src/core/schemas/task-registration-spec.ts
+    - src/core/schemas/phase.ts
+    - src/core/plan/load-phase.ts
+    - src/core/task-dependencies.ts
+    - src/core/progress/events-io.ts
+    - tests/unit/commands/task-start.test.ts
+    - tests/integration/task-registration-spec.test.ts
+    - design/specs/P83-T5-task-spec.yaml
+    - design/phases/P83-lossless-task-registration.yaml
+  writes:
+    - src/commands/task-progress.ts
+    - tests/unit/commands/task-start.test.ts
+    - tests/integration/task-registration-spec.test.ts
+  acceptance_refs:
+    - design/specs/P83-T5-task-spec.yaml
