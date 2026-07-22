@@ -1,20 +1,29 @@
 import { loadPhase } from "../core/plan/load-phase.ts";
-import { stringify as toYaml } from "yaml";
-import { atomicWriteText } from "../io/atomic-text.ts";
+import { parse as parseYaml, stringify as toYaml } from "yaml";
+import {
+  atomicWriteText,
+  atomicReplaceExistingText,
+} from "../io/atomic-text.ts";
 import { resolvePhaseInRoadmap } from "../core/plan/resolve-phase.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import {
   resolvePhaseWritePath,
+  resolvePhaseReadPath,
   resolveExplicitUserReadPath,
   readExplicitUserText,
+  readOwnedText,
 } from "../core/project-fs/index.ts";
-import type { OwnedWritePath } from "../core/project-fs/branded-paths.ts";
+import type {
+  OwnedReadPath,
+  OwnedWritePath,
+} from "../core/project-fs/branded-paths.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { TaskType, type Task } from "../core/schemas/task.ts";
 import { assertSafePlanId } from "../core/schemas/plan-id.ts";
 import {
   parseTaskRegistrationSpec,
   taskRegistrationDigest,
+  lockTimeRegistrationChangedFields,
 } from "../core/task-registration-spec.ts";
 import { Prompter } from "../lib/prompt.ts";
 import { messages as messageCatalog, type Locale } from "../i18n/index.ts";
@@ -249,8 +258,10 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
   try {
     const ref = await resolvePhaseInRoadmap(opts.cwd, opts.phaseId);
     let absPath: OwnedWritePath;
+    let readPath: OwnedReadPath;
     try {
       absPath = await resolvePhaseWritePath(opts.cwd, ref.path);
+      readPath = await resolvePhaseReadPath(opts.cwd, ref.path);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
@@ -331,30 +342,72 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
       tasks: [...existingTasks, newTask],
     });
 
-    await atomicWriteText(absPath, toYaml(updatedPhase));
+    // Capture the original phase bytes so we can CAS rollback if the write
+    // succeeds but the post-write sanity re-read fails.
+    const originalBytes = await readOwnedText(readPath);
+
+    // Serialize and re-parse in memory before any filesystem mutation. The
+    // candidate task is what would be stored; verify it matches the intended
+    // registration exactly.
+    const candidateYaml = toYaml(updatedPhase);
+    const candidatePhase = Phase.parse(parseYaml(candidateYaml));
+    const candidateTask = candidatePhase.tasks?.find(t => t.id === taskId);
+    if (!candidateTask) {
+      const err = new Error(
+        `Task "${taskId}" was serialized but could not be re-parsed from the candidate YAML.`,
+      );
+      (err as NodeJS.ErrnoException).code = "TASK_REGISTRATION_ROUND_TRIP";
+      throw err;
+    }
+    const roundTripDiff = lockTimeRegistrationChangedFields(
+      specResult ? specResult.spec.task : newTask,
+      candidateTask,
+    );
+    if (roundTripDiff.length > 0) {
+      const err = new Error(
+        `Task registration round-trip mismatch for "${taskId}" before write (${roundTripDiff.join(", ")}).`,
+      );
+      (err as NodeJS.ErrnoException).code = "TASK_REGISTRATION_ROUND_TRIP";
+      throw err;
+    }
+
+    await atomicWriteText(absPath, candidateYaml);
+
+    // Post-write sanity check: the bytes on disk must round-trip to the same
+    // canonical registration. If they do not, attempt a CAS rollback to the
+    // original bytes when the file still contains exactly what we wrote.
+    const reloaded = await loadPhase(opts.cwd, ref.path);
+    const storedTask = reloaded.tasks?.find(t => t.id === taskId);
+    const storedDiff =
+      storedTask == null
+        ? ["missing"]
+        : lockTimeRegistrationChangedFields(
+            specResult ? specResult.spec.task : newTask,
+            storedTask,
+          );
+    if (storedDiff.length > 0) {
+      let currentBytes: string | undefined;
+      try {
+        currentBytes = await readOwnedText(readPath);
+      } catch {
+        currentBytes = undefined;
+      }
+      if (currentBytes === candidateYaml) {
+        await atomicReplaceExistingText(absPath, originalBytes, candidateYaml);
+      }
+      const err = new Error(
+        `Task registration round-trip mismatch for "${taskId}" after write (${storedDiff.join(", ")}).`,
+      );
+      (err as NodeJS.ErrnoException).code = "TASK_REGISTRATION_ROUND_TRIP";
+      throw err;
+    }
 
     if (specResult) {
-      const reloaded = await loadPhase(opts.cwd, ref.path);
-      const storedTask = reloaded.tasks?.find(t => t.id === taskId);
-      if (!storedTask) {
-        const err = new Error(
-          `Task "${taskId}" was written to "${ref.path}" but could not be re-read.`,
-        );
-        (err as NodeJS.ErrnoException).code = "TASK_REGISTRATION_ROUND_TRIP";
-        throw err;
-      }
       const inputDigest = taskRegistrationDigest(
         specResult.spec.phase_id,
         specResult.spec.task,
       );
-      const storedDigest = taskRegistrationDigest(reloaded.id, storedTask);
-      if (inputDigest !== storedDigest) {
-        const err = new Error(
-          `Task registration round-trip mismatch for "${taskId}" (spec digest ${inputDigest} != stored digest ${storedDigest}).`,
-        );
-        (err as NodeJS.ErrnoException).code = "TASK_REGISTRATION_ROUND_TRIP";
-        throw err;
-      }
+      const storedDigest = taskRegistrationDigest(reloaded.id, storedTask!);
       return {
         phaseId: opts.phaseId,
         taskId,

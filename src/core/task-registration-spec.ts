@@ -22,20 +22,17 @@ function arraysEqual(
   return true;
 }
 
-/**
- * Return the list of registration field names that differ between two task
- * descriptions. Used for both lock-time spec mismatch and post-lock drift.
- *
- * - `status` is intentionally excluded: it is a lifecycle field (planned →
- *   started → done) and not part of the lossless registration contract.
- * - Empty arrays are treated as different from missing fields.
- * - `requires_decision: undefined` and `false` are treated as equal.
- */
-export function registrationChangedFields(
+type FieldDiffOptions = {
+  includeStatus: boolean;
+};
+
+function registrationFieldDiffs(
   expected: Task,
   actual: Task,
+  options: FieldDiffOptions,
 ): string[] {
   const fields: string[] = [];
+  if (expected.id !== actual.id) fields.push("id");
   if (expected.type !== actual.type) fields.push("type");
   if (expected.ambiguity !== actual.ambiguity) fields.push("ambiguity");
   if (expected.risk !== actual.risk) fields.push("risk");
@@ -47,8 +44,10 @@ export function registrationChangedFields(
     fields.push("verification_strength");
   if (expected.expected_duration !== actual.expected_duration)
     fields.push("expected_duration");
+  if (options.includeStatus && expected.status !== actual.status)
+    fields.push("status");
   if (expected.description !== actual.description) fields.push("description");
-  if (Boolean(expected.requires_decision) !== Boolean(actual.requires_decision))
+  if (expected.requires_decision !== actual.requires_decision)
     fields.push("requires_decision");
   if (!arraysEqual(expected.depends_on, actual.depends_on))
     fields.push("depends_on");
@@ -62,14 +61,45 @@ export function registrationChangedFields(
 }
 
 /**
+ * Lock-time full comparison between a strict task-registration spec and the
+ * stored phase task. Every registration field, including `status` and the
+ * presence/value of `requires_decision`, must match.
+ *
+ * - `status` is included: a spec-locked task must be `planned` at lock time.
+ * - Empty arrays are treated as different from missing fields.
+ * - `requires_decision: false` and a missing field are different.
+ */
+export function lockTimeRegistrationChangedFields(
+  expected: Task,
+  actual: Task,
+): string[] {
+  return registrationFieldDiffs(expected, actual, { includeStatus: true });
+}
+
+/**
+ * Post-lock drift comparison. The `status` lifecycle field is excluded so that
+ * `planned → started → done` transitions do not trigger drift. All other fields
+ * are compared exactly, including `requires_decision` presence.
+ *
+ * - `requires_decision: false` and a missing field are different.
+ * - Empty arrays are treated as different from missing fields.
+ */
+export function postLockRegistrationChangedFields(
+  expected: Task,
+  actual: Task,
+): string[] {
+  return registrationFieldDiffs(expected, actual, { includeStatus: false });
+}
+
+/**
  * Build the canonical UTF-8 JSON representation of a task registration
  * contract without mutating the input.
  *
  * - Top-level key order is canonicalized by `canonicalJson`.
  * - Array order is preserved as-is; `depends_on` is NOT sorted.
- - `status` is excluded from the digest; it is a lifecycle field managed by
- *   `task start`, `task complete`, and `task finalize`, not the registration
- *   contract.
+ * - `status` is included because lock-time registration must be `planned`.
+ * - `requires_decision` is preserved as-is; `undefined` (field missing) and
+ *   `false` (explicitly false) produce different canonical forms.
  * - Explicit empty arrays are kept; missing optional arrays are omitted,
  *   so "empty array" and "field omitted" produce different digests.
  * - `undefined` values are filtered out by `canonicalJson`.
@@ -91,9 +121,9 @@ export function canonicalTaskRegistration(phaseId: string, task: Task): string {
       write_surface: task.write_surface,
       verification_strength: task.verification_strength,
       expected_duration: task.expected_duration,
+      status: task.status,
       description: task.description,
-      requires_decision:
-        task.requires_decision === undefined ? false : task.requires_decision,
+      requires_decision: task.requires_decision,
       depends_on: task.depends_on,
       decision_refs: task.decision_refs,
       reads: task.reads,

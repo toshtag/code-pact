@@ -14,7 +14,7 @@ import { canonicalJson } from "./content-addressed-store/canonical-json.ts";
 import {
   taskRegistrationDigest,
   canonicalTaskRegistration,
-  registrationChangedFields,
+  postLockRegistrationChangedFields,
 } from "./task-registration-spec.ts";
 import {
   readOwnedText,
@@ -575,14 +575,19 @@ export async function assertTaskContractCurrent(
           const parsed = JSON.parse(lock.registration.spec_canonical) as {
             task: Task;
           };
-          changedFields = registrationChangedFields(parsed.task, task);
+          changedFields = postLockRegistrationChangedFields(parsed.task, task);
         } catch {
           changedFields = ["registration_spec"];
         }
       } else {
         changedFields = ["registration_spec"];
       }
-      if (changedFields.length === 0) changedFields = ["registration_spec"];
+      if (changedFields.length === 0) {
+        // The digests differ only because of a canonical-form or lifecycle
+        // field change that is intentionally excluded from post-lock drift
+        // (e.g. status). Treat this as no drift.
+        return { ok: true, lock };
+      }
       const err = new Error(
         `TASK_CONTRACT_DRIFT: task registration digest mismatch (${changedFields.join(", ")}).`,
       );

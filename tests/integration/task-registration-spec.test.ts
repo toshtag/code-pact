@@ -279,4 +279,121 @@ describe("task lock --spec-file", () => {
     // No lock file should have been written as a side effect.
     expect(existsSync(lockPath)).toBe(false);
   });
+
+  it("fails with TASK_REGISTRATION_SPEC_MISMATCH when status changed", async () => {
+    project = await createTempProject();
+    await setupPhase(project);
+
+    const specPath = join(project.dir, "p1-t1-spec.yaml");
+    writeFileSync(specPath, specBody({ phaseId: "P1", taskId: "P1-T1" }));
+
+    expectJsonOk(
+      project.run([
+        "task",
+        "add",
+        "P1",
+        "--spec-file",
+        "p1-t1-spec.yaml",
+        "--json",
+      ]),
+    );
+
+    git(project.dir, ["init", "--quiet"]);
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "init",
+    ]);
+
+    // Simulate a lifecycle status mutation before lock.
+    const phasePath = join(
+      project.dir,
+      "design",
+      "phases",
+      "P1-foundation.yaml",
+    );
+    const phase = parseYaml(readFileSync(phasePath, "utf8")) as {
+      tasks: { id: string; status: string }[];
+    };
+    const task = phase.tasks.find(t => t.id === "P1-T1");
+    expect(task).toBeDefined();
+    task!.status = "in_progress";
+    writeFileSync(phasePath, stringifyYaml(phase));
+
+    const res = project.run([
+      "task",
+      "lock",
+      "P1-T1",
+      "--spec-file",
+      "p1-t1-spec.yaml",
+      "--json",
+    ]);
+    expect(res.code).toBe(2);
+    const parsed = expectJsonErr(res, "TASK_REGISTRATION_SPEC_MISMATCH");
+    expect(parsed.error.message).toContain("status");
+  });
+
+  it("fails with TASK_REGISTRATION_SPEC_MISMATCH when requires_decision is removed", async () => {
+    project = await createTempProject();
+    await setupPhase(project);
+
+    const specPath = join(project.dir, "p1-t1-spec.yaml");
+    writeFileSync(specPath, specBody({ phaseId: "P1", taskId: "P1-T1" }));
+
+    expectJsonOk(
+      project.run([
+        "task",
+        "add",
+        "P1",
+        "--spec-file",
+        "p1-t1-spec.yaml",
+        "--json",
+      ]),
+    );
+
+    git(project.dir, ["init", "--quiet"]);
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "init",
+    ]);
+
+    const phasePath = join(
+      project.dir,
+      "design",
+      "phases",
+      "P1-foundation.yaml",
+    );
+    const phase = parseYaml(readFileSync(phasePath, "utf8")) as {
+      tasks: { id: string; requires_decision?: boolean }[];
+    };
+    const task = phase.tasks.find(t => t.id === "P1-T1");
+    expect(task).toBeDefined();
+    delete task!.requires_decision;
+    writeFileSync(phasePath, stringifyYaml(phase));
+
+    const res = project.run([
+      "task",
+      "lock",
+      "P1-T1",
+      "--spec-file",
+      "p1-t1-spec.yaml",
+      "--json",
+    ]);
+    expect(res.code).toBe(2);
+    const parsed = expectJsonErr(res, "TASK_REGISTRATION_SPEC_MISMATCH");
+    expect(parsed.error.message).toContain("requires_decision");
+  });
 });

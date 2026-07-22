@@ -184,20 +184,6 @@ async function currentTreeSha(cwd: string): Promise<string> {
   return execGit(cwd, ["rev-parse", "--verify", "HEAD^{tree}"]);
 }
 
-/**
- * Return the parent of `sha`, or `sha` itself if `sha` has no parent (root
- * commit). Used as the inclusive base for review-bundle write audits so that
- * files introduced in the lock-base commit itself are not reported as
- * `declared_unused`.
- */
-async function parentOrLockBase(cwd: string, sha: string): Promise<string> {
-  try {
-    return await execGit(cwd, ["rev-parse", "--verify", `${sha}^`]);
-  } catch {
-    return sha;
-  }
-}
-
 async function assertWorktreeClean(cwd: string): Promise<void> {
   const out = await execGit(cwd, [
     "status",
@@ -387,11 +373,10 @@ export async function runReviewBundle(
 
   const actualChangedFiles = await changedFilesSince(cwd, lock.base_sha);
 
-  const auditBaseSha = await parentOrLockBase(cwd, lock.base_sha);
   const writeAudit = await auditWrites({
     cwd,
     declaredWrites: task.writes ?? [],
-    baseRef: auditBaseSha,
+    baseRef: lock.base_sha,
   });
 
   // Lifecycle-only phase status mutations (task finalize / phase reconcile /

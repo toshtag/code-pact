@@ -374,6 +374,24 @@ inspect_decision` with a `next.command` that points to the full-detail
   call from `started` state returns `kind: "already_started"` without
   appending a duplicate event.
 
+- **Register and lock with a strict spec file.** When the agent has a
+  complete machine-readable task contract (`depends_on`, `reads`,
+  `writes`, readiness fields, etc.), it must not transcribe those fields
+  into individual CLI flags. Instead, write a strict task-registration
+  spec file inside the project tree and use it for both registration
+  and lock:
+
+  ```bash
+  code-pact task add P83 --spec-file design/specs/P83-T1-task-spec.yaml --json
+  code-pact task lock P83-T1 --spec-file design/specs/P83-T1-task-spec.yaml --json
+  ```
+
+  The `--spec-file` path must be project-relative and point to a file
+  that conforms to the strict `TaskRegistrationSpec` schema. Do not
+  infer dependencies that are not explicitly listed in the spec file;
+  `depends_on` is preserved losslessly from the spec into the phase and
+  contract lock.
+
 - **Implement the task.** This is the agent's own work. `code-pact`
   does not run during this phase; it is invoked again only at the
   next verb boundary.

@@ -12,7 +12,7 @@ import {
 import {
   parseTaskRegistrationSpec,
   taskRegistrationDigest,
-  registrationChangedFields,
+  lockTimeRegistrationChangedFields,
 } from "../core/task-registration-spec.ts";
 
 export type TaskLockOptions = {
@@ -94,7 +94,10 @@ async function readAndValidateSpecFile(
   const actualDigest = taskRegistrationDigest(phase.id, currentTask);
 
   if (expectedDigest !== actualDigest) {
-    const changedFields = registrationChangedFields(spec.task, currentTask);
+    const changedFields = lockTimeRegistrationChangedFields(
+      spec.task,
+      currentTask,
+    );
     const err = new Error(
       `TASK_REGISTRATION_SPEC_MISMATCH: task "${taskId}" phase task does not match the supplied spec (${changedFields.join(", ")}).`,
     );

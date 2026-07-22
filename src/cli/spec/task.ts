@@ -241,7 +241,7 @@ const add: CommandSpec = {
   examples: [
     "code-pact task add P1                         # interactive wizard (TTY)",
     'code-pact task add P1 --description "Add X" --type feature --json',
-    "code-pact task add P83 --spec-file /tmp/P83-T1-task-spec.yaml --json",
+    "code-pact task add P83 --spec-file design/specs/P83-T1-task-spec.yaml --json",
   ],
 };
 
@@ -471,7 +471,7 @@ const lock: CommandSpec = {
   examples: [
     "code-pact task lock P1-T1",
     "code-pact task lock P1-T1 --base-ref origin/main --json",
-    "code-pact task lock P83-T1 --spec-file /tmp/P83-T1-task-spec.yaml --json",
+    "code-pact task lock P83-T1 --spec-file design/specs/P83-T1-task-spec.yaml --json",
   ],
 };
 
