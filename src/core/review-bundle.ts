@@ -185,16 +185,16 @@ async function currentTreeSha(cwd: string): Promise<string> {
 }
 
 /**
- * Return the parent of `sha`, or the git empty tree SHA if `sha` has no parent
- * (root commit). Used as the inclusive base for review-bundle write audits so
- * that files introduced in the lock-base commit itself are not reported as
+ * Return the parent of `sha`, or `sha` itself if `sha` has no parent (root
+ * commit). Used as the inclusive base for review-bundle write audits so that
+ * files introduced in the lock-base commit itself are not reported as
  * `declared_unused`.
  */
-async function parentOrEmptyTree(cwd: string, sha: string): Promise<string> {
+async function parentOrLockBase(cwd: string, sha: string): Promise<string> {
   try {
     return await execGit(cwd, ["rev-parse", "--verify", `${sha}^`]);
   } catch {
-    return "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+    return sha;
   }
 }
 
@@ -387,7 +387,7 @@ export async function runReviewBundle(
 
   const actualChangedFiles = await changedFilesSince(cwd, lock.base_sha);
 
-  const auditBaseSha = await parentOrEmptyTree(cwd, lock.base_sha);
+  const auditBaseSha = await parentOrLockBase(cwd, lock.base_sha);
   const writeAudit = await auditWrites({
     cwd,
     declaredWrites: task.writes ?? [],
