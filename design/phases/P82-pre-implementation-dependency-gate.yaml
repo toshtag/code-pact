@@ -3,7 +3,7 @@ name: Pre-Implementation Dependency Gate
 weight: 1
 confidence: high
 risk: medium
-status: in_progress
+status: done
 objective: >
   Prevent agents from starting implementation while declared task dependencies
   are incomplete, before any contract lock or progress event is written.
