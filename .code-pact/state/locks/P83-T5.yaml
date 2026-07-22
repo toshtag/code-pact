@@ -1,0 +1,61 @@
+schema_version: 1
+task_id: P83-T5
+phase_id: P83
+phase_path: design/phases/P83-lossless-task-registration.yaml
+base_ref: HEAD
+base_sha: a9e11286628c1321764c9f5de06764cf0d02e77d
+phase_blob_sha: 7103f74278a90c0c01e48c1c40c397eb07048dc0
+contract_digest: 12388e247178656a25e4d1f8aeef7242f6dbc394937166645cc9cb230678db41
+contract:
+  description: >
+    Pre-start spec drift gate. Reject task start without side effects when an
+    existing spec-file contract lock has drifted, been deleted, or corrupted.
+  reads:
+    - design/phases/P83-lossless-task-registration.yaml
+    - design/specs/P83-T5-task-spec.yaml
+    - src/commands/task-progress.ts
+    - src/core/contract-lock.ts
+    - src/core/plan/load-phase.ts
+    - src/core/progress/events-io.ts
+    - src/core/schemas/phase.ts
+    - src/core/schemas/task-registration-spec.ts
+    - src/core/task-dependencies.ts
+    - src/core/task-registration-spec.ts
+    - tests/integration/task-registration-spec.test.ts
+    - tests/unit/commands/task-start.test.ts
+  writes:
+    - src/commands/task-progress.ts
+    - tests/integration/task-registration-spec.test.ts
+    - tests/unit/commands/task-start.test.ts
+  depends_on:
+    - P83-T4
+  decision_refs: []
+  acceptance_refs:
+    - design/specs/P83-T5-task-spec.yaml
+  definition_of_done:
+    - A spec-locked task detects registration-field drift after lock.
+    - A strict task spec containing depends_on is stored losslessly in the phase.
+    - Focused verification, local CI, and review-bundle complete without
+      corrective code commits.
+    - Removing depends_on between add and lock causes a side-effect-free failure.
+    - The P80 dependency-omission replay is blocked before implementation.
+    - The same spec is verified again before contract lock creation.
+  verification_commands:
+    - pnpm build
+    - pnpm check:docs
+    - pnpm test:ci
+    - pnpm test:integration
+    - pnpm test:integration:smoke
+    - pnpm test:unit
+    - pnpm typecheck
+  base_sha: a9e11286628c1321764c9f5de06764cf0d02e77d
+  phase_blob_sha: 7103f74278a90c0c01e48c1c40c397eb07048dc0
+registration:
+  mode: spec_file
+  spec_digest: 5e476a19f0b7001add563dbad96ba0703a7ec0ac83bd5e38ee2770670644c9cc
+  spec_path: design/specs/P83-T5-task-spec.yaml
+  spec_canonical: |
+    {"phase_id":"P83","schema_version":1,"task":{"acceptance_refs":["design/specs/P83-T5-task-spec.yaml"],"ambiguity":"low","context_size":"medium","decision_refs":[],"depends_on":["P83-T4"],"description":"Pre-start spec drift gate. Reject task start without side effects when an existing spec-file contract lock has drifted, been deleted, or corrupted.\n","expected_duration":"short","id":"P83-T5","reads":["src/commands/task-progress.ts","src/core/contract-lock.ts","src/core/task-registration-spec.ts","src/core/schemas/task-registration-spec.ts","src/core/schemas/phase.ts","src/core/plan/load-phase.ts","src/core/task-dependencies.ts","src/core/progress/events-io.ts","tests/unit/commands/task-start.test.ts","tests/integration/task-registration-spec.test.ts","design/specs/P83-T5-task-spec.yaml","design/phases/P83-lossless-task-registration.yaml"],"requires_decision":false,"risk":"medium","status":"planned","type":"bugfix","verification_strength":"strong","write_surface":"low","writes":["src/commands/task-progress.ts","tests/unit/commands/task-start.test.ts","tests/integration/task-registration-spec.test.ts"]}}
+at: 2026-07-22T09:24:58.003Z
+actor: agent
+author: Pocket
