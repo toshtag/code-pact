@@ -24,45 +24,70 @@ import {
 } from "../../../src/cli/spec/render.ts";
 
 const ALL_SPECS = [
-  ...Object.entries(ROOT_SPECS).map(([name, spec]) => [name, spec, name] as const),
-  ...Object.entries(PLAN_SPECS).map(([name, spec]) => [name, spec, `plan ${name}`] as const),
-  ...Object.entries(PHASE_SPECS).map(([name, spec]) => [name, spec, `phase ${name}`] as const),
-  ...Object.entries(ADAPTER_SPECS).map(([name, spec]) => [name, spec, `adapter ${name}`] as const),
-  ...Object.entries(DECISION_SPECS).map(([name, spec]) => [name, spec, `decision ${name}`] as const),
-  ...Object.entries(STATE_SPECS).map(([name, spec]) => [name, spec, `state ${name}`] as const),
-  ...Object.entries(SPEC_SPECS).map(([name, spec]) => [name, spec, `spec ${name}`] as const),
-  ...Object.entries(TASK_SPECS).map(([name, spec]) => [name, spec, `task ${name}`] as const),
+  ...Object.entries(ROOT_SPECS).map(
+    ([name, spec]) => [name, spec, name] as const,
+  ),
+  ...Object.entries(PLAN_SPECS).map(
+    ([name, spec]) => [name, spec, `plan ${name}`] as const,
+  ),
+  ...Object.entries(PHASE_SPECS).map(
+    ([name, spec]) => [name, spec, `phase ${name}`] as const,
+  ),
+  ...Object.entries(ADAPTER_SPECS).map(
+    ([name, spec]) => [name, spec, `adapter ${name}`] as const,
+  ),
+  ...Object.entries(DECISION_SPECS).map(
+    ([name, spec]) => [name, spec, `decision ${name}`] as const,
+  ),
+  ...Object.entries(STATE_SPECS).map(
+    ([name, spec]) => [name, spec, `state ${name}`] as const,
+  ),
+  ...Object.entries(SPEC_SPECS).map(
+    ([name, spec]) => [name, spec, `spec ${name}`] as const,
+  ),
+  ...Object.entries(TASK_SPECS).map(
+    ([name, spec]) => [name, spec, `task ${name}`] as const,
+  ),
 ];
 
 describe("CommandSpec derivation (P46)", () => {
-  it.each(ALL_SPECS)("`%s` toParseOptions maps flags to parseArgs config", (_name, spec) => {
-    const opts = toParseOptions(spec);
-    expect(Object.keys(opts)).toEqual(spec.flags.map((f) => f.name));
-    for (const f of spec.flags) {
-      const entry = opts[f.name]!;
-      // value present → string; absent → boolean.
-      expect(entry.type).toBe(f.value ? "string" : "boolean");
-      // repeatable → multiple:true; otherwise multiple is unset.
-      expect(entry.multiple ?? false).toBe(f.repeatable ?? false);
-    }
-  });
+  it.each(ALL_SPECS)(
+    "`%s` toParseOptions maps flags to parseArgs config",
+    (_name, spec) => {
+      const opts = toParseOptions(spec);
+      expect(Object.keys(opts)).toEqual(spec.flags.map(f => f.name));
+      for (const f of spec.flags) {
+        const entry = opts[f.name]!;
+        // value present → string; absent → boolean.
+        expect(entry.type).toBe(f.value ? "string" : "boolean");
+        // repeatable → multiple:true; otherwise multiple is unset.
+        expect(entry.multiple ?? false).toBe(f.repeatable ?? false);
+      }
+    },
+  );
 
-  it.each(ALL_SPECS)("`%s` help carries the Usage line, every flag, and examples", (_name, spec, label) => {
-    const help = renderLeafHelp(spec);
-    expect(help).toContain(`Usage: code-pact ${label}`);
-    if (spec.positional) expect(help).toContain(spec.positional);
-    for (const f of spec.flags) expect(help).toContain(`--${f.name}`);
-    expect(help).toContain("Examples:");
-    for (const ex of spec.examples) expect(help).toContain(ex);
-    if (spec.readOnly) expect(help).toContain("Read-only");
-  });
+  it.each(ALL_SPECS)(
+    "`%s` help carries the Usage line, every flag, and examples",
+    (_name, spec, label) => {
+      const help = renderLeafHelp(spec);
+      expect(help).toContain(`Usage: code-pact ${label}`);
+      if (spec.positional) expect(help).toContain(spec.positional);
+      for (const f of spec.flags) expect(help).toContain(`--${f.name}`);
+      expect(help).toContain("Examples:");
+      for (const ex of spec.examples) expect(help).toContain(ex);
+      if (spec.readOnly) expect(help).toContain("Read-only");
+    },
+  );
 
-  it.each(ALL_SPECS)("`%s` reference carries the heading, every flag, and examples", (_name, spec, label) => {
-    const ref = renderReference(spec);
-    expect(ref).toContain(`### \`${label}\``);
-    for (const f of spec.flags) expect(ref).toContain(`\`--${f.name}\``);
-    for (const ex of spec.examples) expect(ref).toContain(ex);
-  });
+  it.each(ALL_SPECS)(
+    "`%s` reference carries the heading, every flag, and examples",
+    (_name, spec, label) => {
+      const ref = renderReference(spec);
+      expect(ref).toContain(`### \`${label}\``);
+      for (const f of spec.flags) expect(ref).toContain(`\`--${f.name}\``);
+      for (const ex of spec.examples) expect(ref).toContain(ex);
+    },
+  );
 
   // `task add` is the highest-risk port (stdlib parseArgs directly, the largest
   // mixed required/repeatable flag set). Pin its parse surface specifically:
@@ -71,13 +96,29 @@ describe("CommandSpec derivation (P46)", () => {
     const opts = toParseOptions(TASK_SPECS.add!);
 
     it("repeatable flags map to multiple:true", () => {
-      for (const name of ["depends-on", "decision-ref", "read", "write", "acceptance-ref"]) {
+      for (const name of [
+        "depends-on",
+        "decision-ref",
+        "read",
+        "write",
+        "acceptance-ref",
+      ]) {
         expect(opts[name]).toEqual({ type: "string", multiple: true });
       }
     });
 
     it("string-valued flags are string, no multiple", () => {
-      for (const name of ["description", "type", "id", "ambiguity", "risk", "context-size", "write-surface", "verification-strength", "expected-duration"]) {
+      for (const name of [
+        "description",
+        "type",
+        "id",
+        "ambiguity",
+        "risk",
+        "context-size",
+        "write-surface",
+        "verification-strength",
+        "expected-duration",
+      ]) {
         expect(opts[name]).toEqual({ type: "string" });
       }
     });
@@ -86,12 +127,25 @@ describe("CommandSpec derivation (P46)", () => {
       expect(opts.json).toEqual({ type: "boolean" });
     });
 
-    it("covers exactly the 15 documented flags (no addition, no drop)", () => {
+    it("covers exactly the 16 documented flags (no addition, no drop)", () => {
       expect(Object.keys(opts).sort()).toEqual(
         [
-          "acceptance-ref", "ambiguity", "context-size", "decision-ref",
-          "depends-on", "description", "expected-duration", "id", "json",
-          "read", "risk", "type", "verification-strength", "write", "write-surface",
+          "acceptance-ref",
+          "ambiguity",
+          "context-size",
+          "decision-ref",
+          "depends-on",
+          "description",
+          "expected-duration",
+          "id",
+          "json",
+          "read",
+          "risk",
+          "spec-file",
+          "type",
+          "verification-strength",
+          "write",
+          "write-surface",
         ].sort(),
       );
     });
@@ -116,29 +170,50 @@ describe("CommandSpec derivation (P46)", () => {
       const opts = toParseOptions(PLAN_SPECS.constitution);
       expect(opts.principle).toEqual({ type: "string", multiple: true });
       expect(Object.keys(opts).sort()).toEqual(
-        ["description", "force", "from-file", "json", "principle", "stdin"].sort(),
+        [
+          "description",
+          "force",
+          "from-file",
+          "json",
+          "principle",
+          "stdin",
+        ].sort(),
       );
     });
 
     it("plan sync-paths marks --rename repeatable", () => {
       const opts = toParseOptions(PLAN_SPECS["sync-paths"]);
       expect(opts.rename).toEqual({ type: "string", multiple: true });
-      expect(Object.keys(opts).sort()).toEqual(["json", "rename", "write"].sort());
+      expect(Object.keys(opts).sort()).toEqual(
+        ["json", "rename", "write"].sort(),
+      );
     });
 
     it("plan lint and analyze rich help are not generic stubs", () => {
       expect(renderLeafHelp(PLAN_SPECS.lint)).toContain("--include-quality");
-      expect(renderLeafHelp(PLAN_SPECS.analyze)).toContain("--include-historical");
-      expect(renderReference(PLAN_SPECS.lint)).toContain("code-pact plan lint --json");
-      expect(renderReference(PLAN_SPECS.analyze)).toContain("code-pact plan analyze --json");
+      expect(renderLeafHelp(PLAN_SPECS.analyze)).toContain(
+        "--include-historical",
+      );
+      expect(renderReference(PLAN_SPECS.lint)).toContain(
+        "code-pact plan lint --json",
+      );
+      expect(renderReference(PLAN_SPECS.analyze)).toContain(
+        "code-pact plan analyze --json",
+      );
     });
   });
 
   describe("phase parse surfaces", () => {
     it("phase add covers exactly the parser-backed flags", () => {
       const opts = toParseOptions(PHASE_SPECS.add);
-      expect(opts["verify-command"]).toEqual({ type: "string", multiple: true });
-      expect(opts["done-criterion"]).toEqual({ type: "string", multiple: true });
+      expect(opts["verify-command"]).toEqual({
+        type: "string",
+        multiple: true,
+      });
+      expect(opts["done-criterion"]).toEqual({
+        type: "string",
+        multiple: true,
+      });
       expect(Object.keys(opts).sort()).toEqual(
         [
           "confidence",
@@ -166,8 +241,12 @@ describe("CommandSpec derivation (P46)", () => {
     });
 
     it("phase reference renders flags and examples for representative specs", () => {
-      expect(renderReference(PHASE_SPECS.import)).toContain("code-pact phase import design/roadmap-draft.yaml --json");
-      expect(renderReference(PHASE_SPECS.runbook)).toContain("`--across-phases`");
+      expect(renderReference(PHASE_SPECS.import)).toContain(
+        "code-pact phase import design/roadmap-draft.yaml --json",
+      );
+      expect(renderReference(PHASE_SPECS.runbook)).toContain(
+        "`--across-phases`",
+      );
       expect(renderLeafHelp(PHASE_SPECS.ls)).toContain("--status");
     });
   });
@@ -198,8 +277,12 @@ describe("CommandSpec derivation (P46)", () => {
       expect(ADAPTER_SPECS.doctor.readOnly).toBe(true);
       expect(ADAPTER_SPECS.conformance.readOnly).toBe(true);
       expect(renderLeafHelp(ADAPTER_SPECS.doctor)).toContain("--agent");
-      expect(renderReference(ADAPTER_SPECS.install)).toContain("code-pact adapter install claude-code --json");
-      expect(renderReference(ADAPTER_SPECS.upgrade)).toContain("`--accept-modified`");
+      expect(renderReference(ADAPTER_SPECS.install)).toContain(
+        "code-pact adapter install claude-code --json",
+      );
+      expect(renderReference(ADAPTER_SPECS.upgrade)).toContain(
+        "`--accept-modified`",
+      );
     });
   });
 
@@ -218,8 +301,12 @@ describe("CommandSpec derivation (P46)", () => {
 
     it("decision reference renders representative flags and examples", () => {
       expect(renderLeafHelp(DECISION_SPECS.prune)).toContain("--policy");
-      expect(renderReference(DECISION_SPECS.prune)).toContain("code-pact decision prune design/decisions/foo-rfc.md --write --json");
-      expect(renderReference(DECISION_SPECS.retire)).toContain("code-pact decision retire design/decisions/foo-rfc.md --json");
+      expect(renderReference(DECISION_SPECS.prune)).toContain(
+        "code-pact decision prune design/decisions/foo-rfc.md --write --json",
+      );
+      expect(renderReference(DECISION_SPECS.retire)).toContain(
+        "code-pact decision retire design/decisions/foo-rfc.md --json",
+      );
     });
   });
 
@@ -231,13 +318,16 @@ describe("CommandSpec derivation (P46)", () => {
     });
 
     it("state compact-archive covers exactly the parser-backed flags", () => {
-      expect(Object.keys(toParseOptions(STATE_SPECS["compact-archive"])).sort()).toEqual(
-        ["json", "write"].sort(),
-      );
+      expect(
+        Object.keys(toParseOptions(STATE_SPECS["compact-archive"])).sort(),
+      ).toEqual(["json", "write"].sort());
     });
 
     it("state archive retention commands cover exactly the parser-backed flags", () => {
-      for (const spec of [STATE_SPECS["archive-retention"], STATE_SPECS["archive-maintain"]]) {
+      for (const spec of [
+        STATE_SPECS["archive-retention"],
+        STATE_SPECS["archive-maintain"],
+      ]) {
         expect(Object.keys(toParseOptions(spec)).sort()).toEqual(
           ["json", "keep-latest", "write"].sort(),
         );
@@ -245,10 +335,18 @@ describe("CommandSpec derivation (P46)", () => {
     });
 
     it("state reference renders representative flags and examples", () => {
-      expect(renderLeafHelp(STATE_SPECS["archive-retention"])).toContain("--keep-latest <N>");
-      expect(renderReference(STATE_SPECS.compact)).toContain("code-pact state compact P1 --write --json");
-      expect(renderReference(STATE_SPECS["compact-archive"])).toContain("code-pact state compact-archive decision_record --write");
-      expect(renderReference(STATE_SPECS["archive-maintain"])).toContain("code-pact state archive-maintain --write --keep-latest 5");
+      expect(renderLeafHelp(STATE_SPECS["archive-retention"])).toContain(
+        "--keep-latest <N>",
+      );
+      expect(renderReference(STATE_SPECS.compact)).toContain(
+        "code-pact state compact P1 --write --json",
+      );
+      expect(renderReference(STATE_SPECS["compact-archive"])).toContain(
+        "code-pact state compact-archive decision_record --write",
+      );
+      expect(renderReference(STATE_SPECS["archive-maintain"])).toContain(
+        "code-pact state archive-maintain --write --keep-latest 5",
+      );
     });
   });
 
@@ -260,16 +358,23 @@ describe("CommandSpec derivation (P46)", () => {
     });
 
     it("spec reference renders representative flags and examples", () => {
-      expect(renderLeafHelp(SPEC_SPECS.import)).toContain("--suggest-from <path>");
+      expect(renderLeafHelp(SPEC_SPECS.import)).toContain(
+        "--suggest-from <path>",
+      );
       expect(renderReference(SPEC_SPECS.import)).toContain(
         "code-pact spec import --from tasks.md --phase-id P-feature --json",
       );
-      expect(renderReference(SPEC_SPECS.import)).toContain("code-pact spec import --suggest-from spec.md --json");
+      expect(renderReference(SPEC_SPECS.import)).toContain(
+        "code-pact spec import --suggest-from spec.md --json",
+      );
     });
   });
 
   it("generated reference uses H2 groups and H3 command entries", () => {
-    const doc = readFileSync(new URL("../../../docs/cli-reference.generated.md", import.meta.url), "utf8");
+    const doc = readFileSync(
+      new URL("../../../docs/cli-reference.generated.md", import.meta.url),
+      "utf8",
+    );
     expect(doc).toContain("## Task commands\n\n### `task add`");
     expect(doc).toContain("## Plan commands\n\n### `plan brief`");
     expect(doc).toContain("## Phase commands\n\n### `phase add`");
@@ -277,7 +382,9 @@ describe("CommandSpec derivation (P46)", () => {
     expect(doc).toContain("## Decision commands\n\n### `decision prune`");
     expect(doc).toContain("## State commands\n\n### `state compact`");
     expect(doc).toContain("## Spec commands\n\n### `spec import`");
-    expect(doc).not.toMatch(/## (Task|Plan|Phase|Adapter|Decision|State|Spec) commands\n\n## `/);
+    expect(doc).not.toMatch(
+      /## (Task|Plan|Phase|Adapter|Decision|State|Spec) commands\n\n## `/,
+    );
   });
 
   it("required is presentation-only: it does not appear in parseArgs config", () => {
@@ -287,7 +394,9 @@ describe("CommandSpec derivation (P46)", () => {
       cluster: "root",
       command: "synthetic",
       summary: "x",
-      flags: [{ name: "reason", value: "<text>", required: true, description: "why" }],
+      flags: [
+        { name: "reason", value: "<text>", required: true, description: "why" },
+      ],
       examples: [],
     });
     expect(opts.reason).toEqual({ type: "string" });

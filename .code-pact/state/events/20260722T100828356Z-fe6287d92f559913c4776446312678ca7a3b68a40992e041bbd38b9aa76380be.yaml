@@ -1,0 +1,10 @@
+task_id: P83-T5
+status: failed
+at: 2026-07-22T10:08:28.356Z
+actor: agent
+agent: claude-code
+author: Pocket
+notes: The predeclared P83-T5 write surface omitted the public CLI error mapper
+  required by its fixed acceptance criteria. The locked contract was preserved
+  and the acceptance test was not weakened.
+id: fe6287d92f559913c4776446312678ca7a3b68a40992e041bbd38b9aa76380be

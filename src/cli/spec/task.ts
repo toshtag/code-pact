@@ -230,11 +230,18 @@ const add: CommandSpec = {
       description:
         "Optional sizing/readiness field; see the task schema for allowed values.",
     },
+    {
+      name: "spec-file",
+      value: "<path>",
+      description:
+        "Register from a strict task-registration spec file. Mutually exclusive with all task-field flags.",
+    },
     { name: "json", description: "Emit JSON. Valid in both paths." },
   ],
   examples: [
     "code-pact task add P1                         # interactive wizard (TTY)",
     'code-pact task add P1 --description "Add X" --type feature --json',
+    "code-pact task add P83 --spec-file design/specs/P83-T1-task-spec.yaml --json",
   ],
 };
 
@@ -284,8 +291,10 @@ const start: CommandSpec = {
   positional: "<task-id>",
   summary: [
     "Record a `started` event in the progress ledger. Idempotent — a second call from",
-    "`started` returns already_started without a duplicate event. Run once per",
-    "implementation pass; then `task complete` when verification passes.",
+    "`started` returns already_started without a duplicate event. After the first",
+    "start, a changed contract lock or registration spec file raises",
+    "TASK_CONTRACT_DRIFT (exit 2). Run once per implementation pass; then `task",
+    "complete` when verification passes.",
   ].join("\n"),
   flags: [
     {
@@ -453,11 +462,18 @@ const lock: CommandSpec = {
       value: "<name>",
       description: "Agent name. Defaults to project default_agent.",
     },
+    {
+      name: "spec-file",
+      value: "<path>",
+      description:
+        "Verify the current phase task matches a strict registration spec before locking.",
+    },
     { name: "json", description: "Emit JSON." },
   ],
   examples: [
     "code-pact task lock P1-T1",
     "code-pact task lock P1-T1 --base-ref origin/main --json",
+    "code-pact task lock P83-T1 --spec-file design/specs/P83-T1-task-spec.yaml --json",
   ],
 };
 

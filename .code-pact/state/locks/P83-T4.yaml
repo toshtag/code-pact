@@ -1,0 +1,69 @@
+schema_version: 1
+task_id: P83-T4
+phase_id: P83
+phase_path: design/phases/P83-lossless-task-registration.yaml
+base_ref: HEAD
+base_sha: 4b87dd03a6a1c605b747a5f1877b81656355f0dc
+phase_blob_sha: 43e9befeba7d42e094d2e63b538d6d442630ffbc
+contract_digest: 504c7c0eef1220a6a933787f6ee94383d2cac645023568bf6352aba8a3e692f0
+contract:
+  description: >
+    Spec authority and snapshot atomicity closeout. Ensure phase source bytes
+    and CAS expected bytes are the same single snapshot, detect spec-file drift
+    after spec-file contract lock, and pass strict finalize without treating
+    planning artifacts as implementation writes.
+  reads:
+    - design/phases/P83-lossless-task-registration.yaml
+    - design/specs/P83-T4-task-spec.yaml
+    - src/commands/task-add.ts
+    - src/commands/task-lock.ts
+    - src/core/contract-lock.ts
+    - src/core/plan/load-phase.ts
+    - src/core/project-fs/branded-paths.ts
+    - src/core/project-fs/index.ts
+    - src/core/schemas/phase.ts
+    - src/core/schemas/task-registration-spec.ts
+    - src/core/task-dependencies.ts
+    - src/core/task-registration-spec.ts
+    - src/io/atomic-text.ts
+    - tests/integration/task-registration-spec.test.ts
+    - tests/unit/commands/task-add.test.ts
+    - tests/unit/core/contract-lock.test.ts
+  writes:
+    - src/commands/task-add.ts
+    - src/commands/task-lock.ts
+    - src/core/contract-lock.ts
+    - tests/integration/task-registration-spec.test.ts
+    - tests/unit/commands/task-add.test.ts
+    - tests/unit/core/contract-lock.test.ts
+  depends_on:
+    - P83-T3
+  decision_refs: []
+  acceptance_refs:
+    - design/specs/P83-T4-task-spec.yaml
+  definition_of_done:
+    - A spec-locked task detects registration-field drift after lock.
+    - A strict task spec containing depends_on is stored losslessly in the phase.
+    - Focused verification, local CI, and review-bundle complete without
+      corrective code commits.
+    - Removing depends_on between add and lock causes a side-effect-free failure.
+    - The P80 dependency-omission replay is blocked before implementation.
+    - The same spec is verified again before contract lock creation.
+  verification_commands:
+    - pnpm build
+    - pnpm check:docs
+    - pnpm test:ci
+    - pnpm test:integration
+    - pnpm test:integration:smoke
+    - pnpm test:unit
+    - pnpm typecheck
+  base_sha: 4b87dd03a6a1c605b747a5f1877b81656355f0dc
+  phase_blob_sha: 43e9befeba7d42e094d2e63b538d6d442630ffbc
+registration:
+  mode: spec_file
+  spec_digest: 3727e5ce341534c87728a69b7dd4befcb0ac4a0c75a76de71947390543401bb8
+  spec_canonical: |
+    {"phase_id":"P83","schema_version":1,"task":{"acceptance_refs":["design/specs/P83-T4-task-spec.yaml"],"ambiguity":"low","context_size":"medium","decision_refs":[],"depends_on":["P83-T3"],"description":"Spec authority and snapshot atomicity closeout. Ensure phase source bytes and CAS expected bytes are the same single snapshot, detect spec-file drift after spec-file contract lock, and pass strict finalize without treating planning artifacts as implementation writes.\n","expected_duration":"long","id":"P83-T4","reads":["src/commands/task-add.ts","src/core/contract-lock.ts","src/commands/task-lock.ts","src/core/task-registration-spec.ts","src/core/schemas/task-registration-spec.ts","src/io/atomic-text.ts","src/core/project-fs/index.ts","src/core/project-fs/branded-paths.ts","src/core/plan/load-phase.ts","src/core/schemas/phase.ts","src/core/task-dependencies.ts","tests/unit/commands/task-add.test.ts","tests/unit/core/contract-lock.test.ts","tests/integration/task-registration-spec.test.ts","design/specs/P83-T4-task-spec.yaml","design/phases/P83-lossless-task-registration.yaml"],"requires_decision":false,"risk":"medium","status":"planned","type":"bugfix","verification_strength":"strong","write_surface":"medium","writes":["src/commands/task-add.ts","src/core/contract-lock.ts","src/commands/task-lock.ts","tests/unit/commands/task-add.test.ts","tests/unit/core/contract-lock.test.ts","tests/integration/task-registration-spec.test.ts"]}}
+at: 2026-07-22T08:42:32.783Z
+actor: agent
+author: Pocket

@@ -554,6 +554,45 @@ async function cmdTaskAdd(
     return 2;
   }
 
+  const specFile =
+    typeof values["spec-file"] === "string"
+      ? (values["spec-file"] as string)
+      : undefined;
+
+  // --spec-file is a complete, machine-readable contract. It cannot be
+  // combined with any task-field flag or an explicit --id.
+  if (specFile) {
+    const conflictingFlags = [
+      "id",
+      "description",
+      "type",
+      "ambiguity",
+      "risk",
+      "context-size",
+      "write-surface",
+      "verification-strength",
+      "expected-duration",
+      "depends-on",
+      "decision-ref",
+      "read",
+      "write",
+      "acceptance-ref",
+    ].filter(name => {
+      const v = values[name];
+      if (Array.isArray(v)) return v.length > 0;
+      return typeof v === "string";
+    });
+    if (conflictingFlags.length > 0) {
+      const flagList = conflictingFlags.map(f => "--" + f).join(", ");
+      emitConfigError(
+        "task add: --spec-file cannot be combined with task-field flags: " +
+          flagList,
+        json,
+      );
+      return 2;
+    }
+  }
+
   const description =
     typeof values.description === "string"
       ? (values.description as string)
@@ -588,7 +627,7 @@ async function cmdTaskAdd(
     return 2;
   }
 
-  if (description === undefined && !isInteractive()) {
+  if (description === undefined && !isInteractive() && !specFile) {
     emitConfigError(
       `task add is interactive and requires a TTY. Use \`task add ${phaseId} --description "<text>" --type <type>\` for the non-interactive path (v1.4+), or \`phase import\` for bulk task creation.`,
       json,
@@ -765,19 +804,26 @@ async function cmdTaskAdd(
   // --description is supplied) ALSO run under the lock.
   return withWriteLock(
     cwd,
-    nonInteractiveSpec !== undefined
-      ? `task add ${phaseId} --description "..."`
-      : `task add ${phaseId}`,
+    specFile
+      ? `task add ${phaseId} --spec-file ...`
+      : nonInteractiveSpec !== undefined
+        ? `task add ${phaseId} --description "..."`
+        : `task add ${phaseId}`,
     json,
     async (): Promise<number> => {
       try {
-        const result = await runTaskAdd({
-          cwd,
-          phaseId,
-          locale,
-          id: explicitId,
-          ...(nonInteractiveSpec ? { nonInteractive: nonInteractiveSpec } : {}),
-        });
+        const addOptions: import("../../commands/task-add.ts").TaskAddOptions =
+          {
+            cwd,
+            phaseId,
+            locale,
+            id: specFile ? undefined : explicitId,
+            ...(specFile ? { specFile } : {}),
+            ...(nonInteractiveSpec
+              ? { nonInteractive: nonInteractiveSpec }
+              : {}),
+          };
+        const result = await runTaskAdd(addOptions);
         if (json) {
           emitOk(result);
         } else {
@@ -792,7 +838,8 @@ async function cmdTaskAdd(
         if (
           code === "PHASE_NOT_FOUND" ||
           code === "AMBIGUOUS_PHASE_ID" ||
-          code === "DUPLICATE_TASK_ID"
+          code === "DUPLICATE_TASK_ID" ||
+          code === "TASK_REGISTRATION_ROUND_TRIP"
         ) {
           emitError(
             json,
@@ -2197,6 +2244,37 @@ function emitTaskCommonError(
       msg = m.task.start.dependencyIncomplete(taskId, deps);
       outCode = "TASK_DEPENDENCY_INCOMPLETE";
       emitError(json, outCode, msg, { data: { deps } });
+      return 2;
+    }
+    case "TASK_CONTRACT_DRIFT": {
+      const drift =
+        (
+          err as NodeJS.ErrnoException & {
+            drift?: { kind: string; message: string }[];
+          }
+        ).drift ?? [];
+      const changed =
+        (err as NodeJS.ErrnoException & { changed_fields?: string[] })
+          .changed_fields ?? [];
+      msg = m.task.lock.contractDrift(
+        taskId,
+        drift.map(d => d.message),
+      );
+      outCode = "TASK_CONTRACT_DRIFT";
+      const lockedDigest = (
+        err as NodeJS.ErrnoException & { locked_digest?: string }
+      ).locked_digest;
+      const currentDigest = (
+        err as NodeJS.ErrnoException & { current_digest?: string }
+      ).current_digest;
+      emitError(json, outCode, msg, {
+        data: {
+          locked_digest: lockedDigest,
+          current_digest: currentDigest,
+          changed_fields: changed,
+          drift,
+        },
+      });
       return 2;
     }
     case "WORKTREE_NOT_CLEAN":

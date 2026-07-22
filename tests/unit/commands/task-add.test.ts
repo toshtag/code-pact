@@ -1,13 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "node:stream";
-import { mkdtemp, rm, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { Prompter, type LineReader } from "../../../src/lib/prompt.ts";
 import { runInit } from "../../../src/commands/init.ts";
 import { runPhaseNew } from "../../../src/commands/phase-new.ts";
-import { runTaskAdd } from "../../../src/commands/task-add.ts";
+import {
+  runTaskAdd,
+  __setTaskAddPreWriteInjectorForTests,
+  __setTaskAddPostWriteLoadInjectorForTests,
+} from "../../../src/commands/task-add.ts";
+import { Phase } from "../../../src/core/schemas/phase.ts";
 
 class ScriptedReader implements LineReader {
   private idx = 0;
@@ -28,25 +33,39 @@ function makePrompter(lines: readonly string[]): Prompter {
 }
 
 let cwd: string;
+let phasePath: string;
 
 beforeEach(async () => {
   cwd = await mkdtemp(join(tmpdir(), "code-pact-task-add-"));
-  await runInit({ cwd, locale: "en-US", agents: ["claude-code"], force: false, json: false });
+  await runInit({
+    cwd,
+    locale: "en-US",
+    agents: ["claude-code"],
+    force: false,
+    json: false,
+  });
   // Seed a phase to add tasks to
   const phasePrompter = makePrompter([
     "P1",
     "Foundation",
-    "",   // weight default
+    "", // weight default
     "Build the foundation",
-    "2",  // confidence: medium
-    "2",  // risk: medium
-    "",   // verify default
-    "",   // done default
+    "2", // confidence: medium
+    "2", // risk: medium
+    "", // verify default
+    "", // done default
   ]);
-  await runPhaseNew({ cwd, locale: "en-US", prompter: phasePrompter });
+  const phaseResult = await runPhaseNew({
+    cwd,
+    locale: "en-US",
+    prompter: phasePrompter,
+  });
+  phasePath = phaseResult.path;
 });
 
 afterEach(async () => {
+  __setTaskAddPreWriteInjectorForTests(null);
+  __setTaskAddPostWriteLoadInjectorForTests(null);
   if (cwd) await rm(cwd, { recursive: true, force: true });
 });
 
@@ -54,16 +73,28 @@ describe("runTaskAdd — happy path", () => {
   it("appends a task with auto-generated id", async () => {
     const prompter = makePrompter([
       "Implement login form", // description
-      "2",                   // type: feature (index 1, value = feature)
+      "2", // type: feature (index 1, value = feature)
     ]);
-    const result = await runTaskAdd({ cwd, phaseId: "P1", locale: "en-US", prompter });
+    const result = await runTaskAdd({
+      cwd,
+      phaseId: "P1",
+      locale: "en-US",
+      prompter,
+    });
 
     expect(result.taskId).toBe("P1-T1");
     expect(result.phaseId).toBe("P1");
     expect(result.phasePath).toMatch(/P1-/);
 
-    const phase = parseYaml(await readFile(join(cwd, result.phasePath), "utf8")) as {
-      tasks: Array<{ id: string; type: string; description: string; status: string }>;
+    const phase = parseYaml(
+      await readFile(join(cwd, result.phasePath), "utf8"),
+    ) as {
+      tasks: Array<{
+        id: string;
+        type: string;
+        description: string;
+        status: string;
+      }>;
     };
     expect(phase.tasks).toHaveLength(1);
     expect(phase.tasks[0]!.id).toBe("P1-T1");
@@ -92,7 +123,12 @@ describe("runTaskAdd — happy path", () => {
     await runTaskAdd({ cwd, phaseId: "P1", locale: "en-US", prompter: p1 });
 
     const p2 = makePrompter(["Second task", "2"]);
-    const result = await runTaskAdd({ cwd, phaseId: "P1", locale: "en-US", prompter: p2 });
+    const result = await runTaskAdd({
+      cwd,
+      phaseId: "P1",
+      locale: "en-US",
+      prompter: p2,
+    });
     expect(result.taskId).toBe("P1-T2");
 
     const phase = parseYaml(
@@ -112,23 +148,43 @@ describe("runTaskAdd — error cases", () => {
 
   it("throws DUPLICATE_TASK_ID when explicit id collides", async () => {
     const p1 = makePrompter(["First task", "2"]);
-    await runTaskAdd({ cwd, phaseId: "P1", locale: "en-US", id: "P1-T1", prompter: p1 });
+    await runTaskAdd({
+      cwd,
+      phaseId: "P1",
+      locale: "en-US",
+      id: "P1-T1",
+      prompter: p1,
+    });
 
     const p2 = makePrompter(["Another task", "2"]);
     await expect(
-      runTaskAdd({ cwd, phaseId: "P1", locale: "en-US", id: "P1-T1", prompter: p2 }),
+      runTaskAdd({
+        cwd,
+        phaseId: "P1",
+        locale: "en-US",
+        id: "P1-T1",
+        prompter: p2,
+      }),
     ).rejects.toMatchObject({ code: "DUPLICATE_TASK_ID" });
   });
 
   it.each(["P1/T1", "P1-T1; echo owned", "../evil"])(
     "rejects an unsafe explicit --id %j with CONFIG_ERROR and leaves the phase unchanged",
-    async (badId) => {
+    async badId => {
       const phasesDir = join(cwd, "design", "phases");
-      const fileName = (await readdir(phasesDir)).find((f) => f.startsWith("P1-"))!;
+      const fileName = (await readdir(phasesDir)).find(f =>
+        f.startsWith("P1-"),
+      )!;
       const before = await readFile(join(phasesDir, fileName), "utf8");
       const prompter = makePrompter(["unused", "2"]);
       await expect(
-        runTaskAdd({ cwd, phaseId: "P1", locale: "en-US", id: badId, prompter }),
+        runTaskAdd({
+          cwd,
+          phaseId: "P1",
+          locale: "en-US",
+          id: badId,
+          prompter,
+        }),
       ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
       expect(await readFile(join(phasesDir, fileName), "utf8")).toBe(before);
     },
@@ -152,7 +208,9 @@ describe("runTaskAdd — non-interactive path (P13-T3)", () => {
     });
     expect(result.taskId).toBe("P1-T1");
 
-    const phase = parseYaml(await readFile(join(cwd, result.phasePath), "utf8")) as {
+    const phase = parseYaml(
+      await readFile(join(cwd, result.phasePath), "utf8"),
+    ) as {
       tasks: Array<{
         id: string;
         type: string;
@@ -195,7 +253,9 @@ describe("runTaskAdd — non-interactive path (P13-T3)", () => {
         expected_duration: "long",
       },
     });
-    const phase = parseYaml(await readFile(join(cwd, result.phasePath), "utf8")) as {
+    const phase = parseYaml(
+      await readFile(join(cwd, result.phasePath), "utf8"),
+    ) as {
       tasks: Array<{
         ambiguity: string;
         risk: string;
@@ -229,7 +289,9 @@ describe("runTaskAdd — non-interactive path (P13-T3)", () => {
         acceptance_refs: ["docs/acceptance/foo.md"],
       },
     });
-    const phase = parseYaml(await readFile(join(cwd, result.phasePath), "utf8")) as {
+    const phase = parseYaml(
+      await readFile(join(cwd, result.phasePath), "utf8"),
+    ) as {
       tasks: Array<{
         depends_on?: string[];
         decision_refs?: string[];
@@ -258,7 +320,9 @@ describe("runTaskAdd — non-interactive path (P13-T3)", () => {
         reads: [],
       },
     });
-    const phase = parseYaml(await readFile(join(cwd, result.phasePath), "utf8")) as {
+    const phase = parseYaml(
+      await readFile(join(cwd, result.phasePath), "utf8"),
+    ) as {
       tasks: Array<Record<string, unknown>>;
     };
     const t = phase.tasks[0]!;
@@ -276,7 +340,9 @@ describe("runTaskAdd — non-interactive path (P13-T3)", () => {
         type: "feature",
       },
     });
-    const phase = parseYaml(await readFile(join(cwd, result.phasePath), "utf8")) as {
+    const phase = parseYaml(
+      await readFile(join(cwd, result.phasePath), "utf8"),
+    ) as {
       tasks: Array<{ status: string }>;
     };
     expect(phase.tasks[0]!.status).toBe("planned");
@@ -324,5 +390,156 @@ describe("runTaskAdd — non-interactive path (P13-T3)", () => {
         nonInteractive: { description: "irrelevant", type: "feature" },
       }),
     ).rejects.toMatchObject({ code: "PHASE_NOT_FOUND" });
+  });
+});
+
+describe("runTaskAdd — round-trip rollback (P83-T3)", () => {
+  it("rolls back to original bytes when post-write comparison fails", async () => {
+    const originalBytes = await readFile(join(cwd, phasePath), "utf8");
+
+    __setTaskAddPostWriteLoadInjectorForTests(async () => {
+      const written = await readFile(join(cwd, phasePath), "utf8");
+      const parsed = parseYaml(written) as {
+        tasks: Array<{ id: string; depends_on?: string[] }>;
+      };
+      const mutated = parsed.tasks.find(t => t.id === "P1-T1");
+      if (mutated) mutated.depends_on = [];
+      return Phase.parse(parsed);
+    });
+
+    await expect(
+      runTaskAdd({
+        cwd,
+        phaseId: "P1",
+        locale: "en-US",
+        nonInteractive: {
+          description: "Task with dependency",
+          type: "feature",
+          depends_on: ["P1-T0"],
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "TASK_REGISTRATION_ROUND_TRIP",
+      rollback_status: "rolled_back",
+    });
+
+    const after = await readFile(join(cwd, phasePath), "utf8");
+    expect(after).toBe(originalBytes);
+  });
+
+  it("rolls back to original bytes when post-write loadPhase throws", async () => {
+    const originalBytes = await readFile(join(cwd, phasePath), "utf8");
+
+    __setTaskAddPostWriteLoadInjectorForTests(async () => {
+      throw new Error("injected post-write load failure");
+    });
+
+    await expect(
+      runTaskAdd({
+        cwd,
+        phaseId: "P1",
+        locale: "en-US",
+        nonInteractive: {
+          description: "Injected load failure",
+          type: "feature",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "TASK_REGISTRATION_ROUND_TRIP",
+      rollback_status: "rolled_back",
+    });
+
+    const after = await readFile(join(cwd, phasePath), "utf8");
+    expect(after).toBe(originalBytes);
+  });
+
+  it("refuses to write when the phase file changed before the write", async () => {
+    const originalBytes = await readFile(join(cwd, phasePath), "utf8");
+
+    __setTaskAddPreWriteInjectorForTests(async () => {
+      await writeFile(
+        join(cwd, phasePath),
+        "concurrent writer was here",
+        "utf8",
+      );
+    });
+
+    await expect(
+      runTaskAdd({
+        cwd,
+        phaseId: "P1",
+        locale: "en-US",
+        nonInteractive: {
+          description: "Concurrent write",
+          type: "feature",
+        },
+      }),
+    ).rejects.toMatchObject({ code: "TASK_REGISTRATION_ROUND_TRIP" });
+
+    const after = await readFile(join(cwd, phasePath), "utf8");
+    expect(after).toBe("concurrent writer was here");
+    expect(after).not.toBe(originalBytes);
+  });
+
+  it("preserves a valid concurrent phase update and rejects CAS", async () => {
+    const originalBytes = await readFile(join(cwd, phasePath), "utf8");
+    const originalPhase = parseYaml(originalBytes) as {
+      tasks?: Array<{ id: string; description: string; type: string }>;
+    };
+
+    __setTaskAddPreWriteInjectorForTests(async () => {
+      await writeFile(
+        join(cwd, phasePath),
+        stringifyYaml({
+          ...originalPhase,
+          tasks: [
+            ...(originalPhase.tasks ?? []),
+            {
+              id: "P1-CONCURRENT",
+              type: "feature",
+              ambiguity: "low",
+              risk: "medium",
+              context_size: "medium",
+              write_surface: "medium",
+              verification_strength: "medium",
+              expected_duration: "medium",
+              status: "planned",
+              description: "Concurrent task",
+              requires_decision: false,
+              depends_on: [],
+              decision_refs: [],
+              reads: [],
+              writes: [],
+              acceptance_refs: [],
+            },
+          ],
+        }),
+        "utf8",
+      );
+    });
+
+    await expect(
+      runTaskAdd({
+        cwd,
+        phaseId: "P1",
+        locale: "en-US",
+        nonInteractive: {
+          description: "Snapshot race task",
+          type: "feature",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "TASK_REGISTRATION_ROUND_TRIP",
+      message: expect.stringContaining("phase file changed before write"),
+    });
+
+    const after = await readFile(join(cwd, phasePath), "utf8");
+    expect(parseYaml(after) as { tasks: { id: string }[] }).toEqual(
+      expect.objectContaining({
+        tasks: expect.arrayContaining([
+          expect.objectContaining({ id: "P1-CONCURRENT" }),
+        ]),
+      }),
+    );
   });
 });

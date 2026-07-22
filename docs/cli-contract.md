@@ -2624,17 +2624,19 @@ Two things must hold for the gate:
 
 ## `task add` — append a task to a phase (v0.6, non-interactive in v1.4+)
 
-`code-pact task add <phase-id> [flags]` appends a task to the named phase's `tasks[]` array. Two paths share the same write contract:
+`code-pact task add <phase-id> [flags]` appends a task to the named phase's `tasks[]` array. Three paths share the same write contract:
 
 - **Wizard path (v0.6+, unchanged)** — TTY-only. The wizard prompts for `description` and `type`; all readiness fields default to `"medium"` and `status` defaults to `"planned"`. Output goes to stderr (or stdout JSON when `--json` is passed).
 - **Non-interactive path (v1.4+, Stable)** — flag-driven. Triggered by the presence of `--description`. Bypasses the wizard prompter entirely (no stdin handle is opened), making it safe for CI / scripted bootstrap. JSON envelope is **byte-identical** to the wizard path.
+- **Spec-file path (v2.7+, P83)** — `--spec-file <path>` reads a strict `TaskRegistrationSpec` and writes the task losslessly. The candidate YAML is serialized and re-parsed in memory before any write, and the stored candidate task is compared against the spec with a full lock-time comparison (including `status` and the presence/value of `requires_decision`). Any round-trip loss raises `TASK_REGISTRATION_ROUND_TRIP` and exits 2 with no phase YAML mutation.
 
 ### Mode resolution
 
-The presence of `--description` is the mode switch. Three branches:
+The presence of `--description` or `--spec-file` is the mode switch. Four branches:
 
 | Input                                                                                                  | Behaviour                                                                                                                                                 |
 | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--spec-file` provided                                                                                 | Spec-file path. Mutually exclusive with all task-field flags and `--id`; `phase_id` in the spec must match the positional `<phase-id>`.                   |
 | `--description` provided                                                                               | Non-interactive path. `--type` is required (else CONFIG_ERROR).                                                                                           |
 | `--description` absent, no other non-interactive flags, TTY available                                  | Wizard path (unchanged from v0.6).                                                                                                                        |
 | `--description` absent, no other non-interactive flags, no TTY                                         | CONFIG_ERROR with non-interactive guidance.                                                                                                               |
@@ -2652,7 +2654,7 @@ The flag list, value types, repeatability, and examples live in the generated [C
 
 ### JSON envelope
 
-Same shape in both modes:
+Shared fields in all modes:
 
 ```json
 {
@@ -2665,17 +2667,20 @@ Same shape in both modes:
 }
 ```
 
+The spec-file path additionally includes `registrationMode: "spec_file"`, `specDigest`, `storedTaskDigest`, and `roundTripEqual: true`.
+
 ### Errors
 
 Reuses existing public codes; phase-id resolution additionally surfaces
 `AMBIGUOUS_PHASE_ID`:
 
-| Code                 | Exit | When                                                                                                                                                                                           |
-| -------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PHASE_NOT_FOUND`    | 2    | Phase id is not in `design/roadmap.yaml`                                                                                                                                                       |
-| `AMBIGUOUS_PHASE_ID` | 2    | The `<phase-id>` appears in more than one `roadmap.yaml` entry; `data.phases[]` lists the colliding files                                                                                      |
-| `DUPLICATE_TASK_ID`  | 1    | Task id already exists in the phase (pre-v1.4 exit code preserved)                                                                                                                             |
-| `CONFIG_ERROR`       | 2    | Missing positional `<phase-id>`; `--description` absent with no TTY; `--description` provided without `--type`; non-interactive flag without `--description`; invalid enum value; unknown flag |
+| Code                           | Exit | When                                                                                                                                                                                                                                                                                                           |
+| ------------------------------ | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PHASE_NOT_FOUND`              | 2    | Phase id is not in `design/roadmap.yaml`                                                                                                                                                                                                                                                                       |
+| `AMBIGUOUS_PHASE_ID`           | 2    | The `<phase-id>` appears in more than one `roadmap.yaml` entry; `data.phases[]` lists the colliding files                                                                                                                                                                                                      |
+| `DUPLICATE_TASK_ID`            | 1    | Task id already exists anywhere in the project (pre-v1.4 exit code preserved for in-phase duplicates; now checked globally)                                                                                                                                                                                    |
+| `TASK_REGISTRATION_ROUND_TRIP` | 2    | Spec-file path only. The candidate YAML was re-parsed in memory and did not match the spec, or the post-write re-read did not match. If a post-write mismatch occurs, a CAS rollback restores the original phase bytes when the file still contains the candidate YAML. No net phase YAML mutation is applied. |
+| `CONFIG_ERROR`                 | 2    | Missing positional `<phase-id>`; `--description` absent with no TTY; `--description` provided without `--type`; non-interactive flag without `--description`; `--spec-file` combined with a task-field flag; invalid enum value; unknown flag                                                                  |
 
 ### Usage examples
 
@@ -2943,20 +2948,23 @@ See the generated [CLI reference § `task finalize`](cli-reference.generated.md)
 
 ## `task lock` — create a versioned task contract lock (v2.7+, P79-T4)
 
-`code-pact task lock <task-id> [--base-ref <ref>] [--agent <name>] [--json]` creates a `ContractLock` at `.code-pact/state/locks/<task-id>.yaml`. The lock captures the canonical digest of the task contract (description, reads, writes, depends_on, decision_refs, acceptance_refs, definition_of_done, verification_commands, base_sha, and phase_blob_sha) at the moment it is created. Subsequent mutating commands (`task complete`, `task record-done`, `task finalize`, `task execute-once`) recompute the contract digest and refuse to proceed if it no longer matches.
+`code-pact task lock <task-id> [--base-ref <ref>] [--agent <name>] [--spec-file <path>] [--json]` creates a `ContractLock` at `.code-pact/state/locks/<task-id>.yaml`. The lock captures the canonical digest of the task contract (description, reads, writes, depends_on, decision_refs, acceptance_refs, definition_of_done, verification_commands, base_sha, and phase_blob_sha) at the moment it is created. Subsequent mutating commands (`task complete`, `task record-done`, `task finalize`, `task execute-once`) recompute the contract digest and refuse to proceed if it no longer matches.
+
+When `--spec-file` is supplied, the command first verifies that the current phase task matches the strict registration spec using a full lock-time comparison (all registration fields including `status` and the presence/value of `requires_decision`). A mismatch aborts with `TASK_REGISTRATION_SPEC_MISMATCH` (exit 2) and **no lock is written**. On a match, the lock stores the registration mode (`spec_file`), the spec digest, and the canonical spec JSON for drift detection.
 
 The command refuses to create a lock if the working tree is not clean (`WORKTREE_NOT_CLEAN`, exit 1) or if the task is already done (`INVALID_TASK_TRANSITION`, exit 1). If a lock already exists, it refuses (`TASK_CONTRACT_LOCK_EXISTS`, exit 1). `--base-ref` defaults to `HEAD` and is resolved to a SHA at lock time; the lock stores both the symbolic ref and the resolved SHA. The phase file must be reachable from `--base-ref`.
 
 ### Errors
 
-| Code                        | Exit | When                                                                            |
-| --------------------------- | ---- | ------------------------------------------------------------------------------- |
-| `TASK_NOT_FOUND`            | 2    | Task id is not present in any phase                                             |
-| `AMBIGUOUS_TASK_ID`         | 2    | Task id appears in more than one phase                                          |
-| `TASK_CONTRACT_LOCK_EXISTS` | 1    | A lock already exists for this task                                             |
-| `WORKTREE_NOT_CLEAN`        | 1    | The git working tree has uncommitted changes or untracked files                 |
-| `INVALID_TASK_TRANSITION`   | 1    | The task is already done; locks are created before completion                   |
-| `CONFIG_ERROR`              | 2    | Missing positional task id, unknown flag, or `--base-ref` could not be resolved |
+| Code                              | Exit | When                                                                                                                                                                                                                |
+| --------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TASK_NOT_FOUND`                  | 2    | Task id is not present in any phase                                                                                                                                                                                 |
+| `AMBIGUOUS_TASK_ID`               | 2    | Task id appears in more than one phase                                                                                                                                                                              |
+| `TASK_CONTRACT_LOCK_EXISTS`       | 1    | A lock already exists for this task                                                                                                                                                                                 |
+| `WORKTREE_NOT_CLEAN`              | 1    | The git working tree has uncommitted changes or untracked files                                                                                                                                                     |
+| `INVALID_TASK_TRANSITION`         | 1    | The task is already done; locks are created before completion                                                                                                                                                       |
+| `TASK_REGISTRATION_SPEC_MISMATCH` | 2    | `--spec-file` supplied and the current phase task does not match the spec. `data.changed_fields` lists the diverging registration fields, including `status` or `requires_decision` mismatches. No lock is written. |
+| `CONFIG_ERROR`                    | 2    | Missing positional task id, unknown flag, or `--base-ref` could not be resolved                                                                                                                                     |
 
 ## `task review-bundle` — package review evidence for a done task (v2.7+, P79-T4)
 
@@ -3603,6 +3611,8 @@ Any disallowed transition exits 2 with `INVALID_TASK_TRANSITION` and records no 
 Records a `started` event. Validates `--agent` against `project.yaml` (defaults to `default_agent` when omitted) and emits the standard `AGENT_NOT_FOUND` / `AGENT_NOT_ENABLED` errors.
 
 **Dependency gate:** If any `depends_on` task's derived state is not `done`, exits 2 with `TASK_DEPENDENCY_INCOMPLETE` and lists the incomplete dependency ids in `data.deps`. No contract lock or progress event is written.
+
+**Contract-lock drift gate:** Requires a contract lock for the task (created by `task start` or `code-pact task lock`). If the lock is missing, it is created from the current task declaration before the first `started` event. If the locked contract no longer matches the current task declaration, base ref, or registration spec file, exits 2 with `TASK_CONTRACT_DRIFT` and supplies `data.locked_digest`, `data.current_digest`, `data.changed_fields`, and `data.drift[]`. No progress event is recorded.
 
 Idempotency: if the current state is already `started`, the command exits 0 with `{ ok: true, data: { already_started: true, ... } }` and records no progress event.
 

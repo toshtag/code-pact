@@ -1,0 +1,303 @@
+id: P83
+name: Lossless Task Registration
+weight: 1
+confidence: high
+risk: medium
+status: in_progress
+objective: Preserve an explicitly supplied machine-readable task contract from
+  task registration through contract locking, preventing readiness-field loss
+  caused by manual CLI-flag transcription.
+non_goals:
+  - Infer dependencies from prose.
+  - Infer dependencies from task numbering.
+  - Modify phase import.
+  - Add bulk task registration.
+  - Run model effectiveness trials.
+  - Estimate numerical token reduction.
+definition_of_done:
+  - A strict task spec containing depends_on is stored losslessly in the phase.
+  - The same spec is verified again before contract lock creation.
+  - Removing depends_on between add and lock causes a side-effect-free failure.
+  - A spec-locked task detects registration-field drift after lock.
+  - The P80 dependency-omission replay is blocked before implementation.
+  - Focused verification, local CI, and review-bundle complete without
+    corrective code commits.
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test:unit
+    - pnpm build
+    - pnpm test:integration
+    - pnpm test:integration:smoke
+    - pnpm check:docs
+    - pnpm test:ci
+tasks:
+  - id: P83-T1
+    type: feature
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: long
+    status: done
+    description: >
+      Implement lossless task registration from a strict machine-readable spec
+      file. Add --spec-file support to task add and task lock, compute and store
+      a SHA-256 digest of the canonical registration, and fail side-effect-free
+      when the spec does not round-trip or does not match the current phase
+      task.
+    requires_decision: false
+    depends_on:
+      - P82-T2
+    decision_refs: []
+    reads:
+      - src/core/**/*.ts
+      - src/commands/**/*.ts
+      - src/cli/**/*.ts
+      - tests/**/*.ts
+      - docs/**/*.md
+      - design/roadmap.yaml
+      - design/phases/P83-lossless-task-registration.yaml
+      - design/specs/P83-T1-task-spec.yaml
+    writes:
+      - src/core/schemas/task-registration-spec.ts
+      - src/core/task-registration-spec.ts
+      - src/core/contract-lock.ts
+      - src/core/review-bundle.ts
+      - src/commands/task-add.ts
+      - src/commands/task-lock.ts
+      - src/cli/spec/task.ts
+      - src/cli/commands/task.ts
+      - src/cli/commands/task-lock.ts
+      - tests/integration/task-registration-spec.test.ts
+      - tests/unit/cli/spec-render.test.ts
+      - tests/unit/error-code-surface.test.ts
+      - docs/cli-reference.generated.md
+      - docs/cli-contract.md
+      - design/roadmap.yaml
+      - design/phases/P83-lossless-task-registration.yaml
+      - design/specs/P83-T1-task-spec.yaml
+    acceptance_refs:
+      - design/specs/P83-T1-task-spec.yaml
+  - id: P83-T2
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: long
+    status: done
+    description: >
+      Close out lossless task registration. Eliminate side effects on task add
+      round-trip failure, detect loss of required registration fields including
+      explicit false values and status drift, revert the review-bundle
+      audit-base widening, align agent contract and CLI examples with
+      project-relative spec-file paths, and add regression tests.
+    requires_decision: false
+    depends_on:
+      - P82-T2
+    decision_refs: []
+    reads:
+      - src/core/task-registration-spec.ts
+      - src/core/schemas/task-registration-spec.ts
+      - src/core/contract-lock.ts
+      - src/core/review-bundle.ts
+      - src/commands/task-add.ts
+      - src/commands/task-lock.ts
+      - src/cli/spec/task.ts
+      - src/cli/commands/task.ts
+      - src/cli/commands/task-lock.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - tests/integration/task-registration-spec.test.ts
+      - tests/unit/core/task-registration-spec.test.ts
+      - tests/unit/core/contract-lock.test.ts
+      - tests/unit/core/review-bundle.test.ts
+    writes:
+      - src/core/task-registration-spec.ts
+      - src/core/contract-lock.ts
+      - src/core/review-bundle.ts
+      - src/commands/task-add.ts
+      - src/commands/task-lock.ts
+      - src/cli/spec/task.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/cli-reference.generated.md
+      - tests/integration/task-registration-spec.test.ts
+      - tests/unit/core/task-registration-spec.test.ts
+      - tests/unit/core/contract-lock.test.ts
+      - tests/unit/core/review-bundle.test.ts
+    acceptance_refs:
+      - design/specs/P83-T2-task-spec.yaml
+  - id: P83-T3
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: long
+    status: done
+    description: >
+      Atomic round-trip and ordered dogfood closeout. Ensure post-write re-read
+      failures during task add roll the phase YAML back to the original bytes,
+      complete the P80 omission replay through the P82 start gate, and record
+      ordered spec-file lock evidence for P83-T3 itself.
+    requires_decision: false
+    depends_on:
+      - P83-T2
+    decision_refs: []
+    reads:
+      - src/commands/task-add.ts
+      - src/core/task-registration-spec.ts
+      - src/io/atomic-text.ts
+      - src/core/project-fs/index.ts
+      - src/core/project-fs/branded-paths.ts
+      - src/core/plan/load-phase.ts
+      - src/commands/task-lock.ts
+      - src/commands/task-progress.ts
+      - src/core/task-dependencies.ts
+      - tests/unit/commands/task-add.test.ts
+      - tests/integration/task-registration-spec.test.ts
+      - design/specs/P83-T3-task-spec.yaml
+      - design/phases/P83-lossless-task-registration.yaml
+    writes:
+      - src/commands/task-add.ts
+      - tests/unit/commands/task-add.test.ts
+      - tests/integration/task-registration-spec.test.ts
+      - design/specs/P83-T3-task-spec.yaml
+      - design/phases/P83-lossless-task-registration.yaml
+    acceptance_refs:
+      - design/specs/P83-T3-task-spec.yaml
+  - id: P83-T4
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: long
+    status: done
+    description: >
+      Spec authority and snapshot atomicity closeout. Ensure phase source bytes
+      and CAS expected bytes are the same single snapshot, detect spec-file
+      drift after spec-file contract lock, and pass strict finalize without
+      treating planning artifacts as implementation writes.
+    requires_decision: false
+    depends_on:
+      - P83-T3
+    decision_refs: []
+    reads:
+      - src/commands/task-add.ts
+      - src/core/contract-lock.ts
+      - src/commands/task-lock.ts
+      - src/core/task-registration-spec.ts
+      - src/core/schemas/task-registration-spec.ts
+      - src/io/atomic-text.ts
+      - src/core/project-fs/index.ts
+      - src/core/project-fs/branded-paths.ts
+      - src/core/plan/load-phase.ts
+      - src/core/schemas/phase.ts
+      - src/core/task-dependencies.ts
+      - tests/unit/commands/task-add.test.ts
+      - tests/unit/core/contract-lock.test.ts
+      - tests/integration/task-registration-spec.test.ts
+      - design/specs/P83-T4-task-spec.yaml
+      - design/phases/P83-lossless-task-registration.yaml
+    writes:
+      - src/commands/task-add.ts
+      - src/core/contract-lock.ts
+      - src/commands/task-lock.ts
+      - tests/unit/commands/task-add.test.ts
+      - tests/unit/core/contract-lock.test.ts
+      - tests/integration/task-registration-spec.test.ts
+    acceptance_refs:
+      - design/specs/P83-T4-task-spec.yaml
+  - id: P83-T5
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: >
+      Pre-start spec drift gate. Reject task start without side effects when an
+      existing spec-file contract lock has drifted, been deleted, or corrupted.
+    requires_decision: false
+    depends_on:
+      - P83-T4
+    decision_refs: []
+    reads:
+      - src/commands/task-progress.ts
+      - src/core/contract-lock.ts
+      - src/core/task-registration-spec.ts
+      - src/core/schemas/task-registration-spec.ts
+      - src/core/schemas/phase.ts
+      - src/core/plan/load-phase.ts
+      - src/core/task-dependencies.ts
+      - src/core/progress/events-io.ts
+      - tests/unit/commands/task-start.test.ts
+      - tests/integration/task-registration-spec.test.ts
+      - design/specs/P83-T5-task-spec.yaml
+      - design/phases/P83-lossless-task-registration.yaml
+    writes:
+      - src/commands/task-progress.ts
+      - tests/unit/commands/task-start.test.ts
+      - tests/integration/task-registration-spec.test.ts
+    acceptance_refs:
+      - design/specs/P83-T5-task-spec.yaml
+  - id: P83-T6
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Pre-start spec drift gate for the public task start CLI. Reject task start
+      with exit 2 and a TASK_CONTRACT_DRIFT JSON envelope when an existing
+      spec-file contract lock has drifted, been deleted, or corrupted. Preserve
+      existing priority rules and produce no side effects on rejection.
+    requires_decision: false
+    depends_on:
+      - P83-T4
+    decision_refs: []
+    reads:
+      - src/commands/task-progress.ts
+      - src/cli/commands/task.ts
+      - src/cli/spec/task.ts
+      - src/cli/util.ts
+      - src/core/contract-lock.ts
+      - src/core/task-registration-spec.ts
+      - src/core/schemas/task-registration-spec.ts
+      - src/core/schemas/phase.ts
+      - src/core/plan/load-phase.ts
+      - src/core/task-dependencies.ts
+      - src/core/progress/events-io.ts
+      - src/core/project-fs/authority-resolvers.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - tests/unit/commands/task-start.test.ts
+      - tests/integration/task-registration-spec.test.ts
+      - tests/integration/json-stdout.test.ts
+      - docs/cli-contract.md
+      - docs/cli-reference.generated.md
+      - design/specs/P83-T6-task-spec.yaml
+      - design/phases/P83-lossless-task-registration.yaml
+    writes:
+      - src/commands/task-progress.ts
+      - src/cli/commands/task.ts
+      - src/cli/spec/task.ts
+      - tests/unit/commands/task-start.test.ts
+      - tests/integration/task-registration-spec.test.ts
+      - tests/integration/json-stdout.test.ts
+      - docs/cli-contract.md
+      - docs/cli-reference.generated.md
+    acceptance_refs:
+      - design/specs/P83-T6-task-spec.yaml
