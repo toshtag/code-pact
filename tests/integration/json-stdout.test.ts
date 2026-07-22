@@ -791,7 +791,8 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
       "claude-code",
       "--json",
     ]);
-    expect(res.code).toBe(1);
+    expect(res.code).toBe(2);
+    expect(res.stderr).toBe("");
     expectStdoutIsJson(res, "task start dependency incomplete");
     const parsed = JSON.parse(res.stdout) as {
       ok: false;
@@ -799,6 +800,9 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
       data?: { deps?: string[] };
     };
     expect(parsed.error.code).toBe("TASK_DEPENDENCY_INCOMPLETE");
+    expect(parsed.error.message).toContain(
+      "No contract lock or progress event was recorded.",
+    );
     expect(parsed.data?.deps).toEqual(["P1-T1"]);
   });
 

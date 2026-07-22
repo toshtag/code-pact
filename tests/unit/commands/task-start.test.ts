@@ -378,4 +378,127 @@ describe("runTaskStart — dependency gate", () => {
     const { log: logAfter } = await readProgress(dir);
     expect(logAfter.events).toHaveLength(logBefore.events.length);
   });
+
+  it("failed retry with an incomplete dependency rejects with TASK_DEPENDENCY_INCOMPLETE", async () => {
+    const phaseYaml = `${PHASE_YAML}  - id: P1-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P1-T1
+`;
+    const failedYaml = `events:
+  - task_id: P1-T2
+    status: failed
+    at: "2026-05-18T09:00:00+00:00"
+    actor: agent
+    agent: claude-code
+`;
+    await setupProject(dir, { phaseYaml, progressYaml: failedYaml });
+    await expect(
+      runTaskStart({ cwd: dir, taskId: "P1-T2", agent: "claude-code" }),
+    ).rejects.toMatchObject({
+      code: "TASK_DEPENDENCY_INCOMPLETE",
+      deps: ["P1-T1"],
+    });
+  });
+
+  it("already_started with a later incomplete dependency returns already_started", async () => {
+    const phaseYaml = `${PHASE_YAML}  - id: P1-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P1-T1
+`;
+    const startedYaml = `events:
+  - task_id: P1-T2
+    status: started
+    at: "2026-05-18T09:00:00+00:00"
+    actor: agent
+    agent: claude-code
+`;
+    await setupProject(dir, { phaseYaml, progressYaml: startedYaml });
+    const result = await runTaskStart({
+      cwd: dir,
+      taskId: "P1-T2",
+      agent: "claude-code",
+    });
+    expect(result.kind).toBe("already_started");
+
+    const { log } = await readProgress(dir);
+    expect(log.events).toHaveLength(1);
+  });
+
+  it("blocked state with incomplete dependency fails with INVALID_TASK_TRANSITION before dependency", async () => {
+    const phaseYaml = `${PHASE_YAML}  - id: P1-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P1-T1
+`;
+    const blockedYaml = `events:
+  - task_id: P1-T2
+    status: started
+    at: "2026-05-18T09:00:00+00:00"
+    actor: agent
+    agent: claude-code
+  - task_id: P1-T2
+    status: blocked
+    at: "2026-05-18T10:00:00+00:00"
+    actor: agent
+    agent: claude-code
+    reason: waiting
+`;
+    await setupProject(dir, { phaseYaml, progressYaml: blockedYaml });
+    await expect(
+      runTaskStart({ cwd: dir, taskId: "P1-T2", agent: "claude-code" }),
+    ).rejects.toMatchObject({ code: "INVALID_TASK_TRANSITION" });
+  });
+
+  it("returns all incomplete dependency ids in declaration order", async () => {
+    const phaseYaml = `${PHASE_YAML}  - id: P1-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P1-T3
+      - P1-T1
+`;
+    const eventsYaml = `events:
+  - task_id: P1-T3
+    status: started
+    at: "2026-05-18T09:00:00+00:00"
+    actor: agent
+    agent: claude-code
+`;
+    await setupProject(dir, { phaseYaml, progressYaml: eventsYaml });
+    await expect(
+      runTaskStart({ cwd: dir, taskId: "P1-T2", agent: "claude-code" }),
+    ).rejects.toMatchObject({
+      code: "TASK_DEPENDENCY_INCOMPLETE",
+      deps: ["P1-T3", "P1-T1"],
+    });
+  });
 });

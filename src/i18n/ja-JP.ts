@@ -475,7 +475,7 @@ export const messages = {
       invalidTransition: (taskId: string, current: string): string =>
         `状態 "${current}" からタスク "${taskId}" を start できません。`,
       dependencyIncomplete: (taskId: string, deps: string[]): string =>
-        `タスク "${taskId}" は開始できません: 依存タスクが未完了です: ${deps.join(", ")}。`,
+        `タスク "${taskId}" は開始できません: 依存タスクが未完了です: ${deps.join(", ")}。\ncontract lockとprogressイベントは記録されていません。`,
     },
     block: {
       success: (taskId: string, reason: string): string =>

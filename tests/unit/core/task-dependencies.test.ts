@@ -93,4 +93,15 @@ describe("incompleteTaskDependencyIds", () => {
       "P1-T3",
     ]);
   });
+
+  it("does not mutate the input events array or task object", () => {
+    const task: Task = { ...baseTask, depends_on: ["P1-T1"] };
+    const events: ProgressEvent[] = [event("P1-T1", "started")];
+    const eventsSnapshot = [...events];
+    const taskSnapshot = { ...task, depends_on: [...(task.depends_on ?? [])] };
+    incompleteTaskDependencyIds(events, task);
+    resolveTaskDependencyStates(events, task);
+    expect(events).toEqual(eventsSnapshot);
+    expect(task).toEqual(taskSnapshot);
+  });
 });

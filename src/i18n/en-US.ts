@@ -472,7 +472,7 @@ export const messages = {
       invalidTransition: (taskId: string, current: string): string =>
         `Cannot start task "${taskId}" from state "${current}".`,
       dependencyIncomplete: (taskId: string, deps: string[]): string =>
-        `Task "${taskId}" cannot be started: dependencies are not done: ${deps.join(", ")}.`,
+        `Task "${taskId}" cannot be started: dependencies are not done: ${deps.join(", ")}.\nNo contract lock or progress event was recorded.`,
     },
     block: {
       success: (taskId: string, reason: string): string =>

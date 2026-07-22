@@ -2197,7 +2197,7 @@ function emitTaskCommonError(
       msg = m.task.start.dependencyIncomplete(taskId, deps);
       outCode = "TASK_DEPENDENCY_INCOMPLETE";
       emitError(json, outCode, msg, { data: { deps } });
-      return 1;
+      return 2;
     }
     case "WORKTREE_NOT_CLEAN":
       msg = err.message;
