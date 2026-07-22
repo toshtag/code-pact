@@ -3,14 +3,14 @@ name: Pre-Implementation Dependency Gate
 weight: 1
 confidence: high
 risk: medium
-status: done
+status: in_progress
 objective: >
   Prevent agents from starting implementation while declared task dependencies
   are incomplete, before any contract lock or progress event is written.
 non_goals:
   - Infer omitted dependencies.
   - Modify task registration semantics.
-  - Fix Issue
+  - "Fix Issue #544."
   - Gate task lock.
   - Change task resume.
   - Run model effectiveness trials.
@@ -74,3 +74,38 @@ tasks:
       - tests/integration/json-stdout.test.ts
       - docs/cli-contract.md
       - docs/agent-contract.md
+
+  - id: P82-T2
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P82-T1
+    description: >
+      Align the task-start dependency error contract and complete the
+      predeclared side-effect, parity, and cross-phase acceptance coverage.
+    reads:
+      - src/cli/commands/task.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - tests/unit/commands/task-start.test.ts
+      - tests/unit/core/task-dependencies.test.ts
+      - tests/integration/task-start-dependency-gate.test.ts
+      - tests/integration/json-stdout.test.ts
+      - docs/cli-contract.md
+      - design/phases/P82-pre-implementation-dependency-gate.yaml
+    writes:
+      - src/cli/commands/task.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - tests/unit/commands/task-start.test.ts
+      - tests/unit/core/task-dependencies.test.ts
+      - tests/integration/task-start-dependency-gate.test.ts
+      - tests/integration/json-stdout.test.ts
+      - docs/cli-contract.md
+      - design/phases/P82-pre-implementation-dependency-gate.yaml
