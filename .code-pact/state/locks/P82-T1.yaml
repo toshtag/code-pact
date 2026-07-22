@@ -1,0 +1,66 @@
+schema_version: 1
+task_id: P82-T1
+phase_id: P82
+phase_path: design/phases/P82-pre-implementation-dependency-gate.yaml
+base_ref: HEAD
+base_sha: c6ae0accd9c2065faaa850a0e414f3b745c7a0ef
+phase_blob_sha: d95edda03de3f445b86037e3da4f13485b94654a
+contract_digest: 8d4a149c39038b68d48edc632d115d16b9e43bdf2bba7e4ba64685b2c796f353
+contract:
+  description: >
+    Add a side-effect-free dependency gate to task start and centralize
+    dependency-state derivation across lifecycle commands.
+  reads:
+    - src/cli/commands/task.ts
+    - src/commands/task-complete.ts
+    - src/commands/task-finalize.ts
+    - src/commands/task-prepare.ts
+    - src/commands/task-progress.ts
+    - src/commands/task-record-done.ts
+    - src/core/execute-once/eligibility.ts
+    - src/core/runbook/depends-on.ts
+    - tests/integration/json-stdout.test.ts
+    - tests/unit/commands/task-start.test.ts
+  writes:
+    - docs/agent-contract.md
+    - docs/cli-contract.md
+    - src/cli/commands/task.ts
+    - src/commands/task-complete.ts
+    - src/commands/task-finalize.ts
+    - src/commands/task-prepare.ts
+    - src/commands/task-progress.ts
+    - src/commands/task-record-done.ts
+    - src/core/execute-once/eligibility.ts
+    - src/core/task-dependencies.ts
+    - src/i18n/en-US.ts
+    - src/i18n/ja-JP.ts
+    - tests/integration/json-stdout.test.ts
+    - tests/integration/task-start-dependency-gate.test.ts
+    - tests/unit/commands/task-start.test.ts
+    - tests/unit/core/task-dependencies.test.ts
+  depends_on:
+    - P81-T2
+  decision_refs: []
+  acceptance_refs: []
+  definition_of_done:
+    - a completed dependency allows task start on the first attempt.
+    - existing task complete, record-done, execute, and finalize behavior
+      remains compatible.
+    - local CI and review-bundle pass without corrective code commits.
+    - task prepare and task start derive the same incomplete dependency list.
+    - task start rejects an incomplete declared dependency before any write.
+    - the rejection uses TASK_DEPENDENCY_INCOMPLETE and returns all incomplete
+      ids.
+  verification_commands:
+    - pnpm build
+    - pnpm check:docs
+    - pnpm test:ci
+    - pnpm test:integration
+    - pnpm test:integration:smoke
+    - pnpm test:unit
+    - pnpm typecheck
+  base_sha: c6ae0accd9c2065faaa850a0e414f3b745c7a0ef
+  phase_blob_sha: d95edda03de3f445b86037e3da4f13485b94654a
+at: 2026-07-22T02:16:00.604Z
+actor: agent
+author: Pocket

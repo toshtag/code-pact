@@ -759,6 +759,49 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
     );
   });
 
+  it("task start P1-T2 --json returns data.deps for incomplete dependency", async () => {
+    const p = await projectWithTask("task-start-dep");
+    const phasePath = join(p.dir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    (doc.tasks as Record<string, unknown>[]).push({
+      id: "P1-T2",
+      type: "feature",
+      ambiguity: "low",
+      risk: "low",
+      context_size: "small",
+      write_surface: "low",
+      verification_strength: "weak",
+      expected_duration: "short",
+      status: "planned",
+      description: "dependent task",
+      depends_on: ["P1-T1"],
+    });
+    await writeFile(phasePath, stringifyYaml(doc), "utf8");
+    execSync("git add .", { cwd: p.dir, stdio: "ignore" });
+    execSync("git commit -m add-dep", { cwd: p.dir, stdio: "ignore" });
+
+    const res = p.run([
+      "task",
+      "start",
+      "P1-T2",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(res.code).toBe(1);
+    expectStdoutIsJson(res, "task start dependency incomplete");
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string; message: string };
+      data?: { deps?: string[] };
+    };
+    expect(parsed.error.code).toBe("TASK_DEPENDENCY_INCOMPLETE");
+    expect(parsed.data?.deps).toEqual(["P1-T1"]);
+  });
+
   it("task complete P1-T1 --json returns data.deps for incomplete dependency", async () => {
     const p = await projectWithTask("task-complete-dep");
     const phasePath = join(p.dir, "design", "phases", "P1-foundation.yaml");
