@@ -26,6 +26,7 @@ task:
     - src/core/project-fs/index.ts
     - src/core/project-fs/branded-paths.ts
     - src/core/plan/load-phase.ts
+    - src/core/schemas/phase.ts
     - src/commands/task-lock.ts
     - src/commands/task-progress.ts
     - src/core/task-dependencies.ts
