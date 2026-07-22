@@ -116,7 +116,11 @@ async function readAndValidateSpecFile(
   }
 
   return {
-    registration: { mode: "spec_file", spec_digest: expectedDigest },
+    registration: {
+      mode: "spec_file",
+      spec_digest: expectedDigest,
+      spec_path: specFile,
+    },
     specDigest: expectedDigest,
   };
 }

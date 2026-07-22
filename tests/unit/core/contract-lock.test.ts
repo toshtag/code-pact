@@ -37,11 +37,20 @@ const ROADMAP = `phases:
 `;
 
 function phaseYaml(
-  opts: { status?: string; requiresDecision?: boolean } = {},
+  opts: { status?: string; requiresDecision?: boolean; full?: boolean } = {},
 ): string {
   const status = opts.status ?? "planned";
   const requiresDecision =
     opts.requiresDecision === undefined ? true : opts.requiresDecision;
+  const emptyArrays = opts.full
+    ? [
+        "    depends_on: []",
+        "    decision_refs: []",
+        "    reads: []",
+        "    acceptance_refs:",
+        "      - design/specs/P1-T1-task-spec.yaml",
+      ]
+    : [];
   return [
     "id: P1",
     "name: Foundation",
@@ -67,6 +76,7 @@ function phaseYaml(
     `    status: ${status}`,
     "    description: test",
     `    requires_decision: ${requiresDecision}`,
+    ...emptyArrays,
     "    writes:",
     "      - src/example.ts",
     "",
@@ -74,7 +84,7 @@ function phaseYaml(
 }
 
 async function setupProject(
-  opts: { status?: string; requiresDecision?: boolean } = {},
+  opts: { status?: string; requiresDecision?: boolean; full?: boolean } = {},
 ): Promise<void> {
   await mkdir(join(cwd, "design", "phases"), { recursive: true });
   await mkdir(join(cwd, ".code-pact", "state"), { recursive: true });
@@ -101,7 +111,11 @@ async function setupProject(
   await writeFile(join(cwd, "design", "roadmap.yaml"), ROADMAP, "utf8");
   await writeFile(
     join(cwd, "design", "phases", "P1-foundation.yaml"),
-    phaseYaml(opts),
+    phaseYaml({
+      status: opts.status,
+      requiresDecision: opts.requiresDecision,
+      full: opts.full,
+    }),
     "utf8",
   );
   await writeFile(
@@ -208,6 +222,140 @@ describe("assertTaskContractCurrent post-lock drift", () => {
     ).rejects.toMatchObject({
       code: "TASK_CONTRACT_DRIFT",
       changed_fields: expect.arrayContaining(["requires_decision"]),
+    });
+  });
+});
+
+async function createLockWithSpecFile(cwd: string) {
+  await setupProject({
+    status: "planned",
+    requiresDecision: false,
+    full: true,
+  });
+
+  const task = {
+    id: "P1-T1",
+    type: "feature" as const,
+    ambiguity: "low" as const,
+    risk: "low" as const,
+    context_size: "small" as const,
+    write_surface: "low" as const,
+    verification_strength: "medium" as const,
+    expected_duration: "short" as const,
+    status: "planned" as const,
+    description: "test",
+    requires_decision: false,
+    depends_on: [] as string[],
+    decision_refs: [] as string[],
+    reads: [] as string[],
+    writes: ["src/example.ts"],
+    acceptance_refs: ["design/specs/P1-T1-task-spec.yaml"],
+  };
+
+  const spec = {
+    schema_version: 1 as const,
+    phase_id: "P1",
+    task,
+  };
+
+  await mkdir(join(cwd, "design", "specs"), { recursive: true });
+  await writeFile(
+    join(cwd, "design", "specs", "P1-T1-task-spec.yaml"),
+    stringifyYaml(spec),
+    "utf8",
+  );
+
+  git(["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+  git([
+    "-c",
+    "user.email=t@t",
+    "-c",
+    "user.name=t",
+    "commit",
+    "--quiet",
+    "-m",
+    "add spec",
+  ]);
+
+  const specDigest = taskRegistrationDigest("P1", task);
+  return createTaskContractLock({
+    cwd,
+    taskId: "P1-T1",
+    registration: {
+      mode: "spec_file",
+      spec_digest: specDigest,
+      spec_path: "design/specs/P1-T1-task-spec.yaml",
+    },
+  });
+}
+
+describe("assertTaskContractCurrent spec-file drift (P83-T4)", () => {
+  it("passes when the spec file is unchanged after lock", async () => {
+    const lock = await createLockWithSpecFile(cwd);
+    expect(lock).toBeDefined();
+
+    const result = await assertTaskContractCurrent({
+      cwd,
+      taskId: "P1-T1",
+      requireLock: true,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects spec file drift after lock", async () => {
+    const lock = await createLockWithSpecFile(cwd);
+    expect(lock).toBeDefined();
+
+    const specPath = join(cwd, "design", "specs", "P1-T1-task-spec.yaml");
+    const raw = await readFile(specPath, "utf8");
+    const parsed = parseYaml(raw) as {
+      task: { reads?: string[] };
+    };
+    parsed.task.reads = ["src/extra.ts"];
+    await writeFile(specPath, stringifyYaml(parsed), "utf8");
+    git(["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git([
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "mutate spec",
+    ]);
+
+    await expect(
+      assertTaskContractCurrent({ cwd, taskId: "P1-T1", requireLock: true }),
+    ).rejects.toMatchObject({
+      code: "TASK_CONTRACT_DRIFT",
+      changed_fields: expect.arrayContaining(["registration_spec_file"]),
+    });
+  });
+
+  it("rejects a missing spec file after lock", async () => {
+    const lock = await createLockWithSpecFile(cwd);
+    expect(lock).toBeDefined();
+
+    const specPath = join(cwd, "design", "specs", "P1-T1-task-spec.yaml");
+    await rm(specPath);
+    git(["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git([
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "delete spec",
+    ]);
+
+    await expect(
+      assertTaskContractCurrent({ cwd, taskId: "P1-T1", requireLock: true }),
+    ).rejects.toMatchObject({
+      code: "TASK_CONTRACT_DRIFT",
+      changed_fields: expect.arrayContaining(["registration_spec_file"]),
     });
   });
 });

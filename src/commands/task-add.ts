@@ -300,7 +300,34 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
       throw err;
     }
 
-    const phase = await loadPhase(opts.cwd, ref.path);
+    // Read the phase file once. The raw bytes are both the source of the phase
+    // object used to build the candidate and the expected state for the CAS
+    // write, so a concurrent writer cannot interleave between a semantic load
+    // and a separate raw read.
+    let originalBytes: string;
+    try {
+      originalBytes = await readOwnedText(readPath);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") throw err;
+      const e = new Error(
+        `Phase at ${ref.path} cannot be read: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+
+    let phase: Phase;
+    try {
+      phase = Phase.parse(parseYaml(originalBytes) as unknown);
+    } catch (err) {
+      const e = new Error(
+        `Phase at ${ref.path} is malformed (YAML or schema): ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+
     if (phase.id !== opts.phaseId) {
       const err = new Error(
         `phase reference "${opts.phaseId}" points at "${ref.path}", but that file declares phase "${phase.id}"`,
@@ -369,10 +396,6 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
       ...phase,
       tasks: [...existingTasks, newTask],
     });
-
-    // Capture the original phase bytes so we can CAS rollback if the write
-    // succeeds but the post-write sanity re-read fails.
-    const originalBytes = await readOwnedText(readPath);
 
     // Serialize and re-parse in memory before any filesystem mutation. The
     // candidate task is what would be stored; verify it matches the intended

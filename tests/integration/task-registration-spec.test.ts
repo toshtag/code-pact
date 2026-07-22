@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { writeFileSync, readFileSync } from "node:fs";
+import { writeFileSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
@@ -309,6 +309,20 @@ describe("task lock --spec-file", () => {
     git(project.dir, ["add", "."]);
     git(project.dir, ["commit", "--quiet", "-m", "lock P1-T2"]);
 
+    // Capture authoritative state before the blocked start.
+    const lockBefore = readFileSync(lockPath, "utf8");
+    const phaseBefore = readFileSync(phasePath, "utf8");
+    const eventsDir = join(project.dir, ".code-pact", "state", "events");
+    const eventsBefore = existsSync(eventsDir)
+      ? readdirSync(eventsDir).sort()
+      : [];
+    const statusBefore = git(project.dir, [
+      "status",
+      "--porcelain",
+      "--untracked-files=all",
+    ]);
+    expect(statusBefore.stdout).toBe("");
+
     // P82 start gate: P1-T2 cannot start while P1-T1 is incomplete.
     const blockedStart = project.run(["task", "start", "P1-T2", "--json"]);
     expect(blockedStart.code).toBe(2);
@@ -317,6 +331,23 @@ describe("task lock --spec-file", () => {
       "TASK_DEPENDENCY_INCOMPLETE",
     );
     expect(blockedParsed.error.message).toContain("P1-T1");
+
+    // The failed start must have no side effects.
+    const lockAfter = readFileSync(lockPath, "utf8");
+    const phaseAfter = readFileSync(phasePath, "utf8");
+    const eventsAfter = existsSync(eventsDir)
+      ? readdirSync(eventsDir).sort()
+      : [];
+    const statusAfter = git(project.dir, [
+      "status",
+      "--porcelain",
+      "--untracked-files=all",
+    ]);
+
+    expect(lockAfter).toBe(lockBefore);
+    expect(phaseAfter).toBe(phaseBefore);
+    expect(eventsAfter).toEqual(eventsBefore);
+    expect(statusAfter.stdout).toBe("");
 
     // Complete P1-T1 through the normal lifecycle.
     expectJsonOk(project.run(["task", "start", "P1-T1", "--json"]));

@@ -3,7 +3,7 @@ import { PassThrough } from "node:stream";
 import { mkdtemp, rm, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { Prompter, type LineReader } from "../../../src/lib/prompt.ts";
 import { runInit } from "../../../src/commands/init.ts";
 import { runPhaseNew } from "../../../src/commands/phase-new.ts";
@@ -479,5 +479,67 @@ describe("runTaskAdd — round-trip rollback (P83-T3)", () => {
     const after = await readFile(join(cwd, phasePath), "utf8");
     expect(after).toBe("concurrent writer was here");
     expect(after).not.toBe(originalBytes);
+  });
+
+  it("preserves a valid concurrent phase update and rejects CAS", async () => {
+    const originalBytes = await readFile(join(cwd, phasePath), "utf8");
+    const originalPhase = parseYaml(originalBytes) as {
+      tasks?: Array<{ id: string; description: string; type: string }>;
+    };
+
+    __setTaskAddPreWriteInjectorForTests(async () => {
+      await writeFile(
+        join(cwd, phasePath),
+        stringifyYaml({
+          ...originalPhase,
+          tasks: [
+            ...(originalPhase.tasks ?? []),
+            {
+              id: "P1-CONCURRENT",
+              type: "feature",
+              ambiguity: "low",
+              risk: "medium",
+              context_size: "medium",
+              write_surface: "medium",
+              verification_strength: "medium",
+              expected_duration: "medium",
+              status: "planned",
+              description: "Concurrent task",
+              requires_decision: false,
+              depends_on: [],
+              decision_refs: [],
+              reads: [],
+              writes: [],
+              acceptance_refs: [],
+            },
+          ],
+        }),
+        "utf8",
+      );
+    });
+
+    await expect(
+      runTaskAdd({
+        cwd,
+        phaseId: "P1",
+        locale: "en-US",
+        nonInteractive: {
+          description: "Snapshot race task",
+          type: "feature",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "TASK_REGISTRATION_ROUND_TRIP",
+      message: expect.stringContaining("phase file changed before write"),
+    });
+
+    const after = await readFile(join(cwd, phasePath), "utf8");
+    expect(parseYaml(after) as { tasks: { id: string }[] }).toEqual(
+      expect.objectContaining({
+        tasks: expect.arrayContaining([
+          expect.objectContaining({ id: "P1-CONCURRENT" }),
+        ]),
+      }),
+    );
   });
 });

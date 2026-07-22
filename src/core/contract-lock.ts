@@ -15,14 +15,17 @@ import {
   taskRegistrationDigest,
   canonicalTaskRegistration,
   postLockRegistrationChangedFields,
+  parseTaskRegistrationSpec,
 } from "./task-registration-spec.ts";
 import {
   readOwnedText,
+  readExplicitUserText,
   mkdirOwned,
   writeOwnedText,
   resolveContractLockDirWritePath,
   resolveContractLockReadPath,
   resolveContractLockWritePath,
+  resolveExplicitUserReadPath,
 } from "./project-fs/index.ts";
 
 const execFileAsync = promisify(execFile);
@@ -53,6 +56,8 @@ type Contract = z.infer<typeof Contract>;
 export const ContractLockRegistration = z.object({
   mode: z.literal("spec_file"),
   spec_digest: z.string(),
+  /** Project-relative spec file path stored at lock time for spec-file drift checks. */
+  spec_path: z.string().optional(),
   /** Canonical registration JSON stored at lock time for field-level drift. */
   spec_canonical: z.string().optional(),
 });
@@ -611,6 +616,170 @@ export async function assertTaskContractCurrent(
         kind: f,
         message: `registration field "${f}" drifted from lock`,
       }));
+      throw err;
+    }
+  }
+
+  // For spec-file locks with a stored spec path, verify the original spec file
+  // itself has not drifted from the locked registration. This catches edits to
+  // the spec file that the phase-task digest check might miss when the phase
+  // file itself was not updated (e.g. the spec file was amended after lock).
+  if (lock.registration?.spec_path && lock.registration.spec_digest) {
+    let specRaw: string;
+    try {
+      const specReadPath = await resolveExplicitUserReadPath(
+        cwd,
+        lock.registration.spec_path,
+      );
+      specRaw = await readExplicitUserText(specReadPath);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+        const err = new Error(
+          `TASK_CONTRACT_DRIFT: locked spec file path is outside the project or not owned.`,
+        );
+        (err as NodeJS.ErrnoException).code = "TASK_CONTRACT_DRIFT";
+        (err as NodeJS.ErrnoException & { task_id?: string }).task_id = taskId;
+        (err as NodeJS.ErrnoException & { phase_id?: string }).phase_id =
+          phaseId;
+        (
+          err as NodeJS.ErrnoException & { locked_digest?: string }
+        ).locked_digest = lock.contract_digest;
+        (
+          err as NodeJS.ErrnoException & { current_digest?: string }
+        ).current_digest = currentDigest;
+        (
+          err as NodeJS.ErrnoException & { changed_fields?: string[] }
+        ).changed_fields = ["registration_spec_file"];
+        (
+          err as NodeJS.ErrnoException & {
+            drift?: { kind: string; message: string }[];
+          }
+        ).drift = [
+          {
+            kind: "registration_spec_file",
+            message:
+              "locked spec file path is outside the project or not owned",
+          },
+        ];
+        throw err;
+      }
+      const err = new Error(
+        `TASK_CONTRACT_DRIFT: locked spec file cannot be read.`,
+      );
+      (err as NodeJS.ErrnoException).code = "TASK_CONTRACT_DRIFT";
+      (err as NodeJS.ErrnoException & { task_id?: string }).task_id = taskId;
+      (err as NodeJS.ErrnoException & { phase_id?: string }).phase_id = phaseId;
+      (
+        err as NodeJS.ErrnoException & { locked_digest?: string }
+      ).locked_digest = lock.contract_digest;
+      (
+        err as NodeJS.ErrnoException & { current_digest?: string }
+      ).current_digest = currentDigest;
+      (
+        err as NodeJS.ErrnoException & { changed_fields?: string[] }
+      ).changed_fields = ["registration_spec_file"];
+      (
+        err as NodeJS.ErrnoException & {
+          drift?: { kind: string; message: string }[];
+        }
+      ).drift = [
+        {
+          kind: "registration_spec_file",
+          message: "locked spec file is missing or cannot be read",
+        },
+      ];
+      throw err;
+    }
+
+    let spec: { phase_id: string; task: Task };
+    try {
+      spec = parseTaskRegistrationSpec(specRaw);
+    } catch {
+      const err = new Error(
+        `TASK_CONTRACT_DRIFT: locked spec file is not valid YAML or schema.`,
+      );
+      (err as NodeJS.ErrnoException).code = "TASK_CONTRACT_DRIFT";
+      (err as NodeJS.ErrnoException & { task_id?: string }).task_id = taskId;
+      (err as NodeJS.ErrnoException & { phase_id?: string }).phase_id = phaseId;
+      (
+        err as NodeJS.ErrnoException & { locked_digest?: string }
+      ).locked_digest = lock.contract_digest;
+      (
+        err as NodeJS.ErrnoException & { current_digest?: string }
+      ).current_digest = currentDigest;
+      (
+        err as NodeJS.ErrnoException & { changed_fields?: string[] }
+      ).changed_fields = ["registration_spec_file"];
+      (
+        err as NodeJS.ErrnoException & {
+          drift?: { kind: string; message: string }[];
+        }
+      ).drift = [
+        {
+          kind: "registration_spec_file",
+          message: "locked spec file is not valid YAML or schema",
+        },
+      ];
+      throw err;
+    }
+
+    if (spec.phase_id !== phaseId || spec.task.id !== taskId) {
+      const err = new Error(
+        `TASK_CONTRACT_DRIFT: locked spec file identity does not match.`,
+      );
+      (err as NodeJS.ErrnoException).code = "TASK_CONTRACT_DRIFT";
+      (err as NodeJS.ErrnoException & { task_id?: string }).task_id = taskId;
+      (err as NodeJS.ErrnoException & { phase_id?: string }).phase_id = phaseId;
+      (
+        err as NodeJS.ErrnoException & { locked_digest?: string }
+      ).locked_digest = lock.contract_digest;
+      (
+        err as NodeJS.ErrnoException & { current_digest?: string }
+      ).current_digest = currentDigest;
+      (
+        err as NodeJS.ErrnoException & { changed_fields?: string[] }
+      ).changed_fields = ["registration_spec_file"];
+      (
+        err as NodeJS.ErrnoException & {
+          drift?: { kind: string; message: string }[];
+        }
+      ).drift = [
+        {
+          kind: "registration_spec_file",
+          message: "locked spec file identity does not match",
+        },
+      ];
+      throw err;
+    }
+
+    const currentSpecDigest = taskRegistrationDigest(spec.phase_id, spec.task);
+    if (currentSpecDigest !== lock.registration.spec_digest) {
+      const err = new Error(
+        `TASK_CONTRACT_DRIFT: task registration spec file drifted from lock.`,
+      );
+      (err as NodeJS.ErrnoException).code = "TASK_CONTRACT_DRIFT";
+      (err as NodeJS.ErrnoException & { task_id?: string }).task_id = taskId;
+      (err as NodeJS.ErrnoException & { phase_id?: string }).phase_id = phaseId;
+      (
+        err as NodeJS.ErrnoException & { locked_digest?: string }
+      ).locked_digest = lock.contract_digest;
+      (
+        err as NodeJS.ErrnoException & { current_digest?: string }
+      ).current_digest = currentDigest;
+      (
+        err as NodeJS.ErrnoException & { changed_fields?: string[] }
+      ).changed_fields = ["registration_spec_file"];
+      (
+        err as NodeJS.ErrnoException & {
+          drift?: { kind: string; message: string }[];
+        }
+      ).drift = [
+        {
+          kind: "registration_spec_file",
+          message: "task registration spec file drifted from lock",
+        },
+      ];
       throw err;
     }
   }
