@@ -41,7 +41,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Run one post-P83 qualified Baseline versus Code Pact cycle on the
       historical pre-P83-T6 public task-start drift bug, record all model
