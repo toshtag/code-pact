@@ -233,3 +233,6 @@ phases:
   - id: P84
     path: design/phases/P84-post-p83-qualified-cycle-effectiveness-recheck.yaml
     weight: 1
+  - id: P85
+    path: design/phases/P85-cancelled-task-terminality.yaml
+    weight: 2
