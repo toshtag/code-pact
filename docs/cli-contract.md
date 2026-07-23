@@ -2974,6 +2974,8 @@ The command re-runs the classifier-selected verification commands locally and re
 
 Lifecycle-only phase status mutations (`phase.status` and `phase.tasks[*].status` changed to values that match the derived state) are produced by Code Pact commands such as `task finalize`, `phase reconcile`, and manual closeout. `task review-bundle` reclassifies these changes as control-plane changes rather than task implementation writes. The reclassified files are removed from `write_audit.outside_declared` and recorded in `write_audit.lifecycle_control_plane` with the changed field paths (for example, `["status", "tasks[P1-T1].status"]`). Any other phase YAML change, unknown YAML field, reordered task, or status that does not match the derived state is still treated as `TASK_CONTRACT_DRIFT` (fail-closed).
 
+A task may also change to `status: cancelled` when the design explicitly records an intentional termination and the task is not derived `done`. `cancelled` is a terminal lifecycle state for phase-level aggregation, so a phase can become `done` even when a cancelled task retains historical `failed`/`blocked` progress events.
+
 ### Errors
 
 | Code                                   | Exit | When                                                                                        |
@@ -3022,11 +3024,11 @@ Default mode is dry-run. Pass `--write` to apply the mutations. No `--agent` fla
 
 Each task in the phase is classified into one of three actions:
 
-| Action          | When                                                                                                                                              | Effect of `--write`                                             |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `flip`          | Derived state is `done` AND design status is `planned` / `in_progress`                                                                            | Status is rewritten to `done` (atomic write)                    |
-| `skip`          | Design status is already `done`, OR derived state is `planned` (no events recorded), OR derived state is `started` / `resumed` (work in progress) | No change                                                       |
-| `manual_review` | Derived state is `blocked` or `failed`                                                                                                            | No change. The user is directed to `plan analyze` for diagnosis |
+| Action          | When                                                                                                                                                     | Effect of `--write`                                             |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `flip`          | Derived state is `done` AND design status is `planned` / `in_progress`                                                                                   | Status is rewritten to `done` (atomic write)                    |
+| `skip`          | Design status is `done` or `cancelled`, OR derived state is `planned` (no events recorded), OR derived state is `started` / `resumed` (work in progress) | No change                                                       |
+| `manual_review` | Derived state is `blocked` or `failed` (unless design status is `cancelled`)                                                                             | No change. The user is directed to `plan analyze` for diagnosis |
 
 `phase reconcile` never touches `manual_review` tasks even with `--write`. The classifier intentionally narrows the writable set to the unambiguous `done-but-design-not-done` case.
 
@@ -3078,7 +3080,7 @@ Field presence by kind:
 | `planned_writes[]`                            | ✓                 | absent       | absent              |
 | `applied_writes[]`, `skipped_writes[]`        | absent            | ✓            | absent              |
 
-`phase_status_candidate` reflects the post-flip simulation. It is `done` only if every task would end up `done`; `in_progress` if any task is `started` / `blocked` / `resumed` / `failed`; otherwise `planned`. Writing the actual phase status remains a manual release-prep step.
+`phase_status_candidate` reflects the post-flip simulation. It is `done` only if every task would end up terminal (`done` or explicitly `cancelled`); `in_progress` if any non-cancelled task is `started` / `blocked` / `resumed` / `failed` or if a non-terminal task is marked `in_progress` in design; otherwise `planned`. Writing the actual phase status remains a manual release-prep step.
 
 ### Errors
 
@@ -3485,12 +3487,12 @@ The command **never** writes to the progress ledger, **never** writes to `design
 
 For each phase, runbook iterates `phase.tasks[]` and emits steps in this priority order:
 
-1. **Blocked tasks — resume guidance** (`blocking: true`). For each `blocked` task, emit one `manual_action` step describing blocker resolution + a `task resume <id> --reason "..."` command step.
-2. **Failed / complex-drift tasks — manual_review** (`blocking: true`). For `failed` state or `done-blocked-conflict` / `done-with-incomplete-events` drift, emit a `manual_action` step pointing at `plan analyze`. These drifts need human judgement; `phase reconcile` intentionally refuses them.
+1. **Blocked tasks — resume guidance** (`blocking: true`). For each `blocked` task, emit one `manual_action` step describing blocker resolution + a `task resume <id> --reason "..."` command step, unless the task's design `status` is `cancelled`.
+2. **Failed / complex-drift tasks — manual_review** (`blocking: true`). For `failed` state or `done-blocked-conflict` / `done-with-incomplete-events` drift, emit a `manual_action` step pointing at `plan analyze`, unless the task's design `status` is `cancelled`. These drifts need human judgement; `phase reconcile` intentionally refuses them.
 3. **Eligible reconcile batch** (non-blocking). If at least one task is a `flip` candidate, emit exactly one `phase reconcile <id> --write` step. Per-task `task finalize` enumeration is intentionally avoided — reconcile's atomic batch is the whole point.
-4. **In-progress task hints** (non-blocking). For each `started` / `resumed` task, emit one `task runbook <task-id>` step. Per-task judgement is delegated to `task runbook`.
-5. **Untouched ready tasks** (non-blocking). For each `planned` task with no events AND all `depends_on` satisfied, emit the four-step ready-task sequence: `task start <id>` → `task context <id>` → manual implement → `task complete <id>`. This is the runbook's **Stable (v1.3+)** command output and is intentionally unchanged; `task prepare` is the recommended modern entry point when a human or agent starts work directly; full-detail `task prepare` (or any explicit budget flag) bundles `task context`, but the runbook keeps emitting `task context` so its `next_steps[].command` strings stay contract-stable.
-6. **Phase-status advisory** (non-blocking, `manual_action`). If every task would be `done` post-reconcile and the phase itself isn't already `done`, surface the manual phase-status flip as the final step.
+4. **In-progress task hints** (non-blocking). For each `started` / `resumed` task, emit one `task runbook <task-id>` step, unless the task's design `status` is `cancelled`. Per-task judgement is delegated to `task runbook`.
+5. **Untouched ready tasks** (non-blocking). For each `planned` task with no events AND all `depends_on` satisfied, emit the four-step ready-task sequence: `task start <id>` → `task context <id>` → manual implement → `task complete <id>`. Cancelled tasks do not emit this sequence. This is the runbook's **Stable (v1.3+)** command output and is intentionally unchanged; `task prepare` is the recommended modern entry point when a human or agent starts work directly; full-detail `task prepare` (or any explicit budget flag) bundles `task context`, but the runbook keeps emitting `task context` so its `next_steps[].command` strings stay contract-stable.
+6. **Phase-status advisory** (non-blocking, `manual_action`). If every task would be terminal (`done` or explicitly `cancelled`) post-reconcile and the phase itself isn't already `done`, surface the manual phase-status flip as the final step.
 
 ### JSON envelope (success)
 

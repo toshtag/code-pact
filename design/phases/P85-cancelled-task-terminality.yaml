@@ -16,7 +16,8 @@ non_goals:
 definition_of_done:
   - A cancelled task with failed history no longer keeps a phase in progress.
   - Phase reconcile and phase runbook report the same phase-status candidate.
-  - Review bundle accepts a done reviewed task whose failed sibling is explicitly cancelled.
+  - Review bundle accepts a done reviewed task whose failed sibling is
+    explicitly cancelled.
   - Cancelling a task with a derived done state remains fail-closed.
   - Non-cancelled failed tasks continue to block phase completion.
   - Strict finalize and the official review-bundle command pass.
@@ -38,10 +39,10 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
-      Reapply cancelled-task phase terminality from a clean main base,
-      excluding all unmerged P84 artifacts.
+      Reapply cancelled-task phase terminality from a clean main base, excluding
+      all unmerged P84 artifacts.
     requires_decision: false
     depends_on:
       - P83-T6

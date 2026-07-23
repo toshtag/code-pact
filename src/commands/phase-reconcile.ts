@@ -14,6 +14,7 @@ import {
 } from "../core/finalize/safe-write.ts";
 import type { TaskStatusDiff } from "../core/finalize/diff.ts";
 import { classifyReconcile } from "../core/finalize/reconcile-classifier.ts";
+import { derivePhaseLifecycleStatus } from "../core/phase-lifecycle-status.ts";
 
 // ---------------------------------------------------------------------------
 // `phase reconcile <phase-id>`
@@ -102,31 +103,11 @@ async function resolvePhase(
 function computePhaseStatusCandidate(
   verdicts: TaskReconcileVerdict[],
 ): PhaseStatus {
-  if (verdicts.length === 0) return "planned";
-
-  // For each task, compute the effective post-reconcile status.
-  const effective: PhaseStatus[] = verdicts.map((v) => {
-    if (v.action === "flip") return "done";
-    if (v.current_design_status === "done") return "done";
-    // For skip (not yet done) and manual_review, keep the current design status.
-    return v.current_design_status;
-  });
-
-  if (effective.every((s) => s === "done")) return "done";
-
-  // If any verdict indicates active or blocked work, surface in_progress.
-  const hasActiveWork = verdicts.some(
-    (v) =>
-      v.derived_state === "started" ||
-      v.derived_state === "blocked" ||
-      v.derived_state === "resumed" ||
-      v.derived_state === "failed",
-  );
-  if (hasActiveWork) return "in_progress";
-
-  // Otherwise everything is planned (or has been left in_progress in design).
-  if (effective.some((s) => s === "in_progress")) return "in_progress";
-  return "planned";
+  const states = verdicts.map(v => ({
+    design_status: v.current_design_status,
+    derived_state: v.derived_state,
+  }));
+  return derivePhaseLifecycleStatus(states);
 }
 
 export async function runPhaseReconcile(
@@ -143,7 +124,7 @@ export async function runPhaseReconcile(
 
   // 3. Classify each task.
   const tasks = phase.tasks ?? [];
-  const verdicts: TaskReconcileVerdict[] = tasks.map((t) => {
+  const verdicts: TaskReconcileVerdict[] = tasks.map(t => {
     const derived = deriveTaskState(log.events, t.id).current;
     const { action, reason } = classifyReconcile(t.status, derived);
     return {
@@ -168,7 +149,7 @@ export async function runPhaseReconcile(
   };
 
   // 5. Collect the flip candidates (the only eligible writes).
-  const flipCandidates = verdicts.filter((v) => v.action === "flip");
+  const flipCandidates = verdicts.filter(v => v.action === "flip");
 
   if (flipCandidates.length === 0) {
     return { kind: "no_eligible_tasks", ...baseContext };
@@ -242,21 +223,27 @@ export async function runPhaseReconcile(
       `phase reconcile --write was unable to apply any of ${flipCandidates.length} eligible writes for phase "${phase.id}".`,
     );
     (err as NodeJS.ErrnoException).code = "PHASE_RECONCILE_WRITE_REFUSED";
-    (err as NodeJS.ErrnoException & {
-      phase_id?: string;
-      file?: string;
-      skipped_writes?: SkippedWrite[];
-    }).phase_id = phase.id;
-    (err as NodeJS.ErrnoException & {
-      phase_id?: string;
-      file?: string;
-      skipped_writes?: SkippedWrite[];
-    }).file = file;
-    (err as NodeJS.ErrnoException & {
-      phase_id?: string;
-      file?: string;
-      skipped_writes?: SkippedWrite[];
-    }).skipped_writes = skippedWrites;
+    (
+      err as NodeJS.ErrnoException & {
+        phase_id?: string;
+        file?: string;
+        skipped_writes?: SkippedWrite[];
+      }
+    ).phase_id = phase.id;
+    (
+      err as NodeJS.ErrnoException & {
+        phase_id?: string;
+        file?: string;
+        skipped_writes?: SkippedWrite[];
+      }
+    ).file = file;
+    (
+      err as NodeJS.ErrnoException & {
+        phase_id?: string;
+        file?: string;
+        skipped_writes?: SkippedWrite[];
+      }
+    ).skipped_writes = skippedWrites;
     throw err;
   }
 

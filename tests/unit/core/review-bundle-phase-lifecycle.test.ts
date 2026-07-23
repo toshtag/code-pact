@@ -581,4 +581,152 @@ describe("classifyPhaseLifecycle", () => {
     expect(classification.lifecycleOnly).toBe(false);
     expect(classification.reason).toContain("task");
   });
+
+  describe("cancelled task lifecycle changes", () => {
+    it("allows planned -> cancelled when derived state is failed", async () => {
+      git(["init", "--quiet", "--initial-branch=main"]);
+      await commitPhase("P1-foundation.yaml", basePhase());
+
+      const updated = basePhase().replace(
+        "status: planned",
+        "status: cancelled",
+      );
+      await writeFile(
+        join(cwd, "design", "phases", "P1-foundation.yaml"),
+        updated,
+        "utf8",
+      );
+
+      const events: ProgressEvent[] = [
+        {
+          task_id: "P1-T1",
+          status: "started",
+          at: "2026-05-19T10:00:00.000Z",
+          actor: "agent",
+          agent: "claude-code",
+        },
+        {
+          task_id: "P1-T1",
+          status: "failed",
+          at: "2026-05-19T10:30:00.000Z",
+          actor: "agent",
+          agent: "claude-code",
+        },
+      ];
+
+      const classification = await classifyPhaseLifecycle({
+        cwd,
+        phasePath: phasePath("P1-foundation.yaml"),
+        baseSha: baseSha(),
+        events,
+        derivedPhaseStatus: "done",
+      });
+
+      expect(classification.lifecycleOnly).toBe(true);
+      expect(classification.changedFields).toEqual(["tasks[P1-T1].status"]);
+    });
+
+    it("allows in_progress -> cancelled when derived state is blocked", async () => {
+      git(["init", "--quiet", "--initial-branch=main"]);
+      await commitPhase(
+        "P1-foundation.yaml",
+        basePhase().replace("status: planned", "status: in_progress"),
+      );
+
+      const updated = basePhase().replace(
+        "status: planned",
+        "status: cancelled",
+      );
+      await writeFile(
+        join(cwd, "design", "phases", "P1-foundation.yaml"),
+        updated,
+        "utf8",
+      );
+
+      const events: ProgressEvent[] = [
+        {
+          task_id: "P1-T1",
+          status: "started",
+          at: "2026-05-19T10:00:00.000Z",
+          actor: "agent",
+          agent: "claude-code",
+        },
+        {
+          task_id: "P1-T1",
+          status: "blocked",
+          at: "2026-05-19T10:30:00.000Z",
+          actor: "agent",
+          agent: "claude-code",
+          reason: "blocked",
+        },
+      ];
+
+      const classification = await classifyPhaseLifecycle({
+        cwd,
+        phasePath: phasePath("P1-foundation.yaml"),
+        baseSha: baseSha(),
+        events,
+        derivedPhaseStatus: "done",
+      });
+
+      expect(classification.lifecycleOnly).toBe(true);
+      expect(classification.changedFields).toEqual(["tasks[P1-T1].status"]);
+    });
+
+    it("rejects done -> cancelled", async () => {
+      git(["init", "--quiet", "--initial-branch=main"]);
+      await commitPhase(
+        "P1-foundation.yaml",
+        basePhase().replace("status: planned", "status: done"),
+      );
+
+      const updated = basePhase().replace(
+        "status: planned",
+        "status: cancelled",
+      );
+      await writeFile(
+        join(cwd, "design", "phases", "P1-foundation.yaml"),
+        updated,
+        "utf8",
+      );
+
+      const events = makeEvents("P1-T1", "started");
+      const classification = await classifyPhaseLifecycle({
+        cwd,
+        phasePath: phasePath("P1-foundation.yaml"),
+        baseSha: baseSha(),
+        events,
+        derivedPhaseStatus: "planned",
+      });
+
+      expect(classification.lifecycleOnly).toBe(false);
+      expect(classification.reason).toMatch(/cancelled/);
+    });
+
+    it("rejects cancelling a task whose derived state is done", async () => {
+      git(["init", "--quiet", "--initial-branch=main"]);
+      await commitPhase("P1-foundation.yaml", basePhase());
+
+      const updated = basePhase().replace(
+        "status: planned",
+        "status: cancelled",
+      );
+      await writeFile(
+        join(cwd, "design", "phases", "P1-foundation.yaml"),
+        updated,
+        "utf8",
+      );
+
+      const classification = await classifyPhaseLifecycle({
+        cwd,
+        phasePath: phasePath("P1-foundation.yaml"),
+        baseSha: baseSha(),
+        events: makeEvents("P1-T1"),
+        derivedPhaseStatus: "done",
+      });
+
+      expect(classification.lifecycleOnly).toBe(false);
+      expect(classification.reason).toMatch(/derived state is "done"/);
+    });
+  });
 });

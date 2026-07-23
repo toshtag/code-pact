@@ -1,0 +1,75 @@
+schema_version: 1
+task_id: P85-T2
+phase_id: P85
+phase_path: design/phases/P85-cancelled-task-terminality.yaml
+base_ref: HEAD
+base_sha: 186b988bda509f78ad041736492f4d34b3117862
+phase_blob_sha: a45ccea232bd6a12b16fe064daf005d47d4093f6
+contract_digest: a6e9ee3b083d28f8f9b71a161d163fcacec0065578896a6ca2e1267241a96557
+contract:
+  description: >
+    Reapply cancelled-task phase terminality from a clean main base, excluding
+    all unmerged P84 artifacts.
+  reads:
+    - docs/cli-contract.md
+    - docs/concepts/finalization-reconciliation.md
+    - docs/concepts/runbook.md
+    - src/commands/phase-reconcile.ts
+    - src/core/finalize/reconcile-classifier.ts
+    - src/core/plan/analyze.ts
+    - src/core/progress/task-state.ts
+    - src/core/review-bundle-phase-lifecycle.ts
+    - src/core/review-bundle.ts
+    - src/core/runbook/build-phase-runbook.ts
+    - src/core/schemas/task.ts
+    - tests/integration/review-bundle.test.ts
+    - tests/unit/commands/phase-reconcile.test.ts
+    - tests/unit/core/review-bundle-phase-lifecycle.test.ts
+    - tests/unit/core/runbook/build-phase-runbook.test.ts
+  writes:
+    - docs/cli-contract.md
+    - docs/concepts/finalization-reconciliation.md
+    - docs/concepts/runbook.md
+    - src/commands/phase-reconcile.ts
+    - src/core/finalize/reconcile-classifier.ts
+    - src/core/phase-lifecycle-status.ts
+    - src/core/review-bundle-phase-lifecycle.ts
+    - src/core/review-bundle.ts
+    - src/core/runbook/build-phase-runbook.ts
+    - tests/integration/review-bundle.test.ts
+    - tests/unit/commands/phase-reconcile.test.ts
+    - tests/unit/core/phase-lifecycle-status.test.ts
+    - tests/unit/core/review-bundle-phase-lifecycle.test.ts
+    - tests/unit/core/runbook/build-phase-runbook.test.ts
+  depends_on:
+    - P83-T6
+  decision_refs: []
+  acceptance_refs:
+    - design/specs/P85-T2-task-spec.yaml
+  definition_of_done:
+    - A cancelled task with failed history no longer keeps a phase in progress.
+    - Cancelling a task with a derived done state remains fail-closed.
+    - Non-cancelled failed tasks continue to block phase completion.
+    - Phase reconcile and phase runbook report the same phase-status candidate.
+    - Review bundle accepts a done reviewed task whose failed sibling is
+      explicitly cancelled.
+    - Strict finalize and the official review-bundle command pass.
+  verification_commands:
+    - pnpm build
+    - pnpm check:docs
+    - pnpm test:ci
+    - pnpm test:integration
+    - pnpm test:integration:smoke
+    - pnpm test:unit
+    - pnpm typecheck
+  base_sha: 186b988bda509f78ad041736492f4d34b3117862
+  phase_blob_sha: a45ccea232bd6a12b16fe064daf005d47d4093f6
+registration:
+  mode: spec_file
+  spec_digest: aa993eacdf635a900ae220243a259a2f55d62b710529638185b939e005539db2
+  spec_path: design/specs/P85-T2-task-spec.yaml
+  spec_canonical: |
+    {"phase_id":"P85","schema_version":1,"task":{"acceptance_refs":["design/specs/P85-T2-task-spec.yaml"],"ambiguity":"low","context_size":"medium","decision_refs":[],"depends_on":["P83-T6"],"description":"Reapply cancelled-task phase terminality from a clean main base, excluding all unmerged P84 artifacts.\n","expected_duration":"medium","id":"P85-T2","reads":["src/core/review-bundle.ts","src/core/review-bundle-phase-lifecycle.ts","src/core/finalize/reconcile-classifier.ts","src/commands/phase-reconcile.ts","src/core/runbook/build-phase-runbook.ts","src/core/plan/analyze.ts","src/core/schemas/task.ts","src/core/progress/task-state.ts","tests/unit/core/review-bundle-phase-lifecycle.test.ts","tests/unit/commands/phase-reconcile.test.ts","tests/unit/core/runbook/build-phase-runbook.test.ts","tests/integration/review-bundle.test.ts","docs/concepts/finalization-reconciliation.md","docs/concepts/runbook.md","docs/cli-contract.md"],"requires_decision":false,"risk":"medium","status":"planned","type":"bugfix","verification_strength":"strong","write_surface":"medium","writes":["src/core/phase-lifecycle-status.ts","src/core/review-bundle.ts","src/core/review-bundle-phase-lifecycle.ts","src/core/finalize/reconcile-classifier.ts","src/commands/phase-reconcile.ts","src/core/runbook/build-phase-runbook.ts","tests/unit/core/phase-lifecycle-status.test.ts","tests/unit/core/review-bundle-phase-lifecycle.test.ts","tests/unit/commands/phase-reconcile.test.ts","tests/unit/core/runbook/build-phase-runbook.test.ts","tests/integration/review-bundle.test.ts","docs/concepts/finalization-reconciliation.md","docs/concepts/runbook.md","docs/cli-contract.md"]}}
+at: 2026-07-23T06:01:41.849Z
+actor: agent
+author: Pocket

@@ -24,13 +24,14 @@ afterEach(async () => {
 type TaskSpec = {
   id: string;
   /** Initial design status in the phase YAML. */
-  designStatus: "planned" | "in_progress" | "done";
+  designStatus: "planned" | "in_progress" | "done" | "cancelled";
   /**
    * Pre-recorded progress events for the task. Use "done" to record a
    * started -> done pair; "started" for just a started event; "blocked"
-   * for started -> blocked; "none" for no events at all.
+   * for started -> blocked; "failed" for started -> failed; "none" for no
+   * events at all.
    */
-  derive?: "none" | "started" | "blocked" | "done";
+  derive?: "none" | "started" | "blocked" | "failed" | "done";
 };
 
 async function setupPhase(specs: TaskSpec[]): Promise<void> {
@@ -44,7 +45,7 @@ async function setupPhase(specs: TaskSpec[]): Promise<void> {
   );
 
   const taskBlocks = specs
-    .map((s) =>
+    .map(s =>
       [
         `  - id: ${s.id}`,
         `    type: feature`,
@@ -122,6 +123,17 @@ async function setupPhase(specs: TaskSpec[]): Promise<void> {
         ].join("\n"),
       );
       ts += 60_000;
+    } else if (derive === "failed") {
+      events.push(
+        [
+          `  - task_id: ${s.id}`,
+          `    status: failed`,
+          `    at: "${new Date(ts).toISOString()}"`,
+          `    actor: agent`,
+          `    agent: claude-code`,
+        ].join("\n"),
+      );
+      ts += 60_000;
     }
     // started: no further event needed.
   }
@@ -165,9 +177,7 @@ describe("runPhaseReconcile — no_eligible_tasks", () => {
   });
 
   it("includes the verdict list and phase_status_candidate even when no_eligible_tasks", async () => {
-    await setupPhase([
-      { id: "P1-T1", designStatus: "done", derive: "done" },
-    ]);
+    await setupPhase([{ id: "P1-T1", designStatus: "done", derive: "done" }]);
     const result = await runPhaseReconcile({ cwd, phaseId: "P1" });
     expect(result.tasks).toHaveLength(1);
     expect(result.tasks[0]?.action).toBe("skip");
@@ -192,7 +202,7 @@ describe("runPhaseReconcile — would_reconcile (dry-run)", () => {
     expect(result.kind).toBe("would_reconcile");
     if (result.kind !== "would_reconcile") return;
     expect(result.planned_writes).toHaveLength(2);
-    const flippedIds = result.planned_writes.map((w) => w.task_id).sort();
+    const flippedIds = result.planned_writes.map(w => w.task_id).sort();
     expect(flippedIds).toEqual(["P1-T1", "P1-T2"]);
     expect(result.tasks).toHaveLength(4);
   });
@@ -203,7 +213,7 @@ describe("runPhaseReconcile — would_reconcile (dry-run)", () => {
     ]);
     await runPhaseReconcile({ cwd, phaseId: "P1" });
     const phase = await readPhase();
-    expect(phase.tasks?.find((t) => t.id === "P1-T1")?.status).toBe("planned");
+    expect(phase.tasks?.find(t => t.id === "P1-T1")?.status).toBe("planned");
   });
 
   it("includes verdict action and reason per task", async () => {
@@ -212,10 +222,10 @@ describe("runPhaseReconcile — would_reconcile (dry-run)", () => {
       { id: "P1-T2", designStatus: "planned", derive: "blocked" },
     ]);
     const result = await runPhaseReconcile({ cwd, phaseId: "P1" });
-    const t1 = result.tasks.find((t) => t.task_id === "P1-T1");
+    const t1 = result.tasks.find(t => t.task_id === "P1-T1");
     expect(t1?.action).toBe("flip");
     expect(t1?.derived_state).toBe("done");
-    const t2 = result.tasks.find((t) => t.task_id === "P1-T2");
+    const t2 = result.tasks.find(t => t.task_id === "P1-T2");
     expect(t2?.action).toBe("manual_review");
     expect(t2?.derived_state).toBe("blocked");
     expect(t2?.reason).toMatch(/blocked/);
@@ -243,8 +253,8 @@ describe("runPhaseReconcile — reconciled (--write)", () => {
     expect(result.skipped_writes).toEqual([]);
 
     const phase = await readPhase();
-    expect(phase.tasks?.find((t) => t.id === "P1-T1")?.status).toBe("done");
-    expect(phase.tasks?.find((t) => t.id === "P1-T2")?.status).toBe("done");
+    expect(phase.tasks?.find(t => t.id === "P1-T1")?.status).toBe("done");
+    expect(phase.tasks?.find(t => t.id === "P1-T2")?.status).toBe("done");
   });
 
   it("does NOT touch tasks whose action was skip", async () => {
@@ -254,8 +264,8 @@ describe("runPhaseReconcile — reconciled (--write)", () => {
     ]);
     await runPhaseReconcile({ cwd, phaseId: "P1", write: true });
     const phase = await readPhase();
-    expect(phase.tasks?.find((t) => t.id === "P1-T1")?.status).toBe("done");
-    expect(phase.tasks?.find((t) => t.id === "P1-T2")?.status).toBe("planned");
+    expect(phase.tasks?.find(t => t.id === "P1-T1")?.status).toBe("done");
+    expect(phase.tasks?.find(t => t.id === "P1-T2")?.status).toBe("planned");
   });
 
   it("does NOT change the phase's own status field", async () => {
@@ -301,7 +311,9 @@ describe("runPhaseReconcile — reconciled (--write)", () => {
 
 describe("runPhaseReconcile — PHASE_NOT_FOUND", () => {
   it("raises PHASE_NOT_FOUND for an unknown phase id", async () => {
-    await setupPhase([{ id: "P1-T1", designStatus: "planned", derive: "done" }]);
+    await setupPhase([
+      { id: "P1-T1", designStatus: "planned", derive: "done" },
+    ]);
     await expect(
       runPhaseReconcile({ cwd, phaseId: "P99" }),
     ).rejects.toMatchObject({ code: "PHASE_NOT_FOUND" });
@@ -331,11 +343,31 @@ describe("runPhaseReconcile — classification", () => {
   });
 
   it("classifies design=done already as skip (idempotent)", async () => {
-    await setupPhase([
-      { id: "P1-T1", designStatus: "done", derive: "done" },
-    ]);
+    await setupPhase([{ id: "P1-T1", designStatus: "done", derive: "done" }]);
     const result = await runPhaseReconcile({ cwd, phaseId: "P1" });
     expect(result.tasks[0]?.action).toBe("skip");
     expect(result.tasks[0]?.reason).toMatch(/already done/);
+  });
+});
+
+describe("runPhaseReconcile — cancelled task terminality", () => {
+  it("skips cancelled failed sibling and reports phase_status_candidate done", async () => {
+    await setupPhase([
+      { id: "P1-T1", designStatus: "cancelled", derive: "failed" },
+      { id: "P1-T2", designStatus: "planned", derive: "done" },
+    ]);
+    const result = await runPhaseReconcile({ cwd, phaseId: "P1", write: true });
+    expect(result.phase_status_candidate).toBe("done");
+
+    const t1 = result.tasks.find(t => t.task_id === "P1-T1");
+    expect(t1?.action).toBe("skip");
+    expect(t1?.reason).toMatch(/cancelled/);
+
+    const t2 = result.tasks.find(t => t.task_id === "P1-T2");
+    expect(t2?.action).toBe("flip");
+
+    const phase = await readPhase();
+    expect(phase.tasks?.find(t => t.id === "P1-T1")?.status).toBe("cancelled");
+    expect(phase.tasks?.find(t => t.id === "P1-T2")?.status).toBe("done");
   });
 });

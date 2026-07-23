@@ -198,18 +198,36 @@ export async function classifyPhaseLifecycle(
     }
 
     if (baseTask.status !== headTask.status) {
-      if (headTask.status !== "done") {
+      if (headTask.status === "done") {
+        const derived = deriveTaskState(events, taskId);
+        if (derived.current !== "done") {
+          return fail(
+            `task "${taskId}" status is "done" but progress ledger derived state is "${derived.current}"`,
+          );
+        }
+        changedFields.push(`tasks[${taskId}].status`);
+      } else if (headTask.status === "cancelled") {
+        // Cancelling a task is a terminal lifecycle decision. It is allowed
+        // only when the task was not already done (fail-closed) and the base
+        // status was planned or in_progress.
+        const baseStatus = baseTask.status;
+        if (baseStatus !== "planned" && baseStatus !== "in_progress") {
+          return fail(
+            `task "${taskId}" status changed to "cancelled" from non-eligible base status "${baseStatus}"`,
+          );
+        }
+        const derived = deriveTaskState(events, taskId);
+        if (derived.current === "done") {
+          return fail(
+            `task "${taskId}" is cancelled but progress ledger derived state is "done"`,
+          );
+        }
+        changedFields.push(`tasks[${taskId}].status`);
+      } else {
         return fail(
-          `task "${taskId}" status changed to non-done value "${headTask.status}"`,
+          `task "${taskId}" status changed to non-terminal value "${headTask.status}"`,
         );
       }
-      const derived = deriveTaskState(events, taskId);
-      if (derived.current !== "done") {
-        return fail(
-          `task "${taskId}" status is "done" but progress ledger derived state is "${derived.current}"`,
-        );
-      }
-      changedFields.push(`tasks[${taskId}].status`);
     }
   }
 
