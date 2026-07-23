@@ -13,6 +13,20 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [2.8.0] — 2026-07-23
+
+### Added
+
+- **Added `task cancel`.** Mark a task as cancelled; cancellation is terminal and prevents `lock`, `start`, `block`, `resume`, `complete`, `record-done`, `finalize`, and `execute`. Progress events and contract locks are preserved, and tasks with non-cancelled direct dependents cannot be cancelled.
+- **Added lossless `--spec-file` task registration.** `task register` can ingest a task spec from a file without rewriting the declared reads and writes.
+- **Added pre-start dependency gating.** `task start` rejects incomplete declared dependencies before writing any state and reports every incomplete dependency id.
+- **Added one-shot single-file execution.** Execute a task against a single source file without requiring a full phase context.
+
+### Changed
+
+- **Hardened cancelled-task terminality across the public lifecycle.** `task prepare` and `task runbook` return terminal no-op guidance for cancelled tasks, and lifecycle status mutations no longer trigger false-positive review-bundle audits.
+- **Minimized the default Agent work order.** `task prepare` now emits a smaller, sufficient work order by default; the full contract surface remains accessible through opt-in flags and generated references.
+
 ## [2.7.0] — 2026-07-17
 
 ### Added
