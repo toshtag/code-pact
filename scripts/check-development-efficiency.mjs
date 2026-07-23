@@ -397,7 +397,8 @@ export function evaluateDevelopmentEfficiency({
     const prospectiveConsecutiveDesignOnlyTasks = nextDesignOnly
       ? consecutiveDesignOnlyTasks + 1
       : 0;
-    const pass = prospectiveConsecutiveDesignOnlyTasks <= 1;
+    const pass =
+      prospectiveConsecutiveDesignOnlyTasks <= maxConsecutiveDesignOnlyTasks;
     return {
       ...baseResult,
       next_task: nextTask,
@@ -409,7 +410,7 @@ export function evaluateDevelopmentEfficiency({
     };
   }
 
-  const pass = consecutiveDesignOnlyTasks <= 1;
+  const pass = consecutiveDesignOnlyTasks <= maxConsecutiveDesignOnlyTasks;
   return {
     ...baseResult,
     status: pass ? "pass" : "fail",

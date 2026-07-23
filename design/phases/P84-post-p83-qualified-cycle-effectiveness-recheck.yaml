@@ -68,7 +68,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Re-run P84-T1 as a protocol-correct Baseline versus Code Pact pair after
       P81-P83 improvements. Use identical generation protocol, model, sampling,
