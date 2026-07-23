@@ -1,0 +1,31 @@
+schema_version: 1
+phase_id: P84
+task:
+  id: P84-T2
+  type: test
+  ambiguity: low
+  risk: low
+  context_size: small
+  write_surface: low
+  verification_strength: strong
+  expected_duration: short
+  status: planned
+  description: >
+    Re-run P84-T1 as a protocol-correct Baseline versus Code Pact pair after
+    P81-P83 improvements. Use identical generation protocol, model, sampling,
+    canonical task facts, and at most one repair per condition. Record full
+    lifecycle evidence and classify whether total model-token or repair-round
+    reduction is demonstrated.
+  requires_decision: false
+  depends_on:
+    - P84-T1
+  decision_refs:
+    - design/decisions/P84-T1-post-p83-qualified-cycle-trial.md
+  reads:
+    - design/decisions/P80-T2-qualified-one-pair-trial.md
+    - design/decisions/P66-T2-token-reduction-evidence-rfc.md
+    - docs/maintainers/token-efficient-development.md
+    - design/specs/P83-T6-task-spec.yaml
+    - design/decisions/P84-T1-post-p83-qualified-cycle-trial.md
+  writes:
+    - design/decisions/P84-T2-protocol-correct-effectiveness-trial.md
