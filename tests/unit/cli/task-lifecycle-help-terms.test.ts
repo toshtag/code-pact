@@ -102,6 +102,12 @@ const REQUIRED_TERMS: Record<string, readonly string[]> = {
     "--audit-strict",
     "--write",
   ],
+  cancel: [
+    "Usage: code-pact task cancel <task-id>",
+    "cancelled",
+    "--write",
+    "--json",
+  ],
 };
 
 const VERBS = Object.keys(REQUIRED_TERMS);

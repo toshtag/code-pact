@@ -82,9 +82,13 @@ describe("buildTaskRunbook", () => {
       });
       expect(result.next_steps.length).toBe(4);
       expect(result.next_steps[0]!.command).toBe("code-pact task start P1-T1");
-      expect(result.next_steps[1]!.command).toBe("code-pact task context P1-T1");
+      expect(result.next_steps[1]!.command).toBe(
+        "code-pact task context P1-T1",
+      );
       expect(result.next_steps[2]!.manual_action).toBe("Implement the task");
-      expect(result.next_steps[3]!.command).toBe("code-pact task complete P1-T1");
+      expect(result.next_steps[3]!.command).toBe(
+        "code-pact task complete P1-T1",
+      );
     });
 
     it("task context step does not embed an agent name", () => {
@@ -94,7 +98,7 @@ describe("buildTaskRunbook", () => {
         phaseId: "P1",
         events: [],
       });
-      const contextStep = result.next_steps.find((s) =>
+      const contextStep = result.next_steps.find(s =>
         s.command?.startsWith("code-pact task context"),
       );
       expect(contextStep?.command).not.toContain("--agent");
@@ -109,8 +113,12 @@ describe("buildTaskRunbook", () => {
       });
       expect(result.state_summary.derived_state).toBe("started");
       expect(result.next_steps.length).toBe(2);
-      expect(result.next_steps[0]!.manual_action).toBe("Continue implementation");
-      expect(result.next_steps[1]!.command).toBe("code-pact task complete P1-T1");
+      expect(result.next_steps[0]!.manual_action).toBe(
+        "Continue implementation",
+      );
+      expect(result.next_steps[1]!.command).toBe(
+        "code-pact task complete P1-T1",
+      );
     });
 
     it("blocked → manual_action + task resume, both blocking", () => {
@@ -163,6 +171,19 @@ describe("buildTaskRunbook", () => {
       });
       expect(result.state_summary.drift_kind).toBe("done-historical");
       expect(result.next_steps).toEqual([]);
+    });
+
+    it("cancelled → terminal manual no-op, no lifecycle steps", () => {
+      const result = buildTaskRunbook({
+        cwd,
+        task: { ...baseTask, status: "cancelled" },
+        phaseId: "P1",
+        events: [],
+      });
+      expect(result.next_steps).toHaveLength(1);
+      expect(result.next_steps[0]!.manual_action).toContain("cancelled");
+      expect(result.next_steps[0]!.command).toBeNull();
+      expect(result.next_steps[0]!.blocking).toBe(true);
     });
 
     it("done in design + derived blocked → manual_review (blocking)", () => {
@@ -266,7 +287,12 @@ describe("buildTaskRunbook", () => {
   });
 
   it("kind is always 'runbook' regardless of state", () => {
-    const r1 = buildTaskRunbook({ cwd, task: baseTask, phaseId: "P1", events: [] });
+    const r1 = buildTaskRunbook({
+      cwd,
+      task: baseTask,
+      phaseId: "P1",
+      events: [],
+    });
     const r2 = buildTaskRunbook({
       cwd,
       task: { ...baseTask, status: "done" },

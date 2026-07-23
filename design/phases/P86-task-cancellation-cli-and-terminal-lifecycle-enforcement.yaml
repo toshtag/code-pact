@@ -3,11 +3,11 @@ name: Task Cancellation CLI and Terminal Lifecycle Enforcement
 weight: 2
 confidence: high
 risk: medium
-status: in_progress
+status: done
 objective: >
   Provide a safe task cancellation command and prevent all implementation and
-  completion lifecycle operations on explicitly cancelled tasks while
-  preserving progress and contract history.
+  completion lifecycle operations on explicitly cancelled tasks while preserving
+  progress and contract history.
 non_goals:
   - Add a cancelled progress event.
   - Delete or rewrite progress history.
@@ -18,7 +18,8 @@ non_goals:
 definition_of_done:
   - task cancel changes only the task design status to cancelled.
   - Cancellation preserves progress events, contract locks, and task specs.
-  - Cancelled tasks cannot be locked, started, blocked, resumed, completed, record-done, finalized, or executed.
+  - Cancelled tasks cannot be locked, started, blocked, resumed, completed,
+    record-done, finalized, or executed.
   - task prepare and task runbook return terminal no-op guidance.
   - Tasks with non-cancelled direct dependents cannot be cancelled.
   - P83-T5 is cancelled through the new command and P83 reconciles to done.
@@ -41,7 +42,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       Add task cancel with dry-run/write behavior, enforce cancelled terminality
       across the public task lifecycle, and dogfood the command by cancelling
@@ -81,13 +82,13 @@ tasks:
     writes:
       - src/core/task-cancellation.ts
       - src/core/task-dependents.ts
+      - src/core/contract-lock.ts
       - src/commands/task-cancel.ts
       - src/commands/task-progress.ts
       - src/commands/task-prepare.ts
       - src/commands/task-complete.ts
       - src/commands/task-record-done.ts
       - src/commands/task-finalize.ts
-      - src/commands/task-lock.ts
       - src/core/runbook/build-task-runbook.ts
       - src/core/execute-once/eligibility.ts
       - src/cli/commands/task.ts

@@ -494,6 +494,25 @@ export const messages = {
       noEvents: (taskId: string): string =>
         `Task "${taskId}" has no progress events yet.`,
     },
+    cancel: {
+      missingTaskId:
+        "task cancel requires a task id (e.g. `task cancel P1-T1`).",
+      notAllowed: (taskId: string): string =>
+        `Task "${taskId}" cannot be cancelled: it is already done.`,
+      dependentsExist: (taskId: string, deps: string[]): string =>
+        `Task "${taskId}" cannot be cancelled: it has non-cancelled direct dependents: ${deps.join(", ")}. Cancel or complete them first.`,
+      alreadyCancelled: (taskId: string): string =>
+        `Task "${taskId}" is already cancelled. No change written.`,
+      wouldCancel: (taskId: string, from: string): string =>
+        `Dry run: would flip "${taskId}" design status from "${from}" to "cancelled". Run with --write to apply.`,
+      success: (taskId: string): string => `Cancelled "${taskId}".`,
+      writeFailure: (taskId: string, status: string): string =>
+        `Task "${taskId}" cancel write failed; rollback_status=${status}.`,
+      writeConflict: (taskId: string): string =>
+        `Task "${taskId}" cancel write conflict: phase file changed before write.`,
+      cancelled: (taskId: string): string =>
+        `Task "${taskId}" is cancelled. No further lifecycle operations are allowed.`,
+    },
   },
   cliContract: {
     nonInteractiveMissing: (flag: string): string =>

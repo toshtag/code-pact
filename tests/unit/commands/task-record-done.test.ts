@@ -94,6 +94,7 @@ async function setupProject(
     projectYaml?: string;
     progressYaml?: string;
     phaseYaml?: string;
+    status?: string;
   } = {},
 ): Promise<void> {
   await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
@@ -115,6 +116,7 @@ async function setupProject(
       PHASE_YAML({
         failingCommand: opts.failingCommand,
         requiresDecision: opts.requiresDecision,
+        status: opts.status,
       }),
     "utf8",
   );
@@ -147,12 +149,14 @@ async function setupProject(
     { cwd: dir },
   );
 
-  await createTaskContractLock({
-    cwd: dir,
-    taskId: "P1-T1",
-    actor: "agent",
-    agent: "claude-code",
-  });
+  if (opts.status !== "cancelled") {
+    await createTaskContractLock({
+      cwd: dir,
+      taskId: "P1-T1",
+      actor: "agent",
+      agent: "claude-code",
+    });
+  }
 }
 
 async function readProgress(dir: string) {
@@ -844,6 +848,13 @@ describe("runTaskRecordDone — resolution errors", () => {
     await expect(
       runTaskRecordDone({ cwd: dir, taskId: "NOPE-T9", evidence: ["x"] }),
     ).rejects.toMatchObject({ code: "TASK_NOT_FOUND" });
+  });
+
+  it("TASK_CANCELLED when the task design status is cancelled", async () => {
+    await setupProject(dir, { status: "cancelled" });
+    await expect(
+      runTaskRecordDone({ cwd: dir, taskId: "P1-T1", evidence: ["x"] }),
+    ).rejects.toMatchObject({ code: "TASK_CANCELLED" });
   });
 
   it("AGENT_NOT_FOUND for an agent not in project.yaml", async () => {

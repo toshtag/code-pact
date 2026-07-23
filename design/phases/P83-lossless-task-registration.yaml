@@ -3,7 +3,7 @@ name: Lossless Task Registration
 weight: 1
 confidence: high
 risk: medium
-status: in_progress
+status: done
 objective: Preserve an explicitly supplied machine-readable task contract from
   task registration through contract locking, preventing readiness-field loss
   caused by manual CLI-flag transcription.
@@ -223,7 +223,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: cancelled
     description: >
       Pre-start spec drift gate. Reject task start without side effects when an
       existing spec-file contract lock has drifted, been deleted, or corrupted.

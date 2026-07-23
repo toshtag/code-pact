@@ -86,7 +86,8 @@ export async function cmdTaskLock(
           code === "TASK_CONTRACT_LOCK_EXISTS" ||
           code === "AMBIGUOUS_TASK_ID" ||
           code === "WORKTREE_NOT_CLEAN" ||
-          code === "INVALID_TASK_TRANSITION"
+          code === "INVALID_TASK_TRANSITION" ||
+          code === "TASK_CANCELLED"
         ) {
           emitError(json, code, message);
           return 1;

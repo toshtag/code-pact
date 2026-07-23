@@ -1,0 +1,11 @@
+task_id: P86-T1
+status: done
+at: 2026-07-23T07:33:41.922Z
+actor: agent
+agent: claude-code
+author: Pocket
+evidence:
+  - "manual verification: pnpm test:ci, pnpm test:integration:full, pnpm
+    check:docs passed"
+source: external
+id: 1a3b449f057cce31dc2db533e3ed31948597b49719281462c32943000d7f7cc9

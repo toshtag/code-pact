@@ -52,6 +52,7 @@ The runbook maps `(derived state, design status, drift kind)` → recommended st
 | started / resumed   | planned / in_progress | (none)                                              | continue implementation → `task complete`                                              |
 | blocked             | planned / in_progress | (none)                                              | manual_action (resolve blocker) → `task resume --reason "..."` — both `blocking: true` |
 | failed              | planned / in_progress | (none)                                              | manual_review (diagnose + fix) → `task complete` (re-run)                              |
+| any                 | cancelled             | (none)                                              | `manual_action`: "Task is cancelled. No further lifecycle steps are available."        |
 | done                | planned / in_progress | done-but-design-not-done                            | `task finalize --write` with dry-run safety note                                       |
 | done                | done                  | (none)                                              | empty `next_steps` (consistent)                                                        |
 | done                | done                  | done-blocked-conflict / done-with-incomplete-events | manual_review pointing at `plan analyze` (blocking)                                    |

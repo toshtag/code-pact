@@ -355,6 +355,25 @@ code-pact task finalize P1-T1 --write --json
 code-pact task finalize P1-T1 --audit-strict --base-ref origin/main --write --json
 ```
 
+### `task cancel`
+
+`code-pact task cancel <task-id> [options]`
+
+Cancel a task by flipping its design status to `cancelled` in its phase YAML.
+Cancellation is terminal: cancelled tasks cannot be started, blocked, resumed,
+completed, record-done, finalized, executed, or locked. Dry-run is the default;
+pass --write to apply. Progress events, contract locks, and task specs are preserved.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--write` | — | Apply the cancellation. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact task cancel P1-T1 --json
+code-pact task cancel P1-T1 --write --json
+```
+
 ### `task execute`
 
 `code-pact task execute <task-id> [options]`

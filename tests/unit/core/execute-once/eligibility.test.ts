@@ -357,6 +357,27 @@ describe("resolveOneShotEligibility", () => {
     });
   });
 
+  it("rejects cancelled design status", async () => {
+    await withTempProject(async cwd => {
+      await mkdir(join(cwd, "src"), { recursive: true });
+      await writeFile(join(cwd, "src", "example.ts"), "x", "utf8");
+
+      const result = await resolveOneShotEligibility({
+        cwd,
+        phase: makePhase(),
+        task: makeTask({ status: "cancelled" }),
+        events: [],
+      });
+
+      expect(result.eligible).toBe(false);
+      if (!result.eligible) {
+        expect(result.reasons).toContain(
+          INELIGIBLE_REASONS.TASK_STATE_NOT_ALLOWED,
+        );
+      }
+    });
+  });
+
   it("rejects empty goal", async () => {
     await withTempProject(async cwd => {
       const result = await resolveOneShotEligibility({
