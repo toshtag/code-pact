@@ -162,3 +162,69 @@ Capability tokens are excluded from the pair delta per protocol.
 
 - P84-T1 decision report: `design/decisions/P84-T1-post-p83-qualified-cycle-trial.md`
 - P83-T6 decision report: `design/decisions/P83-T6-pre-start-spec-drift-gate.md`
+
+## P84 final closeout
+
+This section records the fixed review outcome and termination decision for P84.
+
+### Final classification
+
+```yaml
+trial_status: review_process_failed
+pair_status: invalid
+token_result: not_comparable
+repair_round_result: not_comparable
+product_effectiveness: not_demonstrated
+```
+
+### Blockers identified in the final review
+
+- **B1** Capability evidence: `num_predict` conflict between attempts (`512`) and
+  `environment.json`/`capability/metrics.json` (`8192`).
+- **B2** Invocation limit: passed.
+- **B3** Same fixture/oracle/protocol: failed — Baseline and Code Pact initial
+  tree SHAs differ and oracle command sets are not equal.
+- **B4** Raw usage and token accounting: failed — Baseline repair raw provider
+  response is stored as `.txt` instead of `.json`, so `input_tokens`,
+  `output_tokens`, `total_tokens`, `model`, `done reason`, and `sampling` cannot
+  be recomputed from raw evidence.
+- **B5** Classification: failed — verifier is fail-open and does not compare
+  oracle digests, initial trees, or formal review-bundle success.
+- **B6** Code Pact lifecycle: failed — `task review-bundle P84-T2` and the
+  historical `P83-T6` review bundle were refused.
+- **B7** Evidence archive completeness: failed — missing `response-repair.json`,
+  manifest hash is not externally anchored, and patch / lifecycle artifacts are
+  incomplete for a Code Pact review bundle.
+- **B8** Verifier fail-closed: failed — tampering with `total_tokens` and internal
+  arithmetic plus updating `hashes.json` still exits `0`.
+- **B9** Repository / review artifact: failed — the submitted `P84-T2-review.zip`
+  is a manual `git archive`, not a Code Pact review bundle with manifest,
+  contract lock, start/done events, diff, write audit, and verification evidence.
+
+### Post-termination actions
+
+- P84-T2 is **not merged**.
+- P84-T2 PR #548 is **closed without merge**.
+- P84-T3 is **not created**.
+- No further model invocations for P84.
+- Raw evidence for P84-T1 and P84-T2 is preserved unmodified in
+  `.code-pact/state/archive/P84/`.
+- Main will not receive production token-reduction features from this PR.
+- If main needs a record, it must be via an ordinary issue or project note only.
+
+### Preserved facts
+
+- P84-T2 compared a Baseline (1 initial + 1 repair) with a Code Pact (1
+  initial, 0 repairs) condition on the pre-P83-T6 `TASK_CONTRACT_DRIFT` bug.
+- Recorded totals: Baseline `9,536` tokens, Code Pact `6,888` tokens.
+- Final patches were byte-identical between Baseline repair and Code Pact.
+- Because the qualified-comparison prerequisites were not met, the `-27.8%`
+  token delta is **not adopted** as a product-effectiveness conclusion.
+
+### Product decision
+
+P84 is terminated as `review_process_failed`. Token-reduction initiative work is
+paused until new measured data can be produced under a cleaner protocol. The
+next engineering work should come from existing user-facing features, bug fixes,
+or release tasks, not from additional effectiveness trials or production
+token-reduction features.
