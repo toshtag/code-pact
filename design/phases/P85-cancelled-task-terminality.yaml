@@ -3,7 +3,7 @@ name: Cancelled Task Terminality
 weight: 2
 confidence: high
 risk: medium
-status: in_progress
+status: done
 objective: >
   Treat an explicitly cancelled task as terminal for phase-level lifecycle
   aggregation while preserving its historical progress events.
