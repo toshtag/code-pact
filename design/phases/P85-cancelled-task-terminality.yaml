@@ -1,0 +1,81 @@
+id: P85
+name: Cancelled Task Terminality
+weight: 2
+confidence: high
+risk: medium
+status: in_progress
+objective: >
+  Treat an explicitly cancelled task as terminal for phase-level lifecycle
+  aggregation while preserving its historical progress events.
+non_goals:
+  - Add task cancel or supersede commands.
+  - Add a new task status.
+  - Rewrite or delete progress events.
+  - Infer replacement relationships.
+  - Resume token-reduction work.
+definition_of_done:
+  - A cancelled task with failed history no longer keeps a phase in progress.
+  - Phase reconcile and phase runbook report the same phase-status candidate.
+  - Review bundle accepts a done reviewed task whose failed sibling is explicitly cancelled.
+  - Cancelling a task with a derived done state remains fail-closed.
+  - Non-cancelled failed tasks continue to block phase completion.
+  - Strict finalize and the official review-bundle command pass.
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm build
+    - pnpm test:unit
+    - pnpm test:integration
+    - pnpm test:integration:smoke
+    - pnpm check:docs
+    - pnpm test:ci
+tasks:
+  - id: P85-T2
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: >
+      Reapply cancelled-task phase terminality from a clean main base,
+      excluding all unmerged P84 artifacts.
+    requires_decision: false
+    depends_on:
+      - P83-T6
+    decision_refs: []
+    reads:
+      - src/core/review-bundle.ts
+      - src/core/review-bundle-phase-lifecycle.ts
+      - src/core/finalize/reconcile-classifier.ts
+      - src/commands/phase-reconcile.ts
+      - src/core/runbook/build-phase-runbook.ts
+      - src/core/plan/analyze.ts
+      - src/core/schemas/task.ts
+      - src/core/progress/task-state.ts
+      - tests/unit/core/review-bundle-phase-lifecycle.test.ts
+      - tests/unit/commands/phase-reconcile.test.ts
+      - tests/unit/core/runbook/build-phase-runbook.test.ts
+      - tests/integration/review-bundle.test.ts
+      - docs/concepts/finalization-reconciliation.md
+      - docs/concepts/runbook.md
+      - docs/cli-contract.md
+    writes:
+      - src/core/phase-lifecycle-status.ts
+      - src/core/review-bundle.ts
+      - src/core/review-bundle-phase-lifecycle.ts
+      - src/core/finalize/reconcile-classifier.ts
+      - src/commands/phase-reconcile.ts
+      - src/core/runbook/build-phase-runbook.ts
+      - tests/unit/core/phase-lifecycle-status.test.ts
+      - tests/unit/core/review-bundle-phase-lifecycle.test.ts
+      - tests/unit/commands/phase-reconcile.test.ts
+      - tests/unit/core/runbook/build-phase-runbook.test.ts
+      - tests/integration/review-bundle.test.ts
+      - docs/concepts/finalization-reconciliation.md
+      - docs/concepts/runbook.md
+      - docs/cli-contract.md
+    acceptance_refs:
+      - design/specs/P85-T2-task-spec.yaml

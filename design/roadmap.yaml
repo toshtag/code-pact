@@ -230,3 +230,6 @@ phases:
   - id: P83
     path: design/phases/P83-lossless-task-registration.yaml
     weight: 1
+  - id: P85
+    path: design/phases/P85-cancelled-task-terminality.yaml
+    weight: 1
