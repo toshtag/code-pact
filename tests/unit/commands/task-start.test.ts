@@ -245,6 +245,17 @@ describe("runTaskStart — invalid transitions", () => {
     ).rejects.toMatchObject({ code: "INVALID_TASK_TRANSITION" });
   });
 
+  it("cancelled design status → start fails with TASK_CANCELLED", async () => {
+    const cancelledPhase = PHASE_YAML.replace(
+      "    status: planned\n",
+      "    status: cancelled\n",
+    );
+    await setupProject(dir, { phaseYaml: cancelledPhase });
+    await expect(
+      runTaskStart({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    ).rejects.toMatchObject({ code: "TASK_CANCELLED" });
+  });
+
   it("failed → start succeeds (internal retry path)", async () => {
     const failedYaml = `events:
   - task_id: P1-T1

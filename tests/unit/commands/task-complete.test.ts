@@ -145,12 +145,14 @@ async function setupProject(
     { cwd: dir },
   );
 
-  await createTaskContractLock({
-    cwd: dir,
-    taskId: "P1-T1",
-    actor: "agent",
-    agent: "claude-code",
-  });
+  if (opts.taskStatus !== "cancelled") {
+    await createTaskContractLock({
+      cwd: dir,
+      taskId: "P1-T1",
+      actor: "agent",
+      agent: "claude-code",
+    });
+  }
 
   await writeFile(
     join(dir, ".code-pact", "state", "progress.yaml"),
@@ -637,6 +639,13 @@ describe("runTaskComplete — error codes", () => {
       "utf8",
     );
     expect(after).toBe(before);
+  });
+
+  it("TASK_CANCELLED when the task design status is cancelled", async () => {
+    await setupProject(dir, { taskStatus: "cancelled" });
+    await expect(
+      runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    ).rejects.toMatchObject({ code: "TASK_CANCELLED" });
   });
 });
 

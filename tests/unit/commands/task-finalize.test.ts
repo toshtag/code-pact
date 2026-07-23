@@ -28,7 +28,7 @@ type SetupOpts = {
   /** Pre-task-complete event status for P1-T1 (controls eligibility). */
   taskState?: "no_events" | "started" | "done" | "blocked";
   /** Initial design status for P1-T1 inside the phase YAML. */
-  designStatus?: "planned" | "in_progress" | "done";
+  designStatus?: "planned" | "in_progress" | "done" | "cancelled";
   /** P10 fields for P1-T1. */
   acceptanceRefs?: string[];
   writes?: string[];
@@ -178,13 +178,15 @@ async function setupProject(opts: SetupOpts = {}): Promise<void> {
     { cwd },
   );
 
-  await createTaskContractLock({
-    cwd,
-    taskId: "P1-T1",
-    baseRef: "HEAD",
-    actor: "agent",
-    agent: "claude-code",
-  });
+  if (designStatus !== "cancelled") {
+    await createTaskContractLock({
+      cwd,
+      taskId: "P1-T1",
+      baseRef: "HEAD",
+      actor: "agent",
+      agent: "claude-code",
+    });
+  }
 
   await writeFile(
     join(cwd, ".code-pact", "state", "progress.yaml"),
@@ -231,6 +233,18 @@ describe("runTaskFinalize — dry-run (default)", () => {
     const phase = await readPhase();
     const t1 = phase.tasks?.find(t => t.id === "P1-T1");
     expect(t1?.status).toBe("planned");
+  });
+});
+
+describe("runTaskFinalize — cancellation guard", () => {
+  it("rejects finalizing a cancelled task with TASK_CANCELLED", async () => {
+    await setupProject({
+      taskState: "done",
+      designStatus: "cancelled",
+    });
+    await expect(
+      runTaskFinalize({ cwd, taskId: "P1-T1" }),
+    ).rejects.toMatchObject({ code: "TASK_CANCELLED" });
   });
 });
 

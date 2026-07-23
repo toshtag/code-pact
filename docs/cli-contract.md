@@ -53,7 +53,7 @@ The complete catalog (Public / Plan / Doctor / Adapter) is in [Error codes](#err
 - **Output & exit contract** — [Stdout / stderr](#stdout--stderr) · [JSON output shape](#json-output-shape) · [Exit codes](#exit-codes) · [Error codes](#error-codes)
 - **Environment** — [TTY and CI detection](#tty-and-ci-detection) · [`--non-interactive`](#--non-interactive) · [Locale resolution](#locale-resolution) · [State file write guarantees](#state-file-write-guarantees)
 - **Planning & import** — [`plan`](#plan) · [`phase import`](#phase-import) · [`spec import`](#spec-import-v18)
-- **Per-task lifecycle** — [`task prepare`](#task-prepare--single-per-task-entry-point-v111-p21) · [`task context`](#task-context--context-quality-gates-v051-v11-additions) · [`task start` / `status` / `block` / `resume`](#task-start--task-status--task-block--task-resume-v06) · [`task complete`](#task-complete) · [`task record-done`](#task-record-done--record-completion-without-task-complete-v121) · [`task finalize`](#task-finalize--flip-task-design-status-to-done-v12-p11) · [`task lock`](#task-lock--create-a-versioned-task-contract-lock-v27-p79-t4) · [`task review-bundle`](#task-review-bundle--package-review-evidence-for-a-done-task-v27-p79-t4) · [`task ci-parity`](#task-ci-parity--re-run-verification-and-verify-manifest-parity-v27-p79-t4) · [`task add`](#task-add--append-a-task-to-a-phase-v06-non-interactive-in-v14)
+- **Per-task lifecycle** — [`task prepare`](#task-prepare--single-per-task-entry-point-v111-p21) · [`task context`](#task-context--context-quality-gates-v051-v11-additions) · [`task start` / `status` / `block` / `resume` / `cancel`](#task-start--task-status--task-block--task-resume--task-cancel-v06-cancel-v28) · [`task complete`](#task-complete) · [`task record-done`](#task-record-done--record-completion-without-task-complete-v121) · [`task finalize`](#task-finalize--flip-task-design-status-to-done-v12-p11) · [`task lock`](#task-lock--create-a-versioned-task-contract-lock-v27-p79-t4) · [`task review-bundle`](#task-review-bundle--package-review-evidence-for-a-done-task-v27-p79-t4) · [`task ci-parity`](#task-ci-parity--re-run-verification-and-verify-manifest-parity-v27-p79-t4) · [`task add`](#task-add--append-a-task-to-a-phase-v06-non-interactive-in-v14)
 - **Phase-level & sequencing** — [`phase reconcile`](#phase-reconcile--bulk-flip-task-design-statuses-for-a-phase-v12-p11) · [`task runbook`](#task-runbook--read-only-guidance-for-a-single-task-v13-p12) · [`phase runbook`](#phase-runbook--read-only-guidance-for-an-entire-phase-v13-p12)
 - **Collaboration** — [`status`](#status--team-activity-overview-v132-collaboration-ux-rfc-d2d3)
 - **Adapters & diagnostics** — [`adapter`](#adapter-v09) · [`doctor`](#doctor--plan-quality-checks-v053) · [`recommend`](#recommend-v08)
@@ -3591,9 +3591,11 @@ When a dep resolves to a foreign phase, the runbook's `state_summary.depends_on[
 
 Multi-node cycles (length ≥ 2) surface as `TASK_DEPENDS_ON_CYCLE` (error). Self-cycles keep the narrower `TASK_DEPENDS_ON_SELF_REFERENCE`. See [Plan diagnostic codes](#plan-diagnostic-codes).
 
-## `task start` / `task status` / `task block` / `task resume` (v0.6)
+## `task start` / `task status` / `task block` / `task resume` / `task cancel` (v0.6+ cancel v2.8+)
 
-These four commands fill the execution-state gap between `task context` and `task complete`. They all read the same progress ledger used by `task complete` and record events to it — one new file per event under `.code-pact/state/events/` (the legacy `.code-pact/state/progress.yaml` is read-merged for compatibility but is no longer written) — and they share the same state-machine rules enforced via `deriveTaskState` and `assertTransition`.
+`task start`, `status`, `block`, and `resume` fill the execution-state gap between `task context` and `task complete`. They all read the same progress ledger used by `task complete` and record events to it — one new file per event under `.code-pact/state/events/` (the legacy `.code-pact/state/progress.yaml` is read-merged for compatibility but is no longer written) — and they share the same state-machine rules enforced via `deriveTaskState` and `assertTransition`.
+
+`task cancel` flips the task's design YAML status to `cancelled` and is terminal.
 
 **Allowed transitions:**
 
@@ -3603,10 +3605,11 @@ started   → blocked | done | failed
 blocked   → resumed | failed
 resumed   → blocked | done | failed
 done      → terminal
+cancelled → terminal
 failed    → started   (internal retry path, not user-facing in v0.6)
 ```
 
-Any disallowed transition exits 2 with `INVALID_TASK_TRANSITION` and records no progress event.
+Any disallowed transition exits 2 with `INVALID_TASK_TRANSITION` and records no progress event. Cancelled tasks additionally reject all implementation and completion lifecycle operations with `TASK_CANCELLED`.
 
 ### `task start <task-id> [--agent <name>] [--json]`
 
@@ -3658,6 +3661,16 @@ Allowed only from `started` or `resumed`. Block from `planned`, `blocked`, or `d
 ### `task resume <task-id> [--agent <name>] [--json]`
 
 Records a `resumed` event. Allowed only from `blocked` — any other current state returns `INVALID_TASK_TRANSITION` (exit 2).
+
+### `task cancel <task-id> [--write] [--json]`
+
+Cancels a task by flipping its design YAML `status` to `cancelled`. Dry-run is the default; pass `--write` to apply. Cancellation is terminal: cancelled tasks cannot be locked, started, blocked, resumed, completed, `record-done`, finalized, or executed. `task prepare` and `task runbook` return no-op guidance for cancelled tasks.
+
+- If the task is already cancelled, exits 0 with `kind: "already_cancelled"`.
+- If the task design status or derived state is `done`, exits 2 with `TASK_CANCEL_NOT_ALLOWED`.
+- If the task has non-cancelled direct dependents, exits 2 with `TASK_CANCEL_DEPENDENTS_EXIST` and lists them in `data.dependents`.
+- On a write conflict, exits 2 with `TASK_CANCEL_WRITE_CONFLICT`.
+- On a post-write integrity failure, exits 2 with `TASK_CANCEL_WRITE_FAILURE` and `data.rollback_status`.
 
 ## `status` — team activity overview (v1.32+, Collaboration UX RFC D2/D3)
 

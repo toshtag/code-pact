@@ -233,3 +233,6 @@ phases:
   - id: P85
     path: design/phases/P85-cancelled-task-terminality.yaml
     weight: 1
+  - id: P86
+    path: design/phases/P86-task-cancellation-cli.yaml
+    weight: 1

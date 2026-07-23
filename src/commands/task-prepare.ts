@@ -67,6 +67,7 @@ export type NextActionType =
   | "resolve_block"
   | "inspect_decision"
   | "noop_already_done"
+  | "noop_cancelled"
   | "investigate_failure";
 
 export type TaskPrepareMinimalNextAction = {
@@ -140,7 +141,7 @@ export type TaskPrepareFullResult = {
     type: NextActionType;
     message: string;
   };
-  commands: TaskPrepareCommands;
+  commands: TaskPrepareCommands | Record<string, never>;
   blocked_by: string[];
   /** Present (true) only when current_state is "done". */
   already_done?: boolean;
@@ -249,6 +250,8 @@ function messageFor(
       return "Inspect the gating decision before starting; run the full-detail prepare command.";
     case "noop_already_done":
       return "Task is already done; no action required.";
+    case "noop_cancelled":
+      return "Task is cancelled; no further lifecycle operations are allowed.";
     case "investigate_failure":
       return "Task last failed; investigate the failure, then re-run task start.";
   }
@@ -285,6 +288,7 @@ function minimalNextCommand(
     case "wait_for_dependencies":
     case "resolve_block":
     case "noop_already_done":
+    case "noop_cancelled":
     case "investigate_failure":
       return null;
   }
@@ -319,7 +323,9 @@ function resolveMinimalNextAction(
   currentState: TaskCurrentState,
   blockedBy: string[],
   decisionRequired: boolean,
+  designStatus: "planned" | "in_progress" | "done" | "cancelled",
 ): NextActionType {
+  if (designStatus === "cancelled") return "noop_cancelled";
   if (currentState === "done") return "noop_already_done";
   if (blockedBy.length > 0) return "wait_for_dependencies";
   if (currentState === "blocked") return "resolve_block";
@@ -354,6 +360,7 @@ function buildMinimalResult(opts: {
     currentState,
     blockedBy,
     decisionRequired,
+    task.status,
   );
 
   const taskPayload: TaskPrepareMinimalTask = {
@@ -491,7 +498,27 @@ export async function runTaskPrepare(
 
   const commands = buildCommands(agentName, phaseId, taskId);
 
-  // 8a. Early return — done.
+  // 8a. Early return — done or explicitly cancelled.
+  if (task.status === "cancelled") {
+    return {
+      task_id: taskId,
+      phase_id: phaseId,
+      agent: agentName,
+      current_state: currentState,
+      recommendation: null,
+      context_pack_path: null,
+      context_pack_bytes: 0,
+      detail: "full",
+      dry_run: opts.dryRun ?? false,
+      next_action: {
+        type: "noop_cancelled",
+        message: messageFor("noop_cancelled"),
+      },
+      commands: {},
+      blocked_by: [],
+    };
+  }
+
   if (currentState === "done") {
     return {
       task_id: taskId,

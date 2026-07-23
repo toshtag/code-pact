@@ -58,6 +58,7 @@ import {
   runTaskFinalize,
   TaskFinalizeAuditStrictError,
 } from "../../commands/task-finalize.ts";
+import { runTaskCancel } from "../../commands/task-cancel.ts";
 import { runTaskRunbook } from "../../commands/task-runbook.ts";
 import {
   runTaskStart,
@@ -199,6 +200,9 @@ export async function cmdTask(
   if (subcommand === "runbook" || subcommand === "next") {
     return cmdTaskRunbook(rest, locale, globalJson, `task ${subcommand}`);
   }
+  if (subcommand === "cancel") {
+    return cmdTaskCancel(rest, locale, globalJson);
+  }
   if (subcommand === "execute") {
     return cmdTaskExecute(rest, locale, globalJson);
   }
@@ -212,7 +216,7 @@ export async function cmdTask(
     return cmdCiParity(rest, locale, globalJson);
   }
 
-  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook | execute | lock | review-bundle | ci-parity (aliases: reconcile = finalize, next = runbook)`;
+  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook | cancel | execute | lock | review-bundle | ci-parity (aliases: reconcile = finalize, next = runbook)`;
   emitError(globalJson, "CONFIG_ERROR", msg);
   return 2;
 }
@@ -1180,14 +1184,18 @@ async function cmdTaskPrepare(
         `Context pack:   (dry-run) would write to ${result.would_write_context_pack_path} (${result.context_pack_bytes} bytes)`,
       );
     }
-    lines.push("");
-    lines.push("Commands:");
-    lines.push(`  context:  ${result.commands.context}`);
-    lines.push(`  start:    ${result.commands.start}`);
-    lines.push(`  verify:   ${result.commands.verify}`);
-    lines.push(`  complete: ${result.commands.complete}`);
-    lines.push(`  finalize: ${result.commands.finalize}`);
-    lines.push(`  record-done: ${result.commands["record-done"]}`);
+    if (result.next_action.type !== "noop_cancelled") {
+      const commands =
+        result.commands as import("../../commands/task-prepare.ts").TaskPrepareCommands;
+      lines.push("");
+      lines.push("Commands:");
+      lines.push(`  context:  ${commands.context}`);
+      lines.push(`  start:    ${commands.start}`);
+      lines.push(`  verify:   ${commands.verify}`);
+      lines.push(`  complete: ${commands.complete}`);
+      lines.push(`  finalize: ${commands.finalize}`);
+      lines.push(`  record-done: ${commands["record-done"]}`);
+    }
     process.stdout.write(`${lines.join("\n")}\n`);
     return 0;
   } catch (err: unknown) {
@@ -1570,6 +1578,10 @@ async function cmdTaskComplete(
         };
         break;
       }
+      case "TASK_CANCELLED":
+        message = error.message;
+        outCode = "TASK_CANCELLED";
+        break;
       case "CONFIG_ERROR":
         message = error.message;
         outCode = "CONFIG_ERROR";
@@ -1780,6 +1792,10 @@ async function cmdTaskRecordDone(
       case "PHASE_SNAPSHOT_INVALID":
         msg = err.message;
         outCode = "PHASE_SNAPSHOT_INVALID";
+        break;
+      case "TASK_CANCELLED":
+        msg = err.message;
+        outCode = "TASK_CANCELLED";
         break;
       // A path-safety refusal / malformed roadmap or phase from the now-contained
       // control-plane loaders (resolveTaskInRoadmap → loadRoadmap → loadPhase):
@@ -2064,6 +2080,10 @@ async function cmdTaskFinalize(
           msg = err.message;
           outCode = "PHASE_SNAPSHOT_INVALID";
           break;
+        case "TASK_CANCELLED":
+          msg = err.message;
+          outCode = "TASK_CANCELLED";
+          break;
         // Contained control-plane loader refusal → structured (exit 2), not exit 3.
         case "CONFIG_ERROR":
           msg = err.message;
@@ -2193,6 +2213,153 @@ async function cmdTaskRunbook(
 // cmdTaskFinalize / cmdTaskStatus / cmdTaskRunbook.
 
 // ---------------------------------------------------------------------------
+// Command: task cancel
+// ---------------------------------------------------------------------------
+
+async function cmdTaskCancel(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = strictParse(
+      "task cancel",
+      argv,
+      toParseOptions(TASK_SPECS.cancel!),
+      { allowPositionals: true },
+    ));
+  } catch (err) {
+    return emitParseConfigError(err, argv, globalJson);
+  }
+
+  const json = globalJson || values.json === true;
+  const write = values.write === true;
+  const taskId = positionals[0];
+  if (!taskId) {
+    emitError(json, "CONFIG_ERROR", m.task.cancel.missingTaskId);
+    return 2;
+  }
+
+  const cwd = process.cwd();
+  try {
+    const result = await runTaskCancel({ cwd, taskId, write });
+
+    if (json) {
+      emitOk(result);
+      return 0;
+    }
+
+    switch (result.kind) {
+      case "already_cancelled":
+        process.stdout.write(`${m.task.cancel.alreadyCancelled(taskId)}\n`);
+        break;
+      case "cancel_preview":
+        process.stdout.write(
+          `${m.task.cancel.wouldCancel(
+            taskId,
+            result.current_design_status,
+          )}\n`,
+        );
+        break;
+      case "cancelled":
+        process.stdout.write(`${m.task.cancel.success(taskId)}\n`);
+        break;
+    }
+    return 0;
+  } catch (err: unknown) {
+    if (!(err instanceof Error)) throw err;
+    const code = (err as NodeJS.ErrnoException).code;
+
+    if (code === "TASK_CANCEL_NOT_ALLOWED") {
+      emitError(
+        json,
+        "TASK_CANCEL_NOT_ALLOWED",
+        m.task.cancel.notAllowed(taskId),
+      );
+      return 2;
+    }
+
+    if (code === "TASK_CANCEL_DEPENDENTS_EXIST") {
+      const deps =
+        (
+          err as NodeJS.ErrnoException & {
+            dependents?: { task_id: string; phase_id?: string }[];
+          }
+        ).dependents ?? [];
+      const depIds = deps.map(d => d.task_id);
+      emitError(
+        json,
+        "TASK_CANCEL_DEPENDENTS_EXIST",
+        m.task.cancel.dependentsExist(taskId, depIds),
+        {
+          data: { dependents: depIds },
+        },
+      );
+      return 2;
+    }
+
+    if (code === "TASK_CANCELLED") {
+      emitError(json, "TASK_CANCELLED", m.task.cancel.cancelled(taskId));
+      return 2;
+    }
+
+    if (code === "TASK_CANCEL_WRITE_CONFLICT") {
+      emitError(
+        json,
+        "TASK_CANCEL_WRITE_CONFLICT",
+        m.task.cancel.writeConflict(taskId),
+      );
+      return 2;
+    }
+
+    if (code === "TASK_CANCEL_WRITE_FAILURE") {
+      const rollbackStatus = (
+        err as NodeJS.ErrnoException & { rollback_status?: string }
+      ).rollback_status;
+      emitError(
+        json,
+        "TASK_CANCEL_WRITE_FAILURE",
+        m.task.cancel.writeFailure(taskId, rollbackStatus ?? "unknown"),
+        {
+          data: { rollback_status: rollbackStatus ?? "unknown" },
+        },
+      );
+      return 2;
+    }
+
+    if (code === "TASK_NOT_FOUND") {
+      emitError(json, "TASK_NOT_FOUND", m.task.complete.taskNotFound(taskId));
+      return 2;
+    }
+
+    if (code === "AMBIGUOUS_TASK_ID") {
+      const phases =
+        (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+      emitError(
+        json,
+        "AMBIGUOUS_TASK_ID",
+        m.task.complete.ambiguous(taskId, phases),
+        {
+          data: { phases },
+        },
+      );
+      return 2;
+    }
+
+    if (code === "CONFIG_ERROR" || code === "PHASE_SNAPSHOT_INVALID") {
+      emitError(json, code, (err as Error).message);
+      return 2;
+    }
+
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Command: task start / block / resume / status
 // ---------------------------------------------------------------------------
 
@@ -2287,6 +2454,11 @@ function emitTaskCommonError(
       outCode = "TASK_CONTRACT_LOCK_EXISTS";
       emitError(json, outCode, msg);
       return 1;
+    case "TASK_CANCELLED":
+      msg = err.message;
+      outCode = "TASK_CANCELLED";
+      emitError(json, outCode, msg);
+      return 2;
     // Control-plane integrity error from the shared resolver / plan-state loaders.
     case "PHASE_SNAPSHOT_INVALID":
       msg = err.message;

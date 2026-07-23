@@ -357,6 +357,49 @@ describe("resolveOneShotEligibility", () => {
     });
   });
 
+  it("rejects cancelled design status with a single terminal reason", async () => {
+    await withTempProject(async cwd => {
+      await mkdir(join(cwd, "src"), { recursive: true });
+      await writeFile(join(cwd, "src", "example.ts"), "x", "utf8");
+
+      const result = await resolveOneShotEligibility({
+        cwd,
+        phase: makePhase(),
+        task: makeTask({ status: "cancelled" }),
+        events: [],
+      });
+
+      expect(result).toEqual({
+        eligible: false,
+        reasons: [INELIGIBLE_REASONS.DESIGN_CANCELLED],
+      });
+    });
+  });
+
+  it("short-circuits cancelled tasks before other ineligibility checks", async () => {
+    await withTempProject(async cwd => {
+      const result = await resolveOneShotEligibility({
+        cwd,
+        phase: makePhase({
+          requires_decision: true,
+          verification: { commands: [] } as any,
+        }),
+        task: makeTask({
+          status: "cancelled",
+          reads: [],
+          writes: [],
+          depends_on: ["P77-T1"],
+        }),
+        events: [],
+      });
+
+      expect(result).toEqual({
+        eligible: false,
+        reasons: [INELIGIBLE_REASONS.DESIGN_CANCELLED],
+      });
+    });
+  });
+
   it("rejects empty goal", async () => {
     await withTempProject(async cwd => {
       const result = await resolveOneShotEligibility({

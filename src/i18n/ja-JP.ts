@@ -497,6 +497,26 @@ export const messages = {
       noEvents: (taskId: string): string =>
         `タスク "${taskId}" の進捗イベントはまだ記録されていません。`,
     },
+    cancel: {
+      missingTaskId:
+        "task cancel にはタスク ID が必要です (例: `task cancel P1-T1`)。",
+      notAllowed: (taskId: string): string =>
+        `タスク "${taskId}" は既に done のため cancel できません。`,
+      dependentsExist: (taskId: string, deps: string[]): string =>
+        `タスク "${taskId}" は cancel できません: cancel されていない直接依存タスクがあります: ${deps.join(", ")}。先にこれらを cancel または完了してください。`,
+      alreadyCancelled: (taskId: string): string =>
+        `タスク "${taskId}" は既に cancelled です。書き込みは行いませんでした。`,
+      wouldCancel: (taskId: string, from: string): string =>
+        `Dry run: タスク "${taskId}" の design status を "${from}" から "cancelled" に書き換える想定です。--write で適用してください。`,
+      success: (taskId: string): string =>
+        `タスク "${taskId}" を cancelled にしました。`,
+      writeFailure: (taskId: string, status: string): string =>
+        `タスク "${taskId}" の cancel 書き込みに失敗しました; rollback_status=${status}。`,
+      writeConflict: (taskId: string): string =>
+        `タスク "${taskId}" の cancel 書き込みが衝突しました: phase ファイルが書き込み前に変更されました。`,
+      cancelled: (taskId: string): string =>
+        `タスク "${taskId}" は cancelled です。今後のライフサイクル操作は許可されていません。`,
+    },
   },
   cliContract: {
     nonInteractiveMissing: (flag: string): string =>

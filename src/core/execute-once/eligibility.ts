@@ -18,6 +18,7 @@ import {
 
 export const INELIGIBLE_REASONS = {
   TASK_STATE_NOT_ALLOWED: "TASK_STATE_NOT_ALLOWED",
+  DESIGN_CANCELLED: "DESIGN_CANCELLED",
   DECISION_REQUIRED: "DECISION_REQUIRED",
   DEPENDENCY_INCOMPLETE: "DEPENDENCY_INCOMPLETE",
   READ_SCOPE_EMPTY: "READ_SCOPE_EMPTY",
@@ -77,6 +78,14 @@ export async function resolveOneShotEligibility(
   const reasons: string[] = [];
 
   const { current: state } = deriveTaskState(events, task.id);
+
+  if (task.status === "cancelled") {
+    return {
+      eligible: false,
+      reasons: [INELIGIBLE_REASONS.DESIGN_CANCELLED],
+    };
+  }
+
   if (!isEligibleState(state)) {
     reasons.push(INELIGIBLE_REASONS.TASK_STATE_NOT_ALLOWED);
   }
