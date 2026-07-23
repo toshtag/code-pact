@@ -31,7 +31,7 @@ verification:
     - node /tmp/P84-T2-evidence/verify.mjs
       /tmp/P84-T2-evidence/P84-T2-evidence.zip
     - pnpm check:docs
-    - pnpm check:development-efficiency
+    - pnpm check:development-efficiency -- --next-task P84-T2
 tasks:
   - id: P84-T1
     type: test
