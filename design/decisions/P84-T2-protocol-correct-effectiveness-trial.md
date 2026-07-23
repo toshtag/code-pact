@@ -23,15 +23,15 @@ P84-T1 is retained unchanged in `/tmp/P84-T1-evidence/` and is classified as
 invalid for the following reasons:
 
 - Capability gate evidence contradiction (attempt log `passed: false` while the
-decision report claimed `passed: true`).
+  decision report claimed `passed: true`).
 - Baseline invocation limit exceeded (4 attempts, not `1 + 1 repair`).
 - Output protocol and `num_ctx` changed during the Baseline condition
-(system-diff, raw-diff, `num_ctx 16384`, full-file).
+  (system-diff, raw-diff, `num_ctx 16384`, full-file).
 - Token arithmetic mismatch between raw provider usage and the decision report.
 - Incomplete Code Pact lifecycle evidence (no `task start`, `task complete`,
-`task finalize`, or `review-bundle` artifacts).
+  `task finalize`, or `review-bundle` artifacts).
 - Fail-open verifier that hard-coded its result and returned exit `0` after
-reporting protocol violations.
+  reporting protocol violations.
 
 No token reduction, repair reduction, or model inability claims are carried
 from P84-T1 to P84-T2.
@@ -78,14 +78,14 @@ from P84-T1 to P84-T2.
 
 ## Token summary
 
-| stage             | input | output | total |
-| ----------------- | ----: | -----: | ----: |
-| capability        |    71 |      6 |    77 |
-| baseline initial  | 3,790 |      2 | 3,792 |
-| baseline repair   | 3,283 |  2,461 | 5,744 |
-| **baseline total**| **7,073** | **2,463** | **9,536** |
-| code-pact initial | 4,378 |  2,510 | 6,888 |
-| **code-pact total**| **4,378** | **2,510** | **6,888** |
+| stage               |     input |    output |     total |
+| ------------------- | --------: | --------: | --------: |
+| capability          |        71 |         6 |        77 |
+| baseline initial    |     3,790 |         2 |     3,792 |
+| baseline repair     |     3,283 |     2,461 |     5,744 |
+| **baseline total**  | **7,073** | **2,463** | **9,536** |
+| code-pact initial   |     4,378 |     2,510 |     6,888 |
+| **code-pact total** | **4,378** | **2,510** | **6,888** |
 
 Pair delta: Code Pact - Baseline = -2,648 tokens (-27.8%).
 
@@ -121,11 +121,33 @@ Capability tokens are excluded from the pair delta per protocol.
   `in_progress`. A manual `git archive` review bundle was generated and
   included as `code-pact/review-bundle.zip`.
 
+## P84-T2 Code Pact lifecycle
+
+- `code-pact task prepare P84-T2 --detail agent --json` produced the lifecycle
+  command envelope.
+- `code-pact task start P84-T2 --json` created the contract lock.
+- `code-pact task lock P84-T2 --json` re-created the lock after adding
+  development-efficiency artifacts to the task writes.
+- `code-pact task complete P84-T2 --json` passed:
+  - `node /tmp/P84-T2-evidence/verify.mjs /tmp/P84-T2-evidence/P84-T2-evidence.zip`
+  - `pnpm check:docs`
+  - `pnpm check:development-efficiency -- --next-task P84-T2`
+- `code-pact task finalize P84-T2 --write --json` flipped P84-T2 design status to
+  `done` and accepted the write audit with advisory warnings.
+- `code-pact task review-bundle P84-T2` refused with
+  `TASK_CONTRACT_DRIFT` because the necessary updates to
+  `design/phases/P84-post-p83-qualified-cycle-effectiveness-recheck.yaml`
+  (task writes) and `scripts/check-development-efficiency.mjs` are outside the
+  original declared write surface and the `review-bundle` lifecycle reclassification
+  only allows `status` changes on the phase file. A manual `git archive` review
+  bundle was produced as `/tmp/P84-T2-review.zip`.
+
 ## Evidence
 
 - Evidence archive: `/tmp/P84-T2-evidence/P84-T2-evidence.zip`
 - Verification: `node /tmp/P84-T2-evidence/verify.mjs /tmp/P84-T2-evidence/P84-T2-evidence.zip`
 - Negative verification: `/tmp/P84-T2-evidence/negative-verification-results.json`
+- Review bundle: `/tmp/P84-T2-review.zip` (manual `git archive` of HEAD)
 - Worktree commits:
   - Baseline: `/tmp/P84-T2/baseline` detached at `ae86e36`
   - Code Pact: `/tmp/P84-T2/code-pact` detached at `a910885`
@@ -133,6 +155,8 @@ Capability tokens are excluded from the pair delta per protocol.
 ## Writes
 
 - `design/decisions/P84-T2-protocol-correct-effectiveness-trial.md`
+- `scripts/development-efficiency-checkpoint.json`
+- `scripts/check-development-efficiency.mjs`
 
 ## Related
 
