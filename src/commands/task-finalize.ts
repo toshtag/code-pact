@@ -15,6 +15,7 @@ import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { auditWrites, type WriteAuditResult } from "../core/audit/index.ts";
 import { projectPathPresence } from "../core/plan/checks/fs.ts";
 import { assertTaskContractCurrent } from "../core/contract-lock.ts";
+import { assertTaskLifecycleNotCancelled } from "../core/task-cancellation.ts";
 
 // ---------------------------------------------------------------------------
 // `task finalize <task-id>`
@@ -222,6 +223,8 @@ export async function runTaskFinalize(
       `internal invariant: task "${taskId}" missing from classified phase`,
     );
   }
+
+  assertTaskLifecycleNotCancelled(taskId, task.status, state.current);
 
   // TASK_CONTRACT_DRIFT gate. A lock is required unless the task was already
   // finalized before contract locking existed. The locked base and phase blob

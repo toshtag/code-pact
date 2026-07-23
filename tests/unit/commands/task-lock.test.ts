@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runTaskLock } from "../../../src/commands/task-lock.ts";
@@ -118,6 +118,20 @@ describe("runTaskLock", () => {
     await runTaskLock({ cwd, taskId: "P1-T1" });
     await expect(runTaskLock({ cwd, taskId: "P1-T1" })).rejects.toMatchObject({
       code: "TASK_CONTRACT_LOCK_EXISTS",
+    });
+  });
+
+  it("rejects locking a cancelled task with TASK_CANCELLED", async () => {
+    await setupProject(["src/a.ts"]);
+    const phasePath = join(cwd, "design", "phases", "P1-foundation.yaml");
+    const original = await readFile(phasePath, "utf8");
+    await writeFile(
+      phasePath,
+      original.replace("    status: planned\n", "    status: cancelled\n"),
+      "utf8",
+    );
+    await expect(runTaskLock({ cwd, taskId: "P1-T1" })).rejects.toMatchObject({
+      code: "TASK_CANCELLED",
     });
   });
 

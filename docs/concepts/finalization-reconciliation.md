@@ -24,8 +24,8 @@ code-pact task finalize P9-T5 --write --json
 What it does:
 
 1. Resolves `<task-id>` via the same roadmap scan as `task context` / `task complete`.
-2. Reads the progress ledger, derives the task's current state, and refuses with `TASK_FINALIZE_NOT_ELIGIBLE` (exit 2) unless that state is `done`. The check is identical in dry-run and `--write` — dry-run means "won't write", not "won't validate".
-3. If the phase YAML already shows `status: done` for this task, returns `kind: "already_finalized"` (exit 0) with no write.
+2. Reads the progress ledger, derives the task's current state, and refuses with `TASK_FINALIZE_NOT_ELIGIBLE` (exit 2) unless that state is `done`. The check is identical in dry-run and `--write` — dry-run means "won't write", not "won't validate". Cancelled tasks are rejected with `TASK_CANCELLED`.
+3. If the phase YAML already shows `status: done` or `status: cancelled` for this task, returns `kind: "already_finalized"` (exit 0) with no write. The `cancelled` case is also terminal and cannot be finalized.
 4. Otherwise, rewrites `tasks[].status` for that one task via atomic write. Other fields and other tasks in the file are untouched.
 
 What it does **not** do:

@@ -5,6 +5,7 @@ import { writeEventFile } from "../core/progress/events-io.ts";
 import { resolveEventAuthor } from "../core/progress/author.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
 import { incompleteTaskDependencyIds } from "../core/task-dependencies.ts";
+import { assertTaskLifecycleNotCancelled } from "../core/task-cancellation.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
 import { assertTaskContractCurrent } from "../core/contract-lock.ts";
@@ -118,10 +119,19 @@ export async function runTaskRecordDone(
 
   // ---- Step 3: resolve phase from task id ----
   const { phaseId, phasePath } = await resolveTaskInRoadmap(cwd, taskId);
+  const phase = await loadPhase(cwd, phasePath);
+  const task = phase.tasks!.find(t => t.id === taskId)!;
+  if (!task) {
+    const err = new Error(`Task "${taskId}" not found in phase "${phaseId}".`);
+    (err as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
+    throw err;
+  }
 
   // ---- Step 4: derive current state ----
   const { log } = await loadProgressLog(cwd);
   const state = deriveTaskState(log.events, taskId);
+
+  assertTaskLifecycleNotCancelled(taskId, task.status, state.current);
 
   // ---- Step 5: idempotency + transition guard (mirrors task complete) ----
   if (state.current === "done") {
@@ -146,13 +156,7 @@ export async function runTaskRecordDone(
   // planned / started / resumed / failed: proceed. Like task complete we do
   // not call assertTransition here (planned→done is a command-layer shortcut).
 
-  // ---- Step 6: load phase and task, check dependencies and decision gate ----
-  // Resolve once: the same checkDecision call drives both the CheckResult and
-  // the structured data, so they cannot drift apart between two reads of the
-  // filesystem.
-  const phase = await loadPhase(cwd, phasePath);
-  const task = phase.tasks!.find(t => t.id === taskId)!;
-
+  // ---- Step 6: check dependencies and decision gate ----
   const incompleteDeps = incompleteTaskDependencyIds(log.events, task);
   if (incompleteDeps.length > 0) {
     const err = new Error(

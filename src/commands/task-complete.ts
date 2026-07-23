@@ -5,6 +5,7 @@ import { writeEventFile } from "../core/progress/events-io.ts";
 import { resolveEventAuthor } from "../core/progress/author.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
 import { incompleteTaskDependencyIds } from "../core/task-dependencies.ts";
+import { assertTaskLifecycleNotCancelled } from "../core/task-cancellation.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { runVerify, throwIfAborted, type CheckResult } from "./verify.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
@@ -124,6 +125,8 @@ export async function runTaskComplete(
   const { log } = await loadProgressLog(cwd);
   const state = deriveTaskState(log.events, taskId);
   throwIfAborted(opts.signal);
+
+  assertTaskLifecycleNotCancelled(taskId, task.status, state.current);
 
   if (state.current === "done") {
     return {

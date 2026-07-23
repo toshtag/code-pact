@@ -17,6 +17,7 @@ import {
   postLockRegistrationChangedFields,
   parseTaskRegistrationSpec,
 } from "./task-registration-spec.ts";
+import { assertTaskLifecycleNotCancelled } from "./task-cancellation.ts";
 import {
   readOwnedText,
   readExplicitUserText,
@@ -278,6 +279,8 @@ export async function createTaskContractLock(
 
   const { log } = await loadProgressLog(cwd);
   const state = deriveTaskState(log.events, taskId);
+  assertTaskLifecycleNotCancelled(taskId, task.status, state.current);
+
   if (state.current === "done") {
     const err = new Error(
       `Task "${taskId}" is already done; cannot lock its contract.`,

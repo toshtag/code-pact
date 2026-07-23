@@ -56,11 +56,8 @@ function step(
   return s;
 }
 
-function checkAcceptanceRefs(
-  cwd: string,
-  task: Task,
-): AcceptanceRefCheck[] {
-  return (task.acceptance_refs ?? []).map((path) => {
+function checkAcceptanceRefs(cwd: string, task: Task): AcceptanceRefCheck[] {
+  return (task.acceptance_refs ?? []).map(path => {
     const exists = projectPathPresenceSync(cwd, path) === "present";
     return { path, exists };
   });
@@ -72,7 +69,7 @@ function blockingDependsOnStep(unsatisfied: DependsOnEntry[]): RunbookStep {
     unsatisfied.length > 1 ? ` (+ ${unsatisfied.length - 1} more)` : "";
   return step({
     manual_action: `Wait for ${first.task_id} to reach derived state: done (currently: ${first.current})${others}`,
-    reason: `Task depends on ${unsatisfied.map((d) => `${d.task_id} (current: ${d.current})`).join(", ")}. All subsequent steps are blocked until the dependencies resolve.`,
+    reason: `Task depends on ${unsatisfied.map(d => `${d.task_id} (current: ${d.current})`).join(", ")}. All subsequent steps are blocked until the dependencies resolve.`,
     blocking: true,
   });
 }
@@ -81,11 +78,13 @@ function primaryLoopSteps(taskId: string): RunbookStep[] {
   return [
     step({
       command: `code-pact task start ${taskId}`,
-      reason: "Record the planned → started transition so handoff and downstream tools see who is on this task.",
+      reason:
+        "Record the planned → started transition so handoff and downstream tools see who is on this task.",
     }),
     step({
       command: `code-pact task context ${taskId}`,
-      reason: "Fetch the context pack for implementation. Invoke this command with your own --agent choice; the runbook does not embed an agent name.",
+      reason:
+        "Fetch the context pack for implementation. Invoke this command with your own --agent choice; the runbook does not embed an agent name.",
     }),
     step({
       manual_action: "Implement the task",
@@ -93,8 +92,10 @@ function primaryLoopSteps(taskId: string): RunbookStep[] {
     }),
     step({
       command: `code-pact task complete ${taskId}`,
-      reason: "Run verify and, on pass, record a done event (written as a file under .code-pact/state/events/).",
-      expected_result: "task derived state becomes done; design YAML status is NOT mutated (that is task finalize's job).",
+      reason:
+        "Run verify and, on pass, record a done event (written as a file under .code-pact/state/events/).",
+      expected_result:
+        "task derived state becomes done; design YAML status is NOT mutated (that is task finalize's job).",
     }),
   ];
 }
@@ -103,12 +104,15 @@ function continueImplementationSteps(taskId: string): RunbookStep[] {
   return [
     step({
       manual_action: "Continue implementation",
-      reason: "Task is already started; pick up where progress was last recorded.",
+      reason:
+        "Task is already started; pick up where progress was last recorded.",
     }),
     step({
       command: `code-pact task complete ${taskId}`,
-      reason: "Run verify and, on pass, record a done event (written as a file under .code-pact/state/events/).",
-      expected_result: "task derived state becomes done; design YAML status is NOT mutated.",
+      reason:
+        "Run verify and, on pass, record a done event (written as a file under .code-pact/state/events/).",
+      expected_result:
+        "task derived state becomes done; design YAML status is NOT mutated.",
     }),
   ];
 }
@@ -117,12 +121,14 @@ function blockedSteps(taskId: string): RunbookStep[] {
   return [
     step({
       manual_action: "Resolve the blocker recorded in the last `blocked` event",
-      reason: "Task is in derived state `blocked`; the blocker must be resolved before progress can resume.",
+      reason:
+        "Task is in derived state `blocked`; the blocker must be resolved before progress can resume.",
       blocking: true,
     }),
     step({
       command: `code-pact task resume ${taskId} --reason "<unblock reason>"`,
-      reason: "Record the resume transition so the progress log captures the unblock decision.",
+      reason:
+        "Record the resume transition so the progress log captures the unblock decision.",
       blocking: true,
     }),
   ];
@@ -131,8 +137,10 @@ function blockedSteps(taskId: string): RunbookStep[] {
 function failedSteps(taskId: string): RunbookStep[] {
   return [
     step({
-      manual_action: "Diagnose the failure recorded in the last `failed` event and fix the underlying issue",
-      reason: "Task is in derived state `failed`; verify did not pass during the last task complete attempt.",
+      manual_action:
+        "Diagnose the failure recorded in the last `failed` event and fix the underlying issue",
+      reason:
+        "Task is in derived state `failed`; verify did not pass during the last task complete attempt.",
       blocking: true,
     }),
     step({
@@ -145,9 +153,11 @@ function failedSteps(taskId: string): RunbookStep[] {
 function finalizeStep(taskId: string): RunbookStep {
   return step({
     command: `code-pact task finalize ${taskId} --write`,
-    reason: "Task is done in the progress ledger but design status is still planned/in_progress. `task finalize` is the deterministic resolver.",
+    reason:
+      "Task is done in the progress ledger but design status is still planned/in_progress. `task finalize` is the deterministic resolver.",
     safety_note: `This is a --write operation. Preview first with \`code-pact task finalize ${taskId} --json\` (dry-run).`,
-    expected_result: "design/phases/<phase>.yaml task status flips to done; STATUS_DRIFT done-but-design-not-done clears on next plan analyze.",
+    expected_result:
+      "design/phases/<phase>.yaml task status flips to done; STATUS_DRIFT done-but-design-not-done clears on next plan analyze.",
   });
 }
 
@@ -165,6 +175,11 @@ function lifecycleSteps(
   designStatus: PhaseStatus,
   drift: DriftClassification | null,
 ): RunbookStep[] {
+  // Cancelled: terminal status, no lifecycle steps.
+  if (designStatus === "cancelled") {
+    return [];
+  }
+
   // Done + consistent (with or without events): no work to do.
   if (designStatus === "done" && derived === "done") {
     return [];
@@ -224,12 +239,15 @@ export function buildTaskRunbook(
     decision_refs: task.decision_refs ?? [],
   };
 
-  const unsatisfied = depends.filter((d) => !d.satisfied);
+  const unsatisfied = depends.filter(d => !d.satisfied);
   const steps: RunbookStep[] = [];
-  if (unsatisfied.length > 0) {
-    steps.push(blockingDependsOnStep(unsatisfied));
+
+  if (task.status !== "cancelled") {
+    if (unsatisfied.length > 0) {
+      steps.push(blockingDependsOnStep(unsatisfied));
+    }
+    steps.push(...lifecycleSteps(task.id, derived.current, task.status, drift));
   }
-  steps.push(...lifecycleSteps(task.id, derived.current, task.status, drift));
 
   return {
     kind: "runbook",

@@ -385,6 +385,26 @@ const runbook: CommandSpec = {
   examples: ["code-pact task runbook P1-T1 --json"],
 };
 
+const cancel: CommandSpec = {
+  cluster: "task",
+  command: "cancel",
+  positional: "<task-id>",
+  summary: [
+    "Cancel a task by flipping its design status to `cancelled` in its phase YAML.",
+    "Cancellation is terminal: cancelled tasks cannot be started, blocked, resumed,",
+    "completed, record-done, finalized, executed, or locked. Dry-run is the default;",
+    "pass --write to apply. Progress events, contract locks, and task specs are preserved.",
+  ].join("\n"),
+  flags: [
+    { name: "write", description: "Apply the cancellation." },
+    { name: "json", description: "Emit JSON." },
+  ],
+  examples: [
+    "code-pact task cancel P1-T1 --json",
+    "code-pact task cancel P1-T1 --write --json",
+  ],
+};
+
 const execute: CommandSpec = {
   cluster: "task",
   command: "execute",
@@ -574,6 +594,7 @@ export const TASK_SPECS: Record<string, CommandSpec> = {
   block,
   resume,
   runbook,
+  cancel,
   execute,
   lock,
   "review-bundle": reviewBundle,

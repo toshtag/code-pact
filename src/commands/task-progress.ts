@@ -23,6 +23,7 @@ import {
   readContractLock,
 } from "../core/contract-lock.ts";
 import { incompleteTaskDependencyIds } from "../core/task-dependencies.ts";
+import { assertTaskLifecycleNotCancelled } from "../core/task-cancellation.ts";
 
 // Resolve the agent (against project.yaml), the task's phase, and its current
 // derived state. Identical across the three runners; agent validation runs
@@ -105,6 +106,16 @@ export async function runTaskStart(
   const { agentName, phaseId, phasePath, state, events } =
     await resolveProgressRuntime(cwd, taskId, opts.agent);
 
+  const phase = await loadPhase(cwd, phasePath);
+  const task = phase.tasks?.find(t => t.id === taskId);
+  if (!task) {
+    const err = new Error(`Task "${taskId}" not found in phase "${phaseId}".`);
+    (err as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
+    throw err;
+  }
+
+  assertTaskLifecycleNotCancelled(taskId, task.status, state.current);
+
   if (state.current === "started") {
     return {
       kind: "already_started",
@@ -117,13 +128,6 @@ export async function runTaskStart(
   assertTransition(state.current, "started");
 
   // Dependency gate: evaluated before any contract lock or progress write.
-  const phase = await loadPhase(cwd, phasePath);
-  const task = phase.tasks?.find(t => t.id === taskId);
-  if (!task) {
-    const err = new Error(`Task "${taskId}" not found in phase "${phaseId}".`);
-    (err as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
-    throw err;
-  }
   const incompleteDeps = incompleteTaskDependencyIds(events, task);
   if (incompleteDeps.length > 0) {
     const err = new Error(
@@ -197,11 +201,22 @@ export async function runTaskBlock(
     throw err;
   }
 
-  const { agentName, phaseId, state } = await resolveProgressRuntime(
+  const { agentName, phaseId, phasePath, state } = await resolveProgressRuntime(
     cwd,
     taskId,
     opts.agent,
   );
+
+  const phase = await loadPhase(cwd, phasePath);
+  const task = phase.tasks?.find(t => t.id === taskId);
+  if (!task) {
+    const err = new Error(`Task "${taskId}" not found in phase "${phaseId}".`);
+    (err as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
+    throw err;
+  }
+
+  assertTaskLifecycleNotCancelled(taskId, task.status, state.current);
+
   assertTransition(state.current, "blocked");
 
   const event = await appendProgressEvent(cwd, {
@@ -246,11 +261,22 @@ export async function runTaskResume(
   const { cwd, taskId } = opts;
   const now = opts.now ?? (() => new Date());
 
-  const { agentName, phaseId, state } = await resolveProgressRuntime(
+  const { agentName, phaseId, phasePath, state } = await resolveProgressRuntime(
     cwd,
     taskId,
     opts.agent,
   );
+
+  const phase = await loadPhase(cwd, phasePath);
+  const task = phase.tasks?.find(t => t.id === taskId);
+  if (!task) {
+    const err = new Error(`Task "${taskId}" not found in phase "${phaseId}".`);
+    (err as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
+    throw err;
+  }
+
+  assertTaskLifecycleNotCancelled(taskId, task.status, state.current);
+
   assertTransition(state.current, "resumed");
 
   const event = await appendProgressEvent(cwd, {

@@ -713,6 +713,13 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
     );
   });
 
+  it("task cancel P1-T1 --write --json", async () => {
+    const p = await projectWithTask("task-cancel");
+    const res = p.run(["task", "cancel", "P1-T1", "--write", "--json"]);
+    expect(res.code).toBe(0);
+    expectStdoutIsJson(res, "task cancel write");
+  });
+
   it("task start P1-T1 --json returns TASK_CONTRACT_DRIFT on phase contract drift", async () => {
     const p = await projectWithTask("task-start-contract-drift");
     const phasePath = join(p.dir, "design", "phases", "P1-foundation.yaml");
