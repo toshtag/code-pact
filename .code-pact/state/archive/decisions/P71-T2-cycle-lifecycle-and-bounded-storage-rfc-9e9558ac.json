@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "canonical_ref": "design/decisions/P71-T2-cycle-lifecycle-and-bounded-storage-rfc.md",
+  "original_path": "design/decisions/P71-T2-cycle-lifecycle-and-bounded-storage-rfc.md",
+  "path_sha256": "9e9558ac71c08372c9f9ae9d7c8408aa669f6724c6c5c8b48b5f80baa9a1bd79",
+  "title": "Cycle Lifecycle and Bounded Storage",
+  "adr_status_at_snapshot": "accepted",
+  "may_satisfy_active_gate": true,
+  "snapshotted_at": "2026-07-23T13:37:06.821Z",
+  "source_sha256": "5df8ad929ec8a6ff646f51639c3a12b3f69471723c5dd9054dca87e67acff48e"
+}

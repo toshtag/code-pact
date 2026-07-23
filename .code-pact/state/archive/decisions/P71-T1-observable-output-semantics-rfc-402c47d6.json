@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "canonical_ref": "design/decisions/P71-T1-observable-output-semantics-rfc.md",
+  "original_path": "design/decisions/P71-T1-observable-output-semantics-rfc.md",
+  "path_sha256": "402c47d64277c079529fda79b96b6ad9b2740bda6b2f09d7bbb203806df7a87e",
+  "title": "Observable Output Semantics",
+  "adr_status_at_snapshot": "accepted",
+  "may_satisfy_active_gate": true,
+  "snapshotted_at": "2026-07-23T13:37:05.773Z",
+  "source_sha256": "0e1dc6349bcd0fac29166ea0a288d0d34f77a005e079bd7efff316dd97689e7e"
+}

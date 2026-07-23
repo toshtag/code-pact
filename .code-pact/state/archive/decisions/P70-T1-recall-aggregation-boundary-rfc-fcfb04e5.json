@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "canonical_ref": "design/decisions/P70-T1-recall-aggregation-boundary-rfc.md",
+  "original_path": "design/decisions/P70-T1-recall-aggregation-boundary-rfc.md",
+  "path_sha256": "fcfb04e58ac54340cc791cbe0464bd6b88a9fb20ed1d68811786db94a65dfc96",
+  "title": "Recall and Aggregation Boundary",
+  "adr_status_at_snapshot": "accepted",
+  "may_satisfy_active_gate": true,
+  "snapshotted_at": "2026-07-23T13:37:01.580Z",
+  "source_sha256": "135b707de8fd9ac7818379b9fc67cf5deb9518218da346aa06ccdde56ce21792"
+}

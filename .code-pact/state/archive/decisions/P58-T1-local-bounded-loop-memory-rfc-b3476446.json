@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "canonical_ref": "design/decisions/P58-T1-local-bounded-loop-memory-rfc.md",
+  "original_path": "design/decisions/P58-T1-local-bounded-loop-memory-rfc.md",
+  "path_sha256": "b3476446b2d73d63506ece861c0c2b3e21828aed48506189e6400077a49d7a04",
+  "title": "RFC: local bounded loop memory",
+  "adr_status_at_snapshot": "accepted",
+  "may_satisfy_active_gate": true,
+  "snapshotted_at": "2026-07-23T13:36:58.663Z",
+  "source_sha256": "93df8a05c1c740bfd8c9f02ff0fd10315a5e228f17a6e2039e956497626efb85"
+}

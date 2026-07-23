@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "canonical_ref": "design/decisions/P71-T3-runtime-contract-reconciliation-rfc.md",
+  "original_path": "design/decisions/P71-T3-runtime-contract-reconciliation-rfc.md",
+  "path_sha256": "949bde9b072db48f898865d14f5914dc101691a006d4b84869ed3121bc009369",
+  "title": "Runtime Contract Reconciliation",
+  "adr_status_at_snapshot": "accepted",
+  "may_satisfy_active_gate": true,
+  "snapshotted_at": "2026-07-23T13:37:07.800Z",
+  "source_sha256": "5dfc596e832da89af18d67b09fae94c34c7130d34cfe9cd129a5093ef1574141"
+}

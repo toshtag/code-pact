@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "canonical_ref": "design/decisions/P72-T4-runtime-task-reconciliation-rfc.md",
+  "original_path": "design/decisions/P72-T4-runtime-task-reconciliation-rfc.md",
+  "path_sha256": "a75ecfb0b39e0e157931dd3c071378be0efd89e5415b200eb87d9ccb01661784",
+  "title": "Runtime Task Reconciliation",
+  "adr_status_at_snapshot": "accepted",
+  "may_satisfy_active_gate": true,
+  "snapshotted_at": "2026-07-23T13:37:11.673Z",
+  "source_sha256": "01b3238f12278b35ba1fa6627be5f3c1cefcd27e92cf9185ec39a6503d5ea2c6"
+}

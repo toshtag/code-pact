@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "canonical_ref": "design/decisions/P72-T3-cycle-correlation-propagation-rfc.md",
+  "original_path": "design/decisions/P72-T3-cycle-correlation-propagation-rfc.md",
+  "path_sha256": "020ddcbae2b1f8280a48f382d41a2f18b1cdb2a89d443c579a7d805634998829",
+  "title": "Cycle Correlation Propagation",
+  "adr_status_at_snapshot": "accepted",
+  "may_satisfy_active_gate": true,
+  "snapshotted_at": "2026-07-23T13:37:10.694Z",
+  "source_sha256": "124092e6284a6a87308dd1682cb3094549c209b61bb32a24dc4692a49cdb7bc5"
+}

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "canonical_ref": "design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md",
+  "original_path": "design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md",
+  "path_sha256": "c5b8d502f1020a071182fa0295577db96de1e69cdc85d9234dbe3ee0410d560d",
+  "title": "Token Reduction Memory Roadmap",
+  "adr_status_at_snapshot": "accepted",
+  "may_satisfy_active_gate": true,
+  "snapshotted_at": "2026-07-23T13:36:59.616Z",
+  "source_sha256": "498ab8daf16f36c062781a9a165aa558085bf309512ac3fbffeec1c195ad97d0"
+}

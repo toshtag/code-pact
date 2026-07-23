@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "canonical_ref": "design/decisions/P55-T1-stable-core-task-delta-rfc.md",
+  "original_path": "design/decisions/P55-T1-stable-core-task-delta-rfc.md",
+  "path_sha256": "af40b1dd2568c4e7b0bc450190b257ed6dab839982bf72c907afa5d4eba700fb",
+  "title": "P55-T1 Stable Core and Task Delta Decision",
+  "adr_status_at_snapshot": "accepted",
+  "may_satisfy_active_gate": true,
+  "snapshotted_at": "2026-07-23T13:36:57.667Z",
+  "source_sha256": "c8f73e6ac536105c70db64e60ad23676ab69c0125207773d2ae34f42f71f2378"
+}
