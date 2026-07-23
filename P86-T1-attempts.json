@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "task_id": "P86-T1",
+  "attempts": [
+    {
+      "id": 1,
+      "at": "2026-07-23T07:55:48.197Z",
+      "agent": "claude-code",
+      "status": "done",
+      "verification_ref": "evidence:sha256:5d1a5e14b09eb964105f44a0743b3a128d4fb4cf5bf2119a1aa297e06d3dc36b",
+      "bundle_path": ".code-pact/cache/reviews/P86-T1/bundle.zip",
+      "manifest_path": ".code-pact/cache/reviews/P86-T1/manifest.json"
+    }
+  ]
+}
