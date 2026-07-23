@@ -69,6 +69,7 @@ tasks:
       - src/core/finalize/reconcile-classifier.ts
       - src/commands/phase-reconcile.ts
       - src/core/runbook/build-phase-runbook.ts
+      - scripts/check-development-efficiency.mjs
       - tests/unit/core/phase-lifecycle-status.test.ts
       - tests/unit/core/review-bundle-phase-lifecycle.test.ts
       - tests/unit/commands/phase-reconcile.test.ts
