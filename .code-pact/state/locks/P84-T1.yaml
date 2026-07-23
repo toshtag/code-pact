@@ -1,0 +1,51 @@
+schema_version: 1
+task_id: P84-T1
+phase_id: P84
+phase_path: design/phases/P84-post-p83-qualified-cycle-effectiveness-recheck.yaml
+base_ref: HEAD
+base_sha: eb83908facef37eab0448c88c98216336fdd83df
+phase_blob_sha: e6b1679a5f164900a8f3091a7820dc56468e00f8
+contract_digest: 3ec3a2607c1f4426d63665f070c49f662ef3ae52c0f078b9815382846c81ca47
+contract:
+  description: >
+    Run one post-P83 qualified Baseline versus Code Pact cycle on the historical
+    pre-P83-T6 public task-start drift bug, record all model invocations and
+    lifecycle results, and classify whether total model-token or repair-round
+    reduction is demonstrated.
+  reads:
+    - design/decisions/P66-T2-token-reduction-evidence-rfc.md
+    - design/decisions/P80-T2-qualified-one-pair-trial.md
+    - design/specs/P83-T6-task-spec.yaml
+    - docs/maintainers/token-efficient-development.md
+  writes:
+    - design/decisions/P84-T1-post-p83-qualified-cycle-trial.md
+  depends_on:
+    - P83-T6
+  decision_refs: []
+  acceptance_refs:
+    - design/decisions/P80-T2-qualified-one-pair-trial.md
+  definition_of_done:
+    - At most one implementation review and one fix-confirmation review occur.
+    - Baseline and Code Pact conditions use identical source, oracle, model,
+      sampling, task facts, allowed writes, and repair limit.
+    - Both conditions include first invocation and at most one repair invocation.
+    - Raw provider usage records support all token totals.
+    - The result is classified without generalizing beyond the pair.
+    - Verification, scope, and artifact results are recorded separately from
+      model-token results.
+  verification_commands:
+    - node /tmp/P84-T1-evidence/verify.mjs
+      /tmp/P84-T1-evidence/P84-T1-evidence.zip
+    - pnpm check:development-efficiency
+    - pnpm check:docs
+  base_sha: eb83908facef37eab0448c88c98216336fdd83df
+  phase_blob_sha: e6b1679a5f164900a8f3091a7820dc56468e00f8
+registration:
+  mode: spec_file
+  spec_digest: f22eec64c27e84bee590a43d665ec48bc5b74691eecc990d7daa22434de4c82e
+  spec_path: design/specs/P84-T1-task-spec.yaml
+  spec_canonical: |
+    {"phase_id":"P84","schema_version":1,"task":{"acceptance_refs":["design/decisions/P80-T2-qualified-one-pair-trial.md"],"ambiguity":"low","context_size":"small","decision_refs":[],"depends_on":["P83-T6"],"description":"Run one post-P83 qualified Baseline versus Code Pact cycle on the historical pre-P83-T6 public task-start drift bug, record all model invocations and lifecycle results, and classify whether total model-token or repair-round reduction is demonstrated.\n","expected_duration":"short","id":"P84-T1","reads":["design/decisions/P80-T2-qualified-one-pair-trial.md","design/decisions/P66-T2-token-reduction-evidence-rfc.md","docs/maintainers/token-efficient-development.md","design/specs/P83-T6-task-spec.yaml"],"requires_decision":false,"risk":"low","status":"planned","type":"test","verification_strength":"strong","write_surface":"low","writes":["design/decisions/P84-T1-post-p83-qualified-cycle-trial.md"]}}
+at: 2026-07-22T12:48:41.776Z
+actor: agent
+author: Pocket

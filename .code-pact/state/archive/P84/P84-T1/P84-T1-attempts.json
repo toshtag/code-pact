@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "model": "gemma4:latest",
+  "model_digest": "c6eb396dbd59",
+  "attempts": [
+    {
+      "id": "capability-1",
+      "condition": "capability",
+      "kind": "raw",
+      "prompt_path": "/tmp/P84-T1-evidence/capability/prompt.txt",
+      "response_path": "/tmp/P84-T1-evidence/capability/response.json",
+      "input_tokens": 71,
+      "output_tokens": 6,
+      "total_tokens": 77,
+      "done_reason": "stop",
+      "passed": false,
+      "result_note": null,
+      "notes": "capability gate"
+    },
+    {
+      "id": "baseline-1",
+      "condition": "baseline",
+      "kind": "system-diff",
+      "prompt_path": "/tmp/P84-T1-evidence/baseline/prompt-1-system-diff.txt",
+      "response_path": "/tmp/P84-T1-evidence/baseline/response-1-system-diff.json",
+      "input_tokens": 3800,
+      "output_tokens": 296,
+      "total_tokens": 4096,
+      "done_reason": "length",
+      "passed": false,
+      "result_note": "initial: empty response (done_reason length)",
+      "notes": "empty response"
+    },
+    {
+      "id": "baseline-2",
+      "condition": "baseline",
+      "kind": "raw-diff",
+      "prompt_path": "/tmp/P84-T1-evidence/baseline/prompt-2-raw-diff.txt",
+      "response_path": "/tmp/P84-T1-evidence/baseline/response-2-raw-diff.json",
+      "input_tokens": 3649,
+      "output_tokens": 447,
+      "total_tokens": 4096,
+      "done_reason": "length",
+      "passed": false,
+      "result_note": "initial: incomplete diff (done_reason length, 447 tokens)",
+      "notes": "incomplete diff"
+    },
+    {
+      "id": "baseline-3",
+      "condition": "baseline",
+      "kind": "raw-diff-repair",
+      "prompt_path": "/tmp/P84-T1-evidence/baseline/prompt-2-raw-diff.txt",
+      "response_path": "/tmp/P84-T1-evidence/baseline/response-3-raw-diff-repair.json",
+      "input_tokens": 3649,
+      "output_tokens": 920,
+      "total_tokens": 4569,
+      "done_reason": "stop",
+      "passed": false,
+      "result_note": "repair: malformed diff (git apply failed)",
+      "notes": "malformed diff"
+    },
+    {
+      "id": "baseline-4",
+      "condition": "baseline",
+      "kind": "full-file",
+      "prompt_path": "/tmp/P84-T1-evidence/baseline/prompt-4-fullfile.txt",
+      "response_path": "/tmp/P84-T1-evidence/baseline/response-4-fullfile.json",
+      "input_tokens": 3326,
+      "output_tokens": 33,
+      "total_tokens": 3359,
+      "done_reason": "stop",
+      "passed": false,
+      "result_note": "repair: placeholder output (33 tokens)",
+      "notes": "placeholder"
+    },
+    {
+      "id": "code-pact-1",
+      "condition": "code-pact",
+      "kind": "full-file",
+      "prompt_path": "/tmp/P84-T1-evidence/code-pact/prompt-initial.txt",
+      "response_path": "/tmp/P84-T1-evidence/code-pact/response-initial.json",
+      "input_tokens": 3395,
+      "output_tokens": 3032,
+      "total_tokens": 6427,
+      "done_reason": "stop",
+      "passed": true,
+      "result_note": "first_pass: passed",
+      "notes": "first pass pass"
+    }
+  ]
+}

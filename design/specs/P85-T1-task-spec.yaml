@@ -1,0 +1,52 @@
+schema_version: 1
+phase_id: P85
+task:
+  id: P85-T1
+  type: bugfix
+  ambiguity: low
+  risk: medium
+  context_size: medium
+  write_surface: medium
+  verification_strength: strong
+  expected_duration: medium
+  status: planned
+  description: >
+    Make explicit task cancellation terminal for phase lifecycle aggregation,
+    reconcile, runbook, and review evidence without rewriting progress history.
+  requires_decision: false
+  depends_on:
+    - P83-T6
+  decision_refs: []
+  reads:
+    - src/core/review-bundle.ts
+    - src/core/review-bundle-phase-lifecycle.ts
+    - src/core/finalize/reconcile-classifier.ts
+    - src/commands/phase-reconcile.ts
+    - src/core/runbook/build-phase-runbook.ts
+    - src/core/plan/analyze.ts
+    - src/core/schemas/task.ts
+    - src/core/progress/task-state.ts
+    - tests/unit/core/review-bundle-phase-lifecycle.test.ts
+    - tests/unit/commands/phase-reconcile.test.ts
+    - tests/unit/core/runbook/build-phase-runbook.test.ts
+    - tests/integration/review-bundle.test.ts
+    - docs/concepts/finalization-reconciliation.md
+    - docs/concepts/runbook.md
+    - docs/cli-contract.md
+  writes:
+    - src/core/phase-lifecycle-status.ts
+    - src/core/review-bundle.ts
+    - src/core/review-bundle-phase-lifecycle.ts
+    - src/core/finalize/reconcile-classifier.ts
+    - src/commands/phase-reconcile.ts
+    - src/core/runbook/build-phase-runbook.ts
+    - scripts/check-development-efficiency.mjs
+    - tests/unit/core/phase-lifecycle-status.test.ts
+    - tests/unit/core/review-bundle-phase-lifecycle.test.ts
+    - tests/unit/commands/phase-reconcile.test.ts
+    - tests/unit/core/runbook/build-phase-runbook.test.ts
+    - tests/integration/review-bundle.test.ts
+    - docs/concepts/finalization-reconciliation.md
+    - docs/concepts/runbook.md
+    - docs/cli-contract.md
+  acceptance_refs: []

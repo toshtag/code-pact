@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "trial_id": "P84-T2",
+  "invocations": [
+    {
+      "condition": "capability",
+      "attempt": 1,
+      "stage": "gate",
+      "prompt_file": "capability/prompt.txt",
+      "response_file": "capability/response.json",
+      "model": "gemma4:latest",
+      "model_digest": "c6eb396dbd59",
+      "sampling": { "temperature": 0, "top_p": 0.9, "seed": 42, "raw": true, "num_ctx": 16384, "num_predict": 512 },
+      "input_tokens": 71,
+      "output_tokens": 6,
+      "total_tokens": 77,
+      "passed": true,
+      "applied": true,
+      "oracle_passed": true
+    },
+    {
+      "condition": "baseline",
+      "attempt": 1,
+      "stage": "initial",
+      "prompt_file": "baseline/prompt-initial.txt",
+      "response_file": "baseline/response-initial.json",
+      "model": "gemma4:latest",
+      "model_digest": "c6eb396dbd59",
+      "sampling": { "temperature": 0, "top_p": 0.9, "seed": 42, "raw": true, "num_ctx": 16384, "num_predict": 8192 },
+      "input_tokens": 3790,
+      "output_tokens": 2,
+      "total_tokens": 3792,
+      "passed": false,
+      "failure_reason": "model output only contained an opening markdown code fence and no complete-file markers"
+    },
+    {
+      "condition": "baseline",
+      "attempt": 2,
+      "stage": "repair",
+      "prompt_file": "baseline/prompt-repair.txt",
+      "response_file": "baseline/response-repair.json",
+      "model": "gemma4:latest",
+      "model_digest": "c6eb396dbd59",
+      "sampling": { "temperature": 0, "top_p": 0.9, "seed": 42, "raw": true, "num_ctx": 16384, "num_predict": 8192 },
+      "input_tokens": 3283,
+      "output_tokens": 2461,
+      "total_tokens": 5744,
+      "passed": true,
+      "repair": true,
+      "applied": true,
+      "oracle_passed": true
+    },
+    {
+      "condition": "code-pact",
+      "attempt": 1,
+      "stage": "initial",
+      "prompt_file": "code-pact/prompt-initial.txt",
+      "response_file": "code-pact/response-initial.json",
+      "model": "gemma4:latest",
+      "model_digest": "c6eb396dbd59",
+      "sampling": { "temperature": 0, "top_p": 0.9, "seed": 42, "raw": true, "num_ctx": 16384, "num_predict": 8192 },
+      "input_tokens": 4378,
+      "output_tokens": 2510,
+      "total_tokens": 6888,
+      "passed": true,
+      "applied": true,
+      "oracle_passed": true
+    }
+  ]
+}
