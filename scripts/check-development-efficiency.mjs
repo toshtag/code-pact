@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -93,13 +94,61 @@ export function loadDoneEvents(repoRoot) {
   return events;
 }
 
+function phaseSnapshotBundleFiles(repoRoot) {
+  const dir = resolve(repoRoot, ".code-pact/state/archive/bundles");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter(
+      name => name.startsWith("phase_snapshot-") && name.endsWith(".json"),
+    )
+    .map(name => `.code-pact/state/archive/bundles/${name}`)
+    .sort();
+}
+
+function loadTasksFromPhaseSnapshotBundle(repoRoot, rel) {
+  const bundle = readJson(repoRoot, rel);
+  const tasks = [];
+  for (const member of bundle?.members || []) {
+    const snapshot = JSON.parse(member?.bytes || "{}");
+    for (const task of snapshot?.tasks || []) {
+      if (task?.id) tasks.push(task);
+    }
+  }
+  return tasks;
+}
+
+function readYamlFromGitHead(repoRoot, rel) {
+  try {
+    const out = execSync(`git show HEAD:${rel}`, {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 1024 * 1024,
+    });
+    return parseYaml(out);
+  } catch {
+    return null;
+  }
+}
+
 export function loadTasksById(repoRoot) {
   const roadmap = readYaml(repoRoot, "design/roadmap.yaml");
   const tasks = new Map();
+  // Snapshot bundles are fallback authority: load them first, then let live/git
+  // definitions overwrite them so fields like `writes` are preserved.
+  for (const rel of phaseSnapshotBundleFiles(repoRoot)) {
+    for (const task of loadTasksFromPhaseSnapshotBundle(repoRoot, rel)) {
+      if (task?.id) tasks.set(String(task.id), task);
+    }
+  }
   for (const phaseRef of roadmap?.phases ?? []) {
-    if (!phaseRef?.path || !existsSync(resolve(repoRoot, phaseRef.path)))
-      continue;
-    const phase = readYaml(repoRoot, phaseRef.path);
+    if (!phaseRef?.path) continue;
+    let phase = null;
+    if (existsSync(resolve(repoRoot, phaseRef.path))) {
+      phase = readYaml(repoRoot, phaseRef.path);
+    } else {
+      phase = readYamlFromGitHead(repoRoot, phaseRef.path);
+    }
     for (const task of phase?.tasks ?? []) {
       if (task?.id) tasks.set(String(task.id), task);
     }
