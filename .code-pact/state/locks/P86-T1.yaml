@@ -5,7 +5,7 @@ phase_path: design/phases/P86-task-cancellation-cli-and-terminal-lifecycle-enfor
 base_ref: HEAD
 base_sha: 11b8f8ff1c23e58fa89dc602d923d5aa5cdb1fb7
 phase_blob_sha: 2af38f6fa5fb1394fa76fe3e9d7d7068b811d982
-contract_digest: 92c88b519ba4fb6427003b97b8eac192f2d736350c86fe81e06e34227e0c7182
+contract_digest: f29c6550449b2edbc2ff3b7b0ca1aacb0fbdf101d1192666ef966b11de70e62a
 contract:
   description: >
     Add task cancel with dry-run/write behavior, enforce cancelled terminality
@@ -41,6 +41,7 @@ contract:
     - tests/unit/core/runbook/build-task-runbook.test.ts
   writes:
     - design/phases/P83-lossless-task-registration.yaml
+    - design/phases/P86-task-cancellation-cli-and-terminal-lifecycle-enforcement.yaml
     - docs/cli-contract.md
     - docs/cli-reference.generated.md
     - docs/concepts/finalization-reconciliation.md

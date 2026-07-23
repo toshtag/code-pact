@@ -117,4 +117,5 @@ tasks:
       - docs/concepts/runbook.md
       - docs/cli-reference.generated.md
       - design/phases/P83-lossless-task-registration.yaml
+      - design/phases/P86-task-cancellation-cli-and-terminal-lifecycle-enforcement.yaml
     acceptance_refs: []
