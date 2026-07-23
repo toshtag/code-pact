@@ -3,7 +3,7 @@ name: Post-P83 Qualified Cycle Effectiveness Recheck
 weight: 1
 confidence: medium
 risk: low
-status: in_progress
+status: done
 objective: >
   Re-run one capability-qualified implementation pair after P81-P83 and
   determine whether Code Pact reduces total model tokens or corrective model
