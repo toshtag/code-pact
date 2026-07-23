@@ -3,7 +3,7 @@ name: Task Cancellation CLI
 weight: 2
 confidence: high
 risk: medium
-status: planned
+status: done
 objective: >
   Add a public task cancellation command and enforce cancelled terminality
   across the task lifecycle while preserving progress events, contract locks,
@@ -42,7 +42,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       Add task cancel with dry-run/write behavior, enforce cancelled terminality
       across the public task lifecycle, and dogfood the command by cancelling
