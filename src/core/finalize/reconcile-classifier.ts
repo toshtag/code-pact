@@ -35,6 +35,14 @@ export function classifyReconcile(
   designStatus: PhaseStatus,
   derivedState: TaskCurrentState,
 ): ReconcileClassification {
+  // Explicit cancellation is a terminal human decision. It is not eligible for
+  // automatic flip and does not require manual repair.
+  if (designStatus === "cancelled") {
+    return {
+      action: "skip",
+      reason: "design status is cancelled; task is terminal for phase closure",
+    };
+  }
   if (derivedState === "done" && designStatus !== "done") {
     return { action: "flip", reason: null };
   }

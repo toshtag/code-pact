@@ -488,4 +488,434 @@ describe("task review-bundle", () => {
     );
     expect(err.error.message).toContain("src/extra.ts");
   });
+
+  it("accepts a review bundle when a blocked sibling is explicitly cancelled", async () => {
+    project = await createTempProject();
+    await writeFakeClassifier(project.dir);
+
+    expectJsonOk(
+      project.run([
+        "phase",
+        "add",
+        "--id",
+        "P1",
+        "--name",
+        "Foundation",
+        "--weight",
+        "1",
+        "--objective",
+        "Test phase",
+        "--verify-command",
+        "echo ok",
+        "--json",
+      ]),
+    );
+
+    expectJsonOk(
+      project.run([
+        "task",
+        "add",
+        "P1",
+        "--type",
+        "feature",
+        "--description",
+        "Done task",
+        "--write",
+        "src/example.ts",
+        "--json",
+      ]),
+    );
+    expectJsonOk(
+      project.run([
+        "task",
+        "add",
+        "P1",
+        "--type",
+        "bugfix",
+        "--description",
+        "Cancelled sibling",
+        "--json",
+      ]),
+    );
+
+    await mkdir(join(project.dir, "src"), { recursive: true });
+    await writeFile(
+      join(project.dir, "src", "example.ts"),
+      "export const x = 1;\n",
+      "utf8",
+    );
+
+    git(project.dir, ["init", "--quiet"]);
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "init",
+    ]);
+
+    // Lock both tasks before starting so task start never has to create a lock
+    // while the working tree is dirty from a previous event.
+    const lock1 = expectJsonOk<{ base_sha: string }>(
+      project.run(["task", "lock", "P1-T1", "--json"]),
+    );
+    const baseSha = lock1.data.base_sha;
+
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "lock-t1",
+    ]);
+
+    expectJsonOk(project.run(["task", "lock", "P1-T2", "--json"]));
+
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "lock-t2",
+    ]);
+
+    expectJsonOk(project.run(["task", "start", "P1-T1", "--json"]));
+    expectJsonOk(project.run(["task", "start", "P1-T2", "--json"]));
+
+    // Record a blocked event for the sibling, then cancel it in the design.
+    expectJsonOk(
+      project.run([
+        "task",
+        "block",
+        "P1-T2",
+        "--reason",
+        "abandoned",
+        "--json",
+      ]),
+    );
+
+    await writeFile(
+      join(project.dir, "src", "example.ts"),
+      "export const x = 2;\n",
+      "utf8",
+    );
+
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "impl",
+    ]);
+
+    expectJsonOk(project.run(["task", "complete", "P1-T1", "--json"]));
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "done",
+    ]);
+
+    // Finalize P1-T1 first so the strict audit only sees the declared source write.
+    expectJsonOk(
+      project.run([
+        "task",
+        "finalize",
+        "P1-T1",
+        "--audit-strict",
+        "--base-ref",
+        baseSha,
+        "--write",
+        "--json",
+      ]),
+    );
+
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "finalize",
+    ]);
+
+    // Cancel P1-T2 in the phase YAML so the review bundle lifecycle classifier
+    // reclassifies the phase change as control-plane only.
+    const phasePath = join(
+      project.dir,
+      "design",
+      "phases",
+      "P1-foundation.yaml",
+    );
+    let phaseYaml = await readFile(phasePath, "utf8");
+    const p1T2Start = phaseYaml.indexOf("  - id: P1-T2");
+    const p1T2End = phaseYaml.indexOf("  - id: ", p1T2Start + 1);
+    const p1T2Block = phaseYaml.slice(
+      p1T2Start,
+      p1T2End === -1 ? phaseYaml.length : p1T2End,
+    );
+    phaseYaml =
+      phaseYaml.slice(0, p1T2Start) +
+      p1T2Block.replace(/^    status: planned$/m, "    status: cancelled") +
+      (p1T2End === -1 ? "" : phaseYaml.slice(p1T2End));
+    phaseYaml = phaseYaml.replace(/^status: .*$/m, "status: done");
+    await writeFile(phasePath, phaseYaml, "utf8");
+
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "cancel-sibling",
+    ]);
+
+    const bundle = expectJsonOk(
+      project.run(["task", "review-bundle", "P1-T1", "--json"]),
+    );
+    expect(bundle.data).toMatchObject({
+      task_id: "P1-T1",
+      phase_id: "P1",
+    });
+    const data = bundle.data as { manifest_path: string };
+    const manifestRaw = await readFile(data.manifest_path, "utf8");
+    const manifest = JSON.parse(manifestRaw);
+    expect(manifest.write_audit.outside_declared).toEqual([]);
+    expect(manifest.write_audit.declared_unused).toEqual([]);
+    expect(manifest.write_audit.lifecycle_control_plane).toEqual(
+      expect.arrayContaining([
+        {
+          file: "design/phases/P1-foundation.yaml",
+          changed_fields: expect.arrayContaining([
+            "status",
+            "tasks[P1-T2].status",
+          ]),
+        },
+      ]),
+    );
+  });
+
+  it("rejects a review bundle when a non-cancelled sibling is blocked", async () => {
+    project = await createTempProject();
+    await writeFakeClassifier(project.dir);
+
+    expectJsonOk(
+      project.run([
+        "phase",
+        "add",
+        "--id",
+        "P1",
+        "--name",
+        "Foundation",
+        "--weight",
+        "1",
+        "--objective",
+        "Test phase",
+        "--verify-command",
+        "echo ok",
+        "--json",
+      ]),
+    );
+
+    expectJsonOk(
+      project.run([
+        "task",
+        "add",
+        "P1",
+        "--type",
+        "feature",
+        "--description",
+        "Done task",
+        "--write",
+        "src/example.ts",
+        "--json",
+      ]),
+    );
+    expectJsonOk(
+      project.run([
+        "task",
+        "add",
+        "P1",
+        "--type",
+        "bugfix",
+        "--description",
+        "Blocked sibling",
+        "--json",
+      ]),
+    );
+
+    await mkdir(join(project.dir, "src"), { recursive: true });
+    await writeFile(
+      join(project.dir, "src", "example.ts"),
+      "export const x = 1;\n",
+      "utf8",
+    );
+
+    git(project.dir, ["init", "--quiet"]);
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "init",
+    ]);
+
+    const lock = expectJsonOk<{ base_sha: string }>(
+      project.run(["task", "lock", "P1-T1", "--json"]),
+    );
+    const baseSha = lock.data.base_sha;
+
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "lock-t1",
+    ]);
+
+    expectJsonOk(project.run(["task", "lock", "P1-T2", "--json"]));
+
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "lock-t2",
+    ]);
+
+    expectJsonOk(project.run(["task", "start", "P1-T1", "--json"]));
+    expectJsonOk(project.run(["task", "start", "P1-T2", "--json"]));
+    expectJsonOk(
+      project.run(["task", "block", "P1-T2", "--reason", "test", "--json"]),
+    );
+
+    await writeFile(
+      join(project.dir, "src", "example.ts"),
+      "export const x = 2;\n",
+      "utf8",
+    );
+
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "impl",
+    ]);
+
+    expectJsonOk(project.run(["task", "complete", "P1-T1", "--json"]));
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "done",
+    ]);
+
+    // Finalize P1-T1 first so the strict audit only sees the declared source write.
+    expectJsonOk(
+      project.run([
+        "task",
+        "finalize",
+        "P1-T1",
+        "--audit-strict",
+        "--base-ref",
+        baseSha,
+        "--write",
+        "--json",
+      ]),
+    );
+
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "finalize",
+    ]);
+
+    // Mark the phase done without cancelling the blocked sibling.
+    const phasePath = join(
+      project.dir,
+      "design",
+      "phases",
+      "P1-foundation.yaml",
+    );
+    const phaseYaml = (await readFile(phasePath, "utf8")).replace(
+      /^status: .*$/m,
+      "status: done",
+    );
+    await writeFile(phasePath, phaseYaml, "utf8");
+
+    git(project.dir, ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."]);
+    git(project.dir, [
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "--quiet",
+      "-m",
+      "closeout",
+    ]);
+
+    const err = expectJsonErr(
+      project.run(["task", "review-bundle", "P1-T1", "--json"]),
+      "REVIEW_EVIDENCE_STATE_MISMATCH",
+    );
+    expect(
+      (err.data as { derived_phase_status?: string }).derived_phase_status,
+    ).toBe("in_progress");
+  });
 });

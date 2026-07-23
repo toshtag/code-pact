@@ -13,6 +13,7 @@ import {
 import type { Phase, PhaseStatus } from "../schemas/phase.ts";
 import type { ProgressEvent } from "../schemas/progress-event.ts";
 import type { Task } from "../schemas/task.ts";
+import { derivePhaseLifecycleStatus } from "../phase-lifecycle-status.ts";
 import {
   assertStepInvariant,
   type RunbookStep,
@@ -94,27 +95,11 @@ function computeHistograms(classified: ClassifiedTask[]): {
 function computePhaseStatusCandidate(
   classified: ClassifiedTask[],
 ): PhaseStatus {
-  if (classified.length === 0) return "planned";
-
-  const effective: PhaseStatus[] = classified.map((c) => {
-    if (c.reconcile.action === "flip") return "done";
-    if (c.task.status === "done") return "done";
-    return c.task.status;
-  });
-
-  if (effective.every((s) => s === "done")) return "done";
-
-  const hasActiveWork = classified.some(
-    (c) =>
-      c.derived === "started" ||
-      c.derived === "blocked" ||
-      c.derived === "resumed" ||
-      c.derived === "failed",
-  );
-  if (hasActiveWork) return "in_progress";
-
-  if (effective.some((s) => s === "in_progress")) return "in_progress";
-  return "planned";
+  const states = classified.map(c => ({
+    design_status: c.task.status,
+    derived_state: c.derived,
+  }));
+  return derivePhaseLifecycleStatus(states);
 }
 
 function blockedSteps(c: ClassifiedTask): RunbookStep[] {
@@ -199,7 +184,7 @@ export function buildPhaseRunbook(
   const { phase, events } = input;
 
   const tasks = phase.tasks ?? [];
-  const classified: ClassifiedTask[] = tasks.map((task) => {
+  const classified: ClassifiedTask[] = tasks.map(task => {
     const derived = deriveTaskState(events, task.id);
     const hasEvents = derived.history.length > 0;
     return {
@@ -217,15 +202,17 @@ export function buildPhaseRunbook(
   // Build steps in priority order.
   const steps: RunbookStep[] = [];
 
-  // 1. Blocked tasks → resume guidance (blocking).
+  // 1. Blocked tasks → resume guidance (blocking), unless explicitly cancelled.
   for (const c of classified) {
-    if (c.derived === "blocked") {
+    if (c.derived === "blocked" && c.task.status !== "cancelled") {
       steps.push(...blockedSteps(c));
     }
   }
 
-  // 2. Failed / complex-drift tasks → manual_review (blocking).
+  // 2. Failed / complex-drift tasks → manual_review (blocking), unless
+  //    explicitly cancelled.
   for (const c of classified) {
+    if (c.task.status === "cancelled") continue;
     if (c.derived === "failed") {
       steps.push(manualReviewStep(c));
       continue;
@@ -239,29 +226,32 @@ export function buildPhaseRunbook(
   }
 
   // 3. Eligible reconcile batch (one step covering every flip candidate).
-  const flipCandidates = classified.filter((c) => c.reconcile.action === "flip");
+  const flipCandidates = classified.filter(c => c.reconcile.action === "flip");
   if (flipCandidates.length > 0) {
     steps.push(
       reconcileBatchStep(
         phase.id,
-        flipCandidates.map((c) => c.task.id),
+        flipCandidates.map(c => c.task.id),
       ),
     );
   }
 
-  // 4. In-progress task hints (non-blocking).
+  // 4. In-progress task hints (non-blocking), unless explicitly cancelled.
   for (const c of classified) {
+    if (c.task.status === "cancelled") continue;
     if (c.derived === "started" || c.derived === "resumed") {
       steps.push(inProgressHintStep(c));
     }
   }
 
   // 5. Untouched ready tasks → primary loop (non-blocking, only when
-  //    depends_on is fully satisfied).
+  //    depends_on is fully satisfied). Cancelled tasks are intentionally
+  //    terminal and do not get an implementation loop.
   for (const c of classified) {
+    if (c.task.status === "cancelled") continue;
     if (c.derived !== "planned" || c.hasEvents) continue;
     const deps = c.task.depends_on ?? [];
-    const allDepsSatisfied = deps.every((depId) => {
+    const allDepsSatisfied = deps.every(depId => {
       const ds = deriveTaskState(events, depId);
       return ds.current === "done";
     });

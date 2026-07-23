@@ -26,6 +26,10 @@ import {
   type WriteAuditWarning,
 } from "./audit/write-audit.ts";
 import {
+  derivePhaseLifecycleStatus,
+  type PhaseLifecycleTaskState,
+} from "./phase-lifecycle-status.ts";
+import {
   classifyPhaseLifecycle,
   type LifecycleControlPlaneEntry,
 } from "./review-bundle-phase-lifecycle.ts";
@@ -65,23 +69,17 @@ function verificationEntryFromArtifact(
 }
 
 function derivePhaseStatus(
-  tasks: { id: string; status: string }[],
+  tasks: {
+    id: string;
+    status: "planned" | "in_progress" | "done" | "cancelled";
+  }[],
   events: readonly import("./schemas/progress-event.ts").ProgressEvent[],
 ): "planned" | "in_progress" | "done" {
-  if (tasks.length === 0) return "planned";
-  const derived = tasks.map(t => deriveTaskState(events, t.id).current);
-  if (derived.every(s => s === "done")) return "done";
-  if (
-    derived.some(
-      s =>
-        s === "started" || s === "blocked" || s === "resumed" || s === "failed",
-    )
-  ) {
-    return "in_progress";
-  }
-  if (tasks.some(t => t.status === "in_progress")) return "in_progress";
-  if (derived.some(s => s === "done")) return "in_progress";
-  return "planned";
+  const states: PhaseLifecycleTaskState[] = tasks.map(t => ({
+    design_status: t.status,
+    derived_state: deriveTaskState(events, t.id).current,
+  }));
+  return derivePhaseLifecycleStatus(states);
 }
 
 export const DoneEventRef = z.object({

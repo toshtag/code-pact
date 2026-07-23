@@ -3,7 +3,7 @@ name: Cancelled Task Terminality
 weight: 2
 confidence: high
 risk: medium
-status: in_progress
+status: done
 objective: >
   Treat an explicitly cancelled task as terminal for phase-level lifecycle
   aggregation while preserving its historical progress events.
@@ -16,7 +16,8 @@ non_goals:
 definition_of_done:
   - A cancelled task with failed history no longer keeps a phase in progress.
   - Phase reconcile and phase runbook report the same phase-status candidate.
-  - Review bundle accepts a done reviewed task whose failed sibling is explicitly cancelled.
+  - Review bundle accepts a done reviewed task whose failed sibling is
+    explicitly cancelled.
   - Cancelling a task with a derived done state remains fail-closed.
   - Non-cancelled failed tasks continue to block phase completion.
   - Strict finalize and the official review-bundle command pass.
@@ -38,10 +39,11 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       Make explicit task cancellation terminal for phase lifecycle aggregation,
-      reconcile, runbook, and review evidence without rewriting progress history.
+      reconcile, runbook, and review evidence without rewriting progress
+      history.
     requires_decision: false
     depends_on:
       - P83-T6

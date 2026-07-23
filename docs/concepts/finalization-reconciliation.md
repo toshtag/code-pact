@@ -51,11 +51,11 @@ code-pact phase reconcile P9 --write --json
 
 `phase reconcile` is the bulk counterpart. It walks every task in the phase and classifies each into one of three actions:
 
-| Action | When | Effect of `--write` |
-| --- | --- | --- |
-| `flip` | Derived state is `done` AND design status is `planned` / `in_progress` | Status rewritten to `done` (atomic write) |
-| `skip` | Already `done`, OR `planned` with no events, OR work in progress (`started` / `resumed`) | No change |
-| `manual_review` | Derived state is `blocked` or `failed` | No change. Run `plan analyze` for diagnosis |
+| Action          | When                                                                                                    | Effect of `--write`                         |
+| --------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `flip`          | Derived state is `done` AND design status is `planned` / `in_progress`                                  | Status rewritten to `done` (atomic write)   |
+| `skip`          | Already `done` or `cancelled`, OR `planned` with no events, OR work in progress (`started` / `resumed`) | No change                                   |
+| `manual_review` | Derived state is `blocked` or `failed` (unless design status is `cancelled`)                            | No change. Run `plan analyze` for diagnosis |
 
 `phase reconcile` only ever mutates `flip` tasks. `manual_review` tasks are surfaced in `data.tasks[]` but never touched even with `--write` — they require human judgement, which a deterministic command should not pretend to provide.
 
@@ -69,7 +69,7 @@ This matches the spirit of `adapter upgrade`: the contract is "do as much as is 
 
 ## Phase status remains a manual flip
 
-`phase reconcile` reports a `phase_status_candidate` (`done` / `in_progress` / `planned`) by simulating the post-flip state, but never writes the phase's own `status` field:
+`phase reconcile` reports a `phase_status_candidate` (`done` / `in_progress` / `planned`) by simulating the post-flip state. `cancelled` tasks are treated as terminal for this aggregation, so a phase whose remaining tasks are `done` or explicitly `cancelled` receives a `done` candidate even when a cancelled task has historical `failed`/`blocked` events. The phase's own `status` field is still never written by `phase reconcile`:
 
 ```json
 {

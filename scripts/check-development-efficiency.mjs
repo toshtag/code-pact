@@ -258,7 +258,8 @@ export function evaluateDevelopmentEfficiency({
   let completedDesignOnlyTasks = 0;
   let completedRuntimeTasks = 0;
   let consecutiveDesignOnlyTasks = 0;
-  let maxConsecutiveDesignOnlyTasks = 0;
+  let allowedMaxConsecutive = 1;
+  let observedMaxConsecutive = 0;
   let postEvents;
   let checkpointTask;
 
@@ -321,8 +322,11 @@ export function evaluateDevelopmentEfficiency({
     completedDesignOnlyTasks = checkpoint.state.completed_design_only_tasks;
     completedRuntimeTasks = checkpoint.state.completed_runtime_tasks;
     consecutiveDesignOnlyTasks = checkpoint.state.consecutive_design_only_tasks;
-    maxConsecutiveDesignOnlyTasks =
-      checkpoint.state.max_consecutive_design_only_tasks;
+    allowedMaxConsecutive = checkpoint.state.max_consecutive_design_only_tasks;
+    observedMaxConsecutive = Math.max(
+      allowedMaxConsecutive,
+      consecutiveDesignOnlyTasks,
+    );
     postEvents = doneEvents.slice(cp.index + 1);
   } else {
     const baseline = findUniqueEvent(
@@ -338,6 +342,9 @@ export function evaluateDevelopmentEfficiency({
         historical_debt: HISTORICAL_DEBT,
       };
     }
+    // Without a checkpoint the gate allows a single consecutive design-only task.
+    allowedMaxConsecutive = 1;
+    observedMaxConsecutive = allowedMaxConsecutive;
     postEvents = doneEvents.slice(baseline.index + 1);
   }
 
@@ -351,8 +358,8 @@ export function evaluateDevelopmentEfficiency({
     if (isDesignOnlyTask(task)) {
       completedDesignOnlyTasks += 1;
       consecutiveDesignOnlyTasks += 1;
-      maxConsecutiveDesignOnlyTasks = Math.max(
-        maxConsecutiveDesignOnlyTasks,
+      observedMaxConsecutive = Math.max(
+        observedMaxConsecutive,
         consecutiveDesignOnlyTasks,
       );
     } else {
@@ -379,7 +386,7 @@ export function evaluateDevelopmentEfficiency({
     completedDesignOnlyTasks,
     completedRuntimeTasks,
     consecutiveDesignOnlyTasks,
-    maxConsecutiveDesignOnlyTasks,
+    maxConsecutiveDesignOnlyTasks: observedMaxConsecutive,
   });
 
   if (nextTask !== undefined) {
@@ -397,8 +404,7 @@ export function evaluateDevelopmentEfficiency({
     const prospectiveConsecutiveDesignOnlyTasks = nextDesignOnly
       ? consecutiveDesignOnlyTasks + 1
       : 0;
-    const pass =
-      prospectiveConsecutiveDesignOnlyTasks <= maxConsecutiveDesignOnlyTasks;
+    const pass = prospectiveConsecutiveDesignOnlyTasks <= allowedMaxConsecutive;
     return {
       ...baseResult,
       next_task: nextTask,
@@ -410,7 +416,7 @@ export function evaluateDevelopmentEfficiency({
     };
   }
 
-  const pass = consecutiveDesignOnlyTasks <= maxConsecutiveDesignOnlyTasks;
+  const pass = consecutiveDesignOnlyTasks <= allowedMaxConsecutive;
   return {
     ...baseResult,
     status: pass ? "pass" : "fail",

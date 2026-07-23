@@ -80,14 +80,16 @@ The phase runbook iterates `phase.tasks[]` once, classifies each task, and assem
 
 ### Priority order
 
-| #   | Category                     | Blocking? | What it emits                                                                                                                                           |
-| --- | ---------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Blocked tasks                | yes       | manual_action (resolve blocker) + `task resume <id> --reason "..."` for each blocked task                                                               |
-| 2   | Failed / complex-drift tasks | yes       | manual_review pointing at `plan analyze` for `failed` state and `done-blocked-conflict` / `done-with-incomplete-events` drift                           |
-| 3   | Eligible reconcile batch     | no        | exactly one `phase reconcile <id> --write` step covering every `flip` candidate                                                                         |
-| 4   | In-progress task hints       | no        | one `task runbook <task-id>` step per `started` / `resumed` task                                                                                        |
-| 5   | Untouched ready tasks        | no        | the four-step ready-task sequence (`task start` → `task context` → implement → `task complete`) for each `planned` task whose `depends_on` is satisfied |
-| 6   | Phase-status advisory        | no        | manual_action recommending the phase's own `status` flip when every task would be `done` post-reconcile and the phase isn't already `done`              |
+| #   | Category                     | Blocking? | What it emits                                                                                                                                                                                         |
+| --- | ---------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Blocked tasks                | yes       | manual_action (resolve blocker) + `task resume <id> --reason "..."` for each blocked task, unless `status` is `cancelled`                                                                             |
+| 2   | Failed / complex-drift tasks | yes       | manual_review pointing at `plan analyze` for `failed` state and `done-blocked-conflict` / `done-with-incomplete-events` drift, unless `status` is `cancelled`                                         |
+| 3   | Eligible reconcile batch     | no        | exactly one `phase reconcile <id> --write` step covering every `flip` candidate                                                                                                                       |
+| 4   | In-progress task hints       | no        | one `task runbook <task-id>` step per `started` / `resumed` task, unless `status` is `cancelled`                                                                                                      |
+| 5   | Untouched ready tasks        | no        | the four-step ready-task sequence (`task start` → `task context` → implement → `task complete`) for each `planned` task whose `depends_on` is satisfied; cancelled tasks do not emit a ready sequence |
+| 6   | Phase-status advisory        | no        | manual_action recommending the phase's own `status` flip when every task would be terminal (`done` or explicitly `cancelled`) post-reconcile and the phase isn't already `done`                       |
+
+Cancelled tasks are terminal by design. `phase_status_candidate` is `done` when every task is either `done` in the ledger or explicitly `cancelled` in the phase YAML, even if the cancelled task's historical progress events include `failed` or `blocked`.
 
 The phase-status advisory is the closing step. Phase reconcile itself never writes the phase status field; the runbook continues that contract by surfacing the advisory as a `manual_action`, not a command.
 

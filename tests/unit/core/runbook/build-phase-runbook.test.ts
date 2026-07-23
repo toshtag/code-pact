@@ -104,7 +104,9 @@ describe("buildPhaseRunbook", () => {
           ev("P1-T2", "done"),
         ],
       });
-      expect(result.phase_summary.drift_histogram["done-but-design-not-done"]).toBe(2);
+      expect(
+        result.phase_summary.drift_histogram["done-but-design-not-done"],
+      ).toBe(2);
       expect(result.phase_summary.drift_histogram.manual_review).toBe(0);
       expect(result.phase_summary.drift_histogram.consistent).toBe(0);
     });
@@ -150,7 +152,7 @@ describe("buildPhaseRunbook", () => {
         events: [ev("P1-T1", "started"), ev("P1-T1", "blocked")],
       });
       // The drift task gets a manual_review step.
-      const manualReview = result.next_steps.find((s) =>
+      const manualReview = result.next_steps.find(s =>
         s.manual_action?.includes("plan analyze"),
       );
       expect(manualReview).toBeDefined();
@@ -173,7 +175,7 @@ describe("buildPhaseRunbook", () => {
           ev("P1-T3", "done"),
         ],
       });
-      const reconcileSteps = result.next_steps.filter((s) =>
+      const reconcileSteps = result.next_steps.filter(s =>
         s.command?.includes("phase reconcile"),
       );
       expect(reconcileSteps.length).toBe(1);
@@ -190,7 +192,7 @@ describe("buildPhaseRunbook", () => {
         phase: phase([task({ id: "P1-T1" })]),
         events: [ev("P1-T1", "started")],
       });
-      const hint = result.next_steps.find((s) =>
+      const hint = result.next_steps.find(s =>
         s.command?.includes("task runbook P1-T1"),
       );
       expect(hint).toBeDefined();
@@ -207,12 +209,12 @@ describe("buildPhaseRunbook", () => {
       });
       // P1-T1 has no deps, gets primary loop.
       const startT1 = result.next_steps.find(
-        (s) => s.command === "code-pact task start P1-T1",
+        s => s.command === "code-pact task start P1-T1",
       );
       expect(startT1).toBeDefined();
       // P1-T2 depends on planned P1-T1 → no primary loop emitted.
       const startT2 = result.next_steps.find(
-        (s) => s.command === "code-pact task start P1-T2",
+        s => s.command === "code-pact task start P1-T2",
       );
       expect(startT2).toBeUndefined();
     });
@@ -255,7 +257,7 @@ describe("buildPhaseRunbook", () => {
           ev("P1-T2", "done"),
         ],
       });
-      const advisory = result.next_steps.find((s) =>
+      const advisory = result.next_steps.find(s =>
         s.manual_action?.includes("Flip the phase"),
       );
       expect(advisory).toBeUndefined();
@@ -317,5 +319,39 @@ describe("buildPhaseRunbook", () => {
     });
     expect(result.phase_summary.phase_status_note).toContain("advisory");
     expect(result.phase_summary.phase_status_note).toContain("never written");
+  });
+});
+
+describe("cancelled task terminality", () => {
+  it("does not emit blocking repair/resume steps for a cancelled failed task", () => {
+    const result = buildPhaseRunbook({
+      phase: phase([
+        task({ id: "P1-T1", status: "cancelled" }),
+        task({ id: "P1-T2", status: "done" }),
+      ]),
+      events: [
+        ev("P1-T1", "started"),
+        ev("P1-T1", "failed"),
+        ev("P1-T2", "started"),
+        ev("P1-T2", "done"),
+      ],
+    });
+    expect(result.phase_summary.phase_status_candidate).toBe("done");
+    const repair = result.next_steps.find(s =>
+      s.manual_action?.includes("plan analyze"),
+    );
+    expect(repair).toBeUndefined();
+    expect(
+      result.next_steps.some(s => s.command?.includes("task resume")),
+    ).toBe(false);
+  });
+
+  it("does not emit an in-progress hint or primary loop for a cancelled task", () => {
+    const result = buildPhaseRunbook({
+      phase: phase([task({ id: "P1-T1", status: "cancelled" })], "done"),
+      events: [],
+    });
+    expect(result.next_steps).toEqual([]);
+    expect(result.phase_summary.phase_status_candidate).toBe("done");
   });
 });
