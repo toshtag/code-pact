@@ -88,5 +88,7 @@ tasks:
       - design/decisions/P84-T1-post-p83-qualified-cycle-trial.md
     writes:
       - design/decisions/P84-T2-protocol-correct-effectiveness-trial.md
+      - scripts/development-efficiency-checkpoint.json
+      - scripts/check-development-efficiency.mjs
     acceptance_refs:
       - design/decisions/P80-T2-qualified-one-pair-trial.md
