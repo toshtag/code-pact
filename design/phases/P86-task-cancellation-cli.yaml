@@ -70,7 +70,6 @@ tasks:
       - src/i18n/ja-JP.ts
       - src/core/execute-once/run.ts
       - src/core/execute-once/types.ts
-      - src/commands/task-execute.ts
       - src/commands/task-runbook.ts
       - src/core/contract-lock.ts
       - design/phases/P83-lossless-task-registration.yaml

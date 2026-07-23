@@ -3,7 +3,7 @@ import type { PlanIssue, PlanIssueRecovery } from "../shared.ts";
 
 const PHASE_ID_PATTERN = /^P\d+$/;
 const TASK_ID_PATTERN = (phaseId: string): RegExp =>
-  new RegExp(`^${phaseId}-T\\d+$`);
+  new RegExp(`^${phaseId}-T\\d+[A-Z]?$`);
 
 // ---------------------------------------------------------------------------
 // Recovery guidance for the collaboration conflict diagnostics.
@@ -122,7 +122,11 @@ export function detectDuplicatePhaseIds(phases: PhaseEntry[]): PlanIssue[] {
         // pair is in `details` for machine consumption.
         file: entry.ref.path,
         details: { colliding_files: [first, entry.ref.path] },
-        recovery: duplicatePhaseIdRecovery(entry.phase.id, first, entry.ref.path),
+        recovery: duplicatePhaseIdRecovery(
+          entry.phase.id,
+          first,
+          entry.ref.path,
+        ),
       });
     } else {
       seen.set(entry.phase.id, entry.ref.path);

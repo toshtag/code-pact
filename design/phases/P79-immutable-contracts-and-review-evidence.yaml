@@ -91,7 +91,6 @@ tasks:
     description: CI parity gate and classifier parity.
     reads:
       - src/core/evidence/failure-capsule.ts
-      - src/core/classify/result.ts
       - src/core/review-bundle.ts
       - src/cli/spec/task.ts
       - src/i18n/en-US.ts
@@ -131,7 +130,6 @@ tasks:
       - src/core/progress/events-io.ts
       - src/core/progress/io.ts
       - src/core/evidence/failure-capsule.ts
-      - src/core/classify/result.ts
       - src/commands/task-complete.ts
       - src/commands/task-record-done.ts
       - src/commands/task-finalize.ts
