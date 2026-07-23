@@ -85,5 +85,19 @@ definition is a configuration failure; it is never silently ignored. Before
 archiving tasks completed after the checkpoint, maintainers must advance the
 checkpoint while those task definitions are still available.
 
+## Monolithic Public-Contract Read Scope
+
+Monolithic public-contract documents are not default task read dependencies.
+
+- Include `docs/cli-contract.md` only when the task changes the documented public
+  CLI or JSON/error contract.
+- For usage-only work, read the generated CLI reference.
+- For recovery guidance, read `docs/troubleshooting.md`.
+- For implementation, prefer the exact source and tests.
+
+Historical phase files, contract locks, trial evidence, and archive bundles
+must not be placed in a task read set unless the task explicitly changes or
+verifies that history.
+
 This page is linked from [CONTRIBUTING.md](../../CONTRIBUTING.md) and
 [Maintainer operations](operations.md) so the workflow is discoverable.
