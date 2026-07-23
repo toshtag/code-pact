@@ -14,6 +14,9 @@ import {
   taskRegistrationDigest,
   lockTimeRegistrationChangedFields,
 } from "../core/task-registration-spec.ts";
+import { assertTaskLifecycleNotCancelled } from "../core/task-cancellation.ts";
+import { deriveTaskState } from "../core/progress/task-state.ts";
+import { loadProgressLog } from "../core/progress/io.ts";
 
 export type TaskLockOptions = {
   cwd: string;
@@ -128,6 +131,23 @@ async function readAndValidateSpecFile(
 export async function runTaskLock(
   opts: TaskLockOptions,
 ): Promise<TaskLockResult> {
+  const { phaseId, phasePath } = await resolveTaskInRoadmap(
+    opts.cwd,
+    opts.taskId,
+  );
+  const phase = await loadPhase(opts.cwd, phasePath);
+  const task = phase.tasks?.find(t => t.id === opts.taskId);
+  if (!task) {
+    const err = new Error(
+      `Task "${opts.taskId}" not found in phase "${phaseId}".`,
+    );
+    (err as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
+    throw err;
+  }
+  const { log } = await loadProgressLog(opts.cwd);
+  const state = deriveTaskState(log.events, opts.taskId);
+  assertTaskLifecycleNotCancelled(opts.taskId, task.status, state.current);
+
   let registration: ContractLockRegistration | undefined;
   if (opts.specFile) {
     const validated = await readAndValidateSpecFile(
