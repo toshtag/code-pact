@@ -106,7 +106,9 @@ describe("detectDuplicateTaskIds", () => {
     expect(issues[0]?.details?.colliding_phases).toEqual(["P1", "P2"]);
     // Actionable recovery (control-plane v2 PR1b re-scope): manual edit +
     // re-verify command, naming both colliding files.
-    expect(issues[0]?.recovery?.manual_action).toContain("design/phases/P2.yaml");
+    expect(issues[0]?.recovery?.manual_action).toContain(
+      "design/phases/P2.yaml",
+    );
     expect(issues[0]?.recovery?.confirm).toBe("code-pact plan lint");
     expect(issues[0]?.recovery?.reference).toContain("design/phases/P1.yaml");
     expect(issues[0]?.recovery?.reference).toContain("DUPLICATE_TASK_ID");
@@ -123,8 +125,16 @@ describe("detectDuplicatePhaseIds", () => {
     // Two phase files that both claim id P1 (the clean-but-wrong merge): same id,
     // DISTINCT paths — so the collision pair names two real files.
     const entries: PhaseEntry[] = [
-      { ref: { id: "P1", path: "design/phases/P1-a.yaml", weight: 10 }, absPath: "/tmp/a.yaml", phase: phase("P1") },
-      { ref: { id: "P1", path: "design/phases/P1-b.yaml", weight: 10 }, absPath: "/tmp/b.yaml", phase: phase("P1") },
+      {
+        ref: { id: "P1", path: "design/phases/P1-a.yaml", weight: 10 },
+        absPath: "/tmp/a.yaml",
+        phase: phase("P1"),
+      },
+      {
+        ref: { id: "P1", path: "design/phases/P1-b.yaml", weight: 10 },
+        absPath: "/tmp/b.yaml",
+        phase: phase("P1"),
+      },
     ];
     const issues = detectDuplicatePhaseIds(entries);
     expect(issues).toHaveLength(1);
@@ -196,9 +206,9 @@ describe("detectOrphanProgressEvents", () => {
 
 describe("detectPhaseIdNaming", () => {
   it("accepts P<N> style ids", () => {
-    expect(detectPhaseIdNaming([entry(phase("P1")), entry(phase("P42"))])).toEqual(
-      [],
-    );
+    expect(
+      detectPhaseIdNaming([entry(phase("P1")), entry(phase("P42"))]),
+    ).toEqual([]);
   });
 
   it("warns for non-conforming phase ids", () => {
@@ -215,6 +225,11 @@ describe("detectTaskIdPhasePrefix", () => {
     expect(detectTaskIdPhasePrefix(entries)).toEqual([]);
   });
 
+  it("accepts one optional uppercase trial suffix", () => {
+    const entries = [entry(phase("P80", [task("P80-T2"), task("P80-T2C")]))];
+    expect(detectTaskIdPhasePrefix(entries)).toEqual([]);
+  });
+
   it("warns when the task id does not start with the phase id", () => {
     const entries = [entry(phase("P1", [task("P2-T1")]))];
     const issues = detectTaskIdPhasePrefix(entries);
@@ -222,6 +237,16 @@ describe("detectTaskIdPhasePrefix", () => {
     expect(issues[0]?.code).toBe("TASK_ID_PHASE_PREFIX");
     expect(issues[0]?.severity).toBe("warning");
   });
+
+  it.each([["P80-T2CC"], ["P80-T2c"], ["P80-T"], ["P80-T2-TRIAL"]])(
+    "warns for invalid task id %s",
+    taskId => {
+      const entries = [entry(phase("P80", [task(taskId)]))];
+      const issues = detectTaskIdPhasePrefix(entries);
+      expect(issues).toHaveLength(1);
+      expect(issues[0]?.code).toBe("TASK_ID_PHASE_PREFIX");
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -232,10 +257,7 @@ describe("detectTaskDependsOnUnresolved", () => {
   it("no issue when depends_on references existing tasks in the same phase", () => {
     const entries = [
       entry(
-        phase("P1", [
-          task("P1-T1", { depends_on: ["P1-T2"] }),
-          task("P1-T2"),
-        ]),
+        phase("P1", [task("P1-T1", { depends_on: ["P1-T2"] }), task("P1-T2")]),
       ),
     ];
     expect(detectTaskDependsOnUnresolved(entries)).toEqual([]);
@@ -259,7 +281,9 @@ describe("detectTaskDependsOnUnresolved", () => {
 describe("detectTaskDependsOnSelfReference", () => {
   it("no issue when depends_on contains only other task ids", () => {
     const entries = [
-      entry(phase("P1", [task("P1-T1", { depends_on: ["P1-T2"] }), task("P1-T2")])),
+      entry(
+        phase("P1", [task("P1-T1", { depends_on: ["P1-T2"] }), task("P1-T2")]),
+      ),
     ];
     expect(detectTaskDependsOnSelfReference(entries)).toEqual([]);
   });
@@ -309,7 +333,7 @@ describe("detectTaskDecisionRefUnsafePath", () => {
     ["design/decisions/README.md", "the index"],
     ["design/decisions/PRUNED.md", "the tombstone"],
     ["design/decisions/notes.txt", "not a .md"],
-  ])("error for %s (%s)", (badRef) => {
+  ])("error for %s (%s)", badRef => {
     const entries = [
       entry(phase("P1", [task("P1-T1", { decision_refs: [badRef] })])),
     ];
@@ -367,7 +391,9 @@ describe("detectTaskReadsGlobInvalid", () => {
 describe("detectTaskWritesUnsafePath", () => {
   it("no issue for safe write globs", () => {
     const entries = [
-      entry(phase("P1", [task("P1-T1", { writes: ["src/core/path-safety.ts"] })])),
+      entry(
+        phase("P1", [task("P1-T1", { writes: ["src/core/path-safety.ts"] })]),
+      ),
     ];
     expect(detectTaskWritesUnsafePath(entries)).toEqual([]);
   });
@@ -445,7 +471,9 @@ describe("detectTaskWritesProtectedPath", () => {
   it("warning when writes target the .code-pact protected tree", () => {
     const entries = [
       entry(
-        phase("P1", [task("P1-T1", { writes: [".code-pact/state/progress.yaml"] })]),
+        phase("P1", [
+          task("P1-T1", { writes: [".code-pact/state/progress.yaml"] }),
+        ]),
       ),
     ];
     const issues = detectTaskWritesProtectedPath(entries);
@@ -465,9 +493,7 @@ describe("detectTaskWritesProtectedPath", () => {
     const noiseEntries = [
       entry(phase("P1", [task("P1-T1", { writes: ["design/roadmap.yaml"] })])),
     ];
-    expect(
-      detectTaskWritesProtectedPath(noiseEntries, customList),
-    ).toEqual([]);
+    expect(detectTaskWritesProtectedPath(noiseEntries, customList)).toEqual([]);
 
     // `secrets/**` is in the custom list — should fire.
     const hitEntries = [
@@ -513,16 +539,12 @@ describe("detectTaskWritesOverBroad", () => {
 
   it("no issue for a root-level glob without ** (e.g. *.md)", () => {
     // `*.md` is narrow — it only matches root-level files. Not flagged.
-    const entries = [
-      entry(phase("P1", [task("P1-T1", { writes: ["*.md"] })])),
-    ];
+    const entries = [entry(phase("P1", [task("P1-T1", { writes: ["*.md"] })]))];
     expect(detectTaskWritesOverBroad(entries)).toEqual([]);
   });
 
   it("warning when writes is just **", () => {
-    const entries = [
-      entry(phase("P1", [task("P1-T1", { writes: ["**"] })])),
-    ];
+    const entries = [entry(phase("P1", [task("P1-T1", { writes: ["**"] })]))];
     const issues = detectTaskWritesOverBroad(entries);
     expect(issues).toHaveLength(1);
     expect(issues[0]?.code).toBe("TASK_WRITES_OVER_BROAD");
@@ -531,9 +553,7 @@ describe("detectTaskWritesOverBroad", () => {
   });
 
   it("warning when writes is **/*", () => {
-    const entries = [
-      entry(phase("P1", [task("P1-T1", { writes: ["**/*"] })])),
-    ];
+    const entries = [entry(phase("P1", [task("P1-T1", { writes: ["**/*"] })]))];
     const issues = detectTaskWritesOverBroad(entries);
     expect(issues).toHaveLength(1);
     expect(issues[0]?.code).toBe("TASK_WRITES_OVER_BROAD");
@@ -569,7 +589,7 @@ describe("detectTaskWritesOverBroad", () => {
     ];
     const issues = detectTaskWritesOverBroad(entries);
     expect(issues).toHaveLength(2);
-    expect(issues.map((i) => i.details?.value)).toEqual(["**", "**/*.json"]);
+    expect(issues.map(i => i.details?.value)).toEqual(["**", "**/*.json"]);
   });
 
   it("does not double-report on already-broken patterns (unsafe path)", () => {
@@ -601,7 +621,9 @@ describe("detectTaskAcceptanceRefUnsafePath", () => {
   it("no issue for safe acceptance_refs paths", () => {
     const entries = [
       entry(
-        phase("P1", [task("P1-T1", { acceptance_refs: ["docs/cli-contract.md"] })]),
+        phase("P1", [
+          task("P1-T1", { acceptance_refs: ["docs/cli-contract.md"] }),
+        ]),
       ),
     ];
     expect(detectTaskAcceptanceRefUnsafePath(entries)).toEqual([]);
@@ -609,7 +631,9 @@ describe("detectTaskAcceptanceRefUnsafePath", () => {
 
   it("error for absolute acceptance_refs path", () => {
     const entries = [
-      entry(phase("P1", [task("P1-T1", { acceptance_refs: ["/abs/path.md"] })])),
+      entry(
+        phase("P1", [task("P1-T1", { acceptance_refs: ["/abs/path.md"] })]),
+      ),
     ];
     const issues = detectTaskAcceptanceRefUnsafePath(entries);
     expect(issues).toHaveLength(1);
@@ -665,7 +689,9 @@ describe("detectTaskDecisionRefNotFound (fs-backed)", () => {
   it("error when decision_refs path does not exist", async () => {
     const entries = [
       entry(
-        phase("P1", [task("P1-T1", { decision_refs: ["design/decisions/missing.md"] })]),
+        phase("P1", [
+          task("P1-T1", { decision_refs: ["design/decisions/missing.md"] }),
+        ]),
       ),
     ];
     const issues = await detectTaskDecisionRefNotFound(cwd, entries);
@@ -851,7 +877,9 @@ describe("detectTaskAcceptanceRefNotFound (fs-backed)", () => {
     await makeFile("docs/cli-contract.md", "stub");
     const entries = [
       entry(
-        phase("P1", [task("P1-T1", { acceptance_refs: ["docs/cli-contract.md"] })]),
+        phase("P1", [
+          task("P1-T1", { acceptance_refs: ["docs/cli-contract.md"] }),
+        ]),
       ),
     ];
     const issues = await detectTaskAcceptanceRefNotFound(cwd, entries);
@@ -860,7 +888,9 @@ describe("detectTaskAcceptanceRefNotFound (fs-backed)", () => {
 
   it("error when acceptance_refs path does not exist", async () => {
     const entries = [
-      entry(phase("P1", [task("P1-T1", { acceptance_refs: ["docs/missing.md"] })])),
+      entry(
+        phase("P1", [task("P1-T1", { acceptance_refs: ["docs/missing.md"] })]),
+      ),
     ];
     const issues = await detectTaskAcceptanceRefNotFound(cwd, entries);
     expect(issues).toHaveLength(1);
@@ -947,8 +977,14 @@ describe("detectProgressEventConflicts (B6)", () => {
 
   it("names the conflicting side(s) with attribution in details.events[] (D3)", () => {
     const issues = detectProgressEventConflicts([
-      ev("P1-T1", "done", "2026-05-18T10:00:00.000Z", { source: "loop", author: "Ada" }),
-      ev("P1-T1", "done", "2026-05-18T11:00:00.000Z", { source: "loop", author: "Bo" }),
+      ev("P1-T1", "done", "2026-05-18T10:00:00.000Z", {
+        source: "loop",
+        author: "Ada",
+      }),
+      ev("P1-T1", "done", "2026-05-18T11:00:00.000Z", {
+        source: "loop",
+        author: "Bo",
+      }),
     ]);
     expect(issues).toHaveLength(1);
     const events = (issues[0]?.details as { events: unknown[] }).events as {
@@ -960,9 +996,9 @@ describe("detectProgressEventConflicts (B6)", () => {
     // Both conflicting sides named here, chronological (the establishing event
     // then the offender); the first-event-invalid case below names just one.
     expect(events).toHaveLength(2);
-    expect(events.map((e) => e.status)).toEqual(["done", "done"]);
-    expect(events.map((e) => e.author)).toEqual(["Ada", "Bo"]);
-    expect(events.map((e) => e.at)).toEqual([
+    expect(events.map(e => e.status)).toEqual(["done", "done"]);
+    expect(events.map(e => e.author)).toEqual(["Ada", "Bo"]);
+    expect(events.map(e => e.at)).toEqual([
       "2026-05-18T10:00:00.000Z",
       "2026-05-18T11:00:00.000Z",
     ]);
@@ -984,7 +1020,8 @@ describe("detectProgressEventConflicts (B6)", () => {
       ev("P1-T1", "started", "2026-05-18T10:00:00.000Z"), // no author
       ev("P1-T1", "started", "2026-05-18T10:00:01.000Z", { author: "Bo" }),
     ]);
-    const events = (issues[0]?.details as { events: { author?: string }[] }).events;
+    const events = (issues[0]?.details as { events: { author?: string }[] })
+      .events;
     expect(events[0]).not.toHaveProperty("author");
     expect(events[1]?.author).toBe("Bo");
   });

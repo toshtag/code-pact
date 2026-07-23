@@ -179,9 +179,10 @@ export function detectPhaseIdNaming(phases: PhaseEntry[]): PlanIssue[] {
 }
 
 /**
- * Task ids should look like `<phaseId>-T<N>` (warning only). Catches
- * the most common copy/paste error where a task is pasted into the
- * wrong phase.
+ * Task ids should look like `<phaseId>-T<N>` with an optional single
+ * uppercase trial suffix, e.g. `<phaseId>-T<N><A-Z>` (warning only).
+ * Catches the most common copy/paste error where a task is pasted into
+ * the wrong phase while still allowing historical one-off trial ids.
  */
 export function detectTaskIdPhasePrefix(phases: PhaseEntry[]): PlanIssue[] {
   const issues: PlanIssue[] = [];
@@ -192,7 +193,7 @@ export function detectTaskIdPhasePrefix(phases: PhaseEntry[]): PlanIssue[] {
         issues.push({
           code: "TASK_ID_PHASE_PREFIX",
           severity: "warning",
-          message: `Task id "${task.id}" does not match the "${phase.id}-T<N>" naming convention`,
+          message: `Task id "${task.id}" does not match the "${phase.id}-T<N>" or "${phase.id}-T<N><A-Z>" naming convention`,
           file: ref.path,
           phase_id: phase.id,
           task_id: task.id,
