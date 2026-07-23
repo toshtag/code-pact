@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { parse as parseYaml } from "yaml";
 import { deriveTaskState } from "./progress/task-state.ts";
 import type { ProgressEvent } from "./schemas/progress-event.ts";
+import { readOwnedText, resolvePhaseReadPath } from "./project-fs/index.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -109,10 +110,11 @@ export async function classifyPhaseLifecycle(
   let headDoc: unknown;
   try {
     baseDoc = parseYaml(baseRaw);
-    // Reading HEAD from disk via the normal file read keeps the classifier
+    // Reading HEAD from disk via the owned phase read keeps the classifier
     // consistent with the working tree that `git diff` already reports.
-    const { readFile } = await import("node:fs/promises");
-    const headRaw = await readFile(`${cwd}/${phasePath}`, "utf8");
+    const headRaw = await readOwnedText(
+      await resolvePhaseReadPath(cwd, phasePath),
+    );
     headDoc = parseYaml(headRaw);
   } catch {
     return fail("base or head phase YAML could not be parsed");
