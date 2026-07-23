@@ -81,13 +81,16 @@ export async function cmdTaskLock(
       } catch (err: unknown) {
         const code = (err as NodeJS.ErrnoException).code;
         const message = err instanceof Error ? err.message : String(err);
+        if (code === "TASK_CANCELLED") {
+          emitError(json, code, message);
+          return 2;
+        }
         if (
           code === "TASK_NOT_FOUND" ||
           code === "TASK_CONTRACT_LOCK_EXISTS" ||
           code === "AMBIGUOUS_TASK_ID" ||
           code === "WORKTREE_NOT_CLEAN" ||
-          code === "INVALID_TASK_TRANSITION" ||
-          code === "TASK_CANCELLED"
+          code === "INVALID_TASK_TRANSITION"
         ) {
           emitError(json, code, message);
           return 1;

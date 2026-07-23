@@ -141,7 +141,7 @@ export type TaskPrepareFullResult = {
     type: NextActionType;
     message: string;
   };
-  commands: TaskPrepareCommands;
+  commands: TaskPrepareCommands | Record<string, never>;
   blocked_by: string[];
   /** Present (true) only when current_state is "done". */
   already_done?: boolean;
@@ -514,7 +514,7 @@ export async function runTaskPrepare(
         type: "noop_cancelled",
         message: messageFor("noop_cancelled"),
       },
-      commands,
+      commands: {},
       blocked_by: [],
     };
   }

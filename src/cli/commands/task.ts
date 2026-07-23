@@ -1184,14 +1184,18 @@ async function cmdTaskPrepare(
         `Context pack:   (dry-run) would write to ${result.would_write_context_pack_path} (${result.context_pack_bytes} bytes)`,
       );
     }
-    lines.push("");
-    lines.push("Commands:");
-    lines.push(`  context:  ${result.commands.context}`);
-    lines.push(`  start:    ${result.commands.start}`);
-    lines.push(`  verify:   ${result.commands.verify}`);
-    lines.push(`  complete: ${result.commands.complete}`);
-    lines.push(`  finalize: ${result.commands.finalize}`);
-    lines.push(`  record-done: ${result.commands["record-done"]}`);
+    if (result.next_action.type !== "noop_cancelled") {
+      const commands =
+        result.commands as import("../../commands/task-prepare.ts").TaskPrepareCommands;
+      lines.push("");
+      lines.push("Commands:");
+      lines.push(`  context:  ${commands.context}`);
+      lines.push(`  start:    ${commands.start}`);
+      lines.push(`  verify:   ${commands.verify}`);
+      lines.push(`  complete: ${commands.complete}`);
+      lines.push(`  finalize: ${commands.finalize}`);
+      lines.push(`  record-done: ${commands["record-done"]}`);
+    }
     process.stdout.write(`${lines.join("\n")}\n`);
     return 0;
   } catch (err: unknown) {

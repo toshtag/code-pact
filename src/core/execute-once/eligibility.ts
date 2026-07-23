@@ -78,9 +78,15 @@ export async function resolveOneShotEligibility(
   const reasons: string[] = [];
 
   const { current: state } = deriveTaskState(events, task.id);
+
   if (task.status === "cancelled") {
-    reasons.push(INELIGIBLE_REASONS.DESIGN_CANCELLED);
-  } else if (!isEligibleState(state)) {
+    return {
+      eligible: false,
+      reasons: [INELIGIBLE_REASONS.DESIGN_CANCELLED],
+    };
+  }
+
+  if (!isEligibleState(state)) {
     reasons.push(INELIGIBLE_REASONS.TASK_STATE_NOT_ALLOWED);
   }
 

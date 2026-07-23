@@ -5,7 +5,7 @@ import {
   expectJsonOk,
   expectJsonErr,
 } from "../helpers/cli.ts";
-import { readFile } from "node:fs/promises";
+import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 let project: Awaited<ReturnType<typeof createTempProject>> | undefined;
@@ -171,5 +171,133 @@ describe("task cancel", () => {
       "TASK_CANCELLED",
     );
     expect(start.error.message).toContain("cancelled");
+  });
+
+  it("prepare returns a no-op for cancelled tasks", async () => {
+    project = await setupSingleTask();
+    expectJsonOk(project.run(["task", "cancel", "P1-T1", "--write", "--json"]));
+
+    const minimal = expectJsonOk<{
+      next: { type: string; command: string | null };
+    }>(
+      project.run([
+        "task",
+        "prepare",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--json",
+      ]),
+    );
+    expect(minimal.data.next).toMatchObject({
+      type: "noop_cancelled",
+      command: null,
+    });
+
+    const full = expectJsonOk<{
+      next_action: { type: string };
+      commands: Record<string, never>;
+      context_pack_path: null;
+      context_pack_bytes: number;
+    }>(
+      project.run([
+        "task",
+        "prepare",
+        "P1-T1",
+        "--agent",
+        "claude-code",
+        "--detail",
+        "full",
+        "--json",
+      ]),
+    );
+    expect(full.data.next_action).toMatchObject({ type: "noop_cancelled" });
+    expect(full.data.commands).toEqual({});
+    expect(full.data.context_pack_path).toBeNull();
+    expect(full.data.context_pack_bytes).toBe(0);
+  });
+
+  it("lock exits 2 with TASK_CANCELLED and does not create a lock", async () => {
+    project = await setupSingleTask();
+    expectJsonOk(project.run(["task", "cancel", "P1-T1", "--write", "--json"]));
+
+    const res = project.run(["task", "lock", "P1-T1", "--json"]);
+    const parsed = expectJsonErr(res, "TASK_CANCELLED");
+    expect(res.code).toBe(2);
+    expect(res.stderr).toBe("");
+    expect(parsed.error.message).toContain("cancelled");
+
+    const lockPath = join(
+      project.dir,
+      ".code-pact",
+      "state",
+      "locks",
+      "P1-T1.yaml",
+    );
+    const lockExists = await readFile(lockPath, "utf8").then(
+      () => true,
+      () => false,
+    );
+    expect(lockExists).toBe(false);
+  });
+
+  it("block exits 2 with TASK_CANCELLED", async () => {
+    project = await setupSingleTask();
+    expectJsonOk(project.run(["task", "cancel", "P1-T1", "--write", "--json"]));
+
+    const res = project.run([
+      "task",
+      "block",
+      "P1-T1",
+      "--reason",
+      "stuck",
+      "--json",
+    ]);
+    const parsed = expectJsonErr(res, "TASK_CANCELLED");
+    expect(res.code).toBe(2);
+    expect(parsed.error.message).toContain("cancelled");
+  });
+
+  it("resume exits 2 with TASK_CANCELLED", async () => {
+    project = await setupSingleTask();
+    expectJsonOk(project.run(["task", "cancel", "P1-T1", "--write", "--json"]));
+
+    const res = project.run(["task", "resume", "P1-T1", "--json"]);
+    const parsed = expectJsonErr(res, "TASK_CANCELLED");
+    expect(res.code).toBe(2);
+    expect(parsed.error.message).toContain("cancelled");
+  });
+
+  it("execute short-circuits with DESIGN_CANCELLED and performs no side effects", async () => {
+    project = await setupSingleTask();
+    expectJsonOk(project.run(["task", "cancel", "P1-T1", "--write", "--json"]));
+
+    const executorPath = join(project.dir, "executor.mjs");
+    await writeFile(
+      executorPath,
+      "#!/usr/bin/env node\nconsole.log(JSON.stringify({ kind: 'done' }));\n",
+      "utf8",
+    );
+    await chmod(executorPath, 0o755);
+
+    const res = project.run([
+      "task",
+      "execute",
+      "P1-T1",
+      "--executor-file",
+      "executor.mjs",
+      "--json",
+    ]);
+    const parsed = expectJsonErr(res, "EXECUTION_INELIGIBLE");
+    expect(res.code).toBe(1);
+    expect((parsed as { data?: { reasons?: string[] } }).data?.reasons).toEqual(
+      ["DESIGN_CANCELLED"],
+    );
+
+    const phaseRaw = await readFile(
+      join(project.dir, "design", "phases", "P1-foundation.yaml"),
+      "utf8",
+    );
+    expect(phaseRaw).toContain("status: cancelled");
   });
 });

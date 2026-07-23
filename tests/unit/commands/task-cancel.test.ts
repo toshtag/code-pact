@@ -1,10 +1,40 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runTaskCancel } from "../../../src/commands/task-cancel.ts";
 import { loadPhase } from "../../../src/core/plan/load-phase.ts";
 import { loadMergedProgress } from "../../../src/core/progress/io.ts";
+import type { OwnedReadPath } from "../../../src/core/project-fs/index.ts";
+
+const phaseMock = vi.hoisted(() => ({
+  enabled: false,
+  snapshot: "",
+  postWrite: "",
+  callCount: 0,
+}));
+
+vi.mock("../../../src/core/project-fs/index.ts", async importActual => {
+  const actual =
+    await importActual<
+      typeof import("../../../src/core/project-fs/index.ts")
+    >();
+  return {
+    ...actual,
+    readOwnedText: async (path: OwnedReadPath): Promise<string> => {
+      const p = path as string;
+      if (phaseMock.enabled && p.includes("P1-foundation.yaml")) {
+        const call = phaseMock.callCount;
+        phaseMock.callCount = call + 1;
+        if (phaseMock.postWrite && call === 1) {
+          return phaseMock.postWrite;
+        }
+        return phaseMock.snapshot;
+      }
+      return actual.readOwnedText(path);
+    },
+  };
+});
 
 const ROADMAP_YAML = `phases:
   - id: P1
@@ -71,10 +101,15 @@ let dir: string;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "code-pact-task-cancel-"));
+  phaseMock.enabled = false;
+  phaseMock.snapshot = "";
+  phaseMock.postWrite = "";
+  phaseMock.callCount = 0;
 });
 
 afterEach(async () => {
   if (dir) await rm(dir, { recursive: true, force: true });
+  phaseMock.enabled = false;
 });
 
 describe("runTaskCancel — happy path", () => {
@@ -211,5 +246,64 @@ describe("runTaskCancel — lifecycle guards for other commands", () => {
       () => false,
     );
     expect(lockExists).toBe(false);
+  });
+});
+
+describe("runTaskCancel — raw phase snapshot authority", () => {
+  it("uses the raw phase snapshot for eligibility even when PlanState would be stale", async () => {
+    await setupProject(dir, { phaseYaml: phaseYaml(task("P1-T1", "done")) });
+    const phasePath = join(dir, "design", "phases", "P1-foundation.yaml");
+    const originalBytes = await readFile(phasePath, "utf8");
+
+    await expect(
+      runTaskCancel({ cwd: dir, taskId: "P1-T1", write: true }),
+    ).rejects.toMatchObject({ code: "TASK_CANCEL_NOT_ALLOWED" });
+
+    const after = await readFile(phasePath, "utf8");
+    expect(after).toBe(originalBytes);
+
+    const { log } = await loadMergedProgress(dir);
+    expect(log.events).toHaveLength(0);
+  });
+
+  it("detects a concurrent phase write as a CAS conflict and preserves the writer's bytes", async () => {
+    await setupProject(dir);
+    const phasePath = join(dir, "design", "phases", "P1-foundation.yaml");
+    const plannedBytes = await readFile(phasePath, "utf8");
+    const doneBytes = plannedBytes.replace("status: planned", "status: done");
+    await writeFile(phasePath, doneBytes, "utf8");
+
+    phaseMock.enabled = true;
+    phaseMock.snapshot = plannedBytes;
+
+    await expect(
+      runTaskCancel({ cwd: dir, taskId: "P1-T1", write: true }),
+    ).rejects.toMatchObject({
+      code: "TASK_CANCEL_WRITE_CONFLICT",
+      rollback_status: "not_attempted",
+    });
+
+    const after = await readFile(phasePath, "utf8");
+    expect(after).toBe(doneBytes);
+  });
+
+  it("rolls back to its own candidate only when its candidate is still on disk", async () => {
+    await setupProject(dir);
+    const phasePath = join(dir, "design", "phases", "P1-foundation.yaml");
+    const plannedBytes = await readFile(phasePath, "utf8");
+
+    phaseMock.enabled = true;
+    phaseMock.snapshot = plannedBytes;
+    phaseMock.postWrite = plannedBytes.replace("P1-foundation", "corrupted");
+
+    await expect(
+      runTaskCancel({ cwd: dir, taskId: "P1-T1", write: true }),
+    ).rejects.toMatchObject({
+      code: "TASK_CANCEL_WRITE_FAILURE",
+      rollback_status: "rolled_back",
+    });
+
+    const after = await readFile(phasePath, "utf8");
+    expect(after).toBe(plannedBytes);
   });
 });

@@ -3667,7 +3667,7 @@ Records a `resumed` event. Allowed only from `blocked` — any other current sta
 Cancels a task by flipping its design YAML `status` to `cancelled`. Dry-run is the default; pass `--write` to apply. Cancellation is terminal: cancelled tasks cannot be locked, started, blocked, resumed, completed, `record-done`, finalized, or executed. `task prepare` and `task runbook` return no-op guidance for cancelled tasks.
 
 - If the task is already cancelled, exits 0 with `kind: "already_cancelled"`.
-- If the task design status or derived state is `done`, exits 1 with `TASK_CANCEL_NOT_ALLOWED`.
+- If the task design status or derived state is `done`, exits 2 with `TASK_CANCEL_NOT_ALLOWED`.
 - If the task has non-cancelled direct dependents, exits 2 with `TASK_CANCEL_DEPENDENTS_EXIST` and lists them in `data.dependents`.
 - On a write conflict, exits 2 with `TASK_CANCEL_WRITE_CONFLICT`.
 - On a post-write integrity failure, exits 2 with `TASK_CANCEL_WRITE_FAILURE` and `data.rollback_status`.
