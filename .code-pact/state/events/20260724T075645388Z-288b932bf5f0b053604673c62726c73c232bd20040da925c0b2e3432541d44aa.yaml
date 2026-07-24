@@ -1,0 +1,10 @@
+task_id: P87-T1
+status: done
+at: 2026-07-24T07:56:45.388Z
+actor: agent
+agent: claude-code
+author: Pocket
+evidence:
+  - focused unit tests passed; typecheck passed; check:docs passed
+source: external
+id: 288b932bf5f0b053604673c62726c73c232bd20040da925c0b2e3432541d44aa
