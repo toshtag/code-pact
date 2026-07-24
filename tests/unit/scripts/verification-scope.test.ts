@@ -14,6 +14,7 @@ import {
   classifyChangedFiles,
   buildLocalCommands,
   collectLocalChangedFiles,
+  buildVerificationPlan,
 } from "../../../scripts/verification-scope.mjs";
 
 const scriptPath = fileURLToPath(
@@ -45,6 +46,13 @@ describe("classifyChangedFiles", () => {
       toolchain: false,
       processControl: false,
       generic: false,
+      workflow: false,
+      releaseScript: false,
+      sharedTestInfra: false,
+      unknown: false,
+      highRisk: false,
+      fallbackFull: false,
+      mode: "focused",
       reason: "no tracked changes",
     });
   });
@@ -115,7 +123,9 @@ describe("classifyChangedFiles", () => {
     expect(result.toolchain).toBe(true);
     expect(result.processControl).toBe(false);
     expect(result.generic).toBe(false);
-    expect(result.reason).toBe("toolchain");
+    expect(result.highRisk).toBe(true);
+    expect(result.fallbackFull).toBe(true);
+    expect(result.reason).toBe("high-risk+toolchain");
   });
 
   it("classifies workflow files as toolchain and standard", () => {
@@ -205,7 +215,8 @@ describe("classifyChangedFiles", () => {
     ]);
     expect(result.toolchain).toBe(true);
     expect(result.standard).toBe(true);
-    expect(result.reason).toBe("toolchain");
+    expect(result.highRisk).toBe(true);
+    expect(result.reason).toBe("high-risk+toolchain");
   });
 
   it("combines process-control and standard without duplicating standard in reason", () => {
@@ -222,7 +233,8 @@ describe("classifyChangedFiles", () => {
     const result = classifyChangedFiles(["package.json", "src/lib/timeout.ts"]);
     expect(result.toolchain).toBe(true);
     expect(result.processControl).toBe(true);
-    expect(result.reason).toBe("process-control+toolchain");
+    expect(result.highRisk).toBe(true);
+    expect(result.reason).toBe("high-risk+process-control+toolchain");
   });
 
   it("deduplicates changed files in the returned list", () => {
@@ -633,7 +645,10 @@ describe("buildLocalCommands", () => {
     ]);
     const commands = buildLocalCommands(scope, "abc", {
       baseFiles: ["src/commands/init.ts", "src/commands/task-start.ts"],
-      workingTreeFiles: ["src/commands/task-start.ts", "src/commands/status.ts"],
+      workingTreeFiles: [
+        "src/commands/task-start.ts",
+        "src/commands/status.ts",
+      ],
       untrackedFiles: [],
     });
     expect(changedVitestCommands(commands)).toHaveLength(2);
@@ -647,7 +662,10 @@ describe("buildLocalCommands", () => {
     ]);
     const commands = buildLocalCommands(scope, "abc", {
       baseFiles: ["src/commands/init.ts", "src/commands/task-start.ts"],
-      workingTreeFiles: ["src/commands/task-start.ts", "src/commands/status.ts"],
+      workingTreeFiles: [
+        "src/commands/task-start.ts",
+        "src/commands/status.ts",
+      ],
       untrackedFiles: [],
     });
     expect(JSON.stringify(commands)).not.toContain("related");
@@ -1185,5 +1203,142 @@ process.exit(0);
     expect(pnpmLog).toContain(
       "exec vitest run --changed --reporter=agent --passWithNoTests",
     );
+  });
+});
+
+describe("buildVerificationPlan selection regression matrix", () => {
+  function buildPlanFor(files: string[], mergeBase: string | null = "abc123") {
+    const scope = classifyChangedFiles(files);
+    return buildVerificationPlan({
+      scope,
+      changeSet: {
+        baseFiles: files,
+        workingTreeFiles: [],
+        untrackedFiles: [],
+        indeterminate: false,
+      },
+      mergeBase,
+      baseSha: mergeBase,
+      headSha: "def456",
+    });
+  }
+
+  function stepIds(plan: { steps: Array<{ id: string }> }) {
+    return plan.steps.map(s => s.id);
+  }
+
+  it("docs-only plan stays focused and only checks docs", () => {
+    const plan = buildPlanFor(["README.md"]);
+    expect(plan.mode).toBe("focused");
+    expect(plan.fallback_full).toBe(false);
+    expect(stepIds(plan)).toEqual(["docs"]);
+  });
+
+  it("unknown file falls back to the full suite", () => {
+    const plan = buildPlanFor([".env"]);
+    expect(plan.mode).toBe("full");
+    expect(plan.fallback_full).toBe(true);
+    expect(stepIds(plan)).toContain("unit");
+    expect(stepIds(plan)).toContain("integration-full");
+    expect(stepIds(plan)).toContain("version-human");
+    expect(stepIds(plan)).toContain("version-json");
+  });
+
+  it("shared test infrastructure triggers full suite fallback", () => {
+    const plan = buildPlanFor(["tests/setup.ts"]);
+    expect(plan.mode).toBe("full");
+    expect(plan.fallback_full).toBe(true);
+    expect(stepIds(plan)).toContain("unit");
+    expect(stepIds(plan)).toContain("integration-full");
+  });
+
+  it("package.json triggers full suite fallback", () => {
+    const plan = buildPlanFor(["package.json"]);
+    expect(plan.mode).toBe("full");
+    expect(plan.fallback_full).toBe(true);
+    expect(stepIds(plan)).toContain("unit");
+    expect(stepIds(plan)).toContain("integration-full");
+  });
+
+  it("workflow changes run targeted workflow tests plus integration smoke", () => {
+    const plan = buildPlanFor([".github/workflows/ci.yml"]);
+    expect(plan.mode).toBe("focused");
+    expect(stepIds(plan)).toContain("supply-chain");
+    expect(stepIds(plan)).toContain("typecheck");
+    expect(stepIds(plan)).toContain("build");
+    expect(stepIds(plan)).toContain("workflow-tests");
+    expect(stepIds(plan)).toContain("integration-smoke");
+    expect(stepIds(plan)).toContain("version-human");
+    expect(stepIds(plan)).toContain("version-json");
+  });
+
+  it("process-control changes run targeted process-control tests plus integration smoke", () => {
+    const plan = buildPlanFor(["src/lib/timeout.ts"]);
+    expect(plan.mode).toBe("focused");
+    expect(stepIds(plan)).toContain("supply-chain");
+    expect(stepIds(plan)).toContain("typecheck");
+    expect(stepIds(plan)).toContain("build");
+    expect(stepIds(plan)).toContain("process-control-unit");
+    expect(stepIds(plan)).toContain("integration-process-control");
+    expect(stepIds(plan)).toContain("version-human");
+    expect(stepIds(plan)).toContain("version-json");
+  });
+
+  it("standard source changes run changed unit tests plus integration smoke", () => {
+    const plan = buildPlanFor(["src/commands/init.ts"], "abc123");
+    expect(plan.mode).toBe("focused");
+    expect(stepIds(plan)).toContain("supply-chain");
+    expect(stepIds(plan)).toContain("typecheck");
+    expect(stepIds(plan)).toContain("build");
+    expect(stepIds(plan)).toContain("unit-base");
+    expect(stepIds(plan)).toContain("integration-smoke");
+    expect(stepIds(plan)).toContain("version-human");
+    expect(stepIds(plan)).toContain("version-json");
+  });
+
+  it("single changed integration test runs that file directly", () => {
+    const plan = buildPlanFor([
+      "tests/integration/task-registration-spec.test.ts",
+    ]);
+    expect(plan.mode).toBe("focused");
+    const step = plan.steps.find(s => s.id === "integration-direct");
+    expect(step).toBeDefined();
+    expect(step?.command.join(" ")).toContain("task-registration-spec.test.ts");
+    expect(step?.command.join(" ")).toContain("vitest.integration.config.ts");
+  });
+
+  it("single changed unit test runs that file directly", () => {
+    const plan = buildPlanFor([
+      "tests/unit/scripts/verification-scope.test.ts",
+    ]);
+    expect(plan.mode).toBe("focused");
+    const step = plan.steps.find(s => s.id === "unit-direct");
+    expect(step).toBeDefined();
+    expect(step?.command.join(" ")).toContain("verification-scope.test.ts");
+  });
+
+  it("vitest integration config change triggers full suite fallback", () => {
+    const plan = buildPlanFor(["vitest.integration.config.ts"]);
+    expect(plan.mode).toBe("full");
+    expect(plan.fallback_full).toBe(true);
+    expect(stepIds(plan)).toContain("unit");
+    expect(stepIds(plan)).toContain("integration-full");
+    expect(stepIds(plan)).toContain("version-human");
+    expect(stepIds(plan)).toContain("version-json");
+  });
+
+  it("pnpm-lock.yaml change triggers full suite fallback", () => {
+    const plan = buildPlanFor(["pnpm-lock.yaml"]);
+    expect(plan.mode).toBe("full");
+    expect(plan.fallback_full).toBe(true);
+    expect(stepIds(plan)).toContain("integration-full");
+  });
+
+  it("workflow change runs targeted workflow tests plus integration smoke", () => {
+    const plan = buildPlanFor([".github/workflows/ci.yml"]);
+    expect(plan.mode).toBe("focused");
+    expect(stepIds(plan)).toContain("workflow-tests");
+    expect(stepIds(plan)).toContain("integration-smoke");
+    expect(stepIds(plan)).toContain("version-human");
   });
 });

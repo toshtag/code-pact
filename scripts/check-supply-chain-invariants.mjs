@@ -18,7 +18,7 @@
 //   - No NPM_TOKEN or NODE_AUTH_TOKEN secret references
 //   - checkout steps have `persist-credentials: false`
 //   - publish workflow only triggers on tags (push.tags, no branches, no workflow_dispatch)
-//   - npm publish is preceded by release:check and tarball inspection (in prepare job)
+//   - npm publish is preceded by exact-SHA required CI verification and tarball inspection (in prepare job)
 //   - post-publish tarball verification exists (in verify job)
 //   - SECURITY.md does not reference "built locally"
 //
@@ -779,8 +779,18 @@ function checkFastCiWorkflow(ciDoc, ciContent) {
         "ci.yml: standard job must install with pnpm install --frozen-lockfile",
       );
     }
-    if (!standardScripts.some(script => script.trim() === "pnpm test:ci")) {
-      violations.push("ci.yml: standard job must run pnpm test:ci");
+    const runsBoundedPlan = standardScripts.some(script =>
+      /node\s+scripts\/verification-scope\.mjs[\s\S]*--base[\s\S]*--run/.test(
+        script,
+      ),
+    );
+    if (
+      !standardScripts.some(script => script.trim() === "pnpm test:ci") &&
+      !runsBoundedPlan
+    ) {
+      violations.push(
+        "ci.yml: standard job must run pnpm test:ci or the bounded verification-scope plan runner",
+      );
     }
 
     const forbiddenStandardPatterns = [
@@ -1941,16 +1951,26 @@ export function checkSupplyChainInvariants(root) {
         fail("publish.yml: github-release job must NOT have pnpm action");
       }
 
-      // prepare job has release:check and tarball inspection
+      // prepare job verifies required CI for exact SHA and inspects the tarball
       const prepareScripts = collectRunScripts(doc, "prepare");
+      const hasExactShaCheck = prepareScripts.some(s =>
+        /check-required-ci-for-sha/.test(s),
+      );
       const hasReleaseCheck = prepareScripts.some(s => /release:check/.test(s));
       const hasTarballCheck = prepareScripts.some(s =>
         /check-package-tarball/.test(s),
       );
-      if (hasReleaseCheck) {
-        pass("publish.yml: prepare job runs release:check");
+      if (hasExactShaCheck) {
+        pass("publish.yml: prepare job verifies required CI for exact SHA");
       } else {
-        fail("publish.yml: prepare job must run release:check");
+        fail("publish.yml: prepare job must verify required CI for exact SHA");
+      }
+      if (hasReleaseCheck) {
+        fail(
+          "publish.yml: prepare job must NOT re-run release:check; CI was already verified for the SHA",
+        );
+      } else {
+        pass("publish.yml: prepare job does not re-run release:check");
       }
       if (hasTarballCheck) {
         pass("publish.yml: prepare job runs tarball inspection");
@@ -2184,10 +2204,20 @@ export function checkSupplyChainInvariants(root) {
       }
 
       const standardScripts = collectRunScripts(ciDoc, "standard");
-      if (standardScripts.some(script => script.trim() === "pnpm test:ci")) {
-        pass("ci.yml: standard gate delegates to pnpm test:ci");
+      const standardRunsBoundedPlan = standardScripts.some(script =>
+        /node\s+scripts\/verification-scope\.mjs[\s\S]*--base[\s\S]*--run/.test(
+          script,
+        ),
+      );
+      if (
+        standardScripts.some(script => script.trim() === "pnpm test:ci") ||
+        standardRunsBoundedPlan
+      ) {
+        pass("ci.yml: standard gate delegates to pnpm test:ci or bounded plan");
       } else {
-        fail("ci.yml: standard gate must delegate to pnpm test:ci");
+        fail(
+          "ci.yml: standard gate must delegate to pnpm test:ci or the bounded verification-scope plan runner",
+        );
       }
     }
 

@@ -94,4 +94,50 @@ describe("runBoundedProcess", () => {
     expect(result.stdout.length).toBeLessThanOrEqual(1_000);
     expect(result.stderr).toContain("max output exceeded");
   });
+
+  it("calls onProgress on output chunks and exposes the child pid", async () => {
+    const progressSnapshots: Array<{ ok: boolean; elapsedMs: number }> = [];
+    const result = await runBoundedProcess({
+      command: process.execPath,
+      args: ["-e", "console.log('hello'); console.error('world');"],
+      timeoutMs: 5_000,
+      heartbeatIntervalMs: 25,
+      onProgress: (snapshot: { ok: boolean; elapsedMs: number }) => {
+        progressSnapshots.push({
+          ok: snapshot.ok,
+          elapsedMs: snapshot.elapsedMs,
+        });
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(typeof result.pid).toBe("number");
+    expect(result.pid).toBeGreaterThan(0);
+    expect(progressSnapshots.length).toBeGreaterThan(0);
+    const last = progressSnapshots[progressSnapshots.length - 1]!;
+    expect(last.elapsedMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("emits periodic heartbeats even when the child is silent", async () => {
+    const progressSnapshots: Array<number> = [];
+    await runBoundedProcess({
+      command: process.execPath,
+      args: ["-e", "setTimeout(() => console.log('done'), 120)"],
+      timeoutMs: 5_000,
+      heartbeatIntervalMs: 30,
+      onProgress: (snapshot: { elapsedMs: number }) => {
+        progressSnapshots.push(snapshot.elapsedMs);
+      },
+    });
+
+    const gaps: number[] = [];
+    for (let i = 1; i < progressSnapshots.length; i++) {
+      gaps.push(progressSnapshots[i]! - progressSnapshots[i - 1]!);
+    }
+
+    const medianGap =
+      gaps.length > 0 ? (gaps[Math.floor(gaps.length / 2)] ?? 0) : 0;
+    expect(medianGap).toBeGreaterThanOrEqual(25);
+    expect(medianGap).toBeLessThan(200);
+  });
 });

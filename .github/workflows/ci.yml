@@ -19,6 +19,7 @@ jobs:
     outputs:
       docs: ${{ steps.classify.outputs.docs }}
       standard: ${{ steps.classify.outputs.standard }}
+      base_ref: ${{ steps.base.outputs.ref }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -88,7 +89,16 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm test:ci
+      - name: Run bounded verification plan
+        env:
+          BASE_REF: ${{ needs.classify.outputs.base_ref }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            node scripts/verification-scope.mjs --base "$BASE_REF" --force-full --run
+          else
+            node scripts/verification-scope.mjs --base "$BASE_REF" --run
+          fi
 
   ci-status:
     name: CI status

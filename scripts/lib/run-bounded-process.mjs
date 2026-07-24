@@ -13,6 +13,8 @@ import { platform } from "node:process";
  * @property {number} [timeoutMs=120_000]
  * @property {number} [termGraceMs=5_000]
  * @property {number} [maxOutputBytes=1_048_576]
+ * @property {number} [heartbeatIntervalMs=0] 0 disables periodic progress ticks
+ * @property {(snapshot: RunBoundedProcessResult & {elapsedMs: number}) => void} [onProgress] called on output chunks and heartbeat ticks
  */
 
 /**
@@ -21,6 +23,7 @@ import { platform } from "node:process";
  * @property {number|null} exitCode
  * @property {boolean} timedOut
  * @property {string|null} signal
+ * @property {number|null} pid
  * @property {string} stdout
  * @property {string} stderr
  * @property {number} elapsedMs
@@ -64,6 +67,8 @@ export async function runBoundedProcess(opts) {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const termGraceMs = opts.termGraceMs ?? DEFAULT_TERM_GRACE_MS;
   const maxOutputBytes = opts.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+  const heartbeatIntervalMs = opts.heartbeatIntervalMs ?? 0;
+  const onProgress = opts.onProgress;
 
   const start = Date.now();
   /** @type {RunBoundedProcessResult} */
@@ -72,6 +77,7 @@ export async function runBoundedProcess(opts) {
     exitCode: null,
     timedOut: false,
     signal: null,
+    pid: null,
     stdout: "",
     stderr: "",
     elapsedMs: 0,
@@ -82,8 +88,16 @@ export async function runBoundedProcess(opts) {
     let child = null;
     let timeoutId = null;
     let graceId = null;
+    let heartbeatId = null;
     let resolved = false;
     let outputExceeded = false;
+
+    function emitProgress() {
+      if (onProgress) {
+        result.elapsedMs = Date.now() - start;
+        onProgress(result);
+      }
+    }
 
     function finish() {
       if (resolved) return;
@@ -95,6 +109,10 @@ export async function runBoundedProcess(opts) {
       if (graceId) {
         clearTimeout(graceId);
         graceId = null;
+      }
+      if (heartbeatId) {
+        clearInterval(heartbeatId);
+        heartbeatId = null;
       }
       result.elapsedMs = Date.now() - start;
       if (outputExceeded) {
@@ -168,11 +186,13 @@ export async function runBoundedProcess(opts) {
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
     });
+    result.pid = child.pid ?? null;
 
     if (child.stdout) {
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", chunk => {
         result.stdout = appendChunk(result.stdout, chunk);
+        emitProgress();
         if (outputExceeded) killTree("SIGKILL");
       });
     }
@@ -181,6 +201,7 @@ export async function runBoundedProcess(opts) {
       child.stderr.setEncoding("utf8");
       child.stderr.on("data", chunk => {
         result.stderr = appendChunk(result.stderr, chunk);
+        emitProgress();
         if (outputExceeded) killTree("SIGKILL");
       });
     }
@@ -201,5 +222,8 @@ export async function runBoundedProcess(opts) {
     });
 
     timeoutId = setTimeout(onTimeout, timeoutMs);
+    if (heartbeatIntervalMs > 0) {
+      heartbeatId = setInterval(emitProgress, heartbeatIntervalMs);
+    }
   });
 }
