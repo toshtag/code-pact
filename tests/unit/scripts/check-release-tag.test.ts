@@ -208,7 +208,7 @@ describe("checkReleaseTag", () => {
     expect(result.message).toContain("CHANGELOG");
   });
 
-  it("reports versionExists when npm registry has the version", async () => {
+  it("fails when npm registry already has the version", async () => {
     const result = await checkReleaseTag({
       refType: "tag",
       refName: "v2.0.1",
@@ -221,7 +221,8 @@ describe("checkReleaseTag", () => {
       gitRunner: makeGitRunner(),
       registryCheck: async () => true,
     });
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("RELEASE_VERSION_ALREADY_EXISTS");
     expect(result.versionExists).toBe(true);
   });
 });

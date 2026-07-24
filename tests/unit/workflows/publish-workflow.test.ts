@@ -460,7 +460,13 @@ describe("publish-workflow inline scripts", () => {
 
   describe("bash -n syntax check for all run steps", () => {
     const content = readWorkflow();
-    const allJobs = ["prepare", "publish", "verify", "github-release"];
+    const allJobs = [
+      "prepare",
+      "publish",
+      "verify",
+      "provenance",
+      "github-release",
+    ];
 
     for (const jobName of allJobs) {
       it(`${jobName} job: all run scripts pass bash -n`, () => {
@@ -563,23 +569,18 @@ describe("publish-workflow inline scripts", () => {
         expect(log).toContain(
           "publish ./release-artifact/package.tgz --ignore-scripts",
         );
-
-        const ghOutput = readFileSync(
-          join(tmpDir, "github-output.txt"),
-          "utf8",
-        );
-        expect(ghOutput).toContain("published_now=true");
       } finally {
         rmSync(tmpDir, { recursive: true, force: true });
       }
     });
 
-    it("existing version: calls npm view but not npm publish", () => {
+    it("existing version: fails as a tag/version collision", () => {
       const tmpDir = makeTmpEnv({ npmViewExit: 0 });
       const npmLog = join(tmpDir, "npm-calls.log");
       try {
         const scriptFile = join(tmpDir, "__run_publish.sh");
         writeFileSync(scriptFile, "set -e\n" + publishScript!);
+        let threw = false;
         try {
           execSync(`bash ${scriptFile}`, {
             encoding: "utf8",
@@ -591,24 +592,19 @@ describe("publish-workflow inline scripts", () => {
               EXPECTED_COMMIT: "c".repeat(40),
               NPM_CONFIG_PROVENANCE: "true",
               NPM_LOG: npmLog,
-              GITHUB_OUTPUT: join(tmpDir, "github-output.txt"),
             },
             stdio: "pipe",
           });
+        } catch {
+          threw = true;
         } finally {
           rmSync(scriptFile, { force: true });
         }
 
+        expect(threw).toBe(true);
         const log = readFileSync(npmLog, "utf8").trim();
         expect(log).toContain("view code-pact@2.0.0 version");
-        expect(log).toContain("--registry=https://registry.npmjs.org");
         expect(log).not.toContain("publish");
-
-        const ghOutput = readFileSync(
-          join(tmpDir, "github-output.txt"),
-          "utf8",
-        );
-        expect(ghOutput).toContain("published_now=false");
       } finally {
         rmSync(tmpDir, { recursive: true, force: true });
       }
@@ -674,7 +670,6 @@ describe("publish-workflow inline scripts", () => {
               NPM_CONFIG_PROVENANCE: "true",
               NPM_CONFIG_REGISTRY: "https://attacker.invalid",
               NPM_LOG: npmLog,
-              GITHUB_OUTPUT: join(tmpDir, "github-output.txt"),
             },
             stdio: "pipe",
           });
@@ -696,10 +691,7 @@ describe("publish-workflow inline scripts", () => {
     const scripts = extractRunScripts(content, "github-release");
     const releaseScript = scripts.find(s => s.includes("gh release"));
 
-    function makeTmpEnv(opts: {
-      ghViewExit?: number;
-      publishedNow?: string;
-    }): string {
+    function makeTmpEnv(opts: { ghViewExit?: number }): string {
       const tmpDir = join(repoRoot, "tmp-test-ghrelease-shell");
       rmSync(tmpDir, { recursive: true, force: true });
       mkdirSync(join(tmpDir, "release-artifact"), { recursive: true });
@@ -755,7 +747,7 @@ describe("publish-workflow inline scripts", () => {
     }
 
     it("new release: calls gh release view then gh release create", () => {
-      const tmpDir = makeTmpEnv({ ghViewExit: 1, publishedNow: "true" });
+      const tmpDir = makeTmpEnv({ ghViewExit: 1 });
       const ghLog = join(tmpDir, "gh-calls.log");
       try {
         const scriptFile = join(tmpDir, "__run_release.sh");
@@ -770,7 +762,6 @@ describe("publish-workflow inline scripts", () => {
               GH_TOKEN: "test-token",
               GH_REPO: "toshtag/code-pact",
               TAG: "v2.0.0",
-              PUBLISHED_NOW: "true",
               GH_LOG: ghLog,
             },
             stdio: "pipe",
@@ -792,7 +783,7 @@ describe("publish-workflow inline scripts", () => {
     });
 
     it("existing release: calls gh release view then gh release edit", () => {
-      const tmpDir = makeTmpEnv({ ghViewExit: 0, publishedNow: "false" });
+      const tmpDir = makeTmpEnv({ ghViewExit: 0 });
       const ghLog = join(tmpDir, "gh-calls.log");
       try {
         const scriptFile = join(tmpDir, "__run_release.sh");
@@ -807,7 +798,6 @@ describe("publish-workflow inline scripts", () => {
               GH_TOKEN: "test-token",
               GH_REPO: "toshtag/code-pact",
               TAG: "v2.0.0",
-              PUBLISHED_NOW: "false",
               GH_LOG: ghLog,
             },
             stdio: "pipe",
@@ -823,9 +813,7 @@ describe("publish-workflow inline scripts", () => {
         expect(log).not.toContain("release create");
 
         const notes = readFileSync(join(tmpDir, "final-notes.md"), "utf8");
-        expect(notes).toContain(
-          "existing-version rerun; verify the npm provenance badge manually",
-        );
+        expect(notes).toContain("generated through Trusted Publishing");
       } finally {
         rmSync(tmpDir, { recursive: true, force: true });
       }
