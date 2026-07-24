@@ -39,6 +39,7 @@ const EXPECTED_JOB_PERMISSIONS = {
   prepare: { contents: "read" },
   publish: { contents: "read", "id-token": "write" },
   verify: { contents: "read" },
+  provenance: { contents: "read" },
   "github-release": { contents: "write" },
 };
 
@@ -46,6 +47,7 @@ const EXPECTED_PUBLISH_JOB_TIMEOUTS = {
   prepare: 15,
   publish: 5,
   verify: 10,
+  provenance: 10,
   "github-release": 5,
 };
 
@@ -71,9 +73,9 @@ function hashRun(run) {
 }
 
 export const PUBLISH_RUN_HASH =
-  "8b1aecc7074039b3c7dfd47650b3ac6fc6c1f424646389e1e908a5412f540d5b";
+  "eaf6fc50be434924c06bc8338e00433c8fb4a5cb3e08293df472c468bd60e2df";
 export const GITHUB_RELEASE_RUN_HASH =
-  "fca11320656640fbea0fadfd233d548ad40ac0754bbb6be3c0e2a9193fac66cc";
+  "0a8cf86fb0cea315594a2d1018d1ee8cb8d337ee065abbde3458b9fecb17637c";
 
 export const EXPECTED_CANONICAL_JOBS = {
   publish: sortKeysDeep({
@@ -82,9 +84,6 @@ export const EXPECTED_CANONICAL_JOBS = {
     needs: "prepare",
     environment: "npm-publish",
     permissions: { contents: "read", "id-token": "write" },
-    outputs: {
-      published_now: "${{ steps.publish.outputs.published_now }}",
-    },
     "timeout-minutes": 5,
     steps: [
       {
@@ -115,7 +114,7 @@ export const EXPECTED_CANONICAL_JOBS = {
   "github-release": sortKeysDeep({
     name: "Create verified GitHub Release",
     "runs-on": "ubuntu-latest",
-    needs: ["verify", "prepare", "publish"],
+    needs: ["verify", "provenance", "prepare", "publish"],
     permissions: { contents: "write" },
     "timeout-minutes": 5,
     steps: [
@@ -135,7 +134,6 @@ export const EXPECTED_CANONICAL_JOBS = {
           GH_TOKEN: "${{ github.token }}",
           GH_REPO: "${{ github.repository }}",
           TAG: "${{ github.ref_name }}",
-          PUBLISHED_NOW: "${{ needs.publish.outputs.published_now }}",
         },
         "run-sha256": GITHUB_RELEASE_RUN_HASH,
       },
@@ -1721,22 +1719,28 @@ export function checkSupplyChainInvariants(root) {
         fail("publish.yml: workflow envelope canonical mismatch", detail);
       }
 
-      // Job structure: exactly prepare, publish, verify, github-release
+      // Job structure: exactly prepare, publish, verify, provenance, github-release
       const jobs = doc.get("jobs");
       const jobNames =
         jobs && jobs.items
           ? jobs.items.map(p => String(p.key.value ?? p.key))
           : [];
-      const expectedJobs = ["prepare", "publish", "verify", "github-release"];
+      const expectedJobs = [
+        "prepare",
+        "publish",
+        "verify",
+        "provenance",
+        "github-release",
+      ];
       const hasAllJobs = expectedJobs.every(j => jobNames.includes(j));
       const hasExtraJobs = jobNames.some(j => !expectedJobs.includes(j));
       if (hasAllJobs && !hasExtraJobs) {
         pass(
-          "publish.yml: has exactly 4 jobs (prepare, publish, verify, github-release)",
+          "publish.yml: has exactly 5 jobs (prepare, publish, verify, provenance, github-release)",
         );
       } else {
         fail(
-          "publish.yml: job structure must be exactly prepare, publish, verify, github-release",
+          "publish.yml: job structure must be exactly prepare, publish, verify, provenance, github-release",
           `found: ${jobNames.join(", ")}`,
         );
       }
@@ -1788,6 +1792,20 @@ export function checkSupplyChainInvariants(root) {
         pass("publish.yml: publish job has environment: npm-publish");
       } else {
         fail("publish.yml: publish job must have environment: npm-publish");
+      }
+
+      // The publish workflow must not carry ambient git identity for test fixtures.
+      // Hermetic test helpers set repository-local identity instead.
+      const gitIdentityEnv = /GIT_(?:AUTHOR|COMMITTER)_(?:NAME|EMAIL)/;
+      if (gitIdentityEnv.test(publishContent)) {
+        fail(
+          "publish.yml: must not set ambient GIT_AUTHOR/COMMITTER environment variables",
+          "workflow should not compensate for non-hermetic test fixtures",
+        );
+      } else {
+        pass(
+          "publish.yml: does not set ambient git identity environment variables",
+        );
       }
 
       // Privileged job checks: canonical structure exact match (source of truth)
@@ -2084,7 +2102,8 @@ export function checkSupplyChainInvariants(root) {
       const expectedNeeds = {
         publish: ["prepare"],
         verify: ["publish", "prepare"],
-        "github-release": ["verify", "prepare", "publish"],
+        provenance: ["publish", "prepare", "verify"],
+        "github-release": ["verify", "provenance", "prepare", "publish"],
       };
       for (const [jobName, expectedDeps] of Object.entries(expectedNeeds)) {
         if (jobs && jobs.items) {

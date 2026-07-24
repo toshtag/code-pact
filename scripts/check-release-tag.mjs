@@ -6,8 +6,9 @@
 // tag points at GITHUB_SHA, that the commit is on origin/main, and that
 // the CHANGELOG's first released version matches package.json.
 //
-// If the version already exists on the npm registry, it reports that fact
-// and exits 0 (the publish step handles idempotent reruns).
+// If the version already exists on the npm registry, the release is a
+// tag/version collision and must fail. The publish step never re-runs an
+// existing version.
 //
 // Usage (inside GitHub Actions):
 //   node scripts/check-release-tag.mjs
@@ -29,16 +30,13 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
  * @param {string} token - GitHub token
  */
 async function githubFetch(repo, path, token) {
-  const response = await fetch(
-    `https://api.github.com/repos/${repo}/${path}`,
-    {
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${token}`,
-        "x-github-api-version": "2022-11-28",
-      },
+  const response = await fetch(`https://api.github.com/repos/${repo}/${path}`, {
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${token}`,
+      "x-github-api-version": "2022-11-28",
     },
-  );
+  });
   if (!response.ok) {
     throw new Error(`GitHub API ${path} returned ${response.status}`);
   }
@@ -95,16 +93,25 @@ export async function checkReleaseTag(opts) {
     pkg,
     changelog,
     githubApi = githubFetch,
-    gitRunner = (args) => execFileSync("git", args, { stdio: "pipe", cwd: repoRoot }),
+    gitRunner = args =>
+      execFileSync("git", args, { stdio: "pipe", cwd: repoRoot }),
     registryCheck = npmVersionExists,
   } = opts;
 
   if (refType !== "tag") {
-    return { ok: false, message: "workflow was not triggered by a tag", versionExists: false };
+    return {
+      ok: false,
+      message: "workflow was not triggered by a tag",
+      versionExists: false,
+    };
   }
 
   if (!refName || !sha || !repository || !token) {
-    return { ok: false, message: "required GitHub environment is missing", versionExists: false };
+    return {
+      ok: false,
+      message: "required GitHub environment is missing",
+      versionExists: false,
+    };
   }
 
   const expectedTag = `v${pkg.version}`;
@@ -119,7 +126,11 @@ export async function checkReleaseTag(opts) {
   // CHANGELOG first released version must match package.json
   const changelogVersion = firstReleasedVersion(changelog);
   if (changelogVersion === null) {
-    return { ok: false, message: "CHANGELOG.md: no released section found", versionExists: false };
+    return {
+      ok: false,
+      message: "CHANGELOG.md: no released section found",
+      versionExists: false,
+    };
   }
   if (changelogVersion !== pkg.version) {
     return {
@@ -132,15 +143,24 @@ export async function checkReleaseTag(opts) {
   // Fetch the tag ref from GitHub API
   let ref;
   try {
-    ref = await githubApi(repository, `git/ref/tags/${encodeURIComponent(refName)}`, token);
+    ref = await githubApi(
+      repository,
+      `git/ref/tags/${encodeURIComponent(refName)}`,
+      token,
+    );
   } catch (err) {
-    return { ok: false, message: `GitHub API error: ${err.message}`, versionExists: false };
+    return {
+      ok: false,
+      message: `GitHub API error: ${err.message}`,
+      versionExists: false,
+    };
   }
 
   if (ref.object?.type !== "tag") {
     return {
       ok: false,
-      message: "release tag must be an annotated signed tag, not a lightweight tag",
+      message:
+        "release tag must be an annotated signed tag, not a lightweight tag",
       versionExists: false,
     };
   }
@@ -148,9 +168,17 @@ export async function checkReleaseTag(opts) {
   // Fetch the annotated tag object to verify signature and target commit
   let tagObject;
   try {
-    tagObject = await githubApi(repository, `git/tags/${ref.object.sha}`, token);
+    tagObject = await githubApi(
+      repository,
+      `git/tags/${ref.object.sha}`,
+      token,
+    );
   } catch (err) {
-    return { ok: false, message: `GitHub API error: ${err.message}`, versionExists: false };
+    return {
+      ok: false,
+      message: `GitHub API error: ${err.message}`,
+      versionExists: false,
+    };
   }
 
   if (tagObject.verification?.verified !== true) {
@@ -180,13 +208,21 @@ export async function checkReleaseTag(opts) {
     };
   }
 
-  // Check if version already exists on npm registry
+  // A normal release must publish a new version. If the version already
+  // exists on npm, this is a tag/version collision, not a success.
   const versionExists = await registryCheck(pkg.name, pkg.version);
+  if (versionExists) {
+    return {
+      ok: false,
+      message: `RELEASE_VERSION_ALREADY_EXISTS: ${pkg.version} is already published to npm`,
+      versionExists: true,
+    };
+  }
 
   return {
     ok: true,
     message: `verified ${refName} at ${sha}`,
-    versionExists,
+    versionExists: false,
   };
 }
 
@@ -220,19 +256,14 @@ async function main() {
     process.exit(1);
   }
 
-  if (result.versionExists) {
-    console.log(
-      `check-release-tag: ${result.message} (version ${pkg.version} already exists on npm registry — idempotent rerun)`,
-    );
-  } else {
-    console.log(`check-release-tag: ${result.message}`);
-  }
+  console.log(`check-release-tag: ${result.message}`);
 }
 
 const invokedDirectly =
-  process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
-  main().catch((err) => {
+  main().catch(err => {
     console.error(`check-release-tag: unexpected error: ${err.message}`);
     process.exit(1);
   });
