@@ -5,16 +5,21 @@ import {
   mkdirSync,
   rmSync,
   existsSync,
+  chmodSync,
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execSync, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { parseDocument } from "yaml";
 import {
   PUBLISH_RUN_HASH,
   GITHUB_RELEASE_RUN_HASH,
 } from "../../../scripts/check-supply-chain-invariants.mjs";
+
+const CHILD_TIMEOUT_MS = 10_000;
+const CHILD_KILL_SIGNAL = "SIGKILL";
+const CHILD_MAX_BUFFER = 10 * 1024 * 1024;
 
 const repoRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -69,11 +74,14 @@ function runNodeScript(
   const tmpFile = join(opts.cwd ?? repoRoot, "__test_inline_script.cjs");
   writeFileSync(tmpFile, script);
   try {
-    execSync(`node ${tmpFile}`, {
+    execFileSync(process.execPath, [tmpFile], {
       encoding: "utf8",
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },
       stdio: "pipe",
+      timeout: CHILD_TIMEOUT_MS,
+      killSignal: CHILD_KILL_SIGNAL,
+      maxBuffer: CHILD_MAX_BUFFER,
     });
   } finally {
     rmSync(tmpFile, { force: true });
@@ -478,6 +486,9 @@ describe("publish-workflow inline scripts", () => {
             execFileSync("bash", ["-n", tmpFile], {
               encoding: "utf8",
               stdio: "pipe",
+              timeout: CHILD_TIMEOUT_MS,
+              killSignal: CHILD_KILL_SIGNAL,
+              maxBuffer: CHILD_MAX_BUFFER,
             });
           } finally {
             rmSync(tmpFile, { force: true });
@@ -530,7 +541,7 @@ describe("publish-workflow inline scripts", () => {
           "exit 2",
         ].join("\n"),
       );
-      execSync(`chmod +x ${join(tmpDir, "bin", "npm")}`);
+      chmodSync(join(tmpDir, "bin", "npm"), 0o755);
 
       writeFileSync(
         join(tmpDir, "bin", "node"),
@@ -553,7 +564,7 @@ describe("publish-workflow inline scripts", () => {
           `exec ${process.execPath} "$@"`,
         ].join("\n"),
       );
-      execSync(`chmod +x ${join(tmpDir, "bin", "node")}`);
+      chmodSync(join(tmpDir, "bin", "node"), 0o755);
 
       return { tmpDir, npmViewExit };
     }
@@ -566,7 +577,7 @@ describe("publish-workflow inline scripts", () => {
         const scriptFile = join(tmpDir, "__run_publish.sh");
         writeFileSync(scriptFile, "set -e\n" + publishScript!);
         try {
-          execSync(`bash ${scriptFile}`, {
+          execFileSync("bash", [scriptFile], {
             encoding: "utf8",
             cwd: tmpDir,
             env: {
@@ -581,6 +592,9 @@ describe("publish-workflow inline scripts", () => {
               GITHUB_OUTPUT: join(tmpDir, "github-output.txt"),
             },
             stdio: "pipe",
+            timeout: CHILD_TIMEOUT_MS,
+            killSignal: CHILD_KILL_SIGNAL,
+            maxBuffer: CHILD_MAX_BUFFER,
           });
         } finally {
           rmSync(scriptFile, { force: true });
@@ -611,7 +625,7 @@ describe("publish-workflow inline scripts", () => {
         writeFileSync(scriptFile, "set -e\n" + publishScript!);
         let threw = false;
         try {
-          execSync(`bash ${scriptFile}`, {
+          execFileSync("bash", [scriptFile], {
             encoding: "utf8",
             cwd: tmpDir,
             env: {
@@ -625,6 +639,9 @@ describe("publish-workflow inline scripts", () => {
               NODE_LOG: nodeLog,
             },
             stdio: "pipe",
+            timeout: CHILD_TIMEOUT_MS,
+            killSignal: CHILD_KILL_SIGNAL,
+            maxBuffer: CHILD_MAX_BUFFER,
           });
         } catch {
           threw = true;
@@ -663,7 +680,7 @@ describe("publish-workflow inline scripts", () => {
         writeFileSync(scriptFile, "set -e\n" + publishScript!);
         let threw = false;
         try {
-          execSync(`bash ${scriptFile}`, {
+          execFileSync("bash", [scriptFile], {
             encoding: "utf8",
             cwd: tmpDir,
             env: {
@@ -677,6 +694,9 @@ describe("publish-workflow inline scripts", () => {
               GITHUB_OUTPUT: join(tmpDir, "github-output.txt"),
             },
             stdio: "pipe",
+            timeout: CHILD_TIMEOUT_MS,
+            killSignal: CHILD_KILL_SIGNAL,
+            maxBuffer: CHILD_MAX_BUFFER,
           });
         } catch {
           threw = true;
@@ -697,7 +717,7 @@ describe("publish-workflow inline scripts", () => {
         const scriptFile = join(tmpDir, "__run_publish.sh");
         writeFileSync(scriptFile, "set -e\n" + publishScript!);
         try {
-          execSync(`bash ${scriptFile}`, {
+          execFileSync("bash", [scriptFile], {
             encoding: "utf8",
             cwd: tmpDir,
             env: {
@@ -711,6 +731,9 @@ describe("publish-workflow inline scripts", () => {
               NODE_LOG: nodeLog,
             },
             stdio: "pipe",
+            timeout: CHILD_TIMEOUT_MS,
+            killSignal: CHILD_KILL_SIGNAL,
+            maxBuffer: CHILD_MAX_BUFFER,
           });
         } finally {
           rmSync(scriptFile, { force: true });
@@ -783,7 +806,7 @@ describe("publish-workflow inline scripts", () => {
           "exit 0",
         ].join("\n"),
       );
-      execSync(`chmod +x ${join(tmpDir, "bin", "gh")}`);
+      chmodSync(join(tmpDir, "bin", "gh"), 0o755);
 
       return { tmpDir, ghViewExit };
     }
@@ -795,7 +818,7 @@ describe("publish-workflow inline scripts", () => {
         const scriptFile = join(tmpDir, "__run_release.sh");
         writeFileSync(scriptFile, "set -e\n" + releaseScript!);
         try {
-          execSync(`bash ${scriptFile}`, {
+          execFileSync("bash", [scriptFile], {
             encoding: "utf8",
             cwd: tmpDir,
             env: {
@@ -807,6 +830,9 @@ describe("publish-workflow inline scripts", () => {
               GH_LOG: ghLog,
             },
             stdio: "pipe",
+            timeout: CHILD_TIMEOUT_MS,
+            killSignal: CHILD_KILL_SIGNAL,
+            maxBuffer: CHILD_MAX_BUFFER,
           });
         } finally {
           rmSync(scriptFile, { force: true });
@@ -831,7 +857,7 @@ describe("publish-workflow inline scripts", () => {
         const scriptFile = join(tmpDir, "__run_release.sh");
         writeFileSync(scriptFile, "set -e\n" + releaseScript!);
         try {
-          execSync(`bash ${scriptFile}`, {
+          execFileSync("bash", [scriptFile], {
             encoding: "utf8",
             cwd: tmpDir,
             env: {
@@ -843,6 +869,9 @@ describe("publish-workflow inline scripts", () => {
               GH_LOG: ghLog,
             },
             stdio: "pipe",
+            timeout: CHILD_TIMEOUT_MS,
+            killSignal: CHILD_KILL_SIGNAL,
+            maxBuffer: CHILD_MAX_BUFFER,
           });
         } finally {
           rmSync(scriptFile, { force: true });

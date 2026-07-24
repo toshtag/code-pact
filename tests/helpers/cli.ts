@@ -9,6 +9,10 @@
 // Build posture: integration tests expect dist/cli.js to have been built
 // before Vitest starts. `pnpm test:integration` and CI both run `pnpm build`
 // once up front, avoiding per-file tsup races and repeated rebuilds.
+//
+// Identity posture: every spawned CLI process receives the hermetic Git
+// identity from `HERMETIC_GIT_ENV` so tests are not affected by the parent
+// user's global Git configuration.
 
 import { spawnSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";

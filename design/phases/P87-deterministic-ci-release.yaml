@@ -51,5 +51,8 @@ tasks:
     expected_duration: medium
     status: planned
     description: >
-      Apply local changed-test selection logic to CI and stop re-running full test suites
-      on already-verified commits during release.
+      Change-aware, bounded, observable test execution.
+      Add changed-file based test selection, hard timeouts with process-tree kill,
+      a test heartbeat, and slowest-file reporting so the suite cannot hang
+      silently and release verification does not repeat a full gate on the
+      same commit.

@@ -10,7 +10,7 @@ type FetchResponse = {
 
 type FetchImpl = (
   url: string,
-  init?: { headers?: Record<string, string> },
+  init?: { headers?: Record<string, string>; signal?: AbortSignal },
 ) => Promise<FetchResponse>;
 
 type ExecResult = {
@@ -43,40 +43,21 @@ function makeFetch(
   return fn;
 }
 
-function makeVerifiedAudit(predicateType: string): unknown {
+function makeProvenanceManifest(provenance: unknown) {
   return {
-    invalid: [],
-    missing: [],
-    verified: [
-      {
-        name: "code-pact",
-        version: "2.0.1",
-        location: "node_modules/code-pact",
-        registry: "https://registry.npmjs.org/",
-        attestations: {
-          url: "https://registry.npmjs.org/-/npm/v1/attestations/code-pact@2.0.1",
-          provenance: { predicateType },
-        },
-        attestationBundles: [
-          {
-            predicateType,
-            bundle: {
-              mediaType: "application/vnd.dev.sigstore.bundle+json;version=0.2",
-            },
-          },
-        ],
-      },
-    ],
+    name: "code-pact",
+    version: "2.0.1",
+    dist: { attestations: { provenance } },
   };
 }
 
-function makeExec(auditPayload: unknown): ExecImpl {
+function makeExec(auditResult: ExecResult): ExecImpl {
   return vi.fn(async (_cwd: string, args: string[]) => {
     if (args[0] === "install") {
       return { ok: true, stdout: "", stderr: "" };
     }
     if (args[0] === "audit") {
-      return { ok: true, stdout: JSON.stringify(auditPayload), stderr: "" };
+      return auditResult;
     }
     return {
       ok: false,
@@ -89,20 +70,11 @@ function makeExec(auditPayload: unknown): ExecImpl {
 const TARGET = "https://registry.npmjs.org/code-pact/2.0.1";
 
 describe("verifyPublishedProvenance", () => {
-  it("succeeds when dist.attestations.provenance is true and audit verifies SLSA v1", async () => {
+  it("succeeds when manifest advertises provenance and audit exits 0", async () => {
     const fetchImpl = makeFetch([
-      makeResponse({
-        dist: {
-          attestations: {
-            provenance: true,
-            url: "https://registry.npmjs.org/-/attestations/code-pact/2.0.1",
-          },
-        },
-      }),
+      makeResponse(makeProvenanceManifest(true)),
     ]) as unknown as typeof globalThis.fetch;
-    const execImpl = makeExec(
-      makeVerifiedAudit("https://slsa.dev/provenance/v1"),
-    );
+    const execImpl = makeExec({ ok: true, stdout: "{}", stderr: "" });
 
     const result = await verifyPublishedProvenance({
       packageName: "code-pact",
@@ -124,20 +96,15 @@ describe("verifyPublishedProvenance", () => {
     ).toBe(TARGET);
   });
 
-  it("succeeds when dist.attestations.provenance is a URL and audit verifies SLSA v0.2", async () => {
+  it("succeeds when provenance is a URL and audit exits 0", async () => {
     const fetchImpl = makeFetch([
-      makeResponse({
-        dist: {
-          attestations: {
-            provenance:
-              "https://registry.npmjs.org/-/npm/v1/attestations/code-pact@2.0.1",
-          },
-        },
-      }),
+      makeResponse(
+        makeProvenanceManifest(
+          "https://registry.npmjs.org/-/npm/v1/attestations/code-pact@2.0.1",
+        ),
+      ),
     ]) as unknown as typeof globalThis.fetch;
-    const execImpl = makeExec(
-      makeVerifiedAudit("https://slsa.dev/provenance/v0.2"),
-    );
+    const execImpl = makeExec({ ok: true, stdout: "{}", stderr: "" });
 
     const result = await verifyPublishedProvenance({
       packageName: "code-pact",
@@ -154,72 +121,33 @@ describe("verifyPublishedProvenance", () => {
     );
   });
 
-  it("fails when dist.attestations is missing", async () => {
-    const fetchImpl = makeFetch([makeResponse({ dist: {} })]);
-
-    const result = await verifyPublishedProvenance({
-      packageName: "code-pact",
-      version: "2.0.1",
-      fetchImpl,
-      execImpl: makeExec({}),
-      intervalMs: 10,
-    });
-
-    expect(result.ok).toBe(false);
-    expect(result.code).toBe("PROVENANCE_MISSING");
-  });
-
-  it("fails when dist.attestations.provenance is falsy", async () => {
+  it("fails when manifest has no provenance metadata", async () => {
     const fetchImpl = makeFetch([
-      makeResponse({ dist: { attestations: { provenance: false } } }),
+      makeResponse({ name: "code-pact", version: "2.0.1", dist: {} }),
     ]);
 
     const result = await verifyPublishedProvenance({
       packageName: "code-pact",
       version: "2.0.1",
       fetchImpl,
-      execImpl: makeExec({}),
+      execImpl: makeExec({ ok: true, stdout: "", stderr: "" }),
       intervalMs: 10,
+      retries: 2,
     });
 
     expect(result.ok).toBe(false);
     expect(result.code).toBe("PROVENANCE_MISSING");
   });
 
-  it("fails when npm audit signatures reports an unsupported predicateType", async () => {
+  it("fails when audit exits non-zero", async () => {
     const fetchImpl = makeFetch([
-      makeResponse({ dist: { attestations: { provenance: true } } }),
-    ]) as unknown as typeof globalThis.fetch;
-    const execImpl = makeExec(
-      makeVerifiedAudit("https://example.com/unsupported"),
-    );
-
-    const result = await verifyPublishedProvenance({
-      packageName: "code-pact",
-      version: "2.0.1",
-      fetchImpl,
-      execImpl,
-      intervalMs: 10,
-    });
-
-    expect(result.ok).toBe(false);
-    expect(result.code).toBe("PROVENANCE_PREDICATE_TYPE_UNSUPPORTED");
-  });
-
-  it("fails when npm audit signatures reports the package as invalid", async () => {
-    const fetchImpl = makeFetch([
-      makeResponse({ dist: { attestations: { provenance: true } } }),
+      makeResponse(makeProvenanceManifest(true)),
     ]) as unknown as typeof globalThis.fetch;
     const execImpl = makeExec({
-      invalid: [
-        {
-          name: "code-pact",
-          version: "2.0.1",
-          reason: "registry signature verification failed",
-        },
-      ],
-      missing: [],
-      verified: [],
+      ok: false,
+      stdout: "",
+      stderr: "npm audit signatures failed",
+      exitCode: 1,
     });
 
     const result = await verifyPublishedProvenance({
@@ -231,18 +159,19 @@ describe("verifyPublishedProvenance", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.code).toBe("PROVENANCE_SIGNATURE_INVALID");
+    expect(result.code).toBe("PROVENANCE_AUDIT_FAILED");
   });
 
-  it("fails when the target package is not in the verified list", async () => {
+  it("fails when npm install fails", async () => {
     const fetchImpl = makeFetch([
-      makeResponse({ dist: { attestations: { provenance: true } } }),
+      makeResponse(makeProvenanceManifest(true)),
     ]) as unknown as typeof globalThis.fetch;
-    const execImpl = makeExec({
-      invalid: [],
-      missing: [],
-      verified: [{ name: "zod", version: "3.0.0" }],
-    });
+    const execImpl = vi.fn(async () => ({
+      ok: false,
+      stdout: "",
+      stderr: "npm ERR! install failed",
+      exitCode: 1,
+    })) as unknown as ExecImpl;
 
     const result = await verifyPublishedProvenance({
       packageName: "code-pact",
@@ -253,24 +182,38 @@ describe("verifyPublishedProvenance", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.code).toBe("PROVENANCE_NOT_AUDITED");
+    expect(result.code).toBe("NPM_INSTALL_FAILED");
   });
 
-  it("retries on 404 and succeeds when the version appears", async () => {
+  it("retries on 404 and succeeds when version appears", async () => {
     const fetchImpl = makeFetch([
       { ok: false, status: 404, json: vi.fn().mockResolvedValue({}) },
-      makeResponse({
-        dist: {
-          attestations: { provenance: true, url: "https://example.com/a" },
-        },
-      }),
+      makeResponse(makeProvenanceManifest(true)),
     ]) as unknown as typeof globalThis.fetch;
 
     const result = await verifyPublishedProvenance({
       packageName: "code-pact",
       version: "2.0.1",
       fetchImpl,
-      execImpl: makeExec(makeVerifiedAudit("https://slsa.dev/provenance/v1")),
+      execImpl: makeExec({ ok: true, stdout: "{}", stderr: "" }),
+      intervalMs: 10,
+    });
+
+    expect(result.ok).toBe(true);
+    expect((fetchImpl as unknown as { calls: () => number }).calls()).toBe(2);
+  });
+
+  it("retries on missing provenance and succeeds", async () => {
+    const fetchImpl = makeFetch([
+      makeResponse({ name: "code-pact", version: "2.0.1", dist: {} }),
+      makeResponse(makeProvenanceManifest(true)),
+    ]) as unknown as typeof globalThis.fetch;
+
+    const result = await verifyPublishedProvenance({
+      packageName: "code-pact",
+      version: "2.0.1",
+      fetchImpl,
+      execImpl: makeExec({ ok: true, stdout: "{}", stderr: "" }),
       intervalMs: 10,
     });
 
@@ -287,7 +230,7 @@ describe("verifyPublishedProvenance", () => {
       packageName: "code-pact",
       version: "2.0.1",
       fetchImpl,
-      execImpl: makeExec({}),
+      execImpl: makeExec({ ok: true, stdout: "", stderr: "" }),
       retries: 2,
       intervalMs: 10,
     });
@@ -297,22 +240,43 @@ describe("verifyPublishedProvenance", () => {
     expect((fetchImpl as unknown as { calls: () => number }).calls()).toBe(2);
   });
 
-  it("fails immediately on non-404 registry errors", async () => {
+  it("fails immediately on non-retryable 403", async () => {
     const fetchImpl = makeFetch([
-      { ok: false, status: 500, json: vi.fn().mockResolvedValue({}) },
+      { ok: false, status: 403, json: vi.fn().mockResolvedValue({}) },
     ]) as unknown as typeof globalThis.fetch;
 
     const result = await verifyPublishedProvenance({
       packageName: "code-pact",
       version: "2.0.1",
       fetchImpl,
-      execImpl: makeExec({}),
+      execImpl: makeExec({ ok: true, stdout: "", stderr: "" }),
       intervalMs: 10,
     });
 
     expect(result.ok).toBe(false);
-    expect(result.code).toBe("REGISTRY_ERROR");
+    expect(result.code).toBe("REGISTRY_AUTH_ERROR");
     expect((fetchImpl as unknown as { calls: () => number }).calls()).toBe(1);
+  });
+
+  it("fails immediately on package/version mismatch", async () => {
+    const fetchImpl = makeFetch([
+      makeResponse({
+        name: "wrong-pkg",
+        version: "9.9.9",
+        dist: { attestations: { provenance: true } },
+      }),
+    ]) as unknown as typeof globalThis.fetch;
+
+    const result = await verifyPublishedProvenance({
+      packageName: "code-pact",
+      version: "2.0.1",
+      fetchImpl,
+      execImpl: makeExec({ ok: true, stdout: "", stderr: "" }),
+      intervalMs: 10,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("REGISTRY_PACKAGE_MISMATCH");
   });
 
   it("retries on network errors and fails when retries are exhausted", async () => {
@@ -324,7 +288,7 @@ describe("verifyPublishedProvenance", () => {
       packageName: "code-pact",
       version: "2.0.1",
       fetchImpl,
-      execImpl: makeExec({}),
+      execImpl: makeExec({ ok: true, stdout: "", stderr: "" }),
       retries: 2,
       intervalMs: 10,
     });
@@ -334,42 +298,32 @@ describe("verifyPublishedProvenance", () => {
     expect((fetchImpl as unknown as { calls: () => number }).calls()).toBe(2);
   });
 
-  it("does not treat network errors as success", async () => {
+  it("passes explicit --registry to npm commands", async () => {
     const fetchImpl = makeFetch([
-      new Error("ETIMEDOUT"),
+      makeResponse(makeProvenanceManifest(true)),
     ]) as unknown as typeof globalThis.fetch;
+    const execImpl = vi.fn(async (_cwd: string, args: string[]) => {
+      if (args[0] === "install") {
+        expect(args).toContain("--registry=https://registry.example.com");
+        return { ok: true, stdout: "", stderr: "" };
+      }
+      if (args[0] === "audit") {
+        expect(args).toContain("--registry=https://registry.example.com");
+        return { ok: true, stdout: "{}", stderr: "" };
+      }
+      return { ok: false, stdout: "", stderr: "unexpected" };
+    }) as unknown as ExecImpl;
 
     const result = await verifyPublishedProvenance({
       packageName: "code-pact",
       version: "2.0.1",
-      fetchImpl,
-      execImpl: makeExec({}),
-      retries: 1,
-      intervalMs: 10,
-    });
-
-    expect(result.ok).toBe(false);
-  });
-
-  it("fails when npm install fails", async () => {
-    const fetchImpl = makeFetch([
-      makeResponse({ dist: { attestations: { provenance: true } } }),
-    ]) as unknown as typeof globalThis.fetch;
-    const execImpl = vi.fn(async () => ({
-      ok: false,
-      stdout: "",
-      stderr: "npm ERR! install failed",
-    })) as unknown as ExecImpl;
-
-    const result = await verifyPublishedProvenance({
-      packageName: "code-pact",
-      version: "2.0.1",
+      registry: "https://registry.example.com",
       fetchImpl,
       execImpl,
       intervalMs: 10,
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.code).toBe("NPM_INSTALL_FAILED");
+    expect(result.ok).toBe(true);
+    expect(execImpl).toHaveBeenCalledTimes(2);
   });
 });

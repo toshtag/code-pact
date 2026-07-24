@@ -5,6 +5,12 @@ export function firstReleasedVersion(changelog: string): string | null;
 
 export type RegistryState = "exists" | "absent" | "error" | "unknown";
 
+export type RegistryCheckResult = {
+  state: "exists" | "absent" | "error";
+  status?: number;
+  message: string;
+};
+
 export function checkReleaseTag(opts: {
   refType: string;
   refName: string;
@@ -18,7 +24,7 @@ export function checkReleaseTag(opts: {
   registryCheck?: (
     packageName: string,
     version: string,
-  ) => Promise<RegistryState>;
+  ) => Promise<RegistryCheckResult>;
 }): Promise<{
   ok: boolean;
   message: string;

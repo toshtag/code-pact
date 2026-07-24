@@ -58,7 +58,11 @@ describe("checkReleaseTag", () => {
       changelog: baseChangelog,
       githubApi: makeGithubApi(),
       gitRunner: makeGitRunner(),
-      registryCheck: async () => "absent",
+      registryCheck: async () => ({
+        state: "absent" as const,
+        status: 404,
+        message: "version code-pact@2.0.1 is not published yet",
+      }),
     });
     expect(result.ok).toBe(true);
     expect(result.versionExists).toBe(false);
@@ -220,7 +224,11 @@ describe("checkReleaseTag", () => {
       changelog: baseChangelog,
       githubApi: makeGithubApi(),
       gitRunner: makeGitRunner(),
-      registryCheck: async () => "exists",
+      registryCheck: async () => ({
+        state: "exists" as const,
+        status: 200,
+        message: "version code-pact@2.0.1 already exists in registry",
+      }),
     });
     expect(result.ok).toBe(false);
     expect(result.message).toContain("RELEASE_VERSION_ALREADY_EXISTS");
@@ -239,7 +247,11 @@ describe("checkReleaseTag", () => {
       changelog: baseChangelog,
       githubApi: makeGithubApi(),
       gitRunner: makeGitRunner(),
-      registryCheck: async () => "error",
+      registryCheck: async () => ({
+        state: "error" as const,
+        status: 500,
+        message: "registry probe failed",
+      }),
     });
     expect(result.ok).toBe(false);
     expect(result.message).toContain("REGISTRY_PROBE_ERROR");

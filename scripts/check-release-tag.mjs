@@ -66,7 +66,7 @@ export function firstReleasedVersion(changelog) {
  * @param {string} opts.changelog - CHANGELOG.md content
  * @param {function} [opts.githubApi] - injectable GitHub API fetcher
  * @param {function} [opts.gitRunner] - injectable git command runner
- * @param {function} [opts.registryCheck] - injectable npm registry checker; should resolve to "exists" | "absent" | "error"
+ * @param {function} [opts.registryCheck] - injectable npm registry checker; should resolve to {state: "exists" | "absent" | "error", status?: number, message: string}
  * @returns {Promise<{ok: boolean, message: string, versionExists: boolean, registryState: "exists" | "absent" | "error"}>}
  */
 export async function checkReleaseTag(opts) {
@@ -207,8 +207,8 @@ export async function checkReleaseTag(opts) {
 
   // A normal release must publish a new version. If the version already
   // exists on npm, this is a tag/version collision, not a success.
-  const registryState = await registryCheck(pkg.name, pkg.version);
-  if (registryState === "exists") {
+  const registryResult = await registryCheck(pkg.name, pkg.version);
+  if (registryResult.state === "exists") {
     return {
       ok: false,
       message: `RELEASE_VERSION_ALREADY_EXISTS: ${pkg.version} is already published to npm`,
@@ -217,7 +217,7 @@ export async function checkReleaseTag(opts) {
     };
   }
 
-  if (registryState === "error") {
+  if (registryResult.state === "error") {
     return {
       ok: false,
       message: `REGISTRY_PROBE_ERROR: could not determine if ${pkg.version} is already published`,
@@ -230,7 +230,7 @@ export async function checkReleaseTag(opts) {
     ok: true,
     message: `verified ${refName} at ${sha}`,
     versionExists: false,
-    registryState: "absent",
+    registryState: registryResult.state,
   };
 }
 
