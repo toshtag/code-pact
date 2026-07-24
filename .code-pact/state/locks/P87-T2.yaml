@@ -1,0 +1,94 @@
+schema_version: 1
+task_id: P87-T2
+phase_id: P87
+phase_path: design/phases/P87-deterministic-ci-release.yaml
+base_ref: origin/main
+base_sha: 9de33b4f0572319baadb78d9feef68d788b8a50a
+phase_blob_sha: 1035b68e4011681b9ae59f2ab747b667ffa51893
+contract_digest: 76a61a1fbd1e5a1bff56650a286a36d8988ca388ee34492429a843d8602dfd31
+contract:
+  description: >
+    Change-aware, bounded, observable test execution. Add changed-file based
+    test selection, hard timeouts with process-tree kill, a test heartbeat, and
+    slowest-file reporting so the suite cannot hang silently and release
+    verification does not repeat a full gate on the same commit.
+  reads:
+    - .github/workflows/ci.yml
+    - .github/workflows/publish.yml
+    - docs/maintainers/releasing.md
+    - docs/maintainers/token-efficient-development.md
+    - package.json
+    - pnpm-lock.yaml
+    - scripts/check-required-ci-for-sha.d.mts
+    - scripts/check-required-ci-for-sha.mjs
+    - scripts/check-supply-chain-invariants.mjs
+    - scripts/lib/run-bounded-process.mjs
+    - scripts/verification-scope.d.mts
+    - scripts/verification-scope.mjs
+    - scripts/vitest-ci-reporter.d.mts
+    - scripts/vitest-ci-reporter.mjs
+    - tests/helpers/cli.ts
+    - tests/helpers/git-repository.ts
+    - tests/integration/task-registration-spec.test.ts
+    - tests/setup.ts
+    - tests/unit/scripts/check-required-ci-for-sha.test.ts
+    - tests/unit/scripts/check-supply-chain-invariants.test.ts
+    - tests/unit/scripts/run-bounded-process.test.ts
+    - tests/unit/scripts/verification-scope.test.ts
+    - tests/unit/scripts/vitest-ci-reporter.test.ts
+    - tests/unit/workflows/ci-workflow.test.ts
+    - tests/unit/workflows/publish-workflow.test.ts
+    - vitest.config.ts
+    - vitest.integration.config.ts
+    - vitest.integration.smoke.config.ts
+  writes:
+    - .github/workflows/ci.yml
+    - .github/workflows/publish.yml
+    - design/phases/P87-deterministic-ci-release.yaml
+    - docs/maintainers/releasing.md
+    - scripts/check-required-ci-for-sha.d.mts
+    - scripts/check-required-ci-for-sha.mjs
+    - scripts/check-supply-chain-invariants.mjs
+    - scripts/lib/run-bounded-process.mjs
+    - scripts/verification-scope.d.mts
+    - scripts/verification-scope.mjs
+    - scripts/vitest-ci-reporter.d.mts
+    - scripts/vitest-ci-reporter.mjs
+    - tests/integration/task-registration-spec.test.ts
+    - tests/unit/scripts/check-required-ci-for-sha.test.ts
+    - tests/unit/scripts/check-supply-chain-invariants.test.ts
+    - tests/unit/scripts/run-bounded-process.test.ts
+    - tests/unit/scripts/verification-scope.test.ts
+    - tests/unit/scripts/vitest-ci-reporter.test.ts
+    - tests/unit/workflows/ci-workflow.test.ts
+  depends_on:
+    - P87-T1
+  decision_refs: []
+  acceptance_refs:
+    - tests/integration/task-registration-spec.test.ts
+    - tests/unit/scripts/check-required-ci-for-sha.test.ts
+    - tests/unit/scripts/check-supply-chain-invariants.test.ts
+    - tests/unit/scripts/run-bounded-process.test.ts
+    - tests/unit/scripts/verification-scope.test.ts
+    - tests/unit/scripts/vitest-ci-reporter.test.ts
+    - tests/unit/workflows/ci-workflow.test.ts
+  definition_of_done:
+    - Main commits run one full standard gate
+    - Publish reuses the successful exact-SHA main CI result
+    - Publish workflow does not depend on ambient git identity
+    - Pull-request verification uses deterministic focused selection with full
+      fallback
+    - Supply-chain invariants enforce the release contract
+    - Trusted publishing fails closed on existing-version collisions
+    - Verification processes are bounded and expose heartbeat and slowest-file
+      output
+    - npm provenance attestation is verified before GitHub Release creation
+  verification_commands:
+    - pnpm check:supply-chain
+    - pnpm release:check
+    - pnpm test:ci
+  base_sha: 9de33b4f0572319baadb78d9feef68d788b8a50a
+  phase_blob_sha: 1035b68e4011681b9ae59f2ab747b667ffa51893
+at: 2026-07-24T12:00:32.278Z
+actor: agent
+author: Pocket
