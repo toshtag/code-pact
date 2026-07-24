@@ -182,24 +182,12 @@ phases:
   - id: P72
     path: design/phases/P72-cycle-metrics-execution-contract-closure.yaml
     weight: 3
-  - id: P64
-    path: design/phases/P64-deterministic-resolution-aggregation.yaml
-    weight: 5
-  - id: P65
-    path: design/phases/P65-lazy-local-memory-retrieval.yaml
-    weight: 6
   - id: P66
     path: design/phases/P66-cycle-cost-accounting.yaml
     weight: 6
   - id: P55
     path: design/phases/P55-stable-core-task-delta.yaml
     weight: 7
-  - id: P67
-    path: design/phases/P67-loop-memory-consolidation.yaml
-    weight: 5
-  - id: P68
-    path: design/phases/P68-loop-memory-storage-backend-review.yaml
-    weight: 3
   - id: P74
     path: design/phases/P74-default-agent-contract-minimization.yaml
     weight: 5

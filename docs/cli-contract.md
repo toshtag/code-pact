@@ -868,7 +868,7 @@ Read-only static integrity check over `design/roadmap.yaml` and every referenced
 - `PHASE_ID_MISMATCH` (error) — `phase.id` inside the YAML does not match the id the roadmap uses to reference it
 - `ORPHAN_PHASE_FILE` (warning) — a `.yaml` under `design/phases/` is not referenced by the roadmap
 - `PHASE_ID_NAMING` (warning) — phase id does not match `P<N>`
-- `TASK_ID_PHASE_PREFIX` (warning) — task id does not match `<phase>-T<N>`
+- `TASK_ID_PHASE_PREFIX` (warning) — task id does not match `<phase>-T<N>` or `<phase>-T<N><single-uppercase-letter>`
 
 **`--include-quality` (opt-in quality/readiness advisories):**
 

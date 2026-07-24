@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "kind": "decision_record",
+  "member_ids_sha256": "8bc615d0a5fcd107314219d2b1875fdb41290150285009a1334604a2f1ca1393",
+  "members": [
+    {
+      "id": "P55-T1-stable-core-task-delta-rfc-af40b1dd",
+      "sha256": "9d4cd12d6c907672c09aa605de43c9d24503d9d37dd21b7eb11425c79f5ba5d9",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P55-T1-stable-core-task-delta-rfc.md\",\n  \"original_path\": \"design/decisions/P55-T1-stable-core-task-delta-rfc.md\",\n  \"path_sha256\": \"af40b1dd2568c4e7b0bc450190b257ed6dab839982bf72c907afa5d4eba700fb\",\n  \"title\": \"P55-T1 Stable Core and Task Delta Decision\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-07-23T13:36:57.667Z\",\n  \"source_sha256\": \"c8f73e6ac536105c70db64e60ad23676ab69c0125207773d2ae34f42f71f2378\"\n}\n"
+    },
+    {
+      "id": "P58-T1-local-bounded-loop-memory-rfc-b3476446",
+      "sha256": "30c5e938540418881c9bc0b08c023e516b76fd27c09eaa778b4e38e760d6303e",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P58-T1-local-bounded-loop-memory-rfc.md\",\n  \"original_path\": \"design/decisions/P58-T1-local-bounded-loop-memory-rfc.md\",\n  \"path_sha256\": \"b3476446b2d73d63506ece861c0c2b3e21828aed48506189e6400077a49d7a04\",\n  \"title\": \"RFC: local bounded loop memory\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-07-23T13:36:58.663Z\",\n  \"source_sha256\": \"93df8a05c1c740bfd8c9f02ff0fd10315a5e228f17a6e2039e956497626efb85\"\n}\n"
+    },
+    {
+      "id": "P63-T1-token-reduction-memory-roadmap-rfc-c5b8d502",
+      "sha256": "fd8a19eabf95e275c97059d191d9dfcd3242e86489b0ad4ee346ac9e1638461d",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md\",\n  \"original_path\": \"design/decisions/P63-T1-token-reduction-memory-roadmap-rfc.md\",\n  \"path_sha256\": \"c5b8d502f1020a071182fa0295577db96de1e69cdc85d9234dbe3ee0410d560d\",\n  \"title\": \"Token Reduction Memory Roadmap\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-07-23T13:36:59.616Z\",\n  \"source_sha256\": \"498ab8daf16f36c062781a9a165aa558085bf309512ac3fbffeec1c195ad97d0\"\n}\n"
+    },
+    {
+      "id": "P66-T2-token-reduction-evidence-rfc-5268038a",
+      "sha256": "1f846aa125238f83bacf267ea4bfa55db41b9a9deb9f2648df696784b956c07c",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P66-T2-token-reduction-evidence-rfc.md\",\n  \"original_path\": \"design/decisions/P66-T2-token-reduction-evidence-rfc.md\",\n  \"path_sha256\": \"5268038a1e3e54f99fee9c985777e309a043a5b780fe7bb305b9723a97cdf1aa\",\n  \"title\": \"P66-T2 Token Reduction Evidence and Model-Independence Decision\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-07-23T13:37:00.631Z\",\n  \"source_sha256\": \"7050d16c9b4cc9c2a00d7b17c661b400f299e1bbb1b21def52dea064a5933cbe\"\n}\n"
+    },
+    {
+      "id": "P70-T1-recall-aggregation-boundary-rfc-fcfb04e5",
+      "sha256": "b5f17afc9dc3501c059cd510874dea15b88a0b21be111394ec0287d1c97853e7",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P70-T1-recall-aggregation-boundary-rfc.md\",\n  \"original_path\": \"design/decisions/P70-T1-recall-aggregation-boundary-rfc.md\",\n  \"path_sha256\": \"fcfb04e58ac54340cc791cbe0464bd6b88a9fb20ed1d68811786db94a65dfc96\",\n  \"title\": \"Recall and Aggregation Boundary\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-07-23T13:37:01.580Z\",\n  \"source_sha256\": \"135b707de8fd9ac7818379b9fc67cf5deb9518218da346aa06ccdde56ce21792\"\n}\n"
+    },
+    {
+      "id": "P70-T2-cycle-correlation-and-accounting-rfc-2f51de1b",
+      "sha256": "d0634375015a46298a00ee59ed279b7726464e1082275422b68accd29b9b481d",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P70-T2-cycle-correlation-and-accounting-rfc.md\",\n  \"original_path\": \"design/decisions/P70-T2-cycle-correlation-and-accounting-rfc.md\",\n  \"path_sha256\": \"2f51de1b177b5a19332cb540e2c575217d7f195ae921238ea7523c2adde66298\",\n  \"title\": \"Cycle Correlation and Accounting\",\n  \"adr_status_at_snapshot\": \"blocked\",\n  \"may_satisfy_active_gate\": false,\n  \"snapshotted_at\": \"2026-07-23T13:37:03.522Z\",\n  \"source_sha256\": \"06f3ea9699420b33f21b76d91e4455511972d1a8c3d2e4a0359f50b3f6eb0793\"\n}\n"
+    },
+    {
+      "id": "P70-T3-runtime-scope-and-benchmark-rfc-fb7f2460",
+      "sha256": "5813bb2c8c4c4bcf3e75fd2d574edb825b440fa11601771700d612d1c2c87274",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P70-T3-runtime-scope-and-benchmark-rfc.md\",\n  \"original_path\": \"design/decisions/P70-T3-runtime-scope-and-benchmark-rfc.md\",\n  \"path_sha256\": \"fb7f246054a41d0f6c826d190dabd384365b9d1f980e513ed8a9de6f2138a016\",\n  \"title\": \"Runtime Scope and Benchmark Boundary\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-07-23T13:37:04.595Z\",\n  \"source_sha256\": \"360e49620737e1c49825a0f6f55ffe2c43824350bd0e75a334e31a1c1976388a\"\n}\n"
+    },
+    {
+      "id": "P71-T1-observable-output-semantics-rfc-402c47d6",
+      "sha256": "76349f363c5c2bf463e9f699ae27e78095a9c82299f5342740834221fdaef0bd",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P71-T1-observable-output-semantics-rfc.md\",\n  \"original_path\": \"design/decisions/P71-T1-observable-output-semantics-rfc.md\",\n  \"path_sha256\": \"402c47d64277c079529fda79b96b6ad9b2740bda6b2f09d7bbb203806df7a87e\",\n  \"title\": \"Observable Output Semantics\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-07-23T13:37:05.773Z\",\n  \"source_sha256\": \"0e1dc6349bcd0fac29166ea0a288d0d34f77a005e079bd7efff316dd97689e7e\"\n}\n"
+    },
+    {
+      "id": "P71-T2-cycle-lifecycle-and-bounded-storage-rfc-9e9558ac",
+      "sha256": "27e7ff11a6e2600827819346fec263f4ec1b3f30a14025996cdc6bb6c4efd808",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P71-T2-cycle-lifecycle-and-bounded-storage-rfc.md\",\n  \"original_path\": \"design/decisions/P71-T2-cycle-lifecycle-and-bounded-storage-rfc.md\",\n  \"path_sha256\": \"9e9558ac71c08372c9f9ae9d7c8408aa669f6724c6c5c8b48b5f80baa9a1bd79\",\n  \"title\": \"Cycle Lifecycle and Bounded Storage\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-07-23T13:37:06.821Z\",\n  \"source_sha256\": \"5df8ad929ec8a6ff646f51639c3a12b3f69471723c5dd9054dca87e67acff48e\"\n}\n"
+    },
+    {
+      "id": "P71-T3-runtime-contract-reconciliation-rfc-949bde9b",
+      "sha256": "27d036bb59e23bff7d4d7461eef8fa2381277af70e4bc62395ba0cef6b32215f",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P71-T3-runtime-contract-reconciliation-rfc.md\",\n  \"original_path\": \"design/decisions/P71-T3-runtime-contract-reconciliation-rfc.md\",\n  \"path_sha256\": \"949bde9b072db48f898865d14f5914dc101691a006d4b84869ed3121bc009369\",\n  \"title\": \"Runtime Contract Reconciliation\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-07-23T13:37:07.800Z\",\n  \"source_sha256\": \"5dfc596e832da89af18d67b09fae94c34c7130d34cfe9cd129a5093ef1574141\"\n}\n"
+    },
+    {
+      "id": "P72-T1-metric-observation-boundary-rfc-1119e5b5",
+      "sha256": "6d0c74b1a8590a7ea11266abff84f8edd4cf32e1e82b368be22751dca0a83ef1",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P72-T1-metric-observation-boundary-rfc.md\",\n  \"original_path\": \"design/decisions/P72-T1-metric-observation-boundary-rfc.md\",\n  \"path_sha256\": \"1119e5b54724c19b1d5ee3496f97b2ea3d0568c896745ce61120630e658a7fdc\",\n  \"title\": \"Metric Observation Boundary\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-07-23T13:37:08.762Z\",\n  \"source_sha256\": \"aa56600e2ec7e2cd51b5dc83df347cc631fe6181781bbb14b91d5432ac8f96e4\"\n}\n"
+    },
+    {
+      "id": "P72-T2-active-cycle-admission-and-lifecycle-rfc-f0b8aa3f",
+      "sha256": "14943eea2c49d81b43dc3224055dc1a4283c33acc38c13b71956a8700e8920ec",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P72-T2-active-cycle-admission-and-lifecycle-rfc.md\",\n  \"original_path\": \"design/decisions/P72-T2-active-cycle-admission-and-lifecycle-rfc.md\",\n  \"path_sha256\": \"f0b8aa3ff219f9008da2f9a4431d7f3f70eb12211b24cfd70364f5c10e132982\",\n  \"title\": \"Active Cycle Admission and Lifecycle\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-07-23T13:37:09.748Z\",\n  \"source_sha256\": \"aa33a27321f8ff92e149b8469296fe1b04928374c40296f96801cae10f429d50\"\n}\n"
+    },
+    {
+      "id": "P72-T3-cycle-correlation-propagation-rfc-020ddcba",
+      "sha256": "63014b9616d9fefe3dc7421433af32ab28f42b5255d30c4de32727903564724d",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P72-T3-cycle-correlation-propagation-rfc.md\",\n  \"original_path\": \"design/decisions/P72-T3-cycle-correlation-propagation-rfc.md\",\n  \"path_sha256\": \"020ddcbae2b1f8280a48f382d41a2f18b1cdb2a89d443c579a7d805634998829\",\n  \"title\": \"Cycle Correlation Propagation\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-07-23T13:37:10.694Z\",\n  \"source_sha256\": \"124092e6284a6a87308dd1682cb3094549c209b61bb32a24dc4692a49cdb7bc5\"\n}\n"
+    },
+    {
+      "id": "P72-T4-runtime-task-reconciliation-rfc-a75ecfb0",
+      "sha256": "82009f69b7cb9bdca05afa36c05bf9251897e6816cbb99dd82b7f918401aa11a",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P72-T4-runtime-task-reconciliation-rfc.md\",\n  \"original_path\": \"design/decisions/P72-T4-runtime-task-reconciliation-rfc.md\",\n  \"path_sha256\": \"a75ecfb0b39e0e157931dd3c071378be0efd89e5415b200eb87d9ccb01661784\",\n  \"title\": \"Runtime Task Reconciliation\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-07-23T13:37:11.673Z\",\n  \"source_sha256\": \"01b3238f12278b35ba1fa6627be5f3c1cefcd27e92cf9185ec39a6503d5ea2c6\"\n}\n"
+    },
+    {
+      "id": "P80-T1-one-pair-effectiveness-trial-d2f249c6",
+      "sha256": "0c506d9154877aa67a69c5377581f80a62dd6f22a88847c8c429159e7ba92286",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P80-T1-one-pair-effectiveness-trial.md\",\n  \"original_path\": \"design/decisions/P80-T1-one-pair-effectiveness-trial.md\",\n  \"path_sha256\": \"d2f249c62a3a433ca5e3ad68d31af0bac416bafe8f76d9f52e87caa9091961a3\",\n  \"title\": \"P80-T1: One-Pair Post-P79 Effectiveness Trial\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-07-23T13:37:12.624Z\",\n  \"source_sha256\": \"a1562e6c0e15897413c7fb83cb55a85372530dce7bcaf23c054261f47bd38097\"\n}\n"
+    },
+    {
+      "id": "P80-T2-qualified-one-pair-trial-8951ca22",
+      "sha256": "db77d8547500d9a9679873a26af736f71af3d135330a92f352ff49118829185b",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P80-T2-qualified-one-pair-trial.md\",\n  \"original_path\": \"design/decisions/P80-T2-qualified-one-pair-trial.md\",\n  \"path_sha256\": \"8951ca22b124682ad82bfd8ac01682e0ce232c5051c6b95220fb69fbcdd6d41a\",\n  \"title\": \"P80-T2: Qualified One-Pair Effectiveness Trial\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-07-23T13:37:13.572Z\",\n  \"source_sha256\": \"4aa49c9d7b1a1672a42a09832fdea12991b2657bb9016f9c36123e299c27ffe0\"\n}\n"
+    },
+    {
+      "id": "control-plane-v2-rfc-d3dfc339",
+      "sha256": "a26bc9c2819e4ea109bc7c9f3c97a77940496d89aec43f0622c56b7a57445bce",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/control-plane-v2-rfc.md\",\n  \"original_path\": \"design/decisions/control-plane-v2-rfc.md\",\n  \"path_sha256\": \"d3dfc339630db09e6a9796f7da7ad9454ff8f652da6a8dbc2a87933f217e3c52\",\n  \"title\": \"RFC: Control-plane v2 — collaboration-safe phases, discovery, and task layout\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T10:03:57.529Z\",\n  \"source_sha256\": \"a6be8c187f3044333ebcfdc23fc723b5961d81a5f976f25ba8721dae248e1d5a\"\n}\n"
+    },
+    {
+      "id": "dogfood-durable-truth-migration-rfc-1d0599dc",
+      "sha256": "fa7dd872de6ec7eea7425a2d2c95809bd0ad8892cc048f41f255ab58c6b7baec",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/dogfood-durable-truth-migration-rfc.md\",\n  \"original_path\": \"design/decisions/dogfood-durable-truth-migration-rfc.md\",\n  \"path_sha256\": \"1d0599dc86b650b1769aa04ef0d33b0e9d07af57662e2e4774d5207cb1f66a01\",\n  \"title\": \"RFC: Dogfood durable-truth migration — converting this repo's history so deleting `design/` just works\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T10:03:57.865Z\",\n  \"source_sha256\": \"a8c3d377c05baec304853a390bc684e6fc6d8a2ec6f01c9fcc26b30f2aeb902b\"\n}\n"
+    },
+    {
+      "id": "event-pack-compaction-rfc-886dfe69",
+      "sha256": "903265cc8e77d436f9e604fe795e7e762ec35dfbd625cfbc7d1ef963f372f5a7",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/event-pack-compaction-rfc.md\",\n  \"original_path\": \"design/decisions/event-pack-compaction-rfc.md\",\n  \"path_sha256\": \"886dfe69bf3809a592c627927d9dca9edef2c0b5661420520c9a65b6b41be7d1\",\n  \"title\": \"RFC: Event-pack compaction lifecycle\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T10:03:58.214Z\",\n  \"source_sha256\": \"43af0411e8f6f9297fde2fd412a864386485ca695d679f2c222c0127637dd274\"\n}\n"
+    },
+    {
+      "id": "retention-pair-delete-journal-rfc-e4278608",
+      "sha256": "08a9cf050854d0fc1d14ad6b49788df27f27f9b5e87017b40acc87f464c92781",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/retention-pair-delete-journal-rfc.md\",\n  \"original_path\": \"design/decisions/retention-pair-delete-journal-rfc.md\",\n  \"path_sha256\": \"e42786088bfb27bf926598b37a1fa45c925779dcefba900a721597cff9f5c898\",\n  \"title\": \"RFC: Retention pair-delete journal — crash-safe both-or-neither for a phase snapshot ↔ event_pack pair\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T10:03:58.547Z\",\n  \"source_sha256\": \"77b15713c1dc9e71cd60a879f5e19477bd5ae58a5460faf5a6b1356564fd7cc7\"\n}\n"
+    }
+  ]
+}

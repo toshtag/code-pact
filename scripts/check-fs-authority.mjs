@@ -470,6 +470,12 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveLoopMemoryEpisodeDeletePath", "owned_delete"],
       ["resolveProjectScaffoldReadPath", "owned_read"],
       ["resolveProjectScaffoldWritePath", "owned_write"],
+      ["resolveContractLockDirWritePath", "owned_write"],
+      ["resolveContractLockReadPath", "owned_read"],
+      ["resolveContractLockWritePath", "owned_write"],
+      ["resolveReviewCacheDirWritePath", "owned_write"],
+      ["resolveReviewManifestReadPath", "owned_read"],
+      ["resolveReviewManifestWritePath", "owned_write"],
     ]),
   ],
   [

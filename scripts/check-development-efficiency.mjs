@@ -97,8 +97,9 @@ export function loadTasksById(repoRoot) {
   const roadmap = readYaml(repoRoot, "design/roadmap.yaml");
   const tasks = new Map();
   for (const phaseRef of roadmap?.phases ?? []) {
-    if (!phaseRef?.path || !existsSync(resolve(repoRoot, phaseRef.path)))
-      continue;
+    if (!phaseRef?.path) continue;
+    const phasePath = resolve(repoRoot, phaseRef.path);
+    if (!existsSync(phasePath)) continue;
     const phase = readYaml(repoRoot, phaseRef.path);
     for (const task of phase?.tasks ?? []) {
       if (task?.id) tasks.set(String(task.id), task);

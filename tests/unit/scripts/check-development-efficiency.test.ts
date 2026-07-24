@@ -7,6 +7,7 @@ import {
   isDesignOnlyTask,
   loadDoneEvents,
   loadDevelopmentEfficiencyCheckpoint,
+  loadTasksById,
   // @ts-expect-error Node-executed .mjs script imported directly for unit testing.
 } from "../../../scripts/check-development-efficiency.mjs";
 
@@ -579,6 +580,183 @@ describe("check-development-efficiency", () => {
         code: "CONFIG_ERROR",
         message: expect.stringContaining("consecutive exceeds maximum"),
       });
+    });
+  });
+
+  describe("archived phases without live definitions", () => {
+    it("passes when the checkpoint covers every archived done event", () => {
+      const doneEvents = [
+        {
+          id: "baseline",
+          task_id: "P72-T4",
+          at: "2026-07-16T06:15:11.411Z",
+          file: "baseline.yaml",
+        },
+        {
+          id: "p86-t1-event",
+          task_id: "P86-T1",
+          at: "2026-07-23T09:42:41.581Z",
+          file: "p86-t1.yaml",
+        },
+      ];
+      const checkpoint = {
+        schema_version: 1,
+        baseline: {
+          task_id: "P72-T4",
+          event_id: "baseline",
+          at: "2026-07-16T06:15:11.411Z",
+        },
+        checkpoint: {
+          task_id: "P86-T1",
+          event_id: "p86-t1-event",
+          at: "2026-07-23T09:42:41.581Z",
+        },
+        state: {
+          completed_design_only_tasks: 3,
+          completed_runtime_tasks: 44,
+          consecutive_design_only_tasks: 0,
+          max_consecutive_design_only_tasks: 1,
+        },
+      };
+      const result = evaluateDevelopmentEfficiency({
+        doneEvents,
+        tasks: new Map(),
+        checkpoint,
+      });
+      expect(result).toMatchObject({
+        baseline_task: "P72-T4",
+        checkpoint_task: "P86-T1",
+        completed_design_only_tasks: 3,
+        completed_runtime_tasks: 44,
+        consecutive_design_only_tasks: 0,
+        max_consecutive_design_only_tasks: 1,
+        status: "pass",
+      });
+    });
+
+    it("fails closed when a post-checkpoint done event has no live definition", () => {
+      const doneEvents = [
+        {
+          id: "baseline",
+          task_id: "P72-T4",
+          at: "2026-07-16T06:15:11.411Z",
+          file: "baseline.yaml",
+        },
+        {
+          id: "p86-t1-event",
+          task_id: "P86-T1",
+          at: "2026-07-23T09:42:41.581Z",
+          file: "p86-t1.yaml",
+        },
+        {
+          id: "p99-t1-event",
+          task_id: "P99-T1",
+          at: "2026-07-24T00:00:00.000Z",
+          file: "p99-t1.yaml",
+        },
+      ];
+      const checkpoint = {
+        schema_version: 1,
+        baseline: {
+          task_id: "P72-T4",
+          event_id: "baseline",
+          at: "2026-07-16T06:15:11.411Z",
+        },
+        checkpoint: {
+          task_id: "P86-T1",
+          event_id: "p86-t1-event",
+          at: "2026-07-23T09:42:41.581Z",
+        },
+        state: {
+          completed_design_only_tasks: 3,
+          completed_runtime_tasks: 44,
+          consecutive_design_only_tasks: 0,
+          max_consecutive_design_only_tasks: 1,
+        },
+      };
+      const result = evaluateDevelopmentEfficiency({
+        doneEvents,
+        tasks: new Map(),
+        checkpoint,
+      });
+      expect(result).toMatchObject({
+        status: "fail",
+        code: "CONFIG_ERROR",
+        message: "completed task definitions are unavailable",
+        unclassified_done_tasks: ["P99-T1"],
+      });
+    });
+
+    it("passes for a new live runtime task after archived phases", () => {
+      const doneEvents = [
+        {
+          id: "baseline",
+          task_id: "P72-T4",
+          at: "2026-07-16T06:15:11.411Z",
+          file: "baseline.yaml",
+        },
+        {
+          id: "p86-t1-event",
+          task_id: "P86-T1",
+          at: "2026-07-23T09:42:41.581Z",
+          file: "p86-t1.yaml",
+        },
+      ];
+      const checkpoint = {
+        schema_version: 1,
+        baseline: {
+          task_id: "P72-T4",
+          event_id: "baseline",
+          at: "2026-07-16T06:15:11.411Z",
+        },
+        checkpoint: {
+          task_id: "P86-T1",
+          event_id: "p86-t1-event",
+          at: "2026-07-23T09:42:41.581Z",
+        },
+        state: {
+          completed_design_only_tasks: 3,
+          completed_runtime_tasks: 44,
+          consecutive_design_only_tasks: 0,
+          max_consecutive_design_only_tasks: 1,
+        },
+      };
+      const taskMap = new Map<string, unknown>([
+        ["P99-T1", { writes: ["src/core/example.ts"] }],
+      ]);
+      const result = evaluateDevelopmentEfficiency({
+        doneEvents,
+        tasks: taskMap,
+        checkpoint,
+        nextTask: "P99-T1",
+      });
+      expect(result).toMatchObject({
+        next_task: "P99-T1",
+        next_task_design_only: false,
+        prospective_consecutive_design_only_tasks: 0,
+        status: "pass",
+      });
+    });
+  });
+
+  describe("git independence", () => {
+    it("resolves live task definitions without git", () => {
+      const repo = makeTempRepo();
+      try {
+        const roadmap = `phases:\n  - id: P99\n    path: design/phases/P99.yaml\n`;
+        mkdirSync(join(repo, "design", "phases"), { recursive: true });
+        writeFileSync(join(repo, "design", "roadmap.yaml"), roadmap);
+        const phase = `id: P99\nname: Test\ntasks:\n  - id: P99-T1\n    type: feature\n    writes:\n      - src/core/example.ts\n`;
+        writeFileSync(join(repo, "design", "phases", "P99.yaml"), phase);
+        const result = loadTasksById(repo);
+        expect(result.has("P99-T1")).toBe(true);
+        expect(result.get("P99-T1")).toMatchObject({
+          id: "P99-T1",
+          writes: ["src/core/example.ts"],
+        });
+      } finally {
+        cleanup(repo);
+      }
     });
   });
 });
