@@ -224,3 +224,6 @@ phases:
   - id: P86
     path: design/phases/P86-task-cancellation-cli.yaml
     weight: 1
+  - id: P87
+    path: design/phases/P87-deterministic-ci-release.yaml
+    weight: 1

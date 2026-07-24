@@ -58,10 +58,15 @@ describe("checkReleaseTag", () => {
       changelog: baseChangelog,
       githubApi: makeGithubApi(),
       gitRunner: makeGitRunner(),
-      registryCheck: async () => false,
+      registryCheck: async () => ({
+        state: "absent" as const,
+        status: 404,
+        message: "version code-pact@2.0.1 is not published yet",
+      }),
     });
     expect(result.ok).toBe(true);
     expect(result.versionExists).toBe(false);
+    expect(result.registryState).toBe("absent");
   });
 
   it("fails when not triggered by a tag", async () => {
@@ -208,7 +213,7 @@ describe("checkReleaseTag", () => {
     expect(result.message).toContain("CHANGELOG");
   });
 
-  it("reports versionExists when npm registry has the version", async () => {
+  it("fails when npm registry already has the version", async () => {
     const result = await checkReleaseTag({
       refType: "tag",
       refName: "v2.0.1",
@@ -219,9 +224,38 @@ describe("checkReleaseTag", () => {
       changelog: baseChangelog,
       githubApi: makeGithubApi(),
       gitRunner: makeGitRunner(),
-      registryCheck: async () => true,
+      registryCheck: async () => ({
+        state: "exists" as const,
+        status: 200,
+        message: "version code-pact@2.0.1 already exists in registry",
+      }),
     });
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("RELEASE_VERSION_ALREADY_EXISTS");
     expect(result.versionExists).toBe(true);
+    expect(result.registryState).toBe("exists");
+  });
+
+  it("fails closed when the registry probe returns an error", async () => {
+    const result = await checkReleaseTag({
+      refType: "tag",
+      refName: "v2.0.1",
+      sha: "abc123",
+      repository: "toshtag/code-pact",
+      token: "test-token",
+      pkg: basePkg,
+      changelog: baseChangelog,
+      githubApi: makeGithubApi(),
+      gitRunner: makeGitRunner(),
+      registryCheck: async () => ({
+        state: "error" as const,
+        status: 500,
+        message: "registry probe failed",
+      }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("REGISTRY_PROBE_ERROR");
+    expect(result.versionExists).toBe(false);
+    expect(result.registryState).toBe("error");
   });
 });

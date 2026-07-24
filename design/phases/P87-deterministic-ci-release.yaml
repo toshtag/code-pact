@@ -1,0 +1,58 @@
+id: P87
+name: Deterministic CI and Release
+weight: 1
+confidence: high
+risk: low
+status: in_progress
+objective: >
+  Make release and CI behavior deterministic, hermetic, and context-efficient.
+  P87-T1 closes release correctness gaps; P87-T2 applies change-aware test selection.
+non_goals:
+  - Modify v2.8.0 tag/Release/npm package
+  - Change production features outside the release pipeline
+  - Implement CI changed-test selection
+definition_of_done:
+  - Trusted publishing fails closed on existing-version collisions
+  - npm provenance attestation is verified before GitHub Release creation
+  - Publish workflow does not depend on ambient git identity
+  - Supply-chain invariants enforce the new release contract
+verification:
+  commands:
+    - pnpm test:ci
+    - pnpm release:check
+    - pnpm check:supply-chain
+tasks:
+  - id: P87-T1
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: >
+      Ensure a normal release follows a strict, fail-closed contract:
+      signed tag → exact commit verification → new npm version → build/pack →
+      Trusted Publishing → registry integrity → provenance verification → GitHub Release.
+    acceptance_refs:
+      - tests/unit/scripts/check-release-tag.test.ts
+      - tests/unit/scripts/verify-published-provenance.test.ts
+      - tests/unit/workflows/publish-workflow.test.ts
+      - tests/unit/scripts/check-supply-chain-invariants.test.ts
+      - tests/helpers/git-repository.ts
+  - id: P87-T2
+    type: feature
+    ambiguity: medium
+    risk: low
+    context_size: large
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: planned
+    description: >
+      Change-aware, bounded, observable test execution.
+      Add changed-file based test selection, hard timeouts with process-tree kill,
+      a test heartbeat, and slowest-file reporting so the suite cannot hang
+      silently and release verification does not repeat a full gate on the
+      same commit.

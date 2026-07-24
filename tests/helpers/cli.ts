@@ -9,6 +9,10 @@
 // Build posture: integration tests expect dist/cli.js to have been built
 // before Vitest starts. `pnpm test:integration` and CI both run `pnpm build`
 // once up front, avoiding per-file tsup races and repeated rebuilds.
+//
+// Identity posture: every spawned CLI process receives the hermetic Git
+// identity from `HERMETIC_GIT_ENV` so tests are not affected by the parent
+// user's global Git configuration.
 
 import { spawnSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -16,6 +20,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { HERMETIC_GIT_ENV } from "./git-repository.js";
 
 export const repoRoot = resolve(fileURLToPath(import.meta.url), "../../..");
 export const cliPath = join(repoRoot, "dist", "cli.js");
@@ -60,14 +65,16 @@ export function run(
   // The new options-object form lets callers pass `input` for stdin
   // without breaking any existing call site.
   const opts: { env?: NodeJS.ProcessEnv; input?: string } =
-    envOrOpts && "env" in envOrOpts || envOrOpts && "input" in envOrOpts
+    (envOrOpts && "env" in envOrOpts) || (envOrOpts && "input" in envOrOpts)
       ? (envOrOpts as { env?: NodeJS.ProcessEnv; input?: string })
       : { env: envOrOpts as NodeJS.ProcessEnv | undefined };
 
   const res = spawnSync(process.execPath, [cliPath, ...args], {
     cwd,
     encoding: "utf8",
-    env: opts.env ? { ...process.env, ...opts.env } : process.env,
+    env: opts.env
+      ? { ...process.env, ...HERMETIC_GIT_ENV, ...opts.env }
+      : { ...process.env, ...HERMETIC_GIT_ENV },
     input: opts.input,
   });
   return {
@@ -112,7 +119,15 @@ export async function createTempProject(opts?: {
   if (opts?.init !== false) {
     const initArgs = Array.isArray(opts?.init)
       ? opts.init
-      : ["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"];
+      : [
+          "init",
+          "--non-interactive",
+          "--locale",
+          "en-US",
+          "--agent",
+          "claude-code",
+          "--json",
+        ];
     const initRes = run(dir, initArgs);
     if (initRes.code !== 0) {
       await rm(dir, { recursive: true, force: true });
@@ -178,10 +193,7 @@ export function expectJsonOk<T = unknown>(res: RunResult): JsonOk<T> {
  * Does NOT assert a specific exit code — callers should verify exit
  * separately (different codes carry different semantics: 1 vs 2).
  */
-export function expectJsonErr(
-  res: RunResult,
-  expectedCode?: string,
-): JsonErr {
+export function expectJsonErr(res: RunResult, expectedCode?: string): JsonErr {
   if (res.stdout.trim().length === 0) {
     throw new Error(
       `expectJsonErr: empty stdout (exit ${res.code})\nstderr:\n${res.stderr}`,
