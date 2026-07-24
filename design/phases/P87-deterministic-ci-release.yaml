@@ -11,12 +11,15 @@ objective: >
 non_goals:
   - Modify v2.8.0 tag/Release/npm package
   - Change production features outside the release pipeline
-  - Implement CI changed-test selection
 definition_of_done:
   - Trusted publishing fails closed on existing-version collisions
   - npm provenance attestation is verified before GitHub Release creation
   - Publish workflow does not depend on ambient git identity
-  - Supply-chain invariants enforce the new release contract
+  - Supply-chain invariants enforce the release contract
+  - Pull-request verification uses deterministic focused selection with full fallback
+  - Main commits run one full standard gate
+  - Publish reuses the successful exact-SHA main CI result
+  - Verification processes are bounded and expose heartbeat and slowest-file output
 verification:
   commands:
     - pnpm test:ci
@@ -57,3 +60,62 @@ tasks:
       test selection, hard timeouts with process-tree kill, a test heartbeat,
       and slowest-file reporting so the suite cannot hang silently and release
       verification does not repeat a full gate on the same commit.
+    depends_on:
+      - P87-T1
+    reads:
+      - .github/workflows/ci.yml
+      - .github/workflows/publish.yml
+      - docs/maintainers/releasing.md
+      - docs/maintainers/token-efficient-development.md
+      - package.json
+      - pnpm-lock.yaml
+      - vitest.config.ts
+      - vitest.integration.config.ts
+      - vitest.integration.smoke.config.ts
+      - scripts/check-required-ci-for-sha.mjs
+      - scripts/check-required-ci-for-sha.d.mts
+      - scripts/check-supply-chain-invariants.mjs
+      - scripts/lib/run-bounded-process.mjs
+      - scripts/verification-scope.d.mts
+      - scripts/verification-scope.mjs
+      - scripts/vitest-ci-reporter.d.mts
+      - scripts/vitest-ci-reporter.mjs
+      - tests/helpers/cli.ts
+      - tests/helpers/git-repository.ts
+      - tests/setup.ts
+      - tests/integration/task-registration-spec.test.ts
+      - tests/unit/scripts/check-required-ci-for-sha.test.ts
+      - tests/unit/scripts/check-supply-chain-invariants.test.ts
+      - tests/unit/scripts/run-bounded-process.test.ts
+      - tests/unit/scripts/verification-scope.test.ts
+      - tests/unit/workflows/ci-workflow.test.ts
+      - tests/unit/workflows/publish-workflow.test.ts
+      - tests/unit/scripts/vitest-ci-reporter.test.ts
+    writes:
+      - design/phases/P87-deterministic-ci-release.yaml
+      - .github/workflows/ci.yml
+      - .github/workflows/publish.yml
+      - docs/maintainers/releasing.md
+      - scripts/check-required-ci-for-sha.d.mts
+      - scripts/check-required-ci-for-sha.mjs
+      - scripts/check-supply-chain-invariants.mjs
+      - scripts/lib/run-bounded-process.mjs
+      - scripts/verification-scope.d.mts
+      - scripts/verification-scope.mjs
+      - scripts/vitest-ci-reporter.d.mts
+      - scripts/vitest-ci-reporter.mjs
+      - tests/integration/task-registration-spec.test.ts
+      - tests/unit/scripts/check-required-ci-for-sha.test.ts
+      - tests/unit/scripts/check-supply-chain-invariants.test.ts
+      - tests/unit/scripts/run-bounded-process.test.ts
+      - tests/unit/scripts/verification-scope.test.ts
+      - tests/unit/scripts/vitest-ci-reporter.test.ts
+      - tests/unit/workflows/ci-workflow.test.ts
+    acceptance_refs:
+      - tests/integration/task-registration-spec.test.ts
+      - tests/unit/scripts/check-required-ci-for-sha.test.ts
+      - tests/unit/scripts/check-supply-chain-invariants.test.ts
+      - tests/unit/scripts/run-bounded-process.test.ts
+      - tests/unit/scripts/verification-scope.test.ts
+      - tests/unit/scripts/vitest-ci-reporter.test.ts
+      - tests/unit/workflows/ci-workflow.test.ts
