@@ -18,14 +18,56 @@ const DEFAULT_HEARTBEAT_MS = 30_000;
 
 const WORKFLOW_PREFIXES = [".github/workflows/"];
 
+const WORKFLOW_TEST_MAP = {
+  ".github/workflows/ci.yml": ["tests/unit/workflows/ci-workflow.test.ts"],
+  ".github/workflows/publish.yml": [
+    "tests/unit/workflows/publish-workflow.test.ts",
+  ],
+};
+
+const WORKFLOW_COMMON_TESTS = [
+  "tests/unit/scripts/check-supply-chain-invariants.test.ts",
+];
+
+const RELEASE_SCRIPT_TEST_MAP = {
+  "scripts/check-release-tag.mjs": [
+    "tests/unit/scripts/check-release-tag.test.ts",
+  ],
+  "scripts/check-release-version.mjs": [
+    "tests/unit/scripts/check-release-version.test.ts",
+  ],
+  "scripts/check-package-tarball.mjs": [
+    "tests/unit/scripts/check-package-tarball.test.ts",
+  ],
+  "scripts/verify-published-tarball.mjs": [
+    "tests/unit/scripts/verify-published-tarball.test.ts",
+  ],
+  "scripts/check-npm-version-availability.mjs": [
+    "tests/unit/scripts/check-npm-version-availability.test.ts",
+  ],
+  "scripts/verify-published-provenance.mjs": [
+    "tests/unit/scripts/verify-published-provenance.test.ts",
+  ],
+  "scripts/check-required-ci-for-sha.mjs": [
+    "tests/unit/scripts/check-required-ci-for-sha.test.ts",
+  ],
+};
+
+const RELEASE_SCRIPT_COMMON_TESTS = [
+  "tests/unit/workflows/publish-workflow.test.ts",
+  "tests/unit/scripts/check-supply-chain-invariants.test.ts",
+];
+
 const RELEASE_SCRIPT_EXACT = [
   "scripts/check-release-tag.mjs",
   "scripts/check-release-version.mjs",
   "scripts/check-package-tarball.mjs",
   "scripts/verify-published-tarball.mjs",
   "scripts/check-npm-version-availability.mjs",
+  "scripts/verify-published-provenance.mjs",
   "scripts/assert-package-metadata.mjs",
   "scripts/release-notes.mjs",
+  "scripts/check-required-ci-for-sha.mjs",
 ];
 
 const SHARED_TEST_INFRA_PREFIXES = [
@@ -147,6 +189,14 @@ function isWorkflow(file) {
   return startsWithAny(file, WORKFLOW_PREFIXES);
 }
 
+function isMappedWorkflow(file) {
+  return Object.prototype.hasOwnProperty.call(WORKFLOW_TEST_MAP, file);
+}
+
+function isUnmappedWorkflow(file) {
+  return isWorkflow(file) && !isMappedWorkflow(file);
+}
+
 function isReleaseScript(file) {
   if (RELEASE_SCRIPT_EXACT.includes(file)) return true;
   return (
@@ -154,6 +204,14 @@ function isReleaseScript(file) {
     file.startsWith("scripts/verify-published-") ||
     file.startsWith("scripts/check-npm-version-")
   );
+}
+
+function isMappedReleaseScript(file) {
+  return Object.prototype.hasOwnProperty.call(RELEASE_SCRIPT_TEST_MAP, file);
+}
+
+function isUnmappedReleaseScript(file) {
+  return isReleaseScript(file) && !isMappedReleaseScript(file);
 }
 
 function isSharedTestInfra(file) {
@@ -245,6 +303,8 @@ export function classifyChangedFiles(files) {
   const sharedTestInfra = changedFiles.some(isSharedTestInfra);
   const unknown = changedFiles.some(isUnknown);
   const highRisk = changedFiles.some(isHighRisk);
+  const unmappedReleaseScript = changedFiles.some(isUnmappedReleaseScript);
+  const unmappedWorkflow = changedFiles.some(isUnmappedWorkflow);
 
   const reasons = [];
   if (highRisk) reasons.push("high-risk");
@@ -254,6 +314,8 @@ export function classifyChangedFiles(files) {
   if (releaseScript) reasons.push("release");
   if (docs) reasons.push("docs");
   if (sharedTestInfra) reasons.push("shared-test-infra");
+  if (unmappedReleaseScript) reasons.push("unmapped-release-script");
+  if (unmappedWorkflow) reasons.push("unmapped-workflow");
   if (
     standard &&
     !processControl &&
@@ -264,12 +326,8 @@ export function classifyChangedFiles(files) {
   )
     reasons.push("standard");
 
-  const reason =
-    changedFiles.length === 0
-      ? "no tracked changes"
-      : reasons.join("+") || "standard";
-
-  const fallbackFull = highRisk || unknown;
+  const fallbackFull =
+    highRisk || unknown || unmappedReleaseScript || unmappedWorkflow;
   const mode = fallbackFull ? "full" : "focused";
 
   return {
@@ -286,7 +344,10 @@ export function classifyChangedFiles(files) {
     highRisk,
     fallbackFull,
     mode,
-    reason,
+    reason:
+      changedFiles.length === 0
+        ? "no tracked changes"
+        : reasons.join("+") || "standard",
   };
 }
 
@@ -341,9 +402,11 @@ function hasGenericFiles(files) {
   return genericFiles(files).length > 0;
 }
 
-function getTestMode(scope, changeSet) {
+function getTestMode(scope, changeSet, mergeBase = null) {
   if (scope.fallbackFull || scope.highRisk || scope.unknown) return "full";
   if (changeSet.indeterminate) return "full";
+  if (mergeBase === null) return "full";
+  if (hasGenericFiles(changeSet.untrackedFiles ?? [])) return "full";
   return "focused";
 }
 
@@ -383,84 +446,132 @@ function buildUnitSteps(scope, changeSet, mergeBase) {
   const steps = [];
   if (!scope.generic && !scope.standard && !scope.processControl) return steps;
 
-  const directUnitFiles = changedUnitTestFiles(changeSet);
-  if (directUnitFiles.length > 0) {
+  const allChanged = uniqueFiles([
+    ...(changeSet.baseFiles ?? []),
+    ...(changeSet.workingTreeFiles ?? []),
+    ...(changeSet.untrackedFiles ?? []),
+  ]);
+  const directUnitFiles = allChanged.filter(isUnitTest);
+  const sourceFiles = allChanged.filter(
+    f => isGenericCode(f) && !isUnitTest(f) && !isIntegrationTest(f),
+  );
+
+  // When only unit test files changed, run them directly.
+  if (directUnitFiles.length > 0 && sourceFiles.length === 0) {
+    const unitFilesToRun = scope.processControl
+      ? uniqueFiles([
+          "tests/unit/core/project-fs-authority-resolvers.test.ts",
+          "tests/unit/commands/verify-process.test.ts",
+          ...directUnitFiles,
+        ])
+      : directUnitFiles;
+    const id = scope.processControl ? "process-control-unit" : "unit-direct";
     addVitestStep(
       steps,
-      "unit-direct",
+      id,
       "focused",
       "pnpm",
-      ["exec", "vitest", "run", ...directUnitFiles],
+      ["exec", "vitest", "run", ...unitFilesToRun],
       300_000,
-      `focused: ${directUnitFiles.length} changed unit test file(s)`,
+      `focused: ${unitFilesToRun.length} changed unit test file(s)`,
     );
   }
 
-  if (
-    changeSet.indeterminate ||
-    hasGenericFiles(changeSet.untrackedFiles) ||
-    mergeBase === null
-  ) {
-    addVitestStep(
-      steps,
-      "unit",
-      "full",
-      "pnpm",
-      ["exec", "vitest", "run"],
-      480_000,
-      "untracked or indeterminate: full unit tests",
-    );
-    return steps;
-  }
+  // When source files changed, use --changed to discover affected tests.
+  if (sourceFiles.length > 0) {
+    if (
+      mergeBase === null ||
+      changeSet.indeterminate ||
+      hasGenericFiles(changeSet.untrackedFiles ?? [])
+    ) {
+      addVitestStep(
+        steps,
+        "unit",
+        "full",
+        "pnpm",
+        ["exec", "vitest", "run"],
+        480_000,
+        "untracked or indeterminate: full unit tests",
+      );
+    } else {
+      const baseGenericFiles = genericFiles(changeSet.baseFiles ?? []);
+      const workingGenericFiles = genericFiles(
+        changeSet.workingTreeFiles ?? [],
+      );
+      const hasBaseGenericFiles = baseGenericFiles.length > 0;
+      const hasWorkingGenericFiles = workingGenericFiles.length > 0;
 
-  const baseGenericFiles = genericFiles(changeSet.baseFiles ?? []);
-  const workingGenericFiles = genericFiles(changeSet.workingTreeFiles ?? []);
-  const hasBaseGenericFiles = baseGenericFiles.length > 0;
-  const hasWorkingGenericFiles = workingGenericFiles.length > 0;
+      let runBaseChanged = hasBaseGenericFiles;
+      let runWorkingChanged = hasWorkingGenericFiles;
 
-  let runBaseChanged = hasBaseGenericFiles;
-  let runWorkingChanged = hasWorkingGenericFiles;
+      if (hasBaseGenericFiles && hasWorkingGenericFiles) {
+        if (isSubset(baseGenericFiles, workingGenericFiles)) {
+          runBaseChanged = false;
+        } else if (isSubset(workingGenericFiles, baseGenericFiles)) {
+          runWorkingChanged = false;
+        }
+      }
 
-  if (hasBaseGenericFiles && hasWorkingGenericFiles) {
-    if (isSubset(baseGenericFiles, workingGenericFiles)) {
-      runBaseChanged = false;
-    } else if (isSubset(workingGenericFiles, baseGenericFiles)) {
-      runWorkingChanged = false;
+      if (runBaseChanged) {
+        addVitestStep(
+          steps,
+          "unit-base",
+          "focused",
+          "pnpm",
+          [
+            "exec",
+            "vitest",
+            "run",
+            "--changed",
+            mergeBase,
+            "--passWithNoTests",
+          ],
+          300_000,
+          `committed generic changes: ${baseGenericFiles.length} file(s)`,
+        );
+      }
+
+      if (runWorkingChanged) {
+        addVitestStep(
+          steps,
+          "unit-working",
+          "focused",
+          "pnpm",
+          ["exec", "vitest", "run", "--changed", "--passWithNoTests"],
+          300_000,
+          `working-tree generic changes: ${workingGenericFiles.length} file(s)`,
+        );
+      }
     }
   }
 
-  if (runBaseChanged) {
-    addVitestStep(
-      steps,
-      "unit-base",
-      "focused",
-      "pnpm",
-      ["exec", "vitest", "run", "--changed", mergeBase, "--passWithNoTests"],
-      300_000,
-      `committed generic changes: ${baseGenericFiles.length} file(s)`,
-    );
-  }
-
-  if (runWorkingChanged) {
-    addVitestStep(
-      steps,
-      "unit-working",
-      "focused",
-      "pnpm",
-      ["exec", "vitest", "run", "--changed", "--passWithNoTests"],
-      300_000,
-      `working-tree generic changes: ${workingGenericFiles.length} file(s)`,
-    );
-  }
-
-  // If no generic source changed but unit test files changed, the direct step
-  // above already covers them. Avoid empty changed-only steps.
+  // Ensure process-control unit tests run even when only process-control
+  // source changed, and avoid duplicating tests already run by --changed
+  // or unit-direct.
   if (
-    steps.length > 1 &&
-    baseGenericFiles.length === 0 &&
-    workingGenericFiles.length === 0
+    scope.processControl &&
+    (sourceFiles.length > 0 || directUnitFiles.length === 0)
   ) {
-    return steps.filter(s => s.id === "unit-direct");
+    const processUnitFiles = uniqueFiles([
+      "tests/unit/core/project-fs-authority-resolvers.test.ts",
+      "tests/unit/commands/verify-process.test.ts",
+      ...directUnitFiles,
+    ]);
+    const extra =
+      sourceFiles.length > 0
+        ? processUnitFiles.filter(f => !directUnitFiles.includes(f))
+        : processUnitFiles;
+    if (extra.length > 0) {
+      addVitestStep(
+        steps,
+        "process-control-unit",
+        "process-control",
+        "pnpm",
+        ["exec", "vitest", "run", ...extra],
+        300_000,
+        "process-control: targeted unit tests",
+      );
+    }
   }
 
   return steps;
@@ -469,6 +580,17 @@ function buildUnitSteps(scope, changeSet, mergeBase) {
 function buildIntegrationSteps(scope, changeSet) {
   const steps = [];
   if (!scope.standard) return steps;
+
+  const allChanged = uniqueFiles([
+    ...(changeSet.baseFiles ?? []),
+    ...(changeSet.workingTreeFiles ?? []),
+    ...(changeSet.untrackedFiles ?? []),
+  ]);
+  const directIntegrationFiles = allChanged.filter(isIntegrationTest);
+  const sourceFiles = allChanged.filter(
+    f => isGenericCode(f) && !isUnitTest(f) && !isIntegrationTest(f),
+  );
+  const hasSource = sourceFiles.length > 0;
 
   if (scope.processControl) {
     addVitestStep(
@@ -489,7 +611,6 @@ function buildIntegrationSteps(scope, changeSet) {
     );
   }
 
-  const directIntegrationFiles = changedIntegrationFiles(changeSet);
   if (directIntegrationFiles.length > 0) {
     addVitestStep(
       steps,
@@ -510,16 +631,92 @@ function buildIntegrationSteps(scope, changeSet) {
     return steps;
   }
 
+  if (hasSource && steps.length === 0) {
+    addVitestStep(
+      steps,
+      "integration-smoke",
+      "focused",
+      "pnpm",
+      [
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "vitest.integration.smoke.config.ts",
+      ],
+      240_000,
+      "source changes: integration smoke",
+    );
+  }
+
+  return steps;
+}
+
+function buildWorkflowSteps(scope, changeSet) {
+  const steps = [];
+  if (!scope.workflow) return steps;
+
+  const workflowFiles = uniqueFiles([
+    ...(changeSet.baseFiles ?? []),
+    ...(changeSet.workingTreeFiles ?? []),
+    ...(changeSet.untrackedFiles ?? []),
+  ]).filter(isWorkflow);
+
+  const tests = new Set();
+  for (const file of workflowFiles) {
+    const mapped = WORKFLOW_TEST_MAP[file];
+    if (mapped) {
+      for (const t of mapped) tests.add(t);
+    }
+  }
+  for (const t of WORKFLOW_COMMON_TESTS) tests.add(t);
+
+  if (tests.size === 0) return steps;
+
+  const testList = [...tests];
   addVitestStep(
     steps,
-    "integration-smoke",
-    "focused",
+    "workflow-tests",
+    "workflow",
     "pnpm",
-    ["exec", "vitest", "run", "--config", "vitest.integration.smoke.config.ts"],
-    240_000,
-    "source changes: integration smoke",
+    ["exec", "vitest", "run", ...testList],
+    300_000,
+    "workflow change: targeted workflow/supply-chain tests",
   );
+  return steps;
+}
 
+function buildReleaseScriptSteps(scope, changeSet) {
+  const steps = [];
+  if (!scope.releaseScript) return steps;
+
+  const releaseFiles = uniqueFiles([
+    ...(changeSet.baseFiles ?? []),
+    ...(changeSet.workingTreeFiles ?? []),
+    ...(changeSet.untrackedFiles ?? []),
+  ]).filter(isReleaseScript);
+
+  const tests = new Set();
+  for (const file of releaseFiles) {
+    const mapped = RELEASE_SCRIPT_TEST_MAP[file];
+    if (mapped) {
+      for (const t of mapped) tests.add(t);
+    }
+  }
+  for (const t of RELEASE_SCRIPT_COMMON_TESTS) tests.add(t);
+
+  if (tests.size === 0) return steps;
+
+  const testList = [...tests];
+  addVitestStep(
+    steps,
+    "release-tests",
+    "release",
+    "pnpm",
+    ["exec", "vitest", "run", ...testList],
+    300_000,
+    "release script change: targeted release tests",
+  );
   return steps;
 }
 
@@ -546,20 +743,21 @@ function buildVersionSteps(steps) {
 
 export function buildVerificationPlan({
   scope,
-  changeSet,
-  mergeBase,
-  baseSha,
-  headSha,
+  changeSet = {},
+  mergeBase = null,
+  baseSha = null,
+  headSha = null,
 }) {
-  const mode = getTestMode(scope, changeSet);
+  const mode = getTestMode(scope, changeSet, mergeBase);
   const steps = [];
 
+  if (scope.docs) {
+    steps.push(
+      makeStep("docs", "docs", ["pnpm", "check:docs"], 300_000, "docs"),
+    );
+  }
+
   if (mode === "full") {
-    if (scope.docs) {
-      steps.push(
-        makeStep("docs", "docs", ["pnpm", "check:docs"], 300_000, "docs"),
-      );
-    }
     steps.push(
       makeStep(
         "supply-chain",
@@ -624,31 +822,27 @@ export function buildVerificationPlan({
     };
   }
 
-  // focused mode
-  if (scope.docs) {
-    steps.push(
-      makeStep("docs", "docs", ["pnpm", "check:docs"], 300_000, "docs"),
-    );
-  }
-
-  if (
+  const hasStandard =
     scope.standard ||
     scope.toolchain ||
+    scope.processControl ||
     scope.workflow ||
-    scope.releaseScript
-  ) {
+    scope.releaseScript ||
+    scope.sharedTestInfra;
+
+  if (scope.toolchain) {
     steps.push(
       makeStep(
         "supply-chain",
         "toolchain",
         ["pnpm", "check:supply-chain"],
         300_000,
-        "toolchain/workflow/release/source",
+        "toolchain/workflow",
       ),
     );
   }
 
-  if (scope.standard) {
+  if (hasStandard) {
     steps.push(
       makeStep(
         "typecheck",
@@ -658,78 +852,31 @@ export function buildVerificationPlan({
         "standard",
       ),
     );
+  }
+
+  const unitSteps = buildUnitSteps(scope, changeSet, mergeBase);
+  const integrationSteps = buildIntegrationSteps(scope, changeSet);
+  const workflowSteps = buildWorkflowSteps(scope, changeSet);
+  const releaseSteps = buildReleaseScriptSteps(scope, changeSet);
+
+  const needsBuild = integrationSteps.length > 0;
+
+  steps.push(...unitSteps);
+  if (needsBuild) {
     steps.push(
       makeStep("build", "standard", ["pnpm", "build"], 300_000, "standard"),
     );
   }
-
-  if (scope.workflow) {
-    addVitestStep(
-      steps,
-      "workflow-tests",
-      "workflow",
-      "pnpm",
-      [
-        "exec",
-        "vitest",
-        "run",
-        "tests/unit/workflows/publish-workflow.test.ts",
-        "tests/unit/scripts/check-supply-chain-invariants.test.ts",
-      ],
-      300_000,
-      "workflow change: targeted workflow/supply-chain tests",
-    );
-  }
-
-  if (scope.releaseScript) {
-    addVitestStep(
-      steps,
-      "release-tests",
-      "release",
-      "pnpm",
-      [
-        "exec",
-        "vitest",
-        "run",
-        "tests/unit/workflows/publish-workflow.test.ts",
-        "tests/unit/scripts/check-supply-chain-invariants.test.ts",
-      ],
-      300_000,
-      "release script change: targeted workflow/supply-chain tests",
-    );
-  }
-
-  if (scope.processControl) {
-    addVitestStep(
-      steps,
-      "process-control-unit",
-      "process-control",
-      "pnpm",
-      [
-        "exec",
-        "vitest",
-        "run",
-        "tests/unit/core/project-fs-authority-resolvers.test.ts",
-        "tests/unit/commands/verify-process.test.ts",
-      ],
-      300_000,
-      "process-control: targeted unit tests",
-    );
-  }
-
-  steps.push(...buildUnitSteps(scope, changeSet, mergeBase));
-  steps.push(...buildIntegrationSteps(scope, changeSet));
-
-  if (scope.standard && steps.some(s => s.id === "build")) {
-    buildVersionSteps(steps);
-  }
+  steps.push(...integrationSteps);
+  steps.push(...workflowSteps);
+  steps.push(...releaseSteps);
 
   return {
     schema_version: "p87-t2/1",
     base_sha: baseSha ?? mergeBase ?? null,
     head_sha: headSha ?? null,
     mode,
-    fallback_full: false,
+    fallback_full: scope.fallbackFull,
     reason: scope.reason,
     changed_files: scope.changedFiles,
     categories: {
@@ -985,316 +1132,80 @@ async function collectBaseChangedFiles(baseRef) {
 
 // --- command execution ---
 
-function runCommand(file, args) {
-  let shell = false;
-  if (file === "pnpm") {
-    const npmExecPath = process.env.npm_execpath;
-    if (npmExecPath) {
-      file = process.execPath;
-      args = [npmExecPath, ...args];
-    } else {
-      shell = process.platform === "win32";
-    }
-  }
-
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(file, args, {
-      cwd: repoRoot,
-      stdio: ["ignore", "pipe", "pipe"],
-      shell,
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", data => {
-      stdout += data;
-    });
-    child.stderr?.on("data", data => {
-      stderr += data;
-    });
-
-    child.on("error", err => {
-      reject(err);
-    });
-
-    child.on("close", code => {
-      resolvePromise({ code, stdout, stderr });
-    });
-  });
-}
-
-function commandLabel(command) {
-  return [command[0], ...command[1]].join(" ");
-}
-
-async function runCommands(commands) {
-  for (const [index, command] of commands.entries()) {
-    const [program, args] = command;
-    const result = await runCommand(program, args);
-    if (result.code !== 0) {
-      console.error(`verify:local: '${commandLabel(command)}' failed`);
-      if (result.stdout.trim()) {
-        console.error(result.stdout);
-      }
-      if (result.stderr.trim()) {
-        console.error(result.stderr);
-      }
-      process.exit(result.code ?? 1);
-    }
-  }
-}
-
-export function buildLocalCommands(scope, mergeBase, changeSet = {}) {
-  const commands = [];
-  const {
-    baseFiles = scope.changedFiles,
-    workingTreeFiles = [],
-    untrackedFiles = [],
-    indeterminate = false,
-  } = changeSet;
-
-  if (scope.docs) {
-    commands.push(["pnpm", ["check:docs"]]);
-  }
-
-  if (scope.toolchain) {
-    commands.push(["pnpm", ["check:supply-chain"]]);
-  }
-
-  if (scope.standard) {
-    commands.push(["pnpm", ["typecheck"]]);
-  }
-
-  if (scope.processControl) {
-    commands.push(["pnpm", ["build"]]);
-  }
-
-  if (scope.generic) {
-    if (
-      indeterminate ||
-      hasGenericFiles(untrackedFiles) ||
-      mergeBase === null
-    ) {
-      commands.push(["pnpm", ["exec", "vitest", "run", "--reporter=agent"]]);
-    } else {
-      const baseGenericFiles = genericFiles(baseFiles);
-      const workingGenericFiles = genericFiles(workingTreeFiles);
-      const hasBaseGenericFiles = baseGenericFiles.length > 0;
-      const hasWorkingGenericFiles = workingGenericFiles.length > 0;
-
-      let runBaseChanged = hasBaseGenericFiles;
-      let runWorkingChanged = hasWorkingGenericFiles;
-
-      if (hasBaseGenericFiles && hasWorkingGenericFiles) {
-        if (isSubset(baseGenericFiles, workingGenericFiles)) {
-          runBaseChanged = false;
-        } else if (isSubset(workingGenericFiles, baseGenericFiles)) {
-          runWorkingChanged = false;
-        }
-      }
-
-      if (runBaseChanged) {
-        commands.push([
-          "pnpm",
-          [
-            "exec",
-            "vitest",
-            "run",
-            "--changed",
-            mergeBase,
-            "--reporter=agent",
-            "--passWithNoTests",
-          ],
-        ]);
-      }
-      if (runWorkingChanged) {
-        commands.push([
-          "pnpm",
-          [
-            "exec",
-            "vitest",
-            "run",
-            "--changed",
-            "--reporter=agent",
-            "--passWithNoTests",
-          ],
-        ]);
-      }
-    }
-  }
-
-  if (scope.toolchain) {
-    commands.push([
-      "pnpm",
-      [
-        "exec",
-        "vitest",
-        "run",
-        "tests/unit/scripts/check-supply-chain-invariants.test.ts",
-        "--reporter=agent",
-      ],
-    ]);
-  }
-
-  if (scope.processControl) {
-    commands.push([
-      "pnpm",
-      [
-        "exec",
-        "vitest",
-        "run",
-        "tests/unit/core/project-fs-authority-resolvers.test.ts",
-        "tests/unit/commands/verify-process.test.ts",
-        "--reporter=agent",
-      ],
-    ]);
-  }
-
-  if (scope.processControl) {
-    commands.push([
-      "pnpm",
-      [
-        "exec",
-        "vitest",
-        "run",
-        "--config",
-        "vitest.integration.config.ts",
-        "tests/integration/verify-timeout-abort.test.ts",
-        "--reporter=agent",
-      ],
-    ]);
-  }
-
-  return commands;
-}
-
-function timeoutForLocalCommand(args) {
-  if (args.includes("vitest")) {
-    if (
-      args.includes("vitest.integration.config.ts") ||
-      args.includes("tests/integration/verify-timeout-abort.test.ts") ||
-      args.includes(
-        "tests/unit/scripts/check-supply-chain-invariants.test.ts",
-      ) ||
-      args.includes("tests/unit/core/project-fs-authority-resolvers.test.ts") ||
-      args.includes("tests/unit/commands/verify-process.test.ts") ||
-      args.includes("--changed")
-    ) {
-      return 300_000;
-    }
-    return 480_000;
-  }
-  return 300_000;
-}
-
-function buildLocalPlan(scope, mergeBase, changeSet) {
-  const commands = buildLocalCommands(scope, mergeBase, changeSet);
-  return commands.map(([program, args], index) => {
-    const finalArgs = args.includes("vitest")
-      ? [...args, `--reporter=${REPORTER_PATH}`]
-      : [...args];
-    return {
-      id: `local-${index}`,
-      scope: scope.reason,
-      enabled: true,
-      command: [program, ...finalArgs],
-      timeout_ms: timeoutForLocalCommand(args),
-      reason: scope.reason,
-    };
-  });
-}
-
-async function resolveHeadSha() {
+async function resolveHeadSha(runGitImpl = runGit) {
   if (
     process.env.GITHUB_SHA &&
     /^[0-9a-f]{40}$/i.test(process.env.GITHUB_SHA)
   ) {
     return process.env.GITHUB_SHA;
   }
-  try {
-    const { execSync } = await import("node:child_process");
-    return execSync("git rev-parse HEAD", {
-      cwd: repoRoot,
-      encoding: "utf8",
-    }).trim();
-  } catch {
-    return null;
-  }
+  const result = await runGitImpl(["rev-parse", "HEAD"]);
+  if (result.code !== 0) return null;
+  const sha = result.stdout.trim();
+  if (!sha || /^0+$/.test(sha)) return null;
+  return sha;
 }
 
 async function runLocalVerification(options = {}) {
-  let files;
-  let mergeBase;
-  let baseResolved;
   let changeSet;
   let failSafe = false;
 
   try {
-    const collected = await collectLocalChangedFiles();
-    files = collected.files;
-    mergeBase = collected.mergeBase;
-    baseResolved = collected.baseResolved;
-    changeSet = collected;
-    failSafe = collected.indeterminate;
+    changeSet = await collectLocalChangedFiles();
+    if (changeSet.indeterminate || !changeSet.baseResolved) failSafe = true;
   } catch (err) {
     console.error(
       `verify:local: failed to determine changed files: ${err.message}`,
     );
-    files = [];
-    mergeBase = null;
-    baseResolved = false;
-    changeSet = { indeterminate: true };
+    changeSet = {
+      indeterminate: true,
+      baseFiles: [],
+      workingTreeFiles: [],
+      untrackedFiles: [],
+      files: [],
+      mergeBase: null,
+      baseResolved: false,
+    };
     failSafe = true;
   }
 
-  if (!baseResolved) {
-    failSafe = true;
-  }
-
-  if (!failSafe && files.length === 0) {
+  if (!failSafe && changeSet.files.length === 0) {
     console.log("verify:local: no tracked changes");
     process.exit(0);
   }
 
   const scope = failSafe
-    ? buildFailSafeScope(files)
-    : classifyChangedFiles(files);
+    ? buildFailSafeScope(changeSet.files)
+    : classifyChangedFiles(changeSet.files);
 
-  const localPlan = buildLocalPlan(scope, mergeBase, {
-    ...changeSet,
-    indeterminate: failSafe,
+  const headSha = await resolveHeadSha();
+  const baseSha = failSafe ? null : changeSet.mergeBase;
+
+  const plan = buildVerificationPlan({
+    scope,
+    changeSet,
+    mergeBase: changeSet.mergeBase,
+    baseSha,
+    headSha,
   });
 
   console.log(
-    `verify:local: scope=${scope.reason} mode=local steps=${localPlan.length}`,
+    `verify:local: scope=${scope.reason} mode=${plan.mode} steps=${plan.steps.length}`,
   );
 
   if (options.writePlan) {
-    const baseSha = baseResolved ? mergeBase : null;
-    const headSha = await resolveHeadSha();
-    const ciPlan = buildVerificationPlan({
-      scope,
-      changeSet: { ...changeSet, indeterminate: failSafe },
-      mergeBase,
-      baseSha,
-      headSha,
-    });
-    writeFileSync(options.writePlan, JSON.stringify(ciPlan, null, 2) + "\n");
+    writeFileSync(options.writePlan, JSON.stringify(plan, null, 2) + "\n");
     console.error(`verify:local: wrote plan to ${options.writePlan}`);
   }
 
-  if (localPlan.length === 0) {
+  if (plan.steps.length === 0) {
     console.log("verify:local: 0 checks passed");
     process.exit(0);
   }
 
-  const run = await runVerificationPlan(
-    { steps: localPlan, mode: "local" },
-    { heartbeatMs: options.heartbeatMs },
-  );
+  const run = await runVerificationPlan(plan, {
+    heartbeatMs: options.heartbeatMs,
+  });
   if (!run.ok) {
     process.exit(1);
   }
@@ -1308,19 +1219,24 @@ async function runBaseVerification(baseRef, options = {}) {
   const forceFull = options.forceFull === true;
   let files = [];
   let mergeBase = null;
+  let changeSet = {
+    baseFiles: [],
+    workingTreeFiles: [],
+    untrackedFiles: [],
+    files: [],
+  };
   let failSafe = false;
-  let changeSet = { baseFiles: [], workingTreeFiles: [], untrackedFiles: [] };
 
   try {
     const collected = await collectBaseChangedFiles(baseRef);
     files = collected.files;
     mergeBase = collected.mergeBase;
-    failSafe = mergeBase === null;
+    if (mergeBase === null) failSafe = true;
     changeSet = {
       baseFiles: files,
       workingTreeFiles: [],
       untrackedFiles: [],
-      indeterminate: failSafe,
+      indeterminate: mergeBase === null,
     };
   } catch (err) {
     console.error(
@@ -1329,18 +1245,18 @@ async function runBaseVerification(baseRef, options = {}) {
     failSafe = true;
   }
 
-  if (!failSafe && files.length === 0) {
+  if (!forceFull && !failSafe && files.length === 0) {
     console.log("verify: no tracked changes");
     process.exit(0);
   }
 
-  const scope = options.forceFull
+  const scope = forceFull
     ? buildFullScope(files)
     : failSafe
       ? buildFailSafeScope(files)
       : classifyChangedFiles(files);
-  const headSha = await resolveHeadSha();
 
+  const headSha = await resolveHeadSha();
   const plan = buildVerificationPlan({
     scope,
     changeSet,
@@ -1434,6 +1350,7 @@ async function main() {
   let mergeBase;
   let baseResolved;
   let failSafe = false;
+  let changeSet;
 
   if (values.local) {
     try {
@@ -1441,6 +1358,7 @@ async function main() {
       files = collected.files;
       mergeBase = collected.mergeBase;
       baseResolved = collected.baseResolved;
+      changeSet = collected;
       if (collected.indeterminate || !baseResolved) failSafe = true;
     } catch (err) {
       console.error(
@@ -1449,6 +1367,12 @@ async function main() {
       files = [];
       mergeBase = null;
       baseResolved = false;
+      changeSet = {
+        baseFiles: [],
+        workingTreeFiles: [],
+        untrackedFiles: [],
+        indeterminate: true,
+      };
       failSafe = true;
     }
   } else if (values.base) {
@@ -1456,17 +1380,31 @@ async function main() {
       const collected = await collectBaseChangedFiles(values.base);
       files = collected.files;
       mergeBase = collected.mergeBase;
+      baseResolved = mergeBase !== null;
+      changeSet = {
+        baseFiles: files,
+        workingTreeFiles: [],
+        untrackedFiles: [],
+        indeterminate: mergeBase === null,
+      };
       if (mergeBase === null) failSafe = true;
     } catch (err) {
       console.error(
-        `verify:local: failed to determine changed files for base ${values.base}: ${err.message}`,
+        `verify: failed to determine changed files for base ${values.base}: ${err.message}`,
       );
       files = [];
       mergeBase = null;
+      baseResolved = false;
+      changeSet = {
+        baseFiles: [],
+        workingTreeFiles: [],
+        untrackedFiles: [],
+        indeterminate: true,
+      };
       failSafe = true;
     }
   } else {
-    console.error("verify:local: pass --local or --base <ref>");
+    console.error("verify: pass --local or --base <ref>");
     process.exit(2);
   }
 
@@ -1474,18 +1412,22 @@ async function main() {
     ? buildFailSafeScope(files)
     : classifyChangedFiles(files);
 
+  const headSha = await resolveHeadSha();
+
+  const plan = buildVerificationPlan({
+    scope,
+    changeSet,
+    mergeBase,
+    baseSha: baseResolved ? mergeBase : null,
+    headSha,
+  });
+
   if (values.commands) {
-    const commands = buildLocalCommands(scope, mergeBase, {
-      baseFiles: files,
-      workingTreeFiles: [],
-      untrackedFiles: [],
-      indeterminate: failSafe,
-    });
     console.log(
       JSON.stringify(
         {
           scope: { ...scope, changedFiles: files, mergeBase },
-          commands,
+          commands: plan.steps.map(s => s.command),
           failSafe,
         },
         null,
@@ -1496,23 +1438,9 @@ async function main() {
   }
 
   if (values.plan || values["write-plan"]) {
-    const baseSha = baseResolved ? mergeBase : null;
-    const headSha = await resolveHeadSha();
-    const plan = buildVerificationPlan({
-      scope,
-      changeSet: {
-        baseFiles: files,
-        workingTreeFiles: [],
-        untrackedFiles: [],
-        indeterminate: failSafe,
-      },
-      mergeBase,
-      baseSha,
-      headSha,
-    });
     if (values["write-plan"]) {
       writeFileSync(values["write-plan"], JSON.stringify(plan, null, 2) + "\n");
-      console.error(`verify:local: wrote plan to ${values["write-plan"]}`);
+      console.error(`verify: wrote plan to ${values["write-plan"]}`);
     }
     console.log(JSON.stringify(plan, null, 2));
     return;

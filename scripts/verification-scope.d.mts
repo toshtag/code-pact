@@ -16,11 +16,6 @@ export interface VerificationScope {
 }
 
 export function classifyChangedFiles(files: string[]): VerificationScope;
-export function buildLocalCommands(
-  scope: VerificationScope,
-  mergeBase: string | null,
-  changeSet?: Partial<LocalChangedFiles>,
-): [string, string[]][];
 
 export interface VerificationStep {
   id: string;

@@ -211,7 +211,7 @@ export async function runBoundedProcess(opts) {
       finish();
     });
 
-    child.on("exit", (code, signal) => {
+    child.on("close", (code, signal) => {
       result.exitCode = code ?? null;
       result.signal = signal ?? null;
       if (result.timedOut && result.signal === null) {

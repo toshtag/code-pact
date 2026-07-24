@@ -19,7 +19,9 @@ function completedRun(
   offsetSeconds: number,
 ) {
   const started = new Date(Date.now() + offsetSeconds * 1000).toISOString();
-  const completed = new Date(Date.now() + (offsetSeconds + 1) * 1000).toISOString();
+  const completed = new Date(
+    Date.now() + (offsetSeconds + 1) * 1000,
+  ).toISOString();
   return {
     id,
     name,
@@ -174,6 +176,36 @@ describe("checkRequiredCiForSha", () => {
     expect(result.attempts).toBe(3);
   });
 
+  it("prefers a newer in-progress run over an older completed run even when completed_at is later", async () => {
+    const olderCompleted = {
+      id: 1,
+      name: "CI status",
+      status: "completed",
+      conclusion: "success",
+      started_at: new Date(Date.now() - 100_000).toISOString(),
+      completed_at: new Date(Date.now() + 100_000).toISOString(),
+    };
+
+    const fetchImpl = vi.fn().mockResolvedValue(
+      makeResponse(200, {
+        check_runs: [olderCompleted, inProgressRun(2, "CI status", 0)],
+      }),
+    );
+
+    const result = await checkRequiredCiForSha({
+      owner: "toshtag",
+      repo: "code-pact",
+      sha,
+      checkName: "CI status",
+      retryAttempts: 2,
+      retryIntervalMs: 10,
+      fetchImpl,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts).toBe(2);
+  });
+
   it("retries when no matching check run exists", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       makeResponse(200, {
@@ -196,7 +228,9 @@ describe("checkRequiredCiForSha", () => {
   });
 
   it("retries on 429 and fails after exhaustion", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(makeResponse(429, "rate limit"));
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(makeResponse(429, "rate limit"));
 
     const result = await checkRequiredCiForSha({
       owner: "toshtag",
@@ -214,7 +248,9 @@ describe("checkRequiredCiForSha", () => {
   });
 
   it("retries on 500 and fails after exhaustion", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(makeResponse(500, "server error"));
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(makeResponse(500, "server error"));
 
     const result = await checkRequiredCiForSha({
       owner: "toshtag",
@@ -248,7 +284,9 @@ describe("checkRequiredCiForSha", () => {
   });
 
   it("fails immediately on 401", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(makeResponse(401, "unauthorized"));
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(makeResponse(401, "unauthorized"));
 
     const result = await checkRequiredCiForSha({
       owner: "toshtag",

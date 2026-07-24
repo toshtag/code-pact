@@ -185,17 +185,27 @@ function sleep(ms) {
 }
 
 function latestRun(runs) {
-  function activityTs(run) {
-    const completed = run.completed_at ? Date.parse(run.completed_at) : null;
+  function fallbackTs(run) {
     const started = run.started_at ? Date.parse(run.started_at) : null;
-    if (completed !== null && started !== null)
-      return Math.max(completed, started);
-    if (completed !== null) return completed;
+    const created = run.created_at ? Date.parse(run.created_at) : null;
     if (started !== null) return started;
-    return Number(run.id ?? 0);
+    if (created !== null) return created;
+    return 0;
   }
 
-  return [...runs].sort((a, b) => activityTs(b) - activityTs(a))[0];
+  return [...runs].sort((a, b) => {
+    const idA = typeof a.id === "number" ? a.id : Number(a.id ?? 0);
+    const idB = typeof b.id === "number" ? b.id : Number(b.id ?? 0);
+    if (idA !== idB) return idB - idA;
+
+    const startedA = a.started_at ? Date.parse(a.started_at) : null;
+    const startedB = b.started_at ? Date.parse(b.started_at) : null;
+    if (startedA !== null && startedB !== null && startedA !== startedB) {
+      return startedB - startedA;
+    }
+
+    return fallbackTs(b) - fallbackTs(a);
+  })[0];
 }
 
 async function main() {

@@ -36,7 +36,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ACTION_REF = /^[^@\s]+@[0-9a-f]{40}$/;
 
 const EXPECTED_JOB_PERMISSIONS = {
-  prepare: { contents: "read" },
+  prepare: { contents: "read", checks: "read" },
   publish: { contents: "read", "id-token": "write" },
   verify: { contents: "read" },
   provenance: { contents: "read" },

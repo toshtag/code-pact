@@ -47,11 +47,12 @@ describe("runBoundedProcess", () => {
       fixture,
       [
         "import { spawn } from 'node:child_process';",
+        "import { writeSync } from 'node:fs';",
         "import process from 'node:process';",
         "const child = spawn(process.execPath, ['-e', 'setInterval(()=>{}, 100000)'], { stdio: 'ignore' });",
         "child.unref();",
-        "console.log('parent ' + process.pid);",
-        "console.log('child ' + child.pid);",
+        "writeSync(1, 'parent ' + process.pid + '\\n');",
+        "writeSync(1, 'child ' + child.pid + '\\n');",
         "setInterval(()=>{}, 100000);",
       ].join("\n"),
     );
@@ -60,8 +61,8 @@ describe("runBoundedProcess", () => {
       const result = await runBoundedProcess({
         command: process.execPath,
         args: [fixture],
-        timeoutMs: 100,
-        termGraceMs: 50,
+        timeoutMs: 500,
+        termGraceMs: 100,
       });
 
       expect(result.ok).toBe(false);

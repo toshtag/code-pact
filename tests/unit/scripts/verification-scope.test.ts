@@ -12,7 +12,6 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   classifyChangedFiles,
-  buildLocalCommands,
   collectLocalChangedFiles,
   buildVerificationPlan,
 } from "../../../scripts/verification-scope.mjs";
@@ -21,20 +20,8 @@ const scriptPath = fileURLToPath(
   new URL("../../../scripts/verification-scope.mjs", import.meta.url),
 );
 
-function commandLabels(commands: Array<[string, string[]]>) {
-  return commands.map(([file, args]) => `${file} ${args.join(" ")}`);
-}
-
-function vitestCommands(commands: Array<[string, string[]]>) {
-  return commands.filter(
-    ([file, args]) => file === "pnpm" && args.includes("vitest"),
-  );
-}
-
-function changedVitestCommands(commands: Array<[string, string[]]>) {
-  return vitestCommands(commands).filter(([, args]) =>
-    args.includes("--changed"),
-  );
+function stepLabels(plan: { steps: Array<{ command: string[] }> }) {
+  return plan.steps.map(s => s.command.join(" "));
 }
 
 describe("classifyChangedFiles", () => {
@@ -246,499 +233,140 @@ describe("classifyChangedFiles", () => {
   });
 });
 
-describe("buildLocalCommands", () => {
-  it("plans docs-only checks", () => {
-    const scope = classifyChangedFiles(["README.md"]);
-    expect(buildLocalCommands(scope, "abc")).toEqual([
-      ["pnpm", ["check:docs"]],
-    ]);
+describe("plan command extraction", () => {
+  function planFor(files: string[], mergeBase: string | null = "abc123") {
+    const scope = classifyChangedFiles(files);
+    return buildVerificationPlan({
+      scope,
+      changeSet: {
+        baseFiles: files,
+        workingTreeFiles: [],
+        untrackedFiles: [],
+        indeterminate: false,
+      },
+      mergeBase,
+      baseSha: mergeBase,
+      headSha: "def456",
+    });
+  }
+
+  it("docs-only plan has only docs check", () => {
+    const plan = planFor(["README.md"]);
+    expect(plan.steps.map(s => s.id)).toEqual(["docs"]);
+    expect(plan.steps[0]?.command).toEqual(["pnpm", "check:docs"]);
   });
 
-  it("plans standard source checks", () => {
-    const scope = classifyChangedFiles(["src/commands/init.ts"]);
-    const commands = buildLocalCommands(scope, "abc");
-    expect(commands).toHaveLength(2);
-    expect(commands[0]).toEqual(["pnpm", ["typecheck"]]);
-    expect(commands[1]).toEqual([
-      "pnpm",
-      [
-        "exec",
-        "vitest",
-        "run",
-        "--changed",
-        "abc",
-        "--reporter=agent",
-        "--passWithNoTests",
-      ],
-    ]);
-  });
-
-  it("plans toolchain checks", () => {
-    const scope = classifyChangedFiles(["package.json"]);
-    const commands = buildLocalCommands(scope, "abc");
-    expect(commands).toEqual([
-      ["pnpm", ["check:supply-chain"]],
-      ["pnpm", ["typecheck"]],
-      [
-        "pnpm",
-        [
-          "exec",
-          "vitest",
-          "run",
-          "tests/unit/scripts/check-supply-chain-invariants.test.ts",
-          "--reporter=agent",
-        ],
-      ],
-    ]);
-  });
-
-  it("plans process-control checks", () => {
-    const scope = classifyChangedFiles(["src/lib/timeout.ts"]);
-    const commands = buildLocalCommands(scope, "abc");
-    expect(commands).toEqual([
-      ["pnpm", ["typecheck"]],
-      ["pnpm", ["build"]],
-      [
-        "pnpm",
-        [
-          "exec",
-          "vitest",
-          "run",
-          "tests/unit/core/project-fs-authority-resolvers.test.ts",
-          "tests/unit/commands/verify-process.test.ts",
-          "--reporter=agent",
-        ],
-      ],
-      [
-        "pnpm",
-        [
-          "exec",
-          "vitest",
-          "run",
-          "--config",
-          "vitest.integration.config.ts",
-          "tests/integration/verify-timeout-abort.test.ts",
-          "--reporter=agent",
-        ],
-      ],
-    ]);
-  });
-
-  it("plans docs + source checks without duplication", () => {
-    const scope = classifyChangedFiles([
-      "docs/usage.md",
-      "src/commands/init.ts",
-    ]);
-    const commands = buildLocalCommands(scope, "abc");
-    expect(commands).toEqual([
-      ["pnpm", ["check:docs"]],
-      ["pnpm", ["typecheck"]],
-      [
-        "pnpm",
-        [
-          "exec",
-          "vitest",
-          "run",
-          "--changed",
-          "abc",
-          "--reporter=agent",
-          "--passWithNoTests",
-        ],
-      ],
-    ]);
-  });
-
-  it("plans process-control + source checks with targeted unit tests", () => {
-    const scope = classifyChangedFiles([
-      "src/lib/timeout.ts",
-      "src/commands/init.ts",
-    ]);
-    const commands = buildLocalCommands(scope, "abc");
-    const labels = commandLabels(commands);
-    expect(new Set(labels).size).toBe(labels.length);
-    expect(
-      commands.some(cmd =>
-        cmd[1].some(arg =>
-          arg.includes("project-fs-authority-resolvers.test.ts"),
-        ),
-      ),
-    ).toBe(true);
-    expect(
-      commands.some(cmd =>
-        cmd[1].some(arg => arg.includes("verify-process.test.ts")),
-      ),
-    ).toBe(true);
-    expect(
-      commands.some(cmd =>
-        cmd[1].some(arg => arg.includes("verify-timeout-abort.test.ts")),
-      ),
-    ).toBe(true);
-    expect(commands.some(cmd => cmd[1].includes("--changed"))).toBe(true);
-    expect(commands.filter(cmd => cmd[1].includes("typecheck"))).toHaveLength(
-      1,
+  it("unit-test-only runs the changed file directly without build or integration", () => {
+    const plan = planFor(["tests/unit/scripts/verification-scope.test.ts"]);
+    expect(plan.steps.map(s => s.id)).toEqual(["typecheck", "unit-direct"]);
+    const unit = plan.steps.find(s => s.id === "unit-direct");
+    expect(unit?.command.join(" ")).toContain(
+      "tests/unit/scripts/verification-scope.test.ts",
     );
+    expect(stepLabels(plan).some(l => l.includes(" build"))).toBe(false);
+    expect(stepLabels(plan).some(l => l.includes("integration"))).toBe(false);
   });
 
-  it("runs all unit tests when mergeBase is unknown", () => {
-    const scope = classifyChangedFiles(["src/commands/init.ts"]);
-    const commands = buildLocalCommands(scope, null);
-    expect(commands[1]).toEqual([
-      "pnpm",
-      ["exec", "vitest", "run", "--reporter=agent"],
+  it("integration-test-only runs the changed file directly with build", () => {
+    const plan = planFor(["tests/integration/task-registration-spec.test.ts"]);
+    expect(plan.steps.map(s => s.id)).toEqual([
+      "typecheck",
+      "build",
+      "integration-direct",
+    ]);
+    const int = plan.steps.find(s => s.id === "integration-direct");
+    expect(int?.command.join(" ")).toContain("task-registration-spec.test.ts");
+    expect(int?.command.join(" ")).toContain("vitest.integration.config.ts");
+  });
+
+  it("source changes run --changed authority and integration smoke with build", () => {
+    const plan = planFor(["src/commands/init.ts"]);
+    expect(plan.steps.map(s => s.id)).toEqual([
+      "typecheck",
+      "unit-base",
+      "build",
+      "integration-smoke",
+    ]);
+    const unit = plan.steps.find(s => s.id === "unit-base");
+    expect(unit?.command).toContain("--changed");
+    expect(unit?.command).toContain("abc123");
+    expect(unit?.command).toContain("--passWithNoTests");
+  });
+
+  it("workflow changes run mapped workflow tests without build", () => {
+    const plan = planFor([".github/workflows/ci.yml"]);
+    expect(plan.steps.map(s => s.id)).toEqual([
+      "supply-chain",
+      "typecheck",
+      "workflow-tests",
+    ]);
+    const wf = plan.steps.find(s => s.id === "workflow-tests");
+    expect(wf?.command.join(" ")).toContain("ci-workflow.test.ts");
+    expect(wf?.command.join(" ")).toContain(
+      "check-supply-chain-invariants.test.ts",
+    );
+    expect(stepLabels(plan).some(l => l.includes(" build"))).toBe(false);
+  });
+
+  it("mapped release script changes run targeted release tests without build", () => {
+    const plan = planFor(["scripts/check-release-tag.mjs"]);
+    expect(plan.steps.map(s => s.id)).toEqual(["typecheck", "release-tests"]);
+    const rel = plan.steps.find(s => s.id === "release-tests");
+    expect(rel?.command.join(" ")).toContain("check-release-tag.test.ts");
+    expect(rel?.command.join(" ")).toContain("publish-workflow.test.ts");
+    expect(rel?.command.join(" ")).toContain(
+      "check-supply-chain-invariants.test.ts",
+    );
+    expect(stepLabels(plan).some(l => l.includes(" build"))).toBe(false);
+  });
+
+  it("process-control changes run targeted unit and integration tests", () => {
+    const plan = planFor(["src/lib/timeout.ts"]);
+    expect(plan.steps.map(s => s.id)).toEqual([
+      "typecheck",
+      "process-control-unit",
+      "build",
+      "integration-process-control",
     ]);
   });
 
-  it("uses valueless --changed for unstaged source changes", () => {
-    const scope = classifyChangedFiles(["src/commands/init.ts"]);
-    const commands = buildLocalCommands(scope, "abc", {
-      baseFiles: [],
-      workingTreeFiles: ["src/commands/init.ts"],
-      untrackedFiles: [],
-    });
-    expect(commands[1]).toEqual([
-      "pnpm",
-      [
-        "exec",
-        "vitest",
-        "run",
-        "--changed",
-        "--reporter=agent",
-        "--passWithNoTests",
-      ],
-    ]);
-  });
-
-  it("uses valueless --changed for staged test file changes", () => {
-    const scope = classifyChangedFiles(["tests/unit/commands/init.test.ts"]);
-    const commands = buildLocalCommands(scope, "abc", {
-      baseFiles: [],
-      workingTreeFiles: ["tests/unit/commands/init.test.ts"],
-      untrackedFiles: [],
-    });
-    expect(commands[1]).toEqual([
-      "pnpm",
-      [
-        "exec",
-        "vitest",
-        "run",
-        "--changed",
-        "--reporter=agent",
-        "--passWithNoTests",
-      ],
-    ]);
-  });
-
-  it("runs all unit tests for untracked source changes", () => {
-    const scope = classifyChangedFiles(["src/new-feature.ts"]);
-    const commands = buildLocalCommands(scope, "abc", {
-      baseFiles: [],
-      workingTreeFiles: ["src/new-feature.ts"],
-      untrackedFiles: ["src/new-feature.ts"],
-    });
-    expect(commands[1]).toEqual([
-      "pnpm",
-      ["exec", "vitest", "run", "--reporter=agent"],
-    ]);
-    const unitCommand = commands[1] as [string, string[]];
-    expect(unitCommand[1]).not.toContain("--passWithNoTests");
-  });
-
-  it("runs all unit tests when an untracked generic file is present alongside tracked changes", () => {
-    const scope = classifyChangedFiles([
+  it("source + unit test uses --changed and does not double-run unit-direct", () => {
+    const plan = planFor([
       "src/commands/init.ts",
-      "src/commands/task-start.ts",
+      "tests/unit/commands/init.test.ts",
     ]);
-    const commands = buildLocalCommands(scope, "abc", {
-      baseFiles: ["src/commands/init.ts"],
-      workingTreeFiles: ["src/commands/task-start.ts"],
-      untrackedFiles: ["src/commands/task-start.ts"],
-    });
-    expect(vitestCommands(commands)).toEqual([
-      ["pnpm", ["exec", "vitest", "run", "--reporter=agent"]],
-    ]);
+    expect(plan.steps.some(s => s.id === "unit-base")).toBe(true);
+    expect(plan.steps.some(s => s.id === "unit-direct")).toBe(false);
   });
 
-  it("runs all unit tests for untracked test file changes", () => {
-    const scope = classifyChangedFiles(["tests/unit/new-feature.test.ts"]);
-    const commands = buildLocalCommands(scope, "abc", {
-      baseFiles: [],
-      workingTreeFiles: ["tests/unit/new-feature.test.ts"],
-      untrackedFiles: ["tests/unit/new-feature.test.ts"],
-    });
-    expect(commands[1]).toEqual([
-      "pnpm",
-      ["exec", "vitest", "run", "--reporter=agent"],
-    ]);
-  });
-
-  it("keeps --changed mergeBase for committed source changes only", () => {
-    const scope = classifyChangedFiles(["src/commands/init.ts"]);
-    const commands = buildLocalCommands(scope, "abc", {
-      baseFiles: ["src/commands/init.ts"],
-      workingTreeFiles: [],
-      untrackedFiles: [],
-    });
-    expect(commands[1]).toEqual([
-      "pnpm",
-      [
-        "exec",
-        "vitest",
-        "run",
-        "--changed",
-        "abc",
-        "--reporter=agent",
-        "--passWithNoTests",
-      ],
-    ]);
-  });
-
-  it("plans committed and working-tree source checks separately", () => {
-    const scope = classifyChangedFiles([
+  it("source + integration test runs integration-direct and no smoke", () => {
+    const plan = planFor([
       "src/commands/init.ts",
-      "src/commands/task-start.ts",
+      "tests/integration/foo.test.ts",
     ]);
-    const commands = buildLocalCommands(scope, "abc", {
-      baseFiles: ["src/commands/init.ts"],
-      workingTreeFiles: ["src/commands/task-start.ts"],
-      untrackedFiles: [],
-    });
-    expect(commands).toContainEqual([
-      "pnpm",
-      [
-        "exec",
-        "vitest",
-        "run",
-        "--changed",
-        "abc",
-        "--reporter=agent",
-        "--passWithNoTests",
-      ],
-    ]);
-    expect(commands).toContainEqual([
-      "pnpm",
-      [
-        "exec",
-        "vitest",
-        "run",
-        "--changed",
-        "--reporter=agent",
-        "--passWithNoTests",
-      ],
-    ]);
+    expect(plan.steps.some(s => s.id === "integration-direct")).toBe(true);
+    expect(plan.steps.some(s => s.id === "integration-smoke")).toBe(false);
   });
 
-  it("deduplicates changed Vitest when base and working tree contain the same generic file", () => {
-    const scope = classifyChangedFiles(["src/commands/init.ts"]);
-    const commands = buildLocalCommands(scope, "abc", {
-      baseFiles: ["src/commands/init.ts"],
-      workingTreeFiles: ["src/commands/init.ts"],
-      untrackedFiles: [],
+  it("untracked source falls back to full unit tests", () => {
+    const plan = buildVerificationPlan({
+      scope: classifyChangedFiles(["src/commands/init.ts"]),
+      changeSet: {
+        baseFiles: [],
+        workingTreeFiles: ["src/commands/init.ts"],
+        untrackedFiles: ["src/commands/init.ts"],
+        indeterminate: false,
+      },
+      mergeBase: "abc123",
+      baseSha: "abc123",
+      headSha: "def456",
     });
-    expect(changedVitestCommands(commands)).toEqual([
-      [
-        "pnpm",
-        [
-          "exec",
-          "vitest",
-          "run",
-          "--changed",
-          "--reporter=agent",
-          "--passWithNoTests",
-        ],
-      ],
-    ]);
+    expect(plan.mode).toBe("full");
+    expect(plan.steps.some(s => s.id === "unit")).toBe(true);
+    expect(plan.steps.some(s => s.id === "integration-full")).toBe(true);
   });
 
-  it("uses valueless changed Vitest when working tree generic files contain base generic files", () => {
-    const scope = classifyChangedFiles([
-      "src/commands/init.ts",
-      "src/commands/task-start.ts",
-    ]);
-    const commands = buildLocalCommands(scope, "abc", {
-      baseFiles: ["src/commands/init.ts"],
-      workingTreeFiles: ["src/commands/init.ts", "src/commands/task-start.ts"],
-      untrackedFiles: [],
-    });
-    expect(changedVitestCommands(commands)).toEqual([
-      [
-        "pnpm",
-        [
-          "exec",
-          "vitest",
-          "run",
-          "--changed",
-          "--reporter=agent",
-          "--passWithNoTests",
-        ],
-      ],
-    ]);
-  });
-
-  it("uses merge-base changed Vitest when base generic files contain working tree generic files", () => {
-    const scope = classifyChangedFiles([
-      "src/commands/init.ts",
-      "src/commands/task-start.ts",
-    ]);
-    const commands = buildLocalCommands(scope, "abc", {
-      baseFiles: ["src/commands/init.ts", "src/commands/task-start.ts"],
-      workingTreeFiles: ["src/commands/init.ts"],
-      untrackedFiles: [],
-    });
-    expect(changedVitestCommands(commands)).toEqual([
-      [
-        "pnpm",
-        [
-          "exec",
-          "vitest",
-          "run",
-          "--changed",
-          "abc",
-          "--reporter=agent",
-          "--passWithNoTests",
-        ],
-      ],
-    ]);
-  });
-
-  it("keeps both changed Vitest commands for disjoint generic files", () => {
-    const scope = classifyChangedFiles([
-      "src/commands/init.ts",
-      "src/commands/task-start.ts",
-    ]);
-    const commands = buildLocalCommands(scope, "abc", {
-      baseFiles: ["src/commands/init.ts"],
-      workingTreeFiles: ["src/commands/task-start.ts"],
-      untrackedFiles: [],
-    });
-    expect(changedVitestCommands(commands)).toEqual([
-      [
-        "pnpm",
-        [
-          "exec",
-          "vitest",
-          "run",
-          "--changed",
-          "abc",
-          "--reporter=agent",
-          "--passWithNoTests",
-        ],
-      ],
-      [
-        "pnpm",
-        [
-          "exec",
-          "vitest",
-          "run",
-          "--changed",
-          "--reporter=agent",
-          "--passWithNoTests",
-        ],
-      ],
-    ]);
-  });
-
-  it("keeps both changed Vitest commands when generic files only partially overlap", () => {
-    const scope = classifyChangedFiles([
-      "src/commands/init.ts",
-      "src/commands/task-start.ts",
-      "src/commands/status.ts",
-    ]);
-    const commands = buildLocalCommands(scope, "abc", {
-      baseFiles: ["src/commands/init.ts", "src/commands/task-start.ts"],
-      workingTreeFiles: [
-        "src/commands/task-start.ts",
-        "src/commands/status.ts",
-      ],
-      untrackedFiles: [],
-    });
-    expect(changedVitestCommands(commands)).toHaveLength(2);
-  });
-
-  it("does not use vitest related for partial overlap", () => {
-    const scope = classifyChangedFiles([
-      "src/commands/init.ts",
-      "src/commands/task-start.ts",
-      "src/commands/status.ts",
-    ]);
-    const commands = buildLocalCommands(scope, "abc", {
-      baseFiles: ["src/commands/init.ts", "src/commands/task-start.ts"],
-      workingTreeFiles: [
-        "src/commands/task-start.ts",
-        "src/commands/status.ts",
-      ],
-      untrackedFiles: [],
-    });
-    expect(JSON.stringify(commands)).not.toContain("related");
-  });
-
-  it("runs all unit tests when local git state is indeterminate", () => {
-    const scope = classifyChangedFiles(["src/commands/init.ts"]);
-    const commands = buildLocalCommands(scope, "abc", {
-      baseFiles: ["src/commands/init.ts"],
-      workingTreeFiles: [],
-      untrackedFiles: [],
-      indeterminate: true,
-    });
-    expect(commands[1]).toEqual([
-      "pnpm",
-      ["exec", "vitest", "run", "--reporter=agent"],
-    ]);
-  });
-
-  it("keeps targeted process-control and toolchain commands when optimizing generic Vitest", () => {
-    const scope = classifyChangedFiles([
-      "src/lib/timeout.ts",
-      "package.json",
-      "src/commands/init.ts",
-    ]);
-    const commands = buildLocalCommands(scope, "abc", {
-      baseFiles: ["src/commands/init.ts"],
-      workingTreeFiles: ["src/commands/init.ts"],
-      untrackedFiles: [],
-    });
-    expect(
-      commands.some(cmd =>
-        cmd[1].some(arg =>
-          arg.includes("check-supply-chain-invariants.test.ts"),
-        ),
-      ),
-    ).toBe(true);
-    expect(
-      commands.some(cmd =>
-        cmd[1].some(arg =>
-          arg.includes("project-fs-authority-resolvers.test.ts"),
-        ),
-      ),
-    ).toBe(true);
-    expect(
-      commands.some(cmd =>
-        cmd[1].some(arg => arg.includes("verify-process.test.ts")),
-      ),
-    ).toBe(true);
-    expect(
-      commands.some(cmd =>
-        cmd[1].some(arg => arg.includes("verify-timeout-abort.test.ts")),
-      ),
-    ).toBe(true);
-    expect(changedVitestCommands(commands)).toHaveLength(1);
-  });
-
-  it("does not plan duplicate command labels", () => {
-    const scope = classifyChangedFiles([
-      "src/lib/timeout.ts",
-      "package.json",
-      "src/commands/init.ts",
-    ]);
-    const commands = buildLocalCommands(scope, "abc", {
-      baseFiles: ["src/commands/init.ts"],
-      workingTreeFiles: ["src/commands/init.ts"],
-      untrackedFiles: [],
-    });
-    const labels = commandLabels(commands);
-    expect(new Set(labels).size).toBe(labels.length);
-  });
-
-  it("does not include full CI commands", () => {
+  it("does not include full CI scripts", () => {
     const scopes = [
       classifyChangedFiles(["README.md"]),
       classifyChangedFiles(["package.json"]),
@@ -746,8 +374,19 @@ describe("buildLocalCommands", () => {
       classifyChangedFiles(["docs/usage.md", "src/commands/init.ts"]),
     ];
     for (const scope of scopes) {
-      const commands = buildLocalCommands(scope, "abc");
-      const flat = JSON.stringify(commands);
+      const plan = buildVerificationPlan({
+        scope,
+        changeSet: {
+          baseFiles: scope.changedFiles,
+          workingTreeFiles: [],
+          untrackedFiles: [],
+          indeterminate: false,
+        },
+        mergeBase: "abc123",
+        baseSha: "abc123",
+        headSha: "def456",
+      });
+      const flat = JSON.stringify(plan.steps);
       expect(flat).not.toContain("test:ci");
       expect(flat).not.toContain("test:ci:deep");
       expect(flat).not.toContain("release:check");
@@ -982,6 +621,14 @@ if (process.env.FAKE_PNPM_LOG) {
 process.exit(0);
 `;
 
+  const fakeCliScript = `const args = process.argv.slice(2);
+if (args.includes("--json")) {
+  console.log(JSON.stringify({ version: "0.0.0" }));
+} else {
+  console.log("0.0.0");
+}
+`;
+
   let tempDir: string;
   let repoDir: string;
   let toolsDir: string;
@@ -1003,7 +650,9 @@ process.exit(0);
     execFileSync("git", ["config", "user.email", "test@example.com"], { cwd });
     execFileSync("git", ["config", "user.name", "Test"], { cwd });
     writeFileSync(join(cwd, ".initial"), "initial\n");
-    execFileSync("git", ["add", ".initial"], { cwd });
+    mkdirSync(join(cwd, "dist"), { recursive: true });
+    writeFileSync(join(cwd, "dist", "cli.js"), fakeCliScript);
+    execFileSync("git", ["add", ".initial", "dist/cli.js"], { cwd });
     execFileSync("git", ["commit", "-m", "initial"], { cwd });
   }
 
@@ -1014,8 +663,11 @@ process.exit(0);
     mkdirSync(join(cwd, "src"), { recursive: true });
     writeFileSync(join(cwd, ".initial"), "initial\n");
     writeFileSync(join(cwd, "src", "existing.ts"), "export const a = 1;\n");
-    execFileSync("git", ["add", ".initial"], { cwd });
-    execFileSync("git", ["add", "src/existing.ts"], { cwd });
+    mkdirSync(join(cwd, "dist"), { recursive: true });
+    writeFileSync(join(cwd, "dist", "cli.js"), fakeCliScript);
+    execFileSync("git", ["add", ".initial", "src/existing.ts", "dist/cli.js"], {
+      cwd,
+    });
     execFileSync("git", ["commit", "-m", "initial"], { cwd });
     execFileSync("git", ["switch", "-c", "feature"], { cwd });
   }
@@ -1096,7 +748,7 @@ process.exit(0);
       npm_execpath: pnpmPath,
     });
     expect(out).toContain("verify:local: scope=fail-safe");
-    expect(out).toContain("verify:local: 3 checks passed");
+    expect(out).toContain("verify:local: 8 checks passed");
     expect(out).not.toContain("no tracked changes");
   });
 
@@ -1111,9 +763,7 @@ process.exit(0);
     const pnpmLog = readFileSync(pnpmLogPath, "utf8");
     expect(out).toContain("verify:local: scope=fail-safe");
     expect(pnpmLog).toContain("check:supply-chain");
-    expect(pnpmLog).toContain(
-      "tests/unit/scripts/check-supply-chain-invariants.test.ts",
-    );
+    expect(pnpmLog).toContain("exec vitest run");
   });
 
   it("runs process-control checks when base is unknown and timeout changed", () => {
@@ -1122,11 +772,10 @@ process.exit(0);
     const { out, pnpmLog } = runLocalWithPnpmLog();
     expect(out).toContain("verify:local: scope=fail-safe");
     expect(pnpmLog).toContain("build");
+    expect(pnpmLog).toContain("exec vitest run");
     expect(pnpmLog).toContain(
-      "tests/unit/core/project-fs-authority-resolvers.test.ts",
+      "exec vitest run --config vitest.integration.config.ts",
     );
-    expect(pnpmLog).toContain("tests/unit/commands/verify-process.test.ts");
-    expect(pnpmLog).toContain("tests/integration/verify-timeout-abort.test.ts");
   });
 
   it("uses valueless --changed for unstaged source changes when base resolves", () => {
@@ -1136,13 +785,11 @@ process.exit(0);
     writeFileSync(join(repoDir, "src", "existing.ts"), "export const a = 2;\n");
 
     const { pnpmLog } = runLocalWithPnpmLog();
-    expect(pnpmLog).toContain(
-      "exec vitest run --changed --reporter=agent --passWithNoTests",
-    );
-    expect(pnpmLog).not.toMatch(/--changed [0-9a-f]{40}/);
+    expect(pnpmLog).toContain("exec vitest run --changed --passWithNoTests");
+    expect(pnpmLog).not.toMatch(/exec vitest run --changed [0-9a-f]{40}/);
   });
 
-  it("uses valueless --changed for staged test file changes when base resolves", () => {
+  it("runs the changed unit test directly when a test file changes", () => {
     rmSync(repoDir, { recursive: true, force: true });
     mkdirSync(repoDir, { recursive: true });
     initRepoWithMainAndFeature(repoDir);
@@ -1154,12 +801,11 @@ process.exit(0);
     execFileSync("git", ["add", "tests/unit/a.test.ts"], { cwd: repoDir });
 
     const { pnpmLog } = runLocalWithPnpmLog();
-    expect(pnpmLog).toContain(
-      "exec vitest run --changed --reporter=agent --passWithNoTests",
-    );
+    expect(pnpmLog).toContain("tests/unit/a.test.ts");
+    expect(pnpmLog).not.toContain("exec vitest run --changed");
   });
 
-  it("runs all unit tests for untracked source changes when base resolves", () => {
+  it("runs full unit tests for untracked source changes when base resolves", () => {
     rmSync(repoDir, { recursive: true, force: true });
     mkdirSync(repoDir, { recursive: true });
     initRepoWithMainAndFeature(repoDir);
@@ -1167,8 +813,12 @@ process.exit(0);
     writeFileSync(join(repoDir, "src", "untracked.ts"), "export {};\n");
 
     const { pnpmLog } = runLocalWithPnpmLog();
-    expect(pnpmLog).toContain("exec vitest run --reporter=agent");
-    expect(pnpmLog).not.toContain("--passWithNoTests");
+    const unitLines = pnpmLog
+      .split("\n")
+      .filter(l => l.startsWith("exec vitest run") && !l.includes("--config"));
+    expect(unitLines.length).toBeGreaterThanOrEqual(1);
+    expect(unitLines[0]).toMatch(/exec vitest run --reporter=/);
+    expect(unitLines[0]).not.toContain("--passWithNoTests");
   });
 
   it("keeps merge-base --changed for committed source changes only", () => {
@@ -1182,7 +832,7 @@ process.exit(0);
 
     const { pnpmLog } = runLocalWithPnpmLog();
     expect(pnpmLog).toMatch(
-      /exec vitest run --changed [0-9a-f]{40} --reporter=agent --passWithNoTests/,
+      /exec vitest run --changed [0-9a-f]{40} --passWithNoTests/,
     );
   });
 
@@ -1198,16 +848,14 @@ process.exit(0);
 
     const { pnpmLog } = runLocalWithPnpmLog();
     expect(pnpmLog).toMatch(
-      /exec vitest run --changed [0-9a-f]{40} --reporter=agent --passWithNoTests/,
+      /exec vitest run --changed [0-9a-f]{40} --passWithNoTests/,
     );
-    expect(pnpmLog).toContain(
-      "exec vitest run --changed --reporter=agent --passWithNoTests",
-    );
+    expect(pnpmLog).toContain("exec vitest run --changed --passWithNoTests");
   });
 });
 
 describe("buildVerificationPlan selection regression matrix", () => {
-  function buildPlanFor(files: string[], mergeBase: string | null = "abc123") {
+  function buildPlanFor(files: string[], mergeBase = "abc123") {
     const scope = classifyChangedFiles(files);
     return buildVerificationPlan({
       scope,
@@ -1223,21 +871,19 @@ describe("buildVerificationPlan selection regression matrix", () => {
     });
   }
 
-  function stepIds(plan: { steps: Array<{ id: string }> }) {
+  function stepIds(plan: ReturnType<typeof buildPlanFor>) {
     return plan.steps.map(s => s.id);
   }
 
   it("docs-only plan stays focused and only checks docs", () => {
-    const plan = buildPlanFor(["README.md"]);
+    const plan = buildPlanFor(["docs/usage.md"]);
     expect(plan.mode).toBe("focused");
-    expect(plan.fallback_full).toBe(false);
     expect(stepIds(plan)).toEqual(["docs"]);
   });
 
   it("unknown file falls back to the full suite", () => {
-    const plan = buildPlanFor([".env"]);
+    const plan = buildPlanFor(["foo.bar"]);
     expect(plan.mode).toBe("full");
-    expect(plan.fallback_full).toBe(true);
     expect(stepIds(plan)).toContain("unit");
     expect(stepIds(plan)).toContain("integration-full");
     expect(stepIds(plan)).toContain("version-human");
@@ -1245,9 +891,8 @@ describe("buildVerificationPlan selection regression matrix", () => {
   });
 
   it("shared test infrastructure triggers full suite fallback", () => {
-    const plan = buildPlanFor(["tests/setup.ts"]);
+    const plan = buildPlanFor(["tests/helpers/git-repository.ts"]);
     expect(plan.mode).toBe("full");
-    expect(plan.fallback_full).toBe(true);
     expect(stepIds(plan)).toContain("unit");
     expect(stepIds(plan)).toContain("integration-full");
   });
@@ -1255,90 +900,95 @@ describe("buildVerificationPlan selection regression matrix", () => {
   it("package.json triggers full suite fallback", () => {
     const plan = buildPlanFor(["package.json"]);
     expect(plan.mode).toBe("full");
-    expect(plan.fallback_full).toBe(true);
     expect(stepIds(plan)).toContain("unit");
     expect(stepIds(plan)).toContain("integration-full");
   });
 
-  it("workflow changes run targeted workflow tests plus integration smoke", () => {
+  it("workflow changes run targeted workflow tests without build or integration", () => {
     const plan = buildPlanFor([".github/workflows/ci.yml"]);
     expect(plan.mode).toBe("focused");
-    expect(stepIds(plan)).toContain("supply-chain");
-    expect(stepIds(plan)).toContain("typecheck");
-    expect(stepIds(plan)).toContain("build");
-    expect(stepIds(plan)).toContain("workflow-tests");
-    expect(stepIds(plan)).toContain("integration-smoke");
-    expect(stepIds(plan)).toContain("version-human");
-    expect(stepIds(plan)).toContain("version-json");
+    expect(stepIds(plan)).toEqual([
+      "supply-chain",
+      "typecheck",
+      "workflow-tests",
+    ]);
+    const wf = plan.steps.find(s => s.id === "workflow-tests");
+    expect(wf?.command.join(" ")).toContain("ci-workflow.test.ts");
+    expect(wf?.command.join(" ")).toContain(
+      "check-supply-chain-invariants.test.ts",
+    );
   });
 
-  it("process-control changes run targeted process-control tests plus integration smoke", () => {
+  it("process-control changes run targeted unit and integration tests", () => {
     const plan = buildPlanFor(["src/lib/timeout.ts"]);
     expect(plan.mode).toBe("focused");
-    expect(stepIds(plan)).toContain("supply-chain");
-    expect(stepIds(plan)).toContain("typecheck");
-    expect(stepIds(plan)).toContain("build");
-    expect(stepIds(plan)).toContain("process-control-unit");
-    expect(stepIds(plan)).toContain("integration-process-control");
-    expect(stepIds(plan)).toContain("version-human");
-    expect(stepIds(plan)).toContain("version-json");
+    expect(stepIds(plan)).toEqual([
+      "typecheck",
+      "process-control-unit",
+      "build",
+      "integration-process-control",
+    ]);
   });
 
   it("standard source changes run changed unit tests plus integration smoke", () => {
-    const plan = buildPlanFor(["src/commands/init.ts"], "abc123");
+    const plan = buildPlanFor(["src/commands/init.ts"]);
     expect(plan.mode).toBe("focused");
-    expect(stepIds(plan)).toContain("supply-chain");
-    expect(stepIds(plan)).toContain("typecheck");
-    expect(stepIds(plan)).toContain("build");
-    expect(stepIds(plan)).toContain("unit-base");
-    expect(stepIds(plan)).toContain("integration-smoke");
-    expect(stepIds(plan)).toContain("version-human");
-    expect(stepIds(plan)).toContain("version-json");
+    expect(stepIds(plan)).toEqual([
+      "typecheck",
+      "unit-base",
+      "build",
+      "integration-smoke",
+    ]);
   });
 
   it("single changed integration test runs that file directly", () => {
     const plan = buildPlanFor([
       "tests/integration/task-registration-spec.test.ts",
     ]);
-    expect(plan.mode).toBe("focused");
-    const step = plan.steps.find(s => s.id === "integration-direct");
-    expect(step).toBeDefined();
-    expect(step?.command.join(" ")).toContain("task-registration-spec.test.ts");
-    expect(step?.command.join(" ")).toContain("vitest.integration.config.ts");
+    expect(stepIds(plan)).toEqual(["typecheck", "build", "integration-direct"]);
+    const int = plan.steps.find(s => s.id === "integration-direct");
+    expect(int?.command.join(" ")).toContain(
+      "tests/integration/task-registration-spec.test.ts",
+    );
+    expect(stepIds(plan)).not.toContain("integration-smoke");
   });
 
   it("single changed unit test runs that file directly", () => {
     const plan = buildPlanFor([
       "tests/unit/scripts/verification-scope.test.ts",
     ]);
-    expect(plan.mode).toBe("focused");
-    const step = plan.steps.find(s => s.id === "unit-direct");
-    expect(step).toBeDefined();
-    expect(step?.command.join(" ")).toContain("verification-scope.test.ts");
+    expect(stepIds(plan)).toEqual(["typecheck", "unit-direct"]);
+    const unit = plan.steps.find(s => s.id === "unit-direct");
+    expect(unit?.command.join(" ")).toContain(
+      "tests/unit/scripts/verification-scope.test.ts",
+    );
+    expect(stepIds(plan)).not.toContain("build");
+    expect(stepIds(plan)).not.toContain("integration-smoke");
   });
 
   it("vitest integration config change triggers full suite fallback", () => {
     const plan = buildPlanFor(["vitest.integration.config.ts"]);
     expect(plan.mode).toBe("full");
-    expect(plan.fallback_full).toBe(true);
-    expect(stepIds(plan)).toContain("unit");
     expect(stepIds(plan)).toContain("integration-full");
-    expect(stepIds(plan)).toContain("version-human");
-    expect(stepIds(plan)).toContain("version-json");
   });
 
   it("pnpm-lock.yaml change triggers full suite fallback", () => {
     const plan = buildPlanFor(["pnpm-lock.yaml"]);
     expect(plan.mode).toBe("full");
-    expect(plan.fallback_full).toBe(true);
     expect(stepIds(plan)).toContain("integration-full");
   });
 
-  it("workflow change runs targeted workflow tests plus integration smoke", () => {
-    const plan = buildPlanFor([".github/workflows/ci.yml"]);
-    expect(plan.mode).toBe("focused");
-    expect(stepIds(plan)).toContain("workflow-tests");
-    expect(stepIds(plan)).toContain("integration-smoke");
-    expect(stepIds(plan)).toContain("version-human");
+  it("workflow change runs targeted workflow tests without build", () => {
+    const plan = buildPlanFor([".github/workflows/publish.yml"]);
+    expect(stepIds(plan)).toEqual([
+      "supply-chain",
+      "typecheck",
+      "workflow-tests",
+    ]);
+    const wf = plan.steps.find(s => s.id === "workflow-tests");
+    expect(wf?.command.join(" ")).toContain("publish-workflow.test.ts");
+    expect(wf?.command.join(" ")).toContain(
+      "check-supply-chain-invariants.test.ts",
+    );
   });
 });

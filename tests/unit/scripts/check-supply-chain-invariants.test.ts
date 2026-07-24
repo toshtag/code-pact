@@ -140,6 +140,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "    runs-on: ubuntu-latest",
     "    permissions:",
     "      contents: read",
+    "      checks: read",
     "    timeout-minutes: 15",
     "    steps:",
     "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",

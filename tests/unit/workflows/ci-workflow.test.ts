@@ -16,6 +16,13 @@ function readWorkflow(): string {
   return readFileSync(workflowPath, "utf8");
 }
 
+function jobIf(content: string, jobName: string): string | null {
+  const doc = parseDocument(content).toJSON() as {
+    jobs?: Record<string, { if?: string }>;
+  } | null;
+  return doc?.jobs?.[jobName]?.if ?? null;
+}
+
 function collectRunScripts(content: string, jobName: string): string[] {
   const doc = parseDocument(content);
   const jobs = doc.get("jobs") as {
@@ -82,6 +89,14 @@ describe("ci.yml topology", () => {
     expect(planScript).toMatch(/--run/);
   });
 
+  it("standard job runs on push or when classify standard is true", () => {
+    const ifExpr = jobIf(content, "standard");
+    expect(ifExpr).toMatch(/github\.event_name\s*==\s*['"]push['"]/);
+    expect(ifExpr).toMatch(
+      /needs\.classify\.outputs\.standard\s*==\s*['"]true['"]/,
+    );
+  });
+
   it("standard job uses --force-full on main push", () => {
     const scripts = collectRunScripts(content, "standard");
     const planScript = scripts.find(s => s.includes("verification-scope.mjs"));
@@ -106,5 +121,12 @@ describe("ci.yml topology", () => {
     expect(statusScript).toBeDefined();
     expect(statusScript).toMatch(/CLASSIFY_RESULT/);
     expect(statusScript).toMatch(/STANDARD_RESULT/);
+  });
+
+  it("ci-status job uses GITHUB_EVENT_NAME to enforce standard on main push", () => {
+    const scripts = collectRunScripts(content, "ci-status");
+    const statusScript = scripts.find(s => s.includes("DOCS_OUTPUT"));
+    expect(statusScript).toMatch(/GITHUB_EVENT_NAME/);
+    expect(statusScript).toMatch(/push/);
   });
 });
