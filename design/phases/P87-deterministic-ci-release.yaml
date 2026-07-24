@@ -3,7 +3,7 @@ name: Deterministic CI and Release
 weight: 1
 confidence: high
 risk: low
-status: in_progress
+status: done
 objective: >
   Make release and CI behavior deterministic, hermetic, and context-efficient.
   P87-T1 closes release correctness gaps; P87-T2 applies change-aware test
