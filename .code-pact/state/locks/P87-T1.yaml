@@ -1,0 +1,38 @@
+schema_version: 1
+task_id: P87-T1
+phase_id: P87
+phase_path: design/phases/P87-deterministic-ci-release.yaml
+base_ref: 2b0dd01865c166b098091d17c0fa9d424712749e
+base_sha: 2b0dd01865c166b098091d17c0fa9d424712749e
+phase_blob_sha: 0197eee10570290b43a82491f4551eac2c780773
+contract_digest: 36ae9bb1833c4065c8b7ff1c6a5fee5ef16740cee5b5d630e312ab4bb14180b4
+contract:
+  description: >
+    Ensure a normal release follows a strict, fail-closed contract: signed tag →
+    exact commit verification → new npm version → build/pack → Trusted
+    Publishing → registry integrity → provenance verification → GitHub Release.
+  reads: []
+  writes: []
+  depends_on: []
+  decision_refs: []
+  acceptance_refs:
+    - tests/helpers/git-repository.ts
+    - tests/unit/scripts/check-release-tag.test.ts
+    - tests/unit/scripts/check-supply-chain-invariants.test.ts
+    - tests/unit/scripts/verify-published-provenance.test.ts
+    - tests/unit/workflows/publish-workflow.test.ts
+  definition_of_done:
+    - Publish workflow does not depend on ambient git identity
+    - Supply-chain invariants enforce the new release contract
+    - Trusted publishing fails closed on existing-version collisions
+    - npm provenance attestation is verified before GitHub Release creation
+  verification_commands:
+    - pnpm check:supply-chain
+    - pnpm release:check
+    - pnpm test:ci
+  base_sha: 2b0dd01865c166b098091d17c0fa9d424712749e
+  phase_blob_sha: 0197eee10570290b43a82491f4551eac2c780773
+at: 2026-07-24T07:56:27.620Z
+actor: agent
+agent: claude-code
+author: Pocket

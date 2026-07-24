@@ -27,7 +27,8 @@ function encodeNpmPackageName(name) {
  * @param {object} [opts]
  * @param {string} [opts.registry=https://registry.npmjs.org]
  * @param {typeof globalThis.fetch} [opts.fetchImpl=globalThis.fetch]
- * @returns {Promise<{state: "exists" | "absent" | "error", status?: number, message: string}>}
+ * @param {number} [opts.requestTimeoutMs=10000]
+ * @returns {Promise<{state: "exists" | "absent" | "error", status?: number, code?: string, message: string}>}
  */
 export async function checkNpmVersionAvailability(
   packageName,
@@ -36,16 +37,31 @@ export async function checkNpmVersionAvailability(
 ) {
   const registry = (opts.registry ?? NPM_REGISTRY).replace(/\/$/, "");
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
+  const requestTimeoutMs = opts.requestTimeoutMs ?? 10_000;
   const target = `${registry}/${encodeNpmPackageName(packageName)}/${encodeURIComponent(version)}`;
 
   let response;
   try {
     response = await fetchImpl(target, {
       headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(requestTimeoutMs),
     });
   } catch (err) {
+    if (
+      err.name === "AbortError" ||
+      err.name === "TimeoutError" ||
+      err.code === "ABORT_ERR" ||
+      /timeout/i.test(String(err.message))
+    ) {
+      return {
+        state: "error",
+        code: "REGISTRY_TIMEOUT",
+        message: `registry request timed out after ${requestTimeoutMs}ms fetching ${target}`,
+      };
+    }
     return {
       state: "error",
+      code: "REGISTRY_NETWORK_ERROR",
       message: `network error fetching ${target}: ${err.message}`,
     };
   }
@@ -69,6 +85,7 @@ export async function checkNpmVersionAvailability(
   return {
     state: "error",
     status: response.status,
+    code: "REGISTRY_UNEXPECTED_STATUS",
     message: `registry returned unexpected status ${response.status} for ${target}`,
   };
 }

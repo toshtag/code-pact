@@ -59,15 +59,35 @@ export function ensureCliBuilt(): void {
 export function run(
   cwd: string,
   args: string[],
-  envOrOpts?: NodeJS.ProcessEnv | { env?: NodeJS.ProcessEnv; input?: string },
+  envOrOpts?:
+    | NodeJS.ProcessEnv
+    | {
+        env?: NodeJS.ProcessEnv;
+        input?: string;
+        timeoutMs?: number;
+      },
 ): RunResult {
   // Back-compat: the original signature took `env` as the third arg.
   // The new options-object form lets callers pass `input` for stdin
-  // without breaking any existing call site.
-  const opts: { env?: NodeJS.ProcessEnv; input?: string } =
-    (envOrOpts && "env" in envOrOpts) || (envOrOpts && "input" in envOrOpts)
-      ? (envOrOpts as { env?: NodeJS.ProcessEnv; input?: string })
-      : { env: envOrOpts as NodeJS.ProcessEnv | undefined };
+  // or `timeoutMs` to cap subprocess runtime.
+  const isEnvOrOptsObject =
+    envOrOpts &&
+    typeof envOrOpts === "object" &&
+    ("env" in envOrOpts || "input" in envOrOpts || "timeoutMs" in envOrOpts);
+  const opts: {
+    env?: NodeJS.ProcessEnv;
+    input?: string;
+    timeoutMs?: number;
+  } = isEnvOrOptsObject
+    ? (envOrOpts as {
+        env?: NodeJS.ProcessEnv;
+        input?: string;
+        timeoutMs?: number;
+      })
+    : { env: envOrOpts as NodeJS.ProcessEnv | undefined };
+
+  const timeoutMs = opts.timeoutMs ?? 30_000;
+  const maxBuffer = 10 * 1024 * 1024;
 
   const res = spawnSync(process.execPath, [cliPath, ...args], {
     cwd,
@@ -76,11 +96,31 @@ export function run(
       ? { ...process.env, ...HERMETIC_GIT_ENV, ...opts.env }
       : { ...process.env, ...HERMETIC_GIT_ENV },
     input: opts.input,
+    timeout: timeoutMs,
+    killSignal: "SIGKILL",
+    maxBuffer,
   });
+
+  const stdout = res.stdout ?? "";
+  let stderr = res.stderr ?? "";
+  const spawnError = res.error as (Error & { code?: string }) | null;
+  if (spawnError?.code === "ETIMEDOUT" || res.signal === "SIGKILL") {
+    stderr =
+      `TEST_SUBPROCESS_TIMEOUT:\n` +
+      `node dist/cli.js ${args.join(" ")}\n` +
+      `timeout_ms=${timeoutMs}\n` +
+      `cwd=${cwd}\n${stderr}`;
+    return {
+      code: res.status ?? 1,
+      stdout,
+      stderr,
+    };
+  }
+
   return {
     code: res.status ?? -1,
-    stdout: res.stdout ?? "",
-    stderr: res.stderr ?? "",
+    stdout,
+    stderr,
   };
 }
 

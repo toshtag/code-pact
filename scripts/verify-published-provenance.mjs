@@ -20,7 +20,7 @@
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
+import { runBoundedProcess } from "./lib/run-bounded-process.mjs";
 
 const DEFAULT_RETRIES = 6;
 const DEFAULT_INTERVAL_MS = 5000;
@@ -38,53 +38,6 @@ function encodeNpmPackageName(name) {
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Run `npm` with a hard timeout and process-tree cleanup.
- *
- * @param {string} cwd
- * @param {string[]} args
- * @param {number} timeoutMs
- * @param {string} [registry]
- * @returns {Promise<{ok: boolean, stdout: string, stderr: string, exitCode?: number}>}
- */
-async function runNpm(cwd, args, timeoutMs, registry) {
-  const fullArgs = registry ? [...args, `--registry=${registry}`] : args;
-  return new Promise((resolve, reject) => {
-    const child = spawn("npm", fullArgs, { cwd });
-    let stdout = "";
-    let stderr = "";
-    let killed = false;
-
-    const timer = setTimeout(() => {
-      killed = true;
-      child.kill("SIGTERM");
-      setTimeout(() => child.kill("SIGKILL"), 5_000);
-    }, timeoutMs);
-
-    child.stdout?.on("data", data => {
-      stdout += String(data);
-    });
-    child.stderr?.on("data", data => {
-      stderr += String(data);
-    });
-
-    child.on("error", err => {
-      clearTimeout(timer);
-      reject(err);
-    });
-
-    child.on("close", exitCode => {
-      clearTimeout(timer);
-      resolve({
-        ok: exitCode === 0 && !killed,
-        stdout,
-        stderr,
-        exitCode: killed ? -1 : exitCode,
-      });
-    });
-  });
 }
 
 /**
@@ -308,12 +261,22 @@ async function runNpmAuditSignatures(opts) {
     ];
     const install = await (execImpl
       ? execImpl(scratch, installArgs)
-      : runNpm(scratch, installArgs, NPM_INSTALL_TIMEOUT_MS));
+      : runBoundedProcess({
+          command: "npm",
+          args: installArgs,
+          cwd: scratch,
+          timeoutMs: NPM_INSTALL_TIMEOUT_MS,
+          termGraceMs: 5_000,
+          maxOutputBytes: 1 * 1024 * 1024,
+        }));
     if (!install.ok) {
+      const code = install.timedOut
+        ? "NPM_INSTALL_TIMEOUT"
+        : "NPM_INSTALL_FAILED";
       return {
         ok: false,
-        code: "NPM_INSTALL_FAILED",
-        message: `npm install failed for ${packageName}@${version}: exit ${install.exitCode ?? "unknown"}; ${install.stderr || install.stdout}`,
+        code,
+        message: `npm install ${install.timedOut ? "timed out" : "failed"} for ${packageName}@${version}: exit ${install.exitCode ?? "unknown"}; ${install.stderr || install.stdout}`,
       };
     }
 
@@ -325,12 +288,22 @@ async function runNpmAuditSignatures(opts) {
     ];
     const audit = await (execImpl
       ? execImpl(scratch, auditArgs)
-      : runNpm(scratch, auditArgs, NPM_AUDIT_TIMEOUT_MS));
+      : runBoundedProcess({
+          command: "npm",
+          args: auditArgs,
+          cwd: scratch,
+          timeoutMs: NPM_AUDIT_TIMEOUT_MS,
+          termGraceMs: 5_000,
+          maxOutputBytes: 1 * 1024 * 1024,
+        }));
     if (!audit.ok) {
+      const code = audit.timedOut
+        ? "PROVENANCE_AUDIT_TIMEOUT"
+        : "PROVENANCE_AUDIT_FAILED";
       return {
         ok: false,
-        code: "PROVENANCE_AUDIT_FAILED",
-        message: `npm audit signatures failed for ${packageName}@${version}: exit ${audit.exitCode ?? "unknown"}; ${audit.stderr || audit.stdout}`,
+        code,
+        message: `npm audit signatures ${audit.timedOut ? "timed out" : "failed"} for ${packageName}@${version}: exit ${audit.exitCode ?? "unknown"}; ${audit.stderr || audit.stdout}`,
       };
     }
 

@@ -8,6 +8,7 @@ export type RegistryState = "exists" | "absent" | "error" | "unknown";
 export type RegistryCheckResult = {
   state: "exists" | "absent" | "error";
   status?: number;
+  code?: string;
   message: string;
 };
 

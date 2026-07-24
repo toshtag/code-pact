@@ -12,7 +12,10 @@ describe("checkNpmVersionAvailability", () => {
     expect(result.status).toBe(200);
     expect(fetchImpl).toHaveBeenCalledWith(
       "https://registry.npmjs.org/code-pact/2.0.1",
-      { headers: { accept: "application/json" } },
+      {
+        headers: { accept: "application/json" },
+        signal: expect.any(AbortSignal),
+      },
     );
   });
 
@@ -51,7 +54,10 @@ describe("checkNpmVersionAvailability", () => {
     });
     expect(fetchImpl).toHaveBeenCalledWith(
       "https://registry.npmjs.org/code-pact/2.0.1",
-      { headers: { accept: "application/json" } },
+      {
+        headers: { accept: "application/json" },
+        signal: expect.any(AbortSignal),
+      },
     );
   });
 
@@ -62,7 +68,33 @@ describe("checkNpmVersionAvailability", () => {
     });
     expect(fetchImpl).toHaveBeenCalledWith(
       "https://registry.npmjs.org/@scope%2Fpkg/1.0.0-beta.1",
-      { headers: { accept: "application/json" } },
+      {
+        headers: { accept: "application/json" },
+        signal: expect.any(AbortSignal),
+      },
     );
+  });
+
+  it("returns REGISTRY_TIMEOUT when the request signal aborts", async () => {
+    const fetchImpl = vi.fn((_url, init) => {
+      const signal = init.signal as AbortSignal | undefined;
+      return new Promise((_resolve, reject) => {
+        const abort = () => {
+          reject(new DOMException("The operation was aborted", "TimeoutError"));
+        };
+        if (signal?.aborted) {
+          abort();
+          return;
+        }
+        signal?.addEventListener("abort", abort, { once: true });
+      });
+    });
+    const result = await checkNpmVersionAvailability("code-pact", "2.0.1", {
+      fetchImpl,
+      requestTimeoutMs: 10,
+    });
+    expect(result.state).toBe("error");
+    expect(result.code).toBe("REGISTRY_TIMEOUT");
+    expect(result.message).toContain("timed out after 10ms");
   });
 });

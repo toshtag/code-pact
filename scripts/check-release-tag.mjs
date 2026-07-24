@@ -30,18 +30,36 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
  * @param {string} path - API path after `repos/{repo}/`
  * @param {string} token - GitHub token
  */
+const GITHUB_API_TIMEOUT_MS = 10_000;
+
 async function githubFetch(repo, path, token) {
-  const response = await fetch(`https://api.github.com/repos/${repo}/${path}`, {
-    headers: {
-      accept: "application/vnd.github+json",
-      authorization: `Bearer ${token}`,
-      "x-github-api-version": "2022-11-28",
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`GitHub API ${path} returned ${response.status}`);
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${repo}/${path}`,
+      {
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${token}`,
+          "x-github-api-version": "2022-11-28",
+        },
+        signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`GitHub API ${path} returned ${response.status}`);
+    }
+    return response.json();
+  } catch (err) {
+    if (
+      err.name === "AbortError" ||
+      err.name === "TimeoutError" ||
+      err.code === "ABORT_ERR" ||
+      /timeout/i.test(String(err.message))
+    ) {
+      throw new Error(`GitHub API timeout: ${path}`);
+    }
+    throw err;
   }
-  return response.json();
 }
 
 /**
@@ -208,7 +226,12 @@ export async function checkReleaseTag(opts) {
   // A normal release must publish a new version. If the version already
   // exists on npm, this is a tag/version collision, not a success.
   const registryResult = await registryCheck(pkg.name, pkg.version);
-  if (registryResult.state === "exists") {
+
+  if (
+    registryResult &&
+    typeof registryResult === "object" &&
+    registryResult.state === "exists"
+  ) {
     return {
       ok: false,
       message: `RELEASE_VERSION_ALREADY_EXISTS: ${pkg.version} is already published to npm`,
@@ -217,20 +240,41 @@ export async function checkReleaseTag(opts) {
     };
   }
 
-  if (registryResult.state === "error") {
+  if (
+    registryResult &&
+    typeof registryResult === "object" &&
+    registryResult.state === "absent"
+  ) {
     return {
-      ok: false,
-      message: `REGISTRY_PROBE_ERROR: could not determine if ${pkg.version} is already published`,
+      ok: true,
+      message: `verified ${refName} at ${sha}`,
       versionExists: false,
-      registryState: "error",
+      registryState: "absent",
     };
   }
 
+  const rawState =
+    registryResult && typeof registryResult === "object"
+      ? registryResult.state
+      : undefined;
+  const stateLabel = typeof rawState === "string" ? rawState : "unknown";
+  const registryState = ["exists", "absent", "error"].includes(stateLabel)
+    ? stateLabel
+    : "unknown";
+
+  let message;
+  if (stateLabel === "error") {
+    message = `REGISTRY_PROBE_ERROR: unexpected registry state "error" for ${pkg.version}`;
+  } else {
+    const raw = rawState === undefined ? "undefined" : rawState;
+    message = `REGISTRY_PROBE_ERROR: unexpected registry state "${stateLabel}" (raw=${raw}, malformed response) for ${pkg.version}`;
+  }
+
   return {
-    ok: true,
-    message: `verified ${refName} at ${sha}`,
+    ok: false,
+    message,
     versionExists: false,
-    registryState: registryResult.state,
+    registryState,
   };
 }
 

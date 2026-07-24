@@ -258,4 +258,67 @@ describe("checkReleaseTag", () => {
     expect(result.versionExists).toBe(false);
     expect(result.registryState).toBe("error");
   });
+
+  it("fails closed when the registry probe returns undefined", async () => {
+    const result = await checkReleaseTag({
+      refType: "tag",
+      refName: "v2.0.1",
+      sha: "abc123",
+      repository: "toshtag/code-pact",
+      token: "test-token",
+      pkg: basePkg,
+      changelog: baseChangelog,
+      githubApi: makeGithubApi(),
+      gitRunner: makeGitRunner(),
+      registryCheck: (async () => undefined) as any,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("REGISTRY_PROBE_ERROR");
+    expect(result.message).toContain("malformed");
+    expect(result.versionExists).toBe(false);
+    expect(result.registryState).toBe("unknown");
+  });
+
+  it("fails closed when the registry probe returns an unknown state", async () => {
+    const result = await checkReleaseTag({
+      refType: "tag",
+      refName: "v2.0.1",
+      sha: "abc123",
+      repository: "toshtag/code-pact",
+      token: "test-token",
+      pkg: basePkg,
+      changelog: baseChangelog,
+      githubApi: makeGithubApi(),
+      gitRunner: makeGitRunner(),
+      registryCheck: (async () => ({
+        state: "unknown" as const,
+        message: "unrecognized state",
+      })) as any,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("REGISTRY_PROBE_ERROR");
+    expect(result.message).toContain("unknown");
+    expect(result.versionExists).toBe(false);
+    expect(result.registryState).toBe("unknown");
+  });
+
+  it("fails closed when the registry probe returns a malformed object", async () => {
+    const result = await checkReleaseTag({
+      refType: "tag",
+      refName: "v2.0.1",
+      sha: "abc123",
+      repository: "toshtag/code-pact",
+      token: "test-token",
+      pkg: basePkg,
+      changelog: baseChangelog,
+      githubApi: makeGithubApi(),
+      gitRunner: makeGitRunner(),
+      registryCheck: (async () => ({})) as any,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("REGISTRY_PROBE_ERROR");
+    expect(result.message).toContain("undefined");
+    expect(result.versionExists).toBe(false);
+    expect(result.registryState).toBe("unknown");
+  });
 });
