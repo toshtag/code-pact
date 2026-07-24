@@ -20,6 +20,12 @@ jobs:
       contents: read
     timeout-minutes: 15
 
+    env:
+      GIT_AUTHOR_NAME: code-pact-release
+      GIT_AUTHOR_EMAIL: release@code-pact.dev
+      GIT_COMMITTER_NAME: code-pact-release
+      GIT_COMMITTER_EMAIL: release@code-pact.dev
+
     steps:
       - name: Checkout signed tag
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
