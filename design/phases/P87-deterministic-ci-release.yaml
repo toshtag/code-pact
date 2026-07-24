@@ -30,7 +30,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: in_progress
+    status: done
     description: >
       Ensure a normal release follows a strict, fail-closed contract:
       signed tag → exact commit verification → new npm version → build/pack →

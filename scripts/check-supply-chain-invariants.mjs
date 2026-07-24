@@ -73,7 +73,7 @@ function hashRun(run) {
 }
 
 export const PUBLISH_RUN_HASH =
-  "eaf6fc50be434924c06bc8338e00433c8fb4a5cb3e08293df472c468bd60e2df";
+  "cc04e645e58d9ef269afbbe87109c664a0d519ced73d0eccc40a15d778bc92c0";
 export const GITHUB_RELEASE_RUN_HASH =
   "0a8cf86fb0cea315594a2d1018d1ee8cb8d337ee065abbde3458b9fecb17637c";
 
@@ -1870,8 +1870,10 @@ export function checkSupplyChainInvariants(root) {
       );
       const publishHasPnpm = publishActionRefs.some(r => r.startsWith("pnpm/"));
       const publishScripts = collectRunScripts(doc, "publish");
-      const publishHasRepoScript = publishScripts.some(s =>
-        /scripts\//.test(s),
+      const publishHasRepoScript = publishScripts.some(
+        s =>
+          /scripts\//.test(s) &&
+          !/scripts\/check-npm-version-availability\.mjs/.test(s),
       );
       const publishHasReleaseCheck = publishScripts.some(s =>
         /release:check/.test(s),
@@ -2034,18 +2036,18 @@ export function checkSupplyChainInvariants(root) {
         );
       }
 
-      // OIDC invariant: npm view and npm publish must use --registry flag
+      // OIDC invariant: registry probe and npm publish must use --registry flag
       const hasViewRegistry = publishScripts.some(s =>
-        /npm view.*--registry=/.test(s),
+        /scripts\/check-npm-version-availability\.mjs[\s\S]*--registry/.test(s),
       );
       const hasPublishRegistry = publishScripts.some(s =>
         /npm publish.*--registry=/.test(s),
       );
       if (hasViewRegistry) {
-        pass("publish.yml: npm view uses --registry flag");
+        pass("publish.yml: registry probe script uses --registry flag");
       } else {
         fail(
-          "publish.yml: npm view must use --registry flag to prevent env override",
+          "publish.yml: registry probe script must use --registry flag to prevent env override",
         );
       }
       if (hasPublishRegistry) {

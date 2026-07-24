@@ -211,9 +211,24 @@ jobs:
           version="$(node -p 'require("./release-artifact/release-manifest.json").version')"
           registry="https://registry.npmjs.org"
 
-          if npm view "code-pact@${version}" version --registry="$registry" >/dev/null 2>&1
+          if node scripts/check-npm-version-availability.mjs \
+            --package code-pact \
+            --version "$version" \
+            --registry "$registry"; then
+            probe_exit=0
+          else
+            probe_exit=$?
+          fi
+
+          if [ "$probe_exit" -eq 0 ]
           then
             echo "::error::Version code-pact@${version} already exists in the registry. A tag/version collision is not a successful release."
+            exit 1
+          fi
+
+          if [ "$probe_exit" -ne 1 ]
+          then
+            echo "::error::Registry probe failed with exit $probe_exit. Refusing to publish because the existing-version check could not be completed."
             exit 1
           fi
 

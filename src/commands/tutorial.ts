@@ -64,7 +64,9 @@ const T1 = "TUTORIAL-T1";
 const T2 = "TUTORIAL-T2";
 
 async function gitInitAndCommit(cwd: string): Promise<void> {
-  await execFileAsync("git", ["init", "--quiet"], { cwd });
+  await execFileAsync("git", ["init", "--quiet", "--initial-branch=main"], {
+    cwd,
+  });
   await execFileAsync(
     "git",
     ["-c", "user.email=t@t", "-c", "user.name=t", "add", "."],

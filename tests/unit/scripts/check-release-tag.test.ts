@@ -58,10 +58,11 @@ describe("checkReleaseTag", () => {
       changelog: baseChangelog,
       githubApi: makeGithubApi(),
       gitRunner: makeGitRunner(),
-      registryCheck: async () => false,
+      registryCheck: async () => "absent",
     });
     expect(result.ok).toBe(true);
     expect(result.versionExists).toBe(false);
+    expect(result.registryState).toBe("absent");
   });
 
   it("fails when not triggered by a tag", async () => {
@@ -219,10 +220,30 @@ describe("checkReleaseTag", () => {
       changelog: baseChangelog,
       githubApi: makeGithubApi(),
       gitRunner: makeGitRunner(),
-      registryCheck: async () => true,
+      registryCheck: async () => "exists",
     });
     expect(result.ok).toBe(false);
     expect(result.message).toContain("RELEASE_VERSION_ALREADY_EXISTS");
     expect(result.versionExists).toBe(true);
+    expect(result.registryState).toBe("exists");
+  });
+
+  it("fails closed when the registry probe returns an error", async () => {
+    const result = await checkReleaseTag({
+      refType: "tag",
+      refName: "v2.0.1",
+      sha: "abc123",
+      repository: "toshtag/code-pact",
+      token: "test-token",
+      pkg: basePkg,
+      changelog: baseChangelog,
+      githubApi: makeGithubApi(),
+      gitRunner: makeGitRunner(),
+      registryCheck: async () => "error",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("REGISTRY_PROBE_ERROR");
+    expect(result.versionExists).toBe(false);
+    expect(result.registryState).toBe("error");
   });
 });
