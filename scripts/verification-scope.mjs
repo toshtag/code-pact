@@ -4,9 +4,7 @@
 // Used by both local `pnpm verify:local` and the GitHub Actions classify job.
 // No external dependencies — only Node.js built-ins and `git`.
 
-import { spawn } from "node:child_process";
-import { writeFileSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
 import { runBoundedProcess } from "./lib/run-bounded-process.mjs";
@@ -263,24 +261,6 @@ function isUnitTest(file) {
   return file.startsWith("tests/unit/") && file.endsWith(".test.ts");
 }
 
-function changedIntegrationFiles(changeSet) {
-  const files = [
-    ...(changeSet.baseFiles ?? []),
-    ...(changeSet.workingTreeFiles ?? []),
-    ...(changeSet.untrackedFiles ?? []),
-  ].filter(isIntegrationTest);
-  return uniqueFiles(files);
-}
-
-function changedUnitTestFiles(changeSet) {
-  const files = [
-    ...(changeSet.baseFiles ?? []),
-    ...(changeSet.workingTreeFiles ?? []),
-    ...(changeSet.untrackedFiles ?? []),
-  ].filter(isUnitTest);
-  return uniqueFiles(files);
-}
-
 function isGenericCode(file) {
   return (
     !isDocsOnly(file) &&
@@ -369,7 +349,7 @@ function buildFailSafeScope(files) {
 function buildFullScope(files = []) {
   return {
     changedFiles: files,
-    docs: true,
+    docs: false,
     standard: true,
     toolchain: true,
     processControl: true,
@@ -444,7 +424,14 @@ function addVitestStep(steps, id, scope, program, args, timeoutMs, reason) {
 
 function buildUnitSteps(scope, changeSet, mergeBase) {
   const steps = [];
-  if (!scope.generic && !scope.standard && !scope.processControl) return steps;
+  if (
+    !scope.generic &&
+    !scope.standard &&
+    !scope.processControl &&
+    !scope.workflow &&
+    !scope.releaseScript
+  )
+    return steps;
 
   const allChanged = uniqueFiles([
     ...(changeSet.baseFiles ?? []),
@@ -455,25 +442,31 @@ function buildUnitSteps(scope, changeSet, mergeBase) {
   const sourceFiles = allChanged.filter(
     f => isGenericCode(f) && !isUnitTest(f) && !isIntegrationTest(f),
   );
+  const targetedUnitFiles = collectTargetedUnitTests(scope, changeSet);
 
-  // When only unit test files changed, run them directly.
-  if (directUnitFiles.length > 0 && sourceFiles.length === 0) {
-    const unitFilesToRun = scope.processControl
-      ? uniqueFiles([
-          "tests/unit/core/project-fs-authority-resolvers.test.ts",
-          "tests/unit/commands/verify-process.test.ts",
-          ...directUnitFiles,
-        ])
-      : directUnitFiles;
-    const id = scope.processControl ? "process-control-unit" : "unit-direct";
+  const processUnitFiles = scope.processControl
+    ? uniqueFiles([
+        "tests/unit/core/project-fs-authority-resolvers.test.ts",
+        "tests/unit/commands/verify-process.test.ts",
+        ...directUnitFiles,
+      ])
+    : [];
+
+  const explicitFiles = uniqueFiles([
+    ...directUnitFiles,
+    ...targetedUnitFiles,
+    ...processUnitFiles,
+  ]);
+
+  if (explicitFiles.length > 0) {
     addVitestStep(
       steps,
-      id,
+      "unit-focused",
       "focused",
       "pnpm",
-      ["exec", "vitest", "run", ...unitFilesToRun],
+      ["exec", "vitest", "run", ...explicitFiles],
       300_000,
-      `focused: ${unitFilesToRun.length} changed unit test file(s)`,
+      `focused: ${explicitFiles.length} unit test file(s)`,
     );
   }
 
@@ -545,35 +538,6 @@ function buildUnitSteps(scope, changeSet, mergeBase) {
     }
   }
 
-  // Ensure process-control unit tests run even when only process-control
-  // source changed, and avoid duplicating tests already run by --changed
-  // or unit-direct.
-  if (
-    scope.processControl &&
-    (sourceFiles.length > 0 || directUnitFiles.length === 0)
-  ) {
-    const processUnitFiles = uniqueFiles([
-      "tests/unit/core/project-fs-authority-resolvers.test.ts",
-      "tests/unit/commands/verify-process.test.ts",
-      ...directUnitFiles,
-    ]);
-    const extra =
-      sourceFiles.length > 0
-        ? processUnitFiles.filter(f => !directUnitFiles.includes(f))
-        : processUnitFiles;
-    if (extra.length > 0) {
-      addVitestStep(
-        steps,
-        "process-control-unit",
-        "process-control",
-        "pnpm",
-        ["exec", "vitest", "run", ...extra],
-        300_000,
-        "process-control: targeted unit tests",
-      );
-    }
-  }
-
   return steps;
 }
 
@@ -586,7 +550,17 @@ function buildIntegrationSteps(scope, changeSet) {
     ...(changeSet.workingTreeFiles ?? []),
     ...(changeSet.untrackedFiles ?? []),
   ]);
-  const directIntegrationFiles = allChanged.filter(isIntegrationTest);
+  const directIntegrationFiles = uniqueFiles(
+    allChanged.filter(isIntegrationTest),
+  );
+  const processControlIntegrationFile =
+    "tests/integration/verify-timeout-abort.test.ts";
+  const processControlFiles = scope.processControl
+    ? [processControlIntegrationFile]
+    : [];
+  const remainingDirect = directIntegrationFiles.filter(
+    f => !processControlFiles.includes(f),
+  );
   const sourceFiles = allChanged.filter(
     f => isGenericCode(f) && !isUnitTest(f) && !isIntegrationTest(f),
   );
@@ -604,14 +578,14 @@ function buildIntegrationSteps(scope, changeSet) {
         "run",
         "--config",
         "vitest.integration.config.ts",
-        "tests/integration/verify-timeout-abort.test.ts",
+        processControlIntegrationFile,
       ],
       300_000,
       "process-control: targeted timeout-abort integration test",
     );
   }
 
-  if (directIntegrationFiles.length > 0) {
+  if (remainingDirect.length > 0) {
     addVitestStep(
       steps,
       "integration-direct",
@@ -623,15 +597,14 @@ function buildIntegrationSteps(scope, changeSet) {
         "run",
         "--config",
         "vitest.integration.config.ts",
-        ...directIntegrationFiles,
+        ...remainingDirect,
       ],
       300_000,
-      `focused: ${directIntegrationFiles.length} changed integration test file(s)`,
+      `focused: ${remainingDirect.length} changed integration test file(s)`,
     );
-    return steps;
   }
 
-  if (hasSource && steps.length === 0) {
+  if (hasSource) {
     addVitestStep(
       steps,
       "integration-smoke",
@@ -652,72 +625,35 @@ function buildIntegrationSteps(scope, changeSet) {
   return steps;
 }
 
-function buildWorkflowSteps(scope, changeSet) {
-  const steps = [];
-  if (!scope.workflow) return steps;
-
-  const workflowFiles = uniqueFiles([
+function collectTargetedUnitTests(scope, changeSet) {
+  const files = new Set();
+  const allChanged = uniqueFiles([
     ...(changeSet.baseFiles ?? []),
     ...(changeSet.workingTreeFiles ?? []),
     ...(changeSet.untrackedFiles ?? []),
-  ]).filter(isWorkflow);
+  ]);
 
-  const tests = new Set();
-  for (const file of workflowFiles) {
-    const mapped = WORKFLOW_TEST_MAP[file];
-    if (mapped) {
-      for (const t of mapped) tests.add(t);
+  if (scope.workflow) {
+    for (const file of allChanged.filter(isWorkflow)) {
+      const mapped = WORKFLOW_TEST_MAP[file];
+      if (mapped) {
+        for (const t of mapped) files.add(t);
+      }
     }
+    for (const t of WORKFLOW_COMMON_TESTS) files.add(t);
   }
-  for (const t of WORKFLOW_COMMON_TESTS) tests.add(t);
 
-  if (tests.size === 0) return steps;
-
-  const testList = [...tests];
-  addVitestStep(
-    steps,
-    "workflow-tests",
-    "workflow",
-    "pnpm",
-    ["exec", "vitest", "run", ...testList],
-    300_000,
-    "workflow change: targeted workflow/supply-chain tests",
-  );
-  return steps;
-}
-
-function buildReleaseScriptSteps(scope, changeSet) {
-  const steps = [];
-  if (!scope.releaseScript) return steps;
-
-  const releaseFiles = uniqueFiles([
-    ...(changeSet.baseFiles ?? []),
-    ...(changeSet.workingTreeFiles ?? []),
-    ...(changeSet.untrackedFiles ?? []),
-  ]).filter(isReleaseScript);
-
-  const tests = new Set();
-  for (const file of releaseFiles) {
-    const mapped = RELEASE_SCRIPT_TEST_MAP[file];
-    if (mapped) {
-      for (const t of mapped) tests.add(t);
+  if (scope.releaseScript) {
+    for (const file of allChanged.filter(isReleaseScript)) {
+      const mapped = RELEASE_SCRIPT_TEST_MAP[file];
+      if (mapped) {
+        for (const t of mapped) files.add(t);
+      }
     }
+    for (const t of RELEASE_SCRIPT_COMMON_TESTS) files.add(t);
   }
-  for (const t of RELEASE_SCRIPT_COMMON_TESTS) tests.add(t);
 
-  if (tests.size === 0) return steps;
-
-  const testList = [...tests];
-  addVitestStep(
-    steps,
-    "release-tests",
-    "release",
-    "pnpm",
-    ["exec", "vitest", "run", ...testList],
-    300_000,
-    "release script change: targeted release tests",
-  );
-  return steps;
+  return [...files];
 }
 
 function buildVersionSteps(steps) {
@@ -856,8 +792,6 @@ export function buildVerificationPlan({
 
   const unitSteps = buildUnitSteps(scope, changeSet, mergeBase);
   const integrationSteps = buildIntegrationSteps(scope, changeSet);
-  const workflowSteps = buildWorkflowSteps(scope, changeSet);
-  const releaseSteps = buildReleaseScriptSteps(scope, changeSet);
 
   const needsBuild = integrationSteps.length > 0;
 
@@ -868,8 +802,6 @@ export function buildVerificationPlan({
     );
   }
   steps.push(...integrationSteps);
-  steps.push(...workflowSteps);
-  steps.push(...releaseSteps);
 
   return {
     schema_version: "p87-t2/1",
@@ -1293,7 +1225,11 @@ async function runBaseVerification(baseRef, options = {}) {
 
 function outputGitHub(scope) {
   const env = process.env.GITHUB_OUTPUT;
-  const lines = [`docs=${scope.docs}`, `standard=${scope.standard}`];
+  const lines = [
+    `docs=${scope.docs}`,
+    `standard=${scope.standard}`,
+    `fallback_full=${scope.fallbackFull}`,
+  ];
 
   if (env) {
     writeFileSync(env, `${lines.join("\n")}\n`, { flag: "a" });

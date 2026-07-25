@@ -81,12 +81,26 @@ describe("ci.yml topology", () => {
     expect(jobOutputs(content, "classify")).toContain("base_ref");
   });
 
-  it("standard job runs the bounded verification-scope plan", () => {
+  it("classify job emits fallback_full", () => {
+    expect(jobOutputs(content, "classify")).toContain("fallback_full");
+  });
+
+  it("classify job copies the classifier and its lib dependency into a temporary tree", () => {
+    const scripts = collectRunScripts(content, "classify");
+    const script = scripts.join("\n");
+    expect(script).toMatch(/trusted_root=.*RUNNER_TEMP\/trusted-classifier/);
+    expect(script).toContain("scripts/verification-scope.mjs");
+    expect(script).toContain("scripts/lib/run-bounded-process.mjs");
+    expect(script).toContain('node "$trusted_classifier"');
+  });
+
+  it("standard job runs the bounded verification-scope plan only when not in fallback full", () => {
     const scripts = collectRunScripts(content, "standard");
     const planScript = scripts.find(s => s.includes("verification-scope.mjs"));
     expect(planScript).toBeDefined();
     expect(planScript).toMatch(/--base\s+"?\$BASE_REF"?/);
     expect(planScript).toMatch(/--run/);
+    expect(planScript).toMatch(/else/);
   });
 
   it("standard job runs on push or when classify standard is true", () => {
@@ -97,22 +111,24 @@ describe("ci.yml topology", () => {
     );
   });
 
-  it("standard job uses --force-full on main push", () => {
+  it("standard job uses a fixed full gate when fallback_full or on main push", () => {
     const scripts = collectRunScripts(content, "standard");
-    const planScript = scripts.find(s => s.includes("verification-scope.mjs"));
+    const planScript = scripts.find(s => s.includes("FALLBACK_FULL"));
+    expect(planScript).toBeDefined();
+    expect(planScript).toMatch(/FALLBACK_FULL/);
     expect(planScript).toMatch(/GITHUB_EVENT_NAME/);
-    expect(planScript).toMatch(/--force-full/);
+    expect(planScript).toMatch(/pnpm\s+test:unit/);
+    expect(planScript).toMatch(/pnpm\s+test:integration:smoke/);
+    expect(planScript).toMatch(/node\s+dist\/cli\.js/);
   });
 
-  it("standard job does not run a hard-coded full test suite", () => {
+  it("standard job runs a hard-coded full test suite for high-risk changes", () => {
     const scripts = collectRunScripts(content, "standard");
-    for (const script of scripts) {
-      expect(script).not.toMatch(/\bpnpm\s+(?:run\s+)?test:ci\b/);
-      expect(script).not.toMatch(/\bpnpm\s+release:check\b/);
-      expect(script).not.toMatch(
-        /vitest\s+run\s+--config\s+vitest\.integration\.config\.ts/,
-      );
-    }
+    const planScript = scripts.find(s => s.includes("FALLBACK_FULL"));
+    expect(planScript).toBeDefined();
+    expect(planScript).toMatch(/pnpm\s+check:supply-chain/);
+    expect(planScript).toMatch(/pnpm\s+typecheck/);
+    expect(planScript).toMatch(/pnpm\s+build/);
   });
 
   it("ci-status job validates all required results", () => {
@@ -121,6 +137,7 @@ describe("ci.yml topology", () => {
     expect(statusScript).toBeDefined();
     expect(statusScript).toMatch(/CLASSIFY_RESULT/);
     expect(statusScript).toMatch(/STANDARD_RESULT/);
+    expect(statusScript).toMatch(/FALLBACK_FULL_OUTPUT/);
   });
 
   it("ci-status job uses GITHUB_EVENT_NAME to enforce standard on main push", () => {

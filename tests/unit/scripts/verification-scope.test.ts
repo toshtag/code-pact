@@ -258,8 +258,8 @@ describe("plan command extraction", () => {
 
   it("unit-test-only runs the changed file directly without build or integration", () => {
     const plan = planFor(["tests/unit/scripts/verification-scope.test.ts"]);
-    expect(plan.steps.map(s => s.id)).toEqual(["typecheck", "unit-direct"]);
-    const unit = plan.steps.find(s => s.id === "unit-direct");
+    expect(plan.steps.map(s => s.id)).toEqual(["typecheck", "unit-focused"]);
+    const unit = plan.steps.find(s => s.id === "unit-focused");
     expect(unit?.command.join(" ")).toContain(
       "tests/unit/scripts/verification-scope.test.ts",
     );
@@ -298,9 +298,9 @@ describe("plan command extraction", () => {
     expect(plan.steps.map(s => s.id)).toEqual([
       "supply-chain",
       "typecheck",
-      "workflow-tests",
+      "unit-focused",
     ]);
-    const wf = plan.steps.find(s => s.id === "workflow-tests");
+    const wf = plan.steps.find(s => s.id === "unit-focused");
     expect(wf?.command.join(" ")).toContain("ci-workflow.test.ts");
     expect(wf?.command.join(" ")).toContain(
       "check-supply-chain-invariants.test.ts",
@@ -310,8 +310,8 @@ describe("plan command extraction", () => {
 
   it("mapped release script changes run targeted release tests without build", () => {
     const plan = planFor(["scripts/check-release-tag.mjs"]);
-    expect(plan.steps.map(s => s.id)).toEqual(["typecheck", "release-tests"]);
-    const rel = plan.steps.find(s => s.id === "release-tests");
+    expect(plan.steps.map(s => s.id)).toEqual(["typecheck", "unit-focused"]);
+    const rel = plan.steps.find(s => s.id === "unit-focused");
     expect(rel?.command.join(" ")).toContain("check-release-tag.test.ts");
     expect(rel?.command.join(" ")).toContain("publish-workflow.test.ts");
     expect(rel?.command.join(" ")).toContain(
@@ -324,28 +324,34 @@ describe("plan command extraction", () => {
     const plan = planFor(["src/lib/timeout.ts"]);
     expect(plan.steps.map(s => s.id)).toEqual([
       "typecheck",
-      "process-control-unit",
+      "unit-focused",
       "build",
       "integration-process-control",
     ]);
+    const unit = plan.steps.find(s => s.id === "unit-focused");
+    expect(unit?.command.join(" ")).toContain("verify-process.test.ts");
+    expect(unit?.command.join(" ")).toContain(
+      "project-fs-authority-resolvers.test.ts",
+    );
   });
 
-  it("source + unit test uses --changed and does not double-run unit-direct", () => {
+  it("source + unit test uses --changed and does not double-run unit-focused", () => {
     const plan = planFor([
       "src/commands/init.ts",
       "tests/unit/commands/init.test.ts",
     ]);
     expect(plan.steps.some(s => s.id === "unit-base")).toBe(true);
-    expect(plan.steps.some(s => s.id === "unit-direct")).toBe(false);
+    expect(plan.steps.some(s => s.id === "unit-focused")).toBe(true);
+    expect(plan.steps.filter(s => s.id === "unit-focused").length).toBe(1);
   });
 
-  it("source + integration test runs integration-direct and no smoke", () => {
+  it("source + integration test runs integration-direct and integration-smoke", () => {
     const plan = planFor([
       "src/commands/init.ts",
       "tests/integration/foo.test.ts",
     ]);
     expect(plan.steps.some(s => s.id === "integration-direct")).toBe(true);
-    expect(plan.steps.some(s => s.id === "integration-smoke")).toBe(false);
+    expect(plan.steps.some(s => s.id === "integration-smoke")).toBe(true);
   });
 
   it("untracked source falls back to full unit tests", () => {
@@ -910,9 +916,9 @@ describe("buildVerificationPlan selection regression matrix", () => {
     expect(stepIds(plan)).toEqual([
       "supply-chain",
       "typecheck",
-      "workflow-tests",
+      "unit-focused",
     ]);
-    const wf = plan.steps.find(s => s.id === "workflow-tests");
+    const wf = plan.steps.find(s => s.id === "unit-focused");
     expect(wf?.command.join(" ")).toContain("ci-workflow.test.ts");
     expect(wf?.command.join(" ")).toContain(
       "check-supply-chain-invariants.test.ts",
@@ -924,10 +930,15 @@ describe("buildVerificationPlan selection regression matrix", () => {
     expect(plan.mode).toBe("focused");
     expect(stepIds(plan)).toEqual([
       "typecheck",
-      "process-control-unit",
+      "unit-focused",
       "build",
       "integration-process-control",
     ]);
+    const unit = plan.steps.find(s => s.id === "unit-focused");
+    expect(unit?.command.join(" ")).toContain("verify-process.test.ts");
+    expect(unit?.command.join(" ")).toContain(
+      "project-fs-authority-resolvers.test.ts",
+    );
   });
 
   it("standard source changes run changed unit tests plus integration smoke", () => {
@@ -957,8 +968,8 @@ describe("buildVerificationPlan selection regression matrix", () => {
     const plan = buildPlanFor([
       "tests/unit/scripts/verification-scope.test.ts",
     ]);
-    expect(stepIds(plan)).toEqual(["typecheck", "unit-direct"]);
-    const unit = plan.steps.find(s => s.id === "unit-direct");
+    expect(stepIds(plan)).toEqual(["typecheck", "unit-focused"]);
+    const unit = plan.steps.find(s => s.id === "unit-focused");
     expect(unit?.command.join(" ")).toContain(
       "tests/unit/scripts/verification-scope.test.ts",
     );
@@ -983,12 +994,58 @@ describe("buildVerificationPlan selection regression matrix", () => {
     expect(stepIds(plan)).toEqual([
       "supply-chain",
       "typecheck",
-      "workflow-tests",
+      "unit-focused",
     ]);
-    const wf = plan.steps.find(s => s.id === "workflow-tests");
+    const wf = plan.steps.find(s => s.id === "unit-focused");
     expect(wf?.command.join(" ")).toContain("publish-workflow.test.ts");
     expect(wf?.command.join(" ")).toContain(
       "check-supply-chain-invariants.test.ts",
     );
+  });
+
+  it("generic source + changed integration test runs smoke and direct", () => {
+    const plan = buildPlanFor([
+      "src/commands/init.ts",
+      "tests/integration/foo.test.ts",
+    ]);
+    expect(stepIds(plan)).toContain("unit-base");
+    expect(stepIds(plan)).toContain("integration-direct");
+    expect(stepIds(plan)).toContain("integration-smoke");
+  });
+
+  it("generic source + process-control source runs smoke and process-control integration", () => {
+    const plan = buildPlanFor(["src/commands/init.ts", "src/lib/timeout.ts"]);
+    expect(stepIds(plan)).toContain("unit-base");
+    expect(stepIds(plan)).toContain("unit-focused");
+    expect(stepIds(plan)).toContain("integration-process-control");
+    expect(stepIds(plan)).toContain("integration-smoke");
+  });
+
+  it("process-control integration file is executed once when changed", () => {
+    const plan = buildPlanFor([
+      "tests/integration/verify-timeout-abort.test.ts",
+    ]);
+    const processSteps = plan.steps.filter(
+      s =>
+        s.id === "integration-process-control" || s.id === "integration-direct",
+    );
+    expect(processSteps.length).toBe(1);
+    const step = processSteps[0];
+    expect(step?.command.join(" ")).toContain(
+      "tests/integration/verify-timeout-abort.test.ts",
+    );
+  });
+
+  it("workflow + release script shared tests are executed once", () => {
+    const plan = buildPlanFor([
+      ".github/workflows/publish.yml",
+      "scripts/check-release-tag.mjs",
+    ]);
+    const focused = plan.steps.filter(s => s.id === "unit-focused");
+    expect(focused.length).toBe(1);
+    const cmd = focused[0]?.command.join(" ") ?? "";
+    expect(cmd).toContain("publish-workflow.test.ts");
+    expect(cmd).toContain("check-supply-chain-invariants.test.ts");
+    expect(cmd).toContain("check-release-tag.test.ts");
   });
 });

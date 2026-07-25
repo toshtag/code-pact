@@ -125,11 +125,14 @@ export async function checkRequiredCiForSha({
 
     const runs = Array.isArray(data.check_runs) ? data.check_runs : [];
     const matches = runs.filter(
-      run => typeof run === "object" && run.name === checkName,
+      run =>
+        typeof run === "object" &&
+        run.name === checkName &&
+        run.app?.slug === "github-actions",
     );
 
     if (matches.length === 0) {
-      lastError = "no matching check run";
+      lastError = "no matching check run from github-actions";
       if (attempt < retryAttempts) {
         await sleep(retryIntervalMs);
         continue;
@@ -153,6 +156,7 @@ export async function checkRequiredCiForSha({
         matching_check_runs: matches.length,
         attempts: attempt,
         latest_run_id: latest.id ?? null,
+        app_slug: latest.app?.slug ?? null,
       };
     }
 

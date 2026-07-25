@@ -17,6 +17,7 @@ function completedRun(
   name: string,
   conclusion: string,
   offsetSeconds: number,
+  appSlug = "github-actions",
 ) {
   const started = new Date(Date.now() + offsetSeconds * 1000).toISOString();
   const completed = new Date(
@@ -29,6 +30,7 @@ function completedRun(
     conclusion,
     started_at: started,
     completed_at: completed,
+    app: { slug: appSlug },
   };
 }
 
@@ -40,6 +42,7 @@ function inProgressRun(id: number, name: string, offsetSeconds: number) {
     conclusion: null,
     started_at: new Date(Date.now() + offsetSeconds * 1000).toISOString(),
     completed_at: null,
+    app: { slug: "github-actions" },
   };
 }
 
@@ -51,6 +54,7 @@ function queuedRun(id: number, name: string, offsetSeconds: number) {
     conclusion: null,
     started_at: new Date(Date.now() + offsetSeconds * 1000).toISOString(),
     completed_at: null,
+    app: { slug: "github-actions" },
   };
 }
 
@@ -339,5 +343,29 @@ describe("checkRequiredCiForSha", () => {
 
     expect(result.ok).toBe(false);
     expect(result.status).toBe("not_found");
+  });
+
+  it("rejects a same-name check from a non-github-actions app", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      makeResponse(200, {
+        check_runs: [
+          completedRun(1, "CI status", "success", 0, "some-other-app"),
+        ],
+      }),
+    );
+
+    const result = await checkRequiredCiForSha({
+      owner: "toshtag",
+      repo: "code-pact",
+      sha,
+      checkName: "CI status",
+      retryAttempts: 1,
+      retryIntervalMs: 10,
+      fetchImpl,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.matching_check_runs).toBe(0);
+    expect(result.error).toContain("github-actions");
   });
 });
