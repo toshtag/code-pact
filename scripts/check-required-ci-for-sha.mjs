@@ -106,9 +106,7 @@ export async function checkRequiredCiForSha({
         typeof run === "object" &&
         run.event === "push" &&
         run.head_branch === "main" &&
-        (run.head_sha ?? "").toLowerCase() === lowerSha &&
-        (run.path ?? "").replace(/^\.github\/workflows\//, "") ===
-          CI_WORKFLOW_ID,
+        (run.head_sha ?? "").toLowerCase() === lowerSha,
     );
 
     if (runs.length === 0) {
@@ -211,6 +209,7 @@ export async function checkRequiredCiForSha({
       matching_check_runs: runs.length,
       attempts: attempt,
       latest_run_id: latest.id ?? null,
+      error: null,
     };
   }
 
@@ -225,6 +224,7 @@ export async function checkRequiredCiForSha({
     total_check_runs: 0,
     matching_check_runs: 0,
     attempts: retryAttempts,
+    latest_run_id: null,
     error: lastError ?? "required CI did not complete successfully",
   };
 }
@@ -310,6 +310,7 @@ function immediateFail({
     total_check_runs: 0,
     matching_check_runs: 0,
     attempts: attempt,
+    latest_run_id: null,
     error,
   };
 }

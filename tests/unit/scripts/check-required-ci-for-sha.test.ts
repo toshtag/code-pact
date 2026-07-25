@@ -8,7 +8,8 @@ function makeResponse(status: number, body: unknown) {
   return {
     ok: status >= 200 && status < 300,
     status,
-    text: () => Promise.resolve(typeof body === "string" ? body : JSON.stringify(body)),
+    text: () =>
+      Promise.resolve(typeof body === "string" ? body : JSON.stringify(body)),
     json: () => Promise.resolve(body),
   };
 }
@@ -32,7 +33,7 @@ function workflowRun(options: {
     head_sha: options.head_sha ?? sha,
     head_branch: options.head_branch ?? "main",
     event: options.event ?? "push",
-    path: options.path ?? ".github/workflows/ci.yml",
+    path: options.path ?? ".github/workflows/ci.yml@main",
     created_at: options.created_at ?? new Date().toISOString(),
     name: "CI",
   };
@@ -160,12 +161,33 @@ describe("checkRequiredCiForSha", () => {
     expect(result.conclusion).toBe("success");
     expect(result.attempts).toBe(1);
     expect(result.matching_check_runs).toBe(1);
+    expect(result.latest_run_id).toBe(1);
+    expect(result.error).toBe(null);
+    for (const key of [
+      "ok",
+      "owner",
+      "repo",
+      "sha",
+      "check_name",
+      "status",
+      "conclusion",
+      "total_check_runs",
+      "matching_check_runs",
+      "attempts",
+      "latest_run_id",
+      "error",
+    ]) {
+      expect(result).toHaveProperty(key);
+    }
   });
 
   it("fails when the latest matching workflow run completed with a failure", async () => {
     const fetchImpl = makeFetchImpl({
       listResponses: [
-        { status: 200, body: { workflow_runs: [completedRun(1, 0, "failure")] } },
+        {
+          status: 200,
+          body: { workflow_runs: [completedRun(1, 0, "failure")] },
+        },
       ],
     });
 
@@ -430,26 +452,18 @@ describe("checkRequiredCiForSha", () => {
     expect(result.matching_check_runs).toBe(0);
   });
 
-  it("fails when the run belongs to a different workflow path", async () => {
+  it("uses the workflow-specific runs endpoint with exact SHA, main branch, and push event", async () => {
     const fetchImpl = makeFetchImpl({
       listResponses: [
-        {
-          status: 200,
-          body: {
-            workflow_runs: [
-              workflowRun({
-                id: 1,
-                status: "completed",
-                conclusion: "success",
-                path: ".github/workflows/other.yml",
-              }),
-            ],
-          },
-        },
+        { status: 200, body: { workflow_runs: [completedRun(1, 0)] } },
       ],
+      jobResponse: {
+        status: 200,
+        body: makeJobsResponse("CI status", "completed", "success"),
+      },
     });
 
-    const result = await checkRequiredCiForSha({
+    await checkRequiredCiForSha({
       owner: "toshtag",
       repo: "code-pact",
       sha,
@@ -459,8 +473,18 @@ describe("checkRequiredCiForSha", () => {
       fetchImpl,
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.matching_check_runs).toBe(0);
+    const call = fetchImpl.mock.calls[0];
+    if (!call) {
+      throw new Error("expected at least one workflow runs API request");
+    }
+    const listUrl = new URL(call[0]);
+    expect(listUrl.pathname).toBe(
+      "/repos/toshtag/code-pact/actions/workflows/ci.yml/runs",
+    );
+    expect(listUrl.searchParams.get("head_sha")).toBe(sha.toLowerCase());
+    expect(listUrl.searchParams.get("branch")).toBe("main");
+    expect(listUrl.searchParams.get("event")).toBe("push");
+    expect(listUrl.searchParams.get("per_page")).toBe("100");
   });
 
   it("fails when the named job is missing from the successful run", async () => {
@@ -530,7 +554,47 @@ describe("checkRequiredCiForSha", () => {
 
     expect(result.ok).toBe(false);
     expect(result.attempts).toBe(1);
+    expect(result.latest_run_id).toBe(null);
     expect(result.error).toContain("401");
+  });
+
+  it("returns a consistent CheckResult shape when no workflow run is found after retries", async () => {
+    const fetchImpl = makeFetchImpl({
+      listResponses: [
+        { status: 200, body: { workflow_runs: [] } },
+        { status: 200, body: { workflow_runs: [] } },
+      ],
+    });
+
+    const result = await checkRequiredCiForSha({
+      owner: "toshtag",
+      repo: "code-pact",
+      sha,
+      checkName: "CI status",
+      retryAttempts: 2,
+      retryIntervalMs: 10,
+      fetchImpl,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.latest_run_id).toBe(null);
+    expect(result.error).toBe("no main push workflow run for the exact SHA");
+    for (const key of [
+      "ok",
+      "owner",
+      "repo",
+      "sha",
+      "check_name",
+      "status",
+      "conclusion",
+      "total_check_runs",
+      "matching_check_runs",
+      "attempts",
+      "latest_run_id",
+      "error",
+    ]) {
+      expect(result).toHaveProperty(key);
+    }
   });
 
   it("fails immediately on 403", async () => {
