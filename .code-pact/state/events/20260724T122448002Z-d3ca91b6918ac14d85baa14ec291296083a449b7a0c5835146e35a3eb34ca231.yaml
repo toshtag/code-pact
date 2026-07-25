@@ -1,0 +1,11 @@
+task_id: P87-T2
+status: done
+at: 2026-07-24T12:24:48.002Z
+actor: agent
+agent: claude-code
+author: Pocket
+evidence:
+  - Focused verification passed (199 tests, 6 files), hermetic integration
+    passed (7 tests), and full pnpm test:ci passed in a fresh worktree.
+source: external
+id: d3ca91b6918ac14d85baa14ec291296083a449b7a0c5835146e35a3eb34ca231

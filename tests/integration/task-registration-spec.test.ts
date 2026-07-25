@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { writeFileSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { HERMETIC_GIT_ENV } from "../helpers/git-repository.js";
 import {
   createTempProject,
   ensureCliBuilt,
@@ -23,7 +24,18 @@ afterEach(async () => {
 });
 
 function git(cwd: string, args: string[]): ReturnType<typeof spawnSync> {
-  return spawnSync("git", args, { cwd, encoding: "utf8" });
+  const res = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, ...HERMETIC_GIT_ENV },
+  });
+  if (res.error || res.status !== 0) {
+    const reason = res.error
+      ? String(res.error)
+      : res.stderr.trim() || `exit ${res.status}`;
+    throw new Error(`git ${args.join(" ")} failed: ${reason}`);
+  }
+  return res;
 }
 
 function specBody(opts: {
@@ -285,7 +297,13 @@ describe("task lock --spec-file", () => {
     // Restore the correct phase and lock the downstream task.
     writeFileSync(phasePath, originalBytes);
     git(project.dir, ["add", "."]);
-    git(project.dir, ["commit", "--quiet", "-m", "restore phase"]);
+    git(project.dir, [
+      "commit",
+      "--allow-empty",
+      "--quiet",
+      "-m",
+      "restore phase",
+    ]);
 
     const lockRes = expectJsonOk<{ task_id: string }>(
       project.run([

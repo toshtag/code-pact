@@ -18,6 +18,7 @@ jobs:
 
     permissions:
       contents: read
+      checks: read
     timeout-minutes: 15
 
     steps:
@@ -62,8 +63,21 @@ jobs:
       - name: Install exact dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run complete release gate
-        run: pnpm release:check
+      - name: Verify required CI for exact SHA
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/check-required-ci-for-sha.mjs \
+            --owner "${GITHUB_REPOSITORY%%/*}" \
+            --repo "${GITHUB_REPOSITORY##*/}" \
+            --sha "${GITHUB_SHA}" \
+            --check-name "CI status" \
+            --json
+
+      - name: Run release-specific supply-chain and version checks
+        run: |
+          node scripts/check-supply-chain-invariants.mjs
+          pnpm check:release-version
 
       - name: Assert package metadata
         run: node scripts/assert-package-metadata.mjs

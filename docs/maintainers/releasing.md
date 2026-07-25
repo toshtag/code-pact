@@ -81,18 +81,20 @@ After the release-prep PR merges to `main`:
    `.github/workflows/publish.yml`. The workflow has four jobs with strict
    permission separation:
 
-   | Job              | Permissions                         | Runs                                                                                                               |
-   | ---------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-   | `prepare`        | `contents: read`                    | checkout, tag verification, `release:check`, tarball build + inspection, release notes generation, artifact upload |
-   | `publish`        | `contents: read`, `id-token: write` | artifact download, manifest verification, `npm publish --ignore-scripts` (no checkout, no repository code)         |
-   | `verify`         | `contents: read`                    | artifact download, registry tarball download + byte verification, integrity report upload                          |
-   | `github-release` | `contents: write`                   | artifact download, `gh release create/edit` (no checkout, no repository code)                                      |
+   | Job              | Permissions                         | Runs                                                                                                                                                  |
+   | ---------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `prepare`        | `contents: read`                    | checkout, tag verification, exact-SHA CI verification, release-specific checks, tarball build + inspection, release notes generation, artifact upload |
+   | `publish`        | `contents: read`, `id-token: write` | artifact download, manifest verification, `npm publish --ignore-scripts` (no checkout, no repository code)                                            |
+   | `verify`         | `contents: read`                    | artifact download, registry tarball download + byte verification, integrity report upload                                                             |
+   | `github-release` | `contents: write`                   | artifact download, `gh release create/edit` (no checkout, no repository code)                                                                         |
 
    Approve the deployment in the GitHub Actions UI (the `publish` job runs in
    the `npm-publish` GitHub Environment with required reviewers). The workflow
    then:
    - **prepare** verifies the signed annotated tag (`check-release-tag.mjs`),
-     runs `pnpm release:check`, builds and inspects the exact tarball
+     verifies that the `CI status` check passed for the exact commit SHA
+     (`check-required-ci-for-sha.mjs`), runs release-specific supply-chain and
+     version checks, builds and inspects the exact tarball
      (`check-package-tarball.mjs`), generates release notes, and uploads the
      artifact,
    - **publish** downloads the verified artifact and publishes it via npm
