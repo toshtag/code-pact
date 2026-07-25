@@ -1,7 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import {
+  readFileSync,
+  mkdtempSync,
+  mkdirSync,
+  copyFileSync,
+  rmSync,
+} from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import { parseDocument } from "yaml";
 
 const repoRoot = resolve(
@@ -101,15 +108,6 @@ describe("ci.yml topology", () => {
     expect(script).toContain('node "$trusted_classifier"');
   });
 
-  it("standard job runs the bounded verification-scope plan only when not in fallback full", () => {
-    const scripts = collectRunScripts(content, "standard");
-    const planScript = scripts.find(s => s.includes("verification-scope.mjs"));
-    expect(planScript).toBeDefined();
-    expect(planScript).toMatch(/--base\s+"?\$BASE_REF"?/);
-    expect(planScript).toMatch(/--run/);
-    expect(planScript).toMatch(/else/);
-  });
-
   it("standard job runs on push or when classify standard is true", () => {
     const ifExpr = jobIf(content, "standard");
     expect(ifExpr).toMatch(/github\.event_name\s*==\s*['"]push['"]/);
@@ -118,24 +116,78 @@ describe("ci.yml topology", () => {
     );
   });
 
-  it("standard job uses a fixed full gate when fallback_full or on main push", () => {
+  it("standard job uses a trusted base classifier for full fallback", () => {
     const scripts = collectRunScripts(content, "standard");
     const planScript = scripts.find(s => s.includes("FALLBACK_FULL"));
     expect(planScript).toBeDefined();
     expect(planScript).toMatch(/FALLBACK_FULL/);
     expect(planScript).toMatch(/GITHUB_EVENT_NAME/);
-    expect(planScript).toMatch(/pnpm\s+test:unit/);
-    expect(planScript).toMatch(/pnpm\s+test:integration:smoke/);
-    expect(planScript).toMatch(/node\s+dist\/cli\.js/);
+    expect(planScript).toMatch(
+      /trusted_root=.*RUNNER_TEMP\/trusted-verification/,
+    );
+    expect(planScript).toMatch(
+      /git show "\$BASE_REF:scripts\/verification-scope\.mjs"/,
+    );
+    expect(planScript).toMatch(
+      /git show "\$BASE_REF:scripts\/lib\/run-bounded-process\.mjs"/,
+    );
+    expect(planScript).toMatch(
+      /node "\$trusted_classifier" --base "\$BASE_REF" --force-full --run/,
+    );
+    expect(planScript).not.toMatch(/pnpm\s+test:unit/);
+    expect(planScript).not.toMatch(/pnpm\s+test:integration:smoke/);
+    expect(planScript).not.toMatch(/node\s+dist\/cli\.js/);
   });
 
-  it("standard job runs a hard-coded full test suite for high-risk changes", () => {
+  it("standard job runs the head-side bounded plan when not in fallback full", () => {
     const scripts = collectRunScripts(content, "standard");
-    const planScript = scripts.find(s => s.includes("FALLBACK_FULL"));
+    const planScript = scripts.find(s => s.includes("verification-scope.mjs"));
     expect(planScript).toBeDefined();
-    expect(planScript).toMatch(/pnpm\s+check:supply-chain/);
-    expect(planScript).toMatch(/pnpm\s+typecheck/);
-    expect(planScript).toMatch(/pnpm\s+build/);
+    expect(planScript).toMatch(/else/);
+    expect(planScript).toMatch(
+      /node scripts\/verification-scope\.mjs --base "\$BASE_REF" --run/,
+    );
+  });
+
+  it("trusted full runner can be materialized and launched by Node", () => {
+    const scripts = collectRunScripts(content, "standard");
+    const standardScript = scripts.find(s => s.includes("trusted_root="));
+    expect(standardScript).toBeDefined();
+
+    const tempDir = mkdtempSync(join(repoRoot, "tmp-trusted-classifier-"));
+    const trustedScriptsDir = join(tempDir, "scripts");
+    const trustedLibDir = join(trustedScriptsDir, "lib");
+    mkdirSync(trustedLibDir, { recursive: true });
+
+    copyFileSync(
+      join(repoRoot, "scripts", "verification-scope.mjs"),
+      join(trustedScriptsDir, "verification-scope.mjs"),
+    );
+    copyFileSync(
+      join(repoRoot, "scripts", "lib", "run-bounded-process.mjs"),
+      join(trustedLibDir, "run-bounded-process.mjs"),
+    );
+
+    try {
+      const output = execFileSync(
+        process.execPath,
+        [
+          join(trustedScriptsDir, "verification-scope.mjs"),
+          "--local",
+          "--plan",
+        ],
+        {
+          cwd: repoRoot,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 30_000,
+        },
+      );
+      expect(output).toContain('"schema_version"');
+      expect(output).toContain('"mode"');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("ci-status job validates all required results", () => {

@@ -109,13 +109,12 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
         run: |
           if [ "$FALLBACK_FULL" = "true" ] || [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            pnpm check:supply-chain
-            pnpm typecheck
-            pnpm test:unit -- --no-file-parallelism --testTimeout=30000
-            pnpm build
-            pnpm test:integration:smoke -- --no-file-parallelism --testTimeout=30000
-            node dist/cli.js --version
-            node dist/cli.js --json --version
+            trusted_root="$RUNNER_TEMP/trusted-verification"
+            trusted_classifier="$trusted_root/scripts/verification-scope.mjs"
+            mkdir -p "$trusted_root/scripts/lib"
+            git show "$BASE_REF:scripts/verification-scope.mjs" > "$trusted_classifier"
+            git show "$BASE_REF:scripts/lib/run-bounded-process.mjs" > "$trusted_root/scripts/lib/run-bounded-process.mjs"
+            node "$trusted_classifier" --base "$BASE_REF" --force-full --run
           else
             node scripts/verification-scope.mjs --base "$BASE_REF" --run
           fi

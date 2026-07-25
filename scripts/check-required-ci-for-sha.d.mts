@@ -9,8 +9,8 @@ export interface CheckResult {
   total_check_runs: number;
   matching_check_runs: number;
   attempts: number;
-  latest_run_id?: number | null;
-  error?: string;
+  latest_run_id: number | null;
+  error: string | null;
 }
 
 export interface CheckOptions {
@@ -26,4 +26,6 @@ export interface CheckOptions {
   fetchImpl?: typeof fetch;
 }
 
-export function checkRequiredCiForSha(options: CheckOptions): Promise<CheckResult>;
+export function checkRequiredCiForSha(
+  options: CheckOptions,
+): Promise<CheckResult>;

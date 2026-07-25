@@ -19,6 +19,9 @@ function assertHexSha(value) {
   }
 }
 
+const GITHUB_API_BASE = "https://api.github.com";
+const CI_WORKFLOW_ID = "ci.yml";
+
 export async function checkRequiredCiForSha({
   owner,
   repo,
@@ -33,7 +36,9 @@ export async function checkRequiredCiForSha({
 }) {
   assertHexSha(sha);
 
-  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${sha}/check-runs?per_page=100`;
+  const lowerSha = sha.toLowerCase();
+  const baseUrl = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/${encodeURIComponent(CI_WORKFLOW_ID)}/runs`;
+  const listUrl = `${baseUrl}?head_sha=${encodeURIComponent(lowerSha)}&branch=${encodeURIComponent("main")}&event=${encodeURIComponent("push")}&per_page=100`;
   const headers = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
@@ -52,128 +57,168 @@ export async function checkRequiredCiForSha({
       break;
     }
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
-    let response;
-    try {
-      response = await fetchImpl(url, { headers, signal: controller.signal });
-    } catch (err) {
-      clearTimeout(timer);
-      lastError = err instanceof Error ? err.message : String(err);
-      // Retry on network / abort errors.
-      if (attempt < retryAttempts) {
-        await sleep(retryIntervalMs);
-        continue;
-      }
-      break;
-    } finally {
-      clearTimeout(timer);
-    }
+    const listResult = await fetchJson(listUrl, {
+      headers,
+      requestTimeoutMs,
+      fetchImpl,
+    });
 
-    if (!response.ok) {
-      lastResponseStatus = response.status;
-      const body = await response.text().catch(() => "");
-      // 401/403 are auth/permission failures — fail immediately.
-      if (response.status === 401 || response.status === 403) {
-        return {
-          ok: false,
+    if (listResult.error) {
+      lastResponseStatus = listResult.status;
+      if (listResult.status === 401 || listResult.status === 403) {
+        return immediateFail({
           owner,
           repo,
-          sha: sha.toLowerCase(),
-          check_name: checkName,
-          status: String(response.status),
-          conclusion: null,
-          total_check_runs: 0,
-          matching_check_runs: 0,
-          attempts: attempt,
-          error: `GitHub API ${response.status}: ${body}`,
-        };
+          sha: lowerSha,
+          checkName,
+          attempt,
+          status: String(listResult.status),
+          error: listResult.error,
+        });
       }
-      // Retry on rate-limit (429) and server errors.
-      if (response.status === 429 || response.status >= 500) {
+      if (
+        listResult.status === 429 ||
+        (typeof listResult.status === "number" && listResult.status >= 500) ||
+        listResult.network
+      ) {
+        lastError = listResult.error;
         if (attempt < retryAttempts) {
           await sleep(retryIntervalMs);
           continue;
         }
+        break;
       }
+      return immediateFail({
+        owner,
+        repo,
+        sha: lowerSha,
+        checkName,
+        attempt,
+        status: String(listResult.status ?? "unknown"),
+        error: listResult.error,
+      });
+    }
+
+    const data = listResult.data;
+    const allRuns = Array.isArray(data.workflow_runs) ? data.workflow_runs : [];
+    const runs = allRuns.filter(
+      run =>
+        typeof run === "object" &&
+        run.event === "push" &&
+        run.head_branch === "main" &&
+        (run.head_sha ?? "").toLowerCase() === lowerSha &&
+        (run.path ?? "").replace(/^\.github\/workflows\//, "") ===
+          CI_WORKFLOW_ID,
+    );
+
+    if (runs.length === 0) {
+      lastError = "no main push workflow run for the exact SHA";
+      if (attempt < retryAttempts) {
+        await sleep(retryIntervalMs);
+        continue;
+      }
+      break;
+    }
+
+    const latest = latestWorkflowRun(runs);
+
+    if (!isTerminalStatus(latest.status)) {
+      lastError = `latest workflow run is ${latest.status}`;
+      if (attempt < retryAttempts) {
+        await sleep(retryIntervalMs);
+        continue;
+      }
+      break;
+    }
+
+    if (latest.status !== "completed" || latest.conclusion !== "success") {
       return {
         ok: false,
         owner,
         repo,
-        sha: sha.toLowerCase(),
+        sha: lowerSha,
         check_name: checkName,
-        status: String(response.status),
-        conclusion: null,
-        total_check_runs: 0,
-        matching_check_runs: 0,
-        attempts: attempt,
-        error: `GitHub API ${response.status}: ${body}`,
-      };
-    }
-
-    let data;
-    try {
-      data = await response.json();
-    } catch (err) {
-      lastError = `invalid JSON: ${err instanceof Error ? err.message : String(err)}`;
-      if (attempt < retryAttempts) {
-        await sleep(retryIntervalMs);
-        continue;
-      }
-      break;
-    }
-
-    const runs = Array.isArray(data.check_runs) ? data.check_runs : [];
-    const matches = runs.filter(
-      run =>
-        typeof run === "object" &&
-        run.name === checkName &&
-        run.app?.slug === "github-actions",
-    );
-
-    if (matches.length === 0) {
-      lastError = "no matching check run from github-actions";
-      if (attempt < retryAttempts) {
-        await sleep(retryIntervalMs);
-        continue;
-      }
-      break;
-    }
-
-    const latest = latestRun(matches);
-
-    if (latest.status === "completed") {
-      const ok = latest.conclusion === "success";
-      return {
-        ok,
-        owner,
-        repo,
-        sha: sha.toLowerCase(),
-        check_name: checkName,
-        status: latest.status,
+        status: String(latest.status ?? "completed"),
         conclusion: latest.conclusion ?? null,
-        total_check_runs: runs.length,
-        matching_check_runs: matches.length,
+        total_check_runs: allRuns.length,
+        matching_check_runs: runs.length,
         attempts: attempt,
         latest_run_id: latest.id ?? null,
-        app_slug: latest.app?.slug ?? null,
+        error:
+          latest.conclusion && latest.conclusion !== "success"
+            ? `workflow run conclusion is ${latest.conclusion}`
+            : `workflow run status is ${latest.status}`,
       };
     }
 
-    // Queued or in-progress — wait for completion.
-    lastError = `latest run is ${latest.status}`;
-    if (attempt < retryAttempts) {
-      await sleep(retryIntervalMs);
-      continue;
+    if (checkName) {
+      const jobResult = await verifyNamedJob({
+        owner,
+        repo,
+        runId: latest.id,
+        checkName,
+        token,
+        requestTimeoutMs,
+        fetchImpl,
+      });
+      if (jobResult.error) {
+        if (jobResult.retryable && attempt < retryAttempts) {
+          lastError = jobResult.error;
+          lastResponseStatus = jobResult.status;
+          await sleep(retryIntervalMs);
+          continue;
+        }
+        return {
+          ok: false,
+          owner,
+          repo,
+          sha: lowerSha,
+          check_name: checkName,
+          status: String(jobResult.status ?? "unknown"),
+          conclusion: jobResult.conclusion ?? null,
+          total_check_runs: allRuns.length,
+          matching_check_runs: runs.length,
+          attempts: attempt,
+          latest_run_id: latest.id ?? null,
+          error: jobResult.error,
+        };
+      }
+      return {
+        ok: jobResult.ok,
+        owner,
+        repo,
+        sha: lowerSha,
+        check_name: checkName,
+        status: jobResult.status,
+        conclusion: jobResult.conclusion,
+        total_check_runs: allRuns.length,
+        matching_check_runs: runs.length,
+        attempts: attempt,
+        latest_run_id: latest.id ?? null,
+        error: jobResult.error ?? null,
+      };
     }
-    break;
+
+    return {
+      ok: true,
+      owner,
+      repo,
+      sha: lowerSha,
+      check_name: checkName,
+      status: latest.status,
+      conclusion: latest.conclusion,
+      total_check_runs: allRuns.length,
+      matching_check_runs: runs.length,
+      attempts: attempt,
+      latest_run_id: latest.id ?? null,
+    };
   }
 
   return {
     ok: false,
     owner,
     repo,
-    sha: sha.toLowerCase(),
+    sha: lowerSha,
     check_name: checkName,
     status: lastResponseStatus ? String(lastResponseStatus) : "not_found",
     conclusion: null,
@@ -188,28 +233,156 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function latestRun(runs) {
-  function fallbackTs(run) {
-    const started = run.started_at ? Date.parse(run.started_at) : null;
-    const created = run.created_at ? Date.parse(run.created_at) : null;
-    if (started !== null) return started;
-    if (created !== null) return created;
-    return 0;
-  }
+function isTerminalStatus(status) {
+  return status === "completed";
+}
 
+function runTs(run) {
+  const created = run.created_at ? Date.parse(run.created_at) : null;
+  if (created !== null) return created;
+  const started = run.started_at ? Date.parse(run.started_at) : null;
+  if (started !== null) return started;
+  return 0;
+}
+
+function latestWorkflowRun(runs) {
   return [...runs].sort((a, b) => {
+    const tsA = runTs(a);
+    const tsB = runTs(b);
+    if (tsA !== tsB) return tsB - tsA;
+
+    const numA = typeof a.run_number === "number" ? a.run_number : 0;
+    const numB = typeof b.run_number === "number" ? b.run_number : 0;
+    if (numA !== numB) return numB - numA;
+
     const idA = typeof a.id === "number" ? a.id : Number(a.id ?? 0);
     const idB = typeof b.id === "number" ? b.id : Number(b.id ?? 0);
-    if (idA !== idB) return idB - idA;
-
-    const startedA = a.started_at ? Date.parse(a.started_at) : null;
-    const startedB = b.started_at ? Date.parse(b.started_at) : null;
-    if (startedA !== null && startedB !== null && startedA !== startedB) {
-      return startedB - startedA;
-    }
-
-    return fallbackTs(b) - fallbackTs(a);
+    return idB - idA;
   })[0];
+}
+
+async function fetchJson(url, { headers, requestTimeoutMs, fetchImpl }) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const response = await fetchImpl(url, {
+      headers,
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      return {
+        error: `GitHub API ${response.status}: ${body}`,
+        status: response.status,
+      };
+    }
+    const data = await response.json();
+    return { data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      error: message,
+      network: true,
+      status: null,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function immediateFail({
+  owner,
+  repo,
+  sha,
+  checkName,
+  attempt,
+  status,
+  error,
+}) {
+  return {
+    ok: false,
+    owner,
+    repo,
+    sha,
+    check_name: checkName,
+    status,
+    conclusion: null,
+    total_check_runs: 0,
+    matching_check_runs: 0,
+    attempts: attempt,
+    error,
+  };
+}
+
+async function verifyNamedJob({
+  owner,
+  repo,
+  runId,
+  checkName,
+  token,
+  requestTimeoutMs,
+  fetchImpl,
+}) {
+  const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${encodeURIComponent(runId)}/jobs?filter=latest`;
+  const headers = {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const result = await fetchJson(url, {
+    headers,
+    requestTimeoutMs,
+    fetchImpl,
+  });
+  if (result.error) {
+    const retryable =
+      result.network === true ||
+      result.status === 429 ||
+      (typeof result.status === "number" && result.status >= 500);
+    return {
+      ok: false,
+      status: result.status ?? null,
+      retryable,
+      conclusion: null,
+      error: result.error,
+    };
+  }
+
+  const jobs = Array.isArray(result.data.jobs) ? result.data.jobs : [];
+  const job = jobs.find(j => j.name === checkName);
+
+  if (!job) {
+    return {
+      ok: false,
+      status: "not_found",
+      retryable: false,
+      conclusion: null,
+      error: `workflow run does not contain job "${checkName}"`,
+    };
+  }
+
+  if (job.status !== "completed" || job.conclusion !== "success") {
+    return {
+      ok: false,
+      status: String(job.status ?? "unknown"),
+      retryable: false,
+      conclusion: job.conclusion ?? null,
+      error:
+        job.conclusion && job.conclusion !== "success"
+          ? `job "${checkName}" conclusion is ${job.conclusion}`
+          : `job "${checkName}" status is ${job.status}`,
+    };
+  }
+
+  return {
+    ok: true,
+    status: job.status,
+    retryable: false,
+    conclusion: job.conclusion,
+  };
 }
 
 async function main() {

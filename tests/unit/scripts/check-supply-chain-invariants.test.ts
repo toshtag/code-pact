@@ -140,7 +140,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "    runs-on: ubuntu-latest",
     "    permissions:",
     "      contents: read",
-    "      checks: read",
+    "      actions: read",
     "    timeout-minutes: 15",
     "    steps:",
     "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
@@ -1352,8 +1352,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when prepare job has id-token: write", async () => {
     root = await buildTree({
       publishContent: wellFormedPublish.replace(
-        "  prepare:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read",
-        "  prepare:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n      id-token: write",
+        "  prepare:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n      actions: read",
+        "  prepare:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n      actions: read\n      id-token: write",
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);
@@ -1534,8 +1534,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   it("fails when prepare job has issues: write", async () => {
     root = await buildTree({
       publishContent: wellFormedPublish.replace(
-        "  prepare:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read",
-        "  prepare:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n      issues: write",
+        "  prepare:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n      actions: read",
+        "  prepare:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n      actions: read\n      issues: write",
       ),
     });
     const { failures } = checkSupplyChainInvariants(root);
