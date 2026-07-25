@@ -19,6 +19,7 @@ jobs:
     outputs:
       docs: ${{ steps.classify.outputs.docs }}
       standard: ${{ steps.classify.outputs.standard }}
+      fallback_full: ${{ steps.classify.outputs.fallback_full }}
       base_ref: ${{ steps.base.outputs.ref }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -40,13 +41,22 @@ jobs:
         env:
           BASE_REF: ${{ steps.base.outputs.ref }}
         run: |
-          trusted_classifier="$RUNNER_TEMP/verification-scope.mjs"
+          trusted_root="$RUNNER_TEMP/trusted-classifier"
+          trusted_classifier="$trusted_root/scripts/verification-scope.mjs"
           if git cat-file -e "$BASE_REF:scripts/verification-scope.mjs" 2>/dev/null; then
+            mkdir -p "$trusted_root/scripts/lib"
             git show "$BASE_REF:scripts/verification-scope.mjs" > "$trusted_classifier"
+            git show "$BASE_REF:scripts/lib/run-bounded-process.mjs" > "$trusted_root/scripts/lib/run-bounded-process.mjs"
             node "$trusted_classifier" --base "$BASE_REF" --format github
+            # Older base classifiers do not emit fallback_full. Default to true
+            # (full gate) so downstream jobs always see a valid boolean.
+            if ! grep -q '^fallback_full=' "$GITHUB_OUTPUT" 2>/dev/null; then
+              echo "fallback_full=true" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "docs=true" >> "$GITHUB_OUTPUT"
             echo "standard=true" >> "$GITHUB_OUTPUT"
+            echo "fallback_full=true" >> "$GITHUB_OUTPUT"
           fi
 
   docs:
@@ -80,6 +90,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
@@ -94,10 +105,16 @@ jobs:
       - name: Run bounded verification plan
         env:
           BASE_REF: ${{ needs.classify.outputs.base_ref }}
+          FALLBACK_FULL: ${{ needs.classify.outputs.fallback_full }}
           GITHUB_SHA: ${{ github.sha }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            node scripts/verification-scope.mjs --base "$BASE_REF" --force-full --run
+          if [ "$FALLBACK_FULL" = "true" ] || [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            trusted_root="$RUNNER_TEMP/trusted-verification"
+            trusted_classifier="$trusted_root/scripts/verification-scope.mjs"
+            mkdir -p "$trusted_root/scripts/lib"
+            git show "$BASE_REF:scripts/verification-scope.mjs" > "$trusted_classifier"
+            git show "$BASE_REF:scripts/lib/run-bounded-process.mjs" > "$trusted_root/scripts/lib/run-bounded-process.mjs"
+            node "$trusted_classifier" --base "$BASE_REF" --force-full --run
           else
             node scripts/verification-scope.mjs --base "$BASE_REF" --run
           fi
@@ -112,19 +129,21 @@ jobs:
         env:
           DOCS_OUTPUT: ${{ needs.classify.outputs.docs }}
           STANDARD_OUTPUT: ${{ needs.classify.outputs.standard }}
+          FALLBACK_FULL_OUTPUT: ${{ needs.classify.outputs.fallback_full }}
           CLASSIFY_RESULT: ${{ needs.classify.result }}
           DOCS_RESULT: ${{ needs.docs.result }}
           STANDARD_RESULT: ${{ needs.standard.result }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ "$DOCS_OUTPUT" != "true" ] && [ "$DOCS_OUTPUT" != "false" ]; then
-            echo "classify output 'docs' is not a boolean: '$DOCS_OUTPUT'"
-            exit 1
-          fi
-          if [ "$STANDARD_OUTPUT" != "true" ] && [ "$STANDARD_OUTPUT" != "false" ]; then
-            echo "classify output 'standard' is not a boolean: '$STANDARD_OUTPUT'"
-            exit 1
-          fi
+          for output in docs standard fallback_full; do
+            value="${DOCS_OUTPUT:-unknown}"
+            if [ "$output" = "standard" ]; then value="${STANDARD_OUTPUT:-unknown}"; fi
+            if [ "$output" = "fallback_full" ]; then value="${FALLBACK_FULL_OUTPUT:-unknown}"; fi
+            if [ "$value" != "true" ] && [ "$value" != "false" ]; then
+              echo "classify output '$output' is not a boolean: '$value'"
+              exit 1
+            fi
+          done
           if [ "$CLASSIFY_RESULT" != "success" ]; then
             echo "classify job did not succeed: $CLASSIFY_RESULT"
             exit 1
