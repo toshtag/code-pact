@@ -85,6 +85,13 @@ describe("ci.yml topology", () => {
     expect(jobOutputs(content, "classify")).toContain("fallback_full");
   });
 
+  it("classify job defaults fallback_full when the base classifier omits it", () => {
+    const scripts = collectRunScripts(content, "classify");
+    const script = scripts.join("\n");
+    expect(script).toMatch(/grep -q '\^fallback_full='\s*"\$GITHUB_OUTPUT"/);
+    expect(script).toContain("fallback_full=true");
+  });
+
   it("classify job copies the classifier and its lib dependency into a temporary tree", () => {
     const scripts = collectRunScripts(content, "classify");
     const script = scripts.join("\n");

@@ -48,6 +48,11 @@ jobs:
             git show "$BASE_REF:scripts/verification-scope.mjs" > "$trusted_classifier"
             git show "$BASE_REF:scripts/lib/run-bounded-process.mjs" > "$trusted_root/scripts/lib/run-bounded-process.mjs"
             node "$trusted_classifier" --base "$BASE_REF" --format github
+            # Older base classifiers do not emit fallback_full. Default to true
+            # (full gate) so downstream jobs always see a valid boolean.
+            if ! grep -q '^fallback_full=' "$GITHUB_OUTPUT" 2>/dev/null; then
+              echo "fallback_full=true" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "docs=true" >> "$GITHUB_OUTPUT"
             echo "standard=true" >> "$GITHUB_OUTPUT"
@@ -85,6 +90,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
