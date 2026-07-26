@@ -3,7 +3,7 @@ name: Claude Bootstrap Right-Sizing
 weight: 1
 confidence: high
 risk: medium
-status: in_progress
+status: done
 objective: >
   Make the generated claude-code instruction file a bootstrap rather than a
   manual. The always-loaded file carries the repository purpose, the single
@@ -159,8 +159,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
-    requires_decision: false
+    status: done
     description: >
       Close the `--accept-modified` correction where P88-T1A left it open: the
       schema-v1 generated instruction body still tells the reader the flag
@@ -168,6 +167,7 @@ tasks:
       claim adapter doctor and the CLI contract no longer make. Align the
       maintainer documentation and source comments that still describe
       model-aware instruction generation with the model-neutral bootstrap.
+    requires_decision: false
     depends_on:
       - P88-T1A
     reads:
@@ -190,18 +190,3 @@ tasks:
       - tests/unit/commands/adapter.test.ts
     acceptance_refs:
       - tests/unit/commands/adapter.test.ts
-    definition_of_done:
-      - No generated adapter instruction describes `--accept-modified` as
-        preserving local edits
-      - The schema-v1 generated instruction states that `--accept-modified`
-        discards managed local modifications and regenerates the file
-      - Both locales carry equivalent destructive-overwrite guidance
-      - Doctor, the generated instructions, and the current CLI contract agree on
-        `--accept-modified` semantics
-      - The schema-v2 bootstrap carries no part of the schema-v1 failure guidance
-      - Maintainer documentation makes no claim that `--model` adds an effort or
-        thinking block to the generated instruction file
-      - Source comments describe `model_version` as a profile pin rather than a
-        template-content switch
-      - codex, cursor, gemini-cli, and generic stay on schema v1 with only the
-        unsafe remediation sentence changed
