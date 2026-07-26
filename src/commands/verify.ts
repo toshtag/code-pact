@@ -251,8 +251,13 @@ async function assertFullStageAllowed(opts: {
   taskId: string;
   phaseId: string;
   maxAttempts: number;
+  signal?: AbortSignal;
 }): Promise<void> {
-  const state = await currentVerificationState(opts.cwd);
+  // Throwing here keeps the full verification commands from starting at all
+  // when the run was cancelled while its authorization state was collected.
+  const state = await currentVerificationState(opts.cwd, {
+    signal: opts.signal,
+  });
   const ledger = await readVerificationLedger(opts.cwd);
   if (stageAttemptCount(ledger, opts.taskId, "full") >= opts.maxAttempts) {
     const error = new Error(
@@ -306,8 +311,13 @@ async function recordStageAttempt(opts: {
   finishedAt: Date;
   commandCheck: CheckResult;
   failure: boolean;
+  signal?: AbortSignal;
 }): Promise<void> {
-  const state = await currentVerificationState(opts.cwd);
+  // A ledger entry is only meaningful alongside the state it was produced
+  // under, so a cancelled collection must record nothing rather than guess.
+  const state = await currentVerificationState(opts.cwd, {
+    signal: opts.signal,
+  });
   await appendVerificationLedgerEntry(opts.cwd, {
     started_at: opts.startedAt.toISOString(),
     finished_at: opts.finishedAt.toISOString(),
@@ -442,6 +452,7 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
         finishedAt,
         commandCheck: commandsCheck,
         failure: !result.ok,
+        signal,
       });
     }
     return result;
@@ -453,6 +464,7 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
       taskId,
       phaseId,
       maxAttempts: maxFullAttempts(project!),
+      signal,
     });
   }
 
@@ -479,6 +491,7 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
         finishedAt,
         commandCheck: commandsCheck,
         failure: true,
+        signal,
       });
     }
     return {
@@ -517,6 +530,7 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
       finishedAt,
       commandCheck: commandsCheck,
       failure: !ok,
+      signal,
     });
   }
 
