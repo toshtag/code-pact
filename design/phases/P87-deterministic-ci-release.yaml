@@ -3,11 +3,13 @@ name: Deterministic CI and Release
 weight: 1
 confidence: high
 risk: low
-status: done
+status: in_progress
 objective: >
   Make release and CI behavior deterministic, hermetic, and context-efficient.
   P87-T1 closes release correctness gaps; P87-T2 applies change-aware test
-  selection.
+  selection; P87-T3 closes the verification-efficiency regression so focused
+  plans actually run in PR CI and local edit/fix loops cannot repeat full
+  suites.
 non_goals:
   - Modify v2.8.0 tag/Release/npm package
   - Change production features outside the release pipeline
@@ -22,6 +24,10 @@ definition_of_done:
   - Publish reuses the successful exact-SHA main CI result
   - Verification processes are bounded and expose heartbeat and slowest-file
     output
+  - Pull-request CI executes the generated focused plan while high-risk changes
+    and main pushes retain one full gate
+  - Local verification requires a successful focused run before full
+    verification and bounds full-suite attempts to two
 verification:
   commands:
     - pnpm test:ci
@@ -121,3 +127,48 @@ tasks:
       - tests/unit/scripts/verification-scope.test.ts
       - tests/unit/scripts/vitest-ci-reporter.test.ts
       - tests/unit/workflows/ci-workflow.test.ts
+  - id: P87-T3
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: large
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: planned
+    description: >
+      Close the P87-T2 verification-efficiency regression by making pull-request
+      CI execute the generated focused verification plan, preventing repeated
+      full-suite execution during local edit/fix loops, and recording selection
+      reasons, command counts, and durations without weakening high-risk or
+      main-branch gates.
+    depends_on:
+      - P87-T2
+    requires_decision: false
+    reads:
+      - .github/workflows/ci.yml
+      - scripts/verification-scope.mjs
+      - scripts/lib/run-bounded-process.mjs
+      - scripts/check-supply-chain-invariants.mjs
+      - package.json
+      - scripts/verification-scope.d.mts
+      - tests/unit/scripts/verification-scope.test.ts
+      - tests/unit/workflows/ci-workflow.test.ts
+      - src/commands/task-prepare.ts
+      - tests/integration/task-prepare-commands-contract.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+    writes:
+      - design/phases/P87-deterministic-ci-release.yaml
+      - .github/workflows/ci.yml
+      - scripts/verification-scope.mjs
+      - scripts/verification-scope.d.mts
+      - tests/unit/scripts/verification-scope.test.ts
+      - tests/unit/workflows/ci-workflow.test.ts
+      - src/commands/task-prepare.ts
+      - tests/integration/task-prepare-commands-contract.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+    acceptance_refs:
+      - tests/unit/scripts/verification-scope.test.ts
+      - tests/unit/workflows/ci-workflow.test.ts
+      - tests/integration/task-prepare-commands-contract.test.ts
+      - tests/unit/commands/task-prepare.test.ts
