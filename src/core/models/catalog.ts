@@ -31,6 +31,8 @@ import type { ModelProfile } from "../schemas/model-profile.ts";
  * "generic" (or undefined) produces the baseline template. Newest first.
  */
 export const CLAUDE_MODEL_VERSIONS = [
+  "opus-5",
+  "sonnet-5",
   "opus-4.8",
   "opus-4.7",
   "opus-4.6",
@@ -44,6 +46,8 @@ export type ClaudeModelVersion = (typeof CLAUDE_MODEL_VERSIONS)[number];
  * (e.g. "opus-4.7") so users can pass whichever form they have on hand.
  */
 export const MODEL_VERSION_ALIASES: Readonly<Record<string, ClaudeModelVersion>> = {
+  "claude-opus-5": "opus-5",
+  "claude-sonnet-5": "sonnet-5",
   "claude-opus-4-8": "opus-4.8",
   "claude-opus-4-7": "opus-4.7",
   "claude-opus-4-6": "opus-4.6",
@@ -60,8 +64,15 @@ export const MODEL_VERSION_ALIASES: Readonly<Record<string, ClaudeModelVersion>>
  * form — so this is a SEPARATE set from {@link CLAUDE_MODEL_VERSIONS}. doctor
  * validates `model_map` values against this set (not the version set), or
  * `cheap_mechanical: claude-haiku-4-5` would be a false `MODEL_ID_UNKNOWN`.
+ *
+ * `claude-fable-5` is listed for the same reason as haiku: it is a shipping
+ * Claude 5 model that a `model_map` may legitimately pin, but it is not a
+ * `model_version` value and is not a tier default.
  */
 export const CLAUDE_KNOWN_VENDOR_MODEL_IDS: readonly string[] = [
+  "claude-opus-5",
+  "claude-sonnet-5",
+  "claude-fable-5",
   "claude-opus-4-8",
   "claude-opus-4-7",
   "claude-opus-4-6",
@@ -76,8 +87,9 @@ export const CLAUDE_KNOWN_VENDOR_MODEL_IDS: readonly string[] = [
  * surface `MODEL_MAP_STALE` (a profile generated before a model bump).
  */
 export const CLAUDE_TIER_MODEL_IDS = {
-  highest_reasoning: "claude-opus-4-8",
-  balanced_coding: "claude-sonnet-4-6",
+  highest_reasoning: "claude-opus-5",
+  balanced_coding: "claude-sonnet-5",
+  // No Haiku 5 exists, so the cheap tier stays on Haiku 4.5.
   cheap_mechanical: "claude-haiku-4-5",
 } as const;
 
@@ -110,6 +122,8 @@ const GENERAL_GUIDANCE: ModelGuidance = {
 };
 
 export const CLAUDE_MODEL_GUIDANCE: Record<ClaudeModelVersion, ModelGuidance> = {
+  "opus-5": GENERAL_GUIDANCE,
+  "sonnet-5": GENERAL_GUIDANCE,
   "opus-4.8": GENERAL_GUIDANCE,
   "opus-4.7": GENERAL_GUIDANCE,
   "opus-4.6": GENERAL_GUIDANCE,

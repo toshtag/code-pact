@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import { runInit } from "../../../src/commands/init.ts";
+import { CLAUDE_TIER_MODEL_IDS } from "../../../src/core/models/catalog.ts";
 import {
   Project,
   Roadmap,
@@ -77,7 +78,9 @@ describe("runInit — default options (claude-code, ja-JP)", () => {
     const data = await readYaml(".code-pact/agent-profiles/claude-code.yaml");
     const profile = AgentProfile.parse(data);
     expect(profile.name).toBe("claude-code");
-    expect(profile.model_map.highest_reasoning).toBe("claude-opus-4-8");
+    expect(profile.model_map.highest_reasoning).toBe(
+      CLAUDE_TIER_MODEL_IDS.highest_reasoning,
+    );
   });
 
   it("generates all three model profiles", async () => {

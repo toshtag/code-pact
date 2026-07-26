@@ -7,6 +7,7 @@ import { runInit } from "../../../src/commands/init.ts";
 import { runPhaseAdd } from "../../../src/commands/phase.ts";
 import { runDoctor } from "../../../src/commands/doctor.ts";
 import { eventsDir, writeEventFile } from "../../../src/core/progress/events-io.ts";
+import { CLAUDE_TIER_MODEL_IDS } from "../../../src/core/models/catalog.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1156,11 +1157,10 @@ describe("runDoctor — model-id drift checks", () => {
     );
   }
 
-  const CURRENT_DEFAULTS = {
-    highest_reasoning: "claude-opus-4-8",
-    balanced_coding: "claude-sonnet-4-6",
-    cheap_mechanical: "claude-haiku-4-5",
-  };
+  // Derived from the catalog, not restated: bumping a Claude model is meant to
+  // be a one-file edit in core/models/catalog.ts, and a hardcoded copy here
+  // turns every bump into a test edit that says nothing about behavior.
+  const CURRENT_DEFAULTS = { ...CLAUDE_TIER_MODEL_IDS };
 
   it("does not flag a freshly initialised claude-code profile (matches catalog default)", async () => {
     const result = await runDoctor(dir);
@@ -1175,7 +1175,7 @@ describe("runDoctor — model-id drift checks", () => {
     expect(issue).toBeDefined();
     expect(issue?.severity).toBe("warning");
     // Message names the current default so the user knows what to follow.
-    expect(issue?.message).toContain("claude-opus-4-8");
+    expect(issue?.message).toContain(CLAUDE_TIER_MODEL_IDS.highest_reasoning);
     // Remediation must be honest: model_map is updated by a hand-edit + plain
     // regenerate. `adapter upgrade --model` only re-pins model_version and would
     // NOT clear this warning, so the message must not advise it.
