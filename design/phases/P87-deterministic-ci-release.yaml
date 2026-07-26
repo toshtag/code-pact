@@ -3,7 +3,7 @@ name: Deterministic CI and Release
 weight: 1
 confidence: high
 risk: low
-status: in_progress
+status: done
 objective: >
   Make release and CI behavior deterministic, hermetic, and context-efficient.
   P87-T1 closes release correctness gaps; P87-T2 applies change-aware test
@@ -184,7 +184,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       Close the remaining P87-T3 trust and lifecycle gaps by executing
       pull-request verification through the trusted base runner, preserving
@@ -200,13 +200,18 @@ tasks:
       - docs/cli-contract.md
       - docs/cli-reference.generated.md
       - docs/troubleshooting.md
+      - scripts/check-supply-chain-invariants.mjs
       - scripts/verification-scope.mjs
       - scripts/verification-scope.d.mts
       - src/cli.ts
+      - src/cli/commands/task.ts
       - src/cli/spec/root.ts
       - src/commands/task-complete.ts
       - src/commands/task-prepare.ts
       - src/commands/verify.ts
+      - src/core/evidence/failure-capsule.ts
+      - src/core/project-fs/authorities/project-config-authority.ts
+      - src/core/project-fs/index.ts
       - src/core/project.ts
       - src/core/schemas/project.ts
       - src/core/verification-ledger.ts
@@ -217,7 +222,6 @@ tasks:
       - tests/unit/commands/verify.test.ts
       - tests/unit/core/project-loader.test.ts
       - tests/unit/error-code-surface.test.ts
-      - tests/unit/scripts/verification-scope.test.ts
       - tests/unit/workflows/ci-workflow.test.ts
     writes:
       - design/phases/P87-deterministic-ci-release.yaml
@@ -226,14 +230,17 @@ tasks:
       - docs/cli-contract.md
       - docs/cli-reference.generated.md
       - docs/troubleshooting.md
+      - scripts/check-supply-chain-invariants.mjs
       - scripts/verification-scope.mjs
-      - scripts/verification-scope.d.mts
       - src/cli.ts
+      - src/cli/commands/task.ts
       - src/cli/spec/root.ts
       - src/commands/task-complete.ts
       - src/commands/task-prepare.ts
       - src/commands/verify.ts
-      - src/core/project.ts
+      - src/core/evidence/failure-capsule.ts
+      - src/core/project-fs/authorities/project-config-authority.ts
+      - src/core/project-fs/index.ts
       - src/core/schemas/project.ts
       - src/core/verification-ledger.ts
       - src/core/verification-policy.ts
@@ -243,7 +250,6 @@ tasks:
       - tests/unit/commands/verify.test.ts
       - tests/unit/core/project-loader.test.ts
       - tests/unit/error-code-surface.test.ts
-      - tests/unit/scripts/verification-scope.test.ts
       - tests/unit/workflows/ci-workflow.test.ts
     acceptance_refs:
       - tests/unit/workflows/ci-workflow.test.ts

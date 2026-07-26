@@ -5,7 +5,7 @@ phase_path: design/phases/P87-deterministic-ci-release.yaml
 base_ref: c6683f9
 base_sha: c6683f9d87842066b8ab0d857e6bacf1172adfc6
 phase_blob_sha: ba7e5f96c8a8cf0fca29b36c465ccfb07a8f6930
-contract_digest: 12ac1be64378c408c2aac9851539db4849bd14cff6a9b4e39ac90e6815864ba7
+contract_digest: a06ac0b67d93ba99357ac95328fa4d2b07c3f8e1ed0e9ec4d9960bc0936b1129
 contract:
   description: >
     Close the remaining P87-T3 trust and lifecycle gaps by executing
@@ -19,13 +19,18 @@ contract:
     - docs/cli-contract.md
     - docs/cli-reference.generated.md
     - docs/troubleshooting.md
+    - scripts/check-supply-chain-invariants.mjs
     - scripts/verification-scope.d.mts
     - scripts/verification-scope.mjs
     - src/cli.ts
+    - src/cli/commands/task.ts
     - src/cli/spec/root.ts
     - src/commands/task-complete.ts
     - src/commands/task-prepare.ts
     - src/commands/verify.ts
+    - src/core/evidence/failure-capsule.ts
+    - src/core/project-fs/authorities/project-config-authority.ts
+    - src/core/project-fs/index.ts
     - src/core/project.ts
     - src/core/schemas/project.ts
     - src/core/verification-ledger.ts
@@ -36,7 +41,6 @@ contract:
     - tests/unit/commands/verify.test.ts
     - tests/unit/core/project-loader.test.ts
     - tests/unit/error-code-surface.test.ts
-    - tests/unit/scripts/verification-scope.test.ts
     - tests/unit/workflows/ci-workflow.test.ts
   writes:
     - .code-pact/project.yaml
@@ -45,14 +49,17 @@ contract:
     - design/phases/P87-deterministic-ci-release.yaml
     - docs/cli-reference.generated.md
     - docs/troubleshooting.md
-    - scripts/verification-scope.d.mts
+    - scripts/check-supply-chain-invariants.mjs
     - scripts/verification-scope.mjs
     - src/cli.ts
+    - src/cli/commands/task.ts
     - src/cli/spec/root.ts
     - src/commands/task-complete.ts
     - src/commands/task-prepare.ts
     - src/commands/verify.ts
-    - src/core/project.ts
+    - src/core/evidence/failure-capsule.ts
+    - src/core/project-fs/authorities/project-config-authority.ts
+    - src/core/project-fs/index.ts
     - src/core/schemas/project.ts
     - src/core/verification-ledger.ts
     - src/core/verification-policy.ts
@@ -62,7 +69,6 @@ contract:
     - tests/unit/commands/verify.test.ts
     - tests/unit/core/project-loader.test.ts
     - tests/unit/error-code-surface.test.ts
-    - tests/unit/scripts/verification-scope.test.ts
     - tests/unit/workflows/ci-workflow.test.ts
   depends_on:
     - P87-T3
