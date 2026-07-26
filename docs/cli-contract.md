@@ -1319,16 +1319,20 @@ for the parse error.
 
 Generates the adapter for the named agent and writes the manifest.
 
-`--model <version>` produces a **model-aware** instruction file for the claude-code adapter
-with an effort-level and thinking guidance block for a supported Claude version
-(`opus-4.8`, `opus-4.7`, `opus-4.6`, `sonnet-4.6`, plus vendor-id aliases such as
-`claude-opus-4-8`). The guidance is intentionally generation-resistant — it avoids
-per-generation capability claims and defers exact model capabilities to Anthropic's current
-documentation. An unknown CLI `--model` value fails with `CONFIG_ERROR` (it is rejected
-before anything is written). Takes precedence over `model_version` in the agent profile YAML;
-if neither is set, the version-agnostic template is used. (Separately: if an existing profile
-already contains an unrecognized `model_version`, generation falls back to the generic
-guidance block and `doctor` reports `MODEL_ID_UNKNOWN`.)
+`--model <version>` pins `model_version` on the claude-code agent profile for a supported
+Claude version (`opus-5`, `sonnet-5`, `opus-4.8`, `opus-4.7`, `opus-4.6`, `sonnet-4.6`, plus
+vendor-id aliases such as `claude-opus-5`). A vendor-id alias is normalized to the canonical
+short form before it is written. An unknown CLI `--model` value fails with `CONFIG_ERROR`
+(it is rejected before anything is written). It takes precedence over `model_version` already
+in the agent profile YAML.
+
+The pin does **not** change the generated instruction file. The claude-code adapter generates
+a model-neutral bootstrap (adapter schema v2): the same bytes for every model version, with
+no effort-level, thinking, or tier guidance. Effort and tier guidance reach the agent
+per-task through `recommend` / `task prepare --detail full` instead, and exact model
+capabilities are Anthropic's current documentation rather than a bundled copy. An existing
+profile carrying an unrecognized `model_version` still generates the same bytes, and `doctor`
+reports `MODEL_ID_UNKNOWN`.
 
 `--regen-skills` is the role-scoped `--force` described above (it applies `--force` to skill
 files only). It refreshes the **built-in** skills and adopts new ones, but it does **NOT**
@@ -1859,7 +1863,27 @@ Conformance is intentionally narrower than `adapter doctor` — it inspects only
 
 Every check object carries a `severity` (`required` | `advisory`). The hardening, recommendation-consumption, bounded-repair, and structural-projection checks show `advisory` above because this example's manifest `generator_version` predates their thresholds; on an adapter generated at or after a group's threshold, that group's checks are `required`.
 
-#### Checks
+#### Two instruction contracts, selected by adapter schema version
+
+The instruction-file checks come in two mutually exclusive sets, chosen from the manifest's
+`adapter_schema_version`:
+
+- **schema v1** — the instruction file must SPELL OUT the agent contract axes, the lifecycle
+  and diagnostic surfaces, the failure catalog, and the recommendation / bounded-repair /
+  projection guidance. This is the `codex`, `cursor`, `gemini-cli`, and `generic` shape.
+- **schema v2 (bootstrap)** — the instruction file must present the entrypoint and the
+  progressive-disclosure fields, and must NOT restate the schema-v1 detail. It is also
+  bounded in size and in how many repository gotchas it may carry. This is the `claude-code`
+  shape.
+
+The selector is the schema version rather than a release threshold, so an installed
+schema-v1 instruction file keeps being checked against the schema-v1 contract for as long as
+it stays installed; it moves to the bootstrap contract when `adapter upgrade <agent> --write`
+regenerates it from a schema-v2 adapter. The `manifest_present`,
+`instruction_file_present`, `no_contract_antipatterns`, and per-file checksum checks apply
+under both.
+
+#### Checks — schema v1 and shared
 
 | Check id                                       | What it asserts                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1888,6 +1912,21 @@ Every check object carries a `severity` (`required` | `advisory`). The hardening
 | `file_checksum_skipped_unverifiable`           | A manifest entry names a dynamically-generated skill in the shared `.claude/skills/` namespace (matches the role-scoped `createPathGlobsByRole` for role=skill but not the narrow read-authority set `ownedPathRoles`) and is not recorded as `ownership: handed_off`. Its name is attacker-influenceable, so read-ownership cannot be proven: the file is NOT read or checksummed. `advisory` severity. To regenerate, move or delete the file, then run `adapter upgrade <agent> --write`.                                                                                                                                                                                                                                                                                                                      |
 | `dynamic_handoff_orphan_unverified`            | A manifest entry is `ownership: handed_off` and names a dynamic skill under the adapter's role-scoped create namespace, but the file is missing. Existing bytes are not read. Conformance compares only the current desired output hash with the manifest hash; when they match, `adapter upgrade <agent> --write` can safely prune the stale manifest entry. `advisory` severity.                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `dynamic_handoff_manifest_stale`               | A manifest entry is `ownership: handed_off` and names a dynamic skill under the adapter's role-scoped create namespace, but the current desired output hash differs from the manifest hash. Existing bytes are not read or checksummed. The stale manifest entry is surfaced as `advisory`; regenerate the adapter or review the handoff before relying on orphan pruning.                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+
+#### Checks — schema v2 (bootstrap)
+
+Every bootstrap check is `required`. There is no generator-version gate: an adapter is held
+to this contract only once its manifest records schema version 2, which happens when a
+schema-v2 adapter regenerates it.
+
+| Check id                             | What it asserts                                                                                                                                                                                                                                                                                        |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bootstrap_entrypoint_present`       | The instruction file contains `code-pact task prepare`, `data.next.command`, and `data.more.command` — the entrypoint plus the two fields the agent reads to continue without widening context                                                                                                            |
+| `bootstrap_no_lifecycle_enumeration` | At most one of `code-pact task start` / `code-pact task complete` / `code-pact task finalize` appears. One reference is a mention; the whole set is a lifecycle manual, and the lifecycle is in the `task prepare` response the agent already holds                                                       |
+| `bootstrap_no_failure_catalog`       | None of the schema-v1 failure keywords (`dependency block`, `manual block`, `verification failure`, `adapter drift`, `missing context pack`) appears. Deliberately the same list `required_failure_guidance` requires — the two contracts disagree about this exact set                                    |
+| `bootstrap_model_neutral`            | No `## Model selection` / `## Model guidance` heading and no tier name (`highest_reasoning`, `balanced_coding`, `cheap_mechanical`). Model facts drive `--model` validation, profile seeding, and advisory recommendation defaults; none of that is restated in always-loaded context                       |
+| `bootstrap_gotchas_bounded`          | The `## Repository gotchas` section carries at most `BOOTSTRAP_MAX_GOTCHAS` (5) bullets. Block quotes and prose in the section are not bullets and do not count                                                                                                                                          |
+| `bootstrap_context_budget`           | The instruction file is at most `BOOTSTRAP_CONTEXT_BUDGET_BYTES` (4096) UTF-8 bytes. This is **Code Pact's own regression budget, not a published Claude Code or Anthropic limit**; staying under it does not by itself improve agent behavior. Its job is to make growth visible before it ships          |
 
 #### Severity and generator-version gates
 
