@@ -19,6 +19,7 @@ export {
   mkdtemp,
   open,
   readFile,
+  readlink,
   readdir,
   realpath,
   rename,

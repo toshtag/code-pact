@@ -1,14 +1,15 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { lstat, readlink } from "node:fs/promises";
-import { join } from "node:path";
 import {
+  hashOwnedRegularFileSha256,
+  lstatOwned,
   mkdirOwned,
   readOwnedText,
+  readlinkOwned,
   writeOwnedText,
   resolveVerificationLedgerReadPath,
   resolveVerificationLedgerWritePath,
   resolveVerificationRunsDirWritePath,
+  resolveVerificationStateReadPath,
 } from "./project-fs/index.ts";
 import {
   runBoundedCommand,
@@ -146,22 +147,6 @@ function sortPathsByteStable(paths: string[]): string[] {
   );
 }
 
-async function hashFileStream(path: string): Promise<string> {
-  const hash = createHash("sha256");
-  const stream = createReadStream(path);
-  try {
-    for await (const chunk of stream) {
-      hash.update(chunk as Buffer);
-    }
-  } catch (cause) {
-    throw verificationStateUnavailable({
-      operation: "hash untracked file content",
-      stderr: cause instanceof Error ? cause.message : String(cause),
-    });
-  }
-  return hash.digest("hex");
-}
-
 type UntrackedManifestEntry =
   | {
       path: string;
@@ -180,10 +165,10 @@ async function hashUntrackedEntry(
   cwd: string,
   path: string,
 ): Promise<UntrackedManifestEntry> {
-  const absolutePath = join(cwd, path);
+  const readPath = await resolveVerificationStateReadPath(cwd, path);
   let stat;
   try {
-    stat = await lstat(absolutePath);
+    stat = await lstatOwned(readPath);
   } catch (cause) {
     throw verificationStateUnavailable({
       operation: "stat untracked entry",
@@ -194,7 +179,7 @@ async function hashUntrackedEntry(
   if (stat.isSymbolicLink()) {
     let target: string;
     try {
-      target = await readlink(absolutePath);
+      target = await readlinkOwned(readPath);
     } catch (cause) {
       throw verificationStateUnavailable({
         operation: "read untracked symlink target",
@@ -215,13 +200,20 @@ async function hashUntrackedEntry(
     });
   }
 
-  return {
-    path,
-    type: "file",
-    mode: stat.mode,
-    size: stat.size,
-    sha256: await hashFileStream(absolutePath),
-  };
+  try {
+    return {
+      path,
+      type: "file",
+      mode: stat.mode,
+      size: stat.size,
+      sha256: await hashOwnedRegularFileSha256(readPath),
+    };
+  } catch (cause) {
+    throw verificationStateUnavailable({
+      operation: "hash untracked file content",
+      stderr: cause instanceof Error ? cause.message : String(cause),
+    });
+  }
 }
 
 async function collectUntrackedManifest(

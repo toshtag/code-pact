@@ -1,6 +1,7 @@
 import {
   brandProjectPresence,
   brandProjectTreeList,
+  brandOwnedRead,
   type OwnedDeletePath,
   type OwnedListPath,
   type OwnedReadPath,
@@ -8,9 +9,10 @@ import {
   type ProjectTreeListPath,
   type ProjectPresencePath,
 } from "../branded-paths-internal.ts";
-import { basename, dirname } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import {
   assertSafeRelativePath,
+  pathTraversesSymlink,
   resolveSymlinkFreeProjectPathSync,
 } from "../../path-safety.ts";
 import {
@@ -370,6 +372,22 @@ export async function resolveVerificationLedgerWritePath(
     `${VERIFICATION_RUNS_CACHE_PREFIX}/ledger.jsonl`,
     isVerificationRunsLedgerPath,
   );
+}
+
+export async function resolveVerificationStateReadPath(
+  cwd: string,
+  relPath: string,
+): Promise<OwnedReadPath> {
+  assertSafeRelativePath(relPath);
+  const parent = dirname(relPath);
+  if (parent !== "." && (await pathTraversesSymlink(cwd, parent))) {
+    const err = new Error(
+      `path "${relPath}" resolves through a symlinked parent; refusing to read unowned verification state`,
+    );
+    (err as NodeJS.ErrnoException).code = "PATH_NOT_OWNED";
+    throw err;
+  }
+  return brandOwnedRead(resolve(cwd, relPath));
 }
 
 export async function resolveProjectProbeReadPath(

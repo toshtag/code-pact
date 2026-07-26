@@ -39,6 +39,7 @@ import {
   copyFile as copyFileRaw,
   link as linkRaw,
   open as openRaw,
+  readlink as readlinkRaw,
   openDirectoryNoFollow,
   openReadNoFollow,
   readRegularOwnedText as readRegularOwnedTextRaw,
@@ -48,6 +49,7 @@ import {
   readdirSync as readdirSyncRaw,
 } from "./raw-internal.ts";
 import { realpath as realpathRaw } from "node:fs/promises";
+import { createHash } from "node:crypto";
 
 export async function readOwnedText(path: OwnedReadPath): Promise<string> {
   return readRegularOwnedTextRaw(unbrand(path));
@@ -116,6 +118,10 @@ export async function statProjectPresence(path: ProjectPresencePath) {
 
 export async function lstatOwned(path: OwnedReadPath) {
   return lstatRaw(unbrand(path));
+}
+
+export async function readlinkOwned(path: OwnedReadPath): Promise<string> {
+  return readlinkRaw(unbrand(path));
 }
 
 export async function statOwnedList(path: OwnedListPath) {
@@ -212,6 +218,32 @@ export async function fsyncOwnedRegularFile(
       throw error;
     }
     await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function hashOwnedRegularFileSha256(
+  path: OwnedReadPath,
+): Promise<string> {
+  const handle = await openReadNoFollow(unbrand(path));
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile()) {
+      const error = new Error("path is not a regular file");
+      (error as NodeJS.ErrnoException).code = "ENOTFILE";
+      throw error;
+    }
+    const hash = createHash("sha256");
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let offset = 0;
+    while (true) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+      offset += bytesRead;
+    }
+    return hash.digest("hex");
   } finally {
     await handle.close();
   }
