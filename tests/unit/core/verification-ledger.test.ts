@@ -250,6 +250,77 @@ describe("currentVerificationState", () => {
     }
   });
 
+  it("fails closed before any Git command when the signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const runSpy = vi.spyOn(boundedCommand, "runBoundedCommand");
+
+    try {
+      await expect(
+        currentVerificationState(dir, { signal: controller.signal }),
+      ).rejects.toMatchObject({
+        code: "VERIFICATION_STATE_UNAVAILABLE",
+        operation: "collect verification state",
+        aborted: true,
+      });
+      expect(runSpy).not.toHaveBeenCalled();
+    } finally {
+      runSpy.mockRestore();
+    }
+  });
+
+  it("passes the signal to the Git state commands", async () => {
+    const controller = new AbortController();
+    // Delegate to the real runner after cancelling: it only reports an abort if
+    // the signal actually reached it, so this fails if propagation is missing.
+    const runBoundedCommand = boundedCommand.runBoundedCommand;
+    const runSpy = vi
+      .spyOn(boundedCommand, "runBoundedCommand")
+      .mockImplementation(async (command, cwd, timeoutMs, signal) => {
+        controller.abort();
+        return runBoundedCommand(command, cwd, timeoutMs, signal);
+      });
+
+    try {
+      await expect(
+        currentVerificationState(dir, { signal: controller.signal }),
+      ).rejects.toMatchObject({
+        code: "VERIFICATION_STATE_UNAVAILABLE",
+        operation: "git rev-parse HEAD",
+        aborted: true,
+      });
+      expect(runSpy.mock.calls[0]?.[3]).toBe(controller.signal);
+    } finally {
+      runSpy.mockRestore();
+    }
+  });
+
+  it("passes the signal to untracked file hashing", async () => {
+    await writeFile(join(dir, "src", "new.ts"), "one\n", "utf8");
+    const controller = new AbortController();
+    const hashOwnedRegularFileSha256 = projectFs.hashOwnedRegularFileSha256;
+    const hashSpy = vi
+      .spyOn(projectFs, "hashOwnedRegularFileSha256")
+      .mockImplementation(async (path, options) => {
+        controller.abort();
+        return hashOwnedRegularFileSha256(path, options);
+      });
+
+    try {
+      // The concurrent Git commands may lose the race to reject, so assert the
+      // outcome both share and pin the hash reader's own signal separately.
+      await expect(
+        currentVerificationState(dir, { signal: controller.signal }),
+      ).rejects.toMatchObject({
+        code: "VERIFICATION_STATE_UNAVAILABLE",
+        aborted: true,
+      });
+      expect(hashSpy.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+    } finally {
+      hashSpy.mockRestore();
+    }
+  });
+
   it("fails closed when a captured Git command truncates its output", async () => {
     const runSpy = vi
       .spyOn(boundedCommand, "runBoundedCommand")
