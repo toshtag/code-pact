@@ -3,7 +3,7 @@ name: Claude Bootstrap Right-Sizing
 weight: 1
 confidence: high
 risk: medium
-status: in_progress
+status: done
 objective: >
   Make the generated claude-code instruction file a bootstrap rather than a
   manual. The always-loaded file carries the repository purpose, the single
@@ -198,14 +198,14 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
-    requires_decision: false
+    status: done
     description: >
       Close the last current-contract wording that still describes Claude
       `--model` as changing generated instruction content: the `adapter upgrade`
       flag summary in the CLI contract, the model catalog's own responsibility
-      comment, and the three navigation labels left dangling by P88-T1B's
-      rename of the operations.md model section.
+      comment, and the three navigation labels left dangling by P88-T1B's rename
+      of the operations.md model section.
+    requires_decision: false
     depends_on:
       - P88-T1B
     reads:
@@ -219,15 +219,3 @@ tasks:
       - src/core/models/catalog.ts
     acceptance_refs:
       - docs/cli-contract.md
-    definition_of_done:
-      - The CLI contract describes `--model` as validating and pinning
-        `model_version`, and states that the schema-v2 bootstrap bytes are
-        model-neutral
-      - The install and upgrade flag summaries describe the same pinning
-        semantics
-      - The model catalog comment no longer claims the catalog drives generated
-        instructions
-      - No navigation label points at an operations.md section title that no
-        longer exists
-      - No model id, tier default, schema version, runtime path, or generated
-        file changes
