@@ -593,15 +593,18 @@ export const messages = {
     // the bootstrap conformance checks anchor on `## Repository gotchas` and on
     // the absence of the schema-v1 headings.
     //
-    // Two rules govern edits to this bundle. Phrase instructions as the desired
-    // state rather than a prohibition — "run the command as written" carries the
-    // same contract as "do not reconstruct the command" and costs the reader
-    // less. And keep it short: the whole rendered file has to stay inside the
-    // bootstrap context budget in ja-JP too, where each character costs about
-    // three UTF-8 bytes.
+    // Three rules govern edits to this bundle. Phrase instructions as the
+    // desired state rather than a prohibition — "run the command as written"
+    // carries the same contract as "do not reconstruct the command" and costs
+    // the reader less. Keep it short: the whole rendered file has to stay inside
+    // the bootstrap context budget in ja-JP too, where each character costs
+    // about three UTF-8 bytes. And never ask the reader to edit the rendered
+    // file — the manifest pins its hash, so an edit fails conformance.
     adapterBootstrap: {
-      editNotice:
-        'Edit the "Repository gotchas" section to reflect this repository.',
+      ownershipNotice: [
+        "code-pact generates this file and rewrites it on `adapter upgrade`;",
+        "the repository's own conventions live in `design/rules/` and `docs/`.",
+      ].join("\n"),
       purposeHeader: "Purpose",
       purposeBody: [
         "This repository is planned and verified with code-pact: the plan lives",
@@ -631,11 +634,6 @@ export const messages = {
         "audit flag — lives in",
         "[`docs/cli-contract.md`](https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md).",
         "Read it when the work order points you there, not in advance.",
-      ].join("\n"),
-      gotchasHint: [
-        "Replace these with the few things that are true of this repository and",
-        "are not visible from the filesystem or the type signatures. Keep it to",
-        "five or fewer; anything longer belongs in `design/rules/` or `docs/`.",
       ].join("\n"),
       gotchasDefault: "Follow `design/rules/coding-style.md` for code style.",
     },

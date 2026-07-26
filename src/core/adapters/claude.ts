@@ -24,6 +24,13 @@ import { BOOTSTRAP_GOTCHA_SECTION_HEADING } from "./conformance-spec.ts";
 // Model-neutral by contract: no branch on model id or model version. The model
 // catalog drives `--model` validation, profile seeding, and advisory
 // recommendation defaults — none of which the agent needs restated here.
+//
+// Every line here is generator-owned, including the repository-gotcha bullets.
+// The manifest pins this file's hash under `ownership: managed`, so a hand edit
+// fails the `file_checksum_match` conformance check and `adapter upgrade`
+// refuses the file as `managed_modified`. The bootstrap therefore points at
+// `design/rules/` and `docs/` for the repository's own conventions rather than
+// inviting an edit its own contract would reject.
 // ---------------------------------------------------------------------------
 
 function claudeMd(locale: Locale): string {
@@ -34,7 +41,7 @@ function claudeMd(locale: Locale): string {
     `# Claude Code — Project Instructions`,
     ``,
     `> ${common.managedNotice}`,
-    `> ${t.editNotice}`,
+    ...t.ownershipNotice.split("\n").map(line => `> ${line}`),
     ``,
     `## ${t.purposeHeader}`,
     ``,
@@ -55,8 +62,6 @@ function claudeMd(locale: Locale): string {
     t.referenceBody,
     ``,
     BOOTSTRAP_GOTCHA_SECTION_HEADING,
-    ``,
-    ...t.gotchasHint.split("\n").map(line => `> ${line}`),
     ``,
     `- ${t.gotchasDefault}`,
     ``,

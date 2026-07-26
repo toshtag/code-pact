@@ -18,6 +18,16 @@ import type { Locale } from "../../../../src/i18n/index.ts";
 
 const LOCALES: Locale[] = ["en-US", "ja-JP"];
 
+// The manifest pins the instruction file's hash under `ownership: managed`, so a
+// hand edit fails `file_checksum_match` and `adapter upgrade` refuses the file as
+// `managed_modified`. A bootstrap that asks the reader to edit it therefore
+// invites the one action its own contract rejects. Locale-specific because the
+// invitation is prose, not an English-locked anchor.
+const EDIT_INVITATION: Record<Locale, RegExp> = {
+  "en-US": /\b(edit|replace|customi[sz]e|fill in|update) (the|these|this)\b/i,
+  "ja-JP": /(編集し|置き換え|書き換え|記入し)/,
+};
+
 async function renderInstruction(
   locale: Locale,
   modelVersion?: string,
@@ -99,6 +109,16 @@ describe("claude-code bootstrap instruction file", () => {
       it("names the envelope reference rather than restating it", async () => {
         const md = await renderInstruction(locale);
         expect(md).toContain("docs/cli-contract.md");
+      });
+
+      it("asks the reader for no edit the manifest hash would reject", async () => {
+        const md = await renderInstruction(locale);
+        expect(md).not.toMatch(EDIT_INVITATION[locale]);
+      });
+
+      it("points repository conventions at the sources it does not own", async () => {
+        const md = await renderInstruction(locale);
+        expect(md).toContain("design/rules/");
       });
     });
   }

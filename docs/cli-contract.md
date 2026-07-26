@@ -1876,6 +1876,13 @@ The instruction-file checks come in two mutually exclusive sets, chosen from the
   bounded in size and in how many repository gotchas it may carry. This is the `claude-code`
   shape.
 
+Both shapes are `ownership: managed`: the manifest pins the instruction file's hash, so a hand
+edit fails `file_checksum_match` and `adapter upgrade` refuses the file as `managed_modified`
+unless `--accept-modified` overwrites it. Every line of the schema-v2 bootstrap — the
+repository-gotcha bullets included — is therefore generator-owned, and a repository's own
+conventions belong in the sources the generator does not write, such as `design/rules/` and
+`docs/`.
+
 The selector is the schema version rather than a release threshold, so an installed
 schema-v1 instruction file keeps being checked against the schema-v1 contract for as long as
 it stays installed; it moves to the bootstrap contract when `adapter upgrade <agent> --write`

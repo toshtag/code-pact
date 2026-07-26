@@ -597,13 +597,17 @@ export const messages = {
     // 事項だけを渡す。見出しは英語固定（bootstrap conformance が
     // `## Repository gotchas` と schema-v1 見出しの不在に anchor するため）。
     //
-    // 編集時の規則は2つ。禁止形ではなく望ましい状態で書くこと（「command を
+    // 編集時の規則は3つ。禁止形ではなく望ましい状態で書くこと（「command を
     // そのまま実行する」は「command を組み立て直さない」と同じ契約で、読む側の
-    // 負荷が小さい）。そして短く保つこと。ja-JP は1文字あたり約3 UTF-8 bytes
-    // なので、budget を超えるのは en-US より先にこちらである。
+    // 負荷が小さい）。短く保つこと。ja-JP は1文字あたり約3 UTF-8 bytes なので、
+    // budget を超えるのは en-US より先にこちらである。そして生成後のファイルを
+    // 編集するよう読者へ促さないこと。manifest が hash を固定しているため、
+    // 編集は conformance を落とす。
     adapterBootstrap: {
-      editNotice:
-        "「Repository gotchas」セクションを編集して、このリポジトリの内容を反映させてください。",
+      ownershipNotice: [
+        "このファイルは code-pact が生成し、`adapter upgrade` で書き直す。",
+        "リポジトリ固有の規約は `design/rules/` と `docs/` にある。",
+      ].join("\n"),
       purposeHeader: "Purpose",
       purposeBody: [
         "このリポジトリは code-pact で計画・検証されている。計画は `design/` にあり、",
@@ -630,11 +634,6 @@ export const messages = {
         "すべて）は",
         "[`docs/cli-contract.md`](https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md)",
         "にある。work order がそこを指したときに読む（事前には読まない）。",
-      ].join("\n"),
-      gotchasHint: [
-        "このリポジトリで実際に成り立ち、かつ filesystem や型定義からは分からない",
-        "事項だけに置き換える。5項目以下に保つ。それより長いものは",
-        "`design/rules/` または `docs/` に属する。",
       ].join("\n"),
       gotchasDefault:
         "コードスタイルは `design/rules/coding-style.md` に従う。",
