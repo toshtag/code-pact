@@ -224,6 +224,26 @@ describe("runVerify — focused verification policy", () => {
     });
   });
 
+  it("records no ledger entry when verification state is unavailable", async () => {
+    await setupProject(dir, { projectYaml: PROJECT_YAML_WITH_POLICY });
+    // Break Git state collection so the digest cannot be established. An entry
+    // written here would be bound to an unknown tree.
+    await rm(join(dir, ".git"), { recursive: true, force: true });
+    await mkdir(join(dir, ".git"), { recursive: true });
+
+    await expect(
+      runVerify({
+        cwd: dir,
+        phaseId: "P1",
+        taskId: "P1-T1",
+        dryRun: false,
+        stage: "focused",
+      }),
+    ).rejects.toMatchObject({ code: "VERIFICATION_STATE_UNAVAILABLE" });
+
+    expect(await readVerificationLedger(dir)).toHaveLength(0);
+  });
+
   it("returns focused next action in public projection when full commands fail", async () => {
     await setupProject(dir, {
       projectYaml: PROJECT_YAML_WITH_POLICY,
