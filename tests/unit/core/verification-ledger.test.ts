@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import {
   mkdir,
   mkdtemp,
@@ -10,6 +10,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { currentVerificationState } from "../../../src/core/verification-ledger.ts";
+import * as projectFs from "../../../src/core/project-fs/index.ts";
+import * as boundedCommand from "../../../src/core/process/bounded-command.ts";
 
 function git(cwd: string, args: string[]): void {
   const result = spawnSync("git", args, { cwd, encoding: "utf8" });
@@ -166,6 +168,110 @@ describe("currentVerificationState", () => {
     await expect(currentVerificationState(dir)).rejects.toMatchObject({
       code: "VERIFICATION_STATE_UNAVAILABLE",
     });
+  });
+
+  it("changes digest for a change after a diff larger than the capture limit", async () => {
+    // "a.txt" sorts before "z.txt", so its diff fills the generic 1 MiB stdout
+    // capture before Git ever emits the z.txt hunk.
+    const filler = `${"line padding padding padding padding".repeat(2)}\n`;
+    await writeFile(join(dir, "src", "a.txt"), "", "utf8");
+    await writeFile(join(dir, "src", "z.txt"), "z0\n", "utf8");
+    git(dir, ["add", "."]);
+    git(dir, ["commit", "--quiet", "-m", "large-diff-base"]);
+    await writeFile(
+      join(dir, "src", "a.txt"),
+      filler.repeat(Math.ceil((2 * 1024 * 1024) / filler.length)),
+      "utf8",
+    );
+
+    await writeFile(join(dir, "src", "z.txt"), "z1\n", "utf8");
+    const first = await currentVerificationState(dir);
+
+    await writeFile(join(dir, "src", "z.txt"), "z2\n", "utf8");
+    const second = await currentVerificationState(dir);
+
+    expect(second.workingTreeDiffDigest).not.toBe(first.workingTreeDiffDigest);
+  });
+
+  it("keeps a diff larger than the capture limit available rather than failing closed", async () => {
+    const filler = `${"line padding padding padding padding".repeat(2)}\n`;
+    await writeFile(
+      join(dir, "src", "tracked.ts"),
+      filler.repeat(Math.ceil((2 * 1024 * 1024) / filler.length)),
+      "utf8",
+    );
+
+    const state = await currentVerificationState(dir);
+
+    expect(state.workingTreeDiffDigest).toMatch(/^[0-9a-f]{64}$/);
+    // The digest is the only retained representation of that output.
+    expect(JSON.stringify(state).length).toBeLessThan(1024);
+  });
+
+  it("fails closed when untracked hashing exceeds its deadline", async () => {
+    await writeFile(join(dir, "src", "new.ts"), "one\n", "utf8");
+    const hashSpy = vi
+      .spyOn(projectFs, "hashOwnedRegularFileSha256")
+      .mockImplementation(async () => {
+        const error = new Error("hashing exceeded its deadline");
+        (error as NodeJS.ErrnoException).code = "ETIMEDOUT";
+        throw error;
+      });
+
+    try {
+      await expect(currentVerificationState(dir)).rejects.toMatchObject({
+        code: "VERIFICATION_STATE_UNAVAILABLE",
+        operation: "hash untracked file content",
+        timed_out: true,
+      });
+    } finally {
+      hashSpy.mockRestore();
+    }
+  });
+
+  it("fails closed when untracked hashing is aborted", async () => {
+    await writeFile(join(dir, "src", "new.ts"), "one\n", "utf8");
+    const hashSpy = vi
+      .spyOn(projectFs, "hashOwnedRegularFileSha256")
+      .mockImplementation(async () => {
+        const error = new Error("hashing was aborted");
+        (error as NodeJS.ErrnoException).code = "ABORT_ERR";
+        throw error;
+      });
+
+    try {
+      await expect(currentVerificationState(dir)).rejects.toMatchObject({
+        code: "VERIFICATION_STATE_UNAVAILABLE",
+        operation: "hash untracked file content",
+        aborted: true,
+      });
+    } finally {
+      hashSpy.mockRestore();
+    }
+  });
+
+  it("fails closed when a captured Git command truncates its output", async () => {
+    const runSpy = vi
+      .spyOn(boundedCommand, "runBoundedCommand")
+      .mockResolvedValue({
+        exitCode: 0,
+        stdout: "0".repeat(40),
+        stderr: "",
+        stdoutTruncated: true,
+        stderrTruncated: false,
+        timedOut: false,
+        aborted: false,
+        elapsedMs: 1,
+      });
+
+    try {
+      await expect(currentVerificationState(dir)).rejects.toMatchObject({
+        code: "VERIFICATION_STATE_UNAVAILABLE",
+        operation: "git rev-parse HEAD",
+      });
+    } finally {
+      runSpy.mockRestore();
+    }
   });
 
   it("fails closed for unsupported untracked file types", async () => {
