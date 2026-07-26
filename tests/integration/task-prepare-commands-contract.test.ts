@@ -157,8 +157,6 @@ describe("task prepare — emitted commands are accepted by the CLI parser", () 
     const commands = prepareCommands(project);
 
     for (const [name, command] of Object.entries(commands)) {
-      // The verify command is intentionally a plain node script; only
-      // code-pact CLI commands need to parse cleanly.
       if (!command.startsWith("code-pact ")) continue;
 
       const res = project.run(toArgv(command));
@@ -239,7 +237,7 @@ describe("task prepare — emitted commands are accepted by the CLI parser", () 
       context: "code-pact task context P1-T1 --agent claude-code",
       start: "code-pact task start P1-T1 --agent claude-code",
       verify:
-        "node scripts/verification-scope.mjs --local --stage focused --run --task-id P1-T1",
+        "code-pact verify --phase P1 --task P1-T1 --json --detail agent",
       complete:
         "code-pact task complete P1-T1 --agent claude-code --json --detail agent",
       finalize: "code-pact task finalize P1-T1 --write --json",
@@ -250,10 +248,21 @@ describe("task prepare — emitted commands are accepted by the CLI parser", () 
       expect(name).not.toMatch(/repair|retry/i);
       expect(command).not.toMatch(/repair|retry/i);
     }
-    expect(env.data.commands.verify).toContain(
-      "scripts/verification-scope.mjs",
-    );
+    expect(env.data.commands.verify).not.toContain("scripts/verification-scope.mjs");
     expect(env.data.commands.complete).toContain("--json --detail agent");
+  });
+
+  it("minimal task.verify preserves phase verification commands", () => {
+    const res = project.run([
+      "task",
+      "prepare",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    const env = expectJsonOk<{ task: { verify: string[] } }>(res);
+    expect(env.data.task.verify).toEqual(["node --version"]);
   });
 
   it('commands["record-done"] is a correct template (P40): task record-done + --evidence placeholder', () => {

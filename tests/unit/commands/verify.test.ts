@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runVerify } from "../../../src/commands/verify.ts";
+import { readVerificationLedger } from "../../../src/core/verification-ledger.ts";
 
 const fixtureDir = new URL("../../../tests/fixtures/project-a", import.meta.url).pathname;
 
@@ -45,6 +46,28 @@ const PHASE_YAML = (
     .join("\n");
 
 const ROADMAP_YAML = `phases:\n  - id: P1\n    path: design/phases/P1-foundation.yaml\n    weight: 12\n`;
+const PROJECT_YAML = `name: project-test
+version: 0.1.0
+locale: en-US
+default_agent: claude-code
+agents:
+  - name: claude-code
+    profile: agent-profiles/claude-code.yaml
+    enabled: true
+`;
+
+const PROJECT_YAML_WITH_POLICY = `name: project-test
+version: 0.1.0
+locale: en-US
+default_agent: claude-code
+verification_policy:
+  focused_command: node focused.mjs
+  max_full_attempts: 2
+agents:
+  - name: claude-code
+    profile: agent-profiles/claude-code.yaml
+    enabled: true
+`;
 
 async function setupProject(
   dir: string,
@@ -54,6 +77,7 @@ async function setupProject(
     hasAdr?: boolean;
     requiresDecision?: boolean;
     taskRequiresDecision?: boolean;
+    projectYaml?: string;
   } = {},
 ): Promise<void> {
   const {
@@ -62,11 +86,16 @@ async function setupProject(
     hasAdr = false,
     requiresDecision = false,
     taskRequiresDecision = false,
+    projectYaml,
   } = opts;
 
   await mkdir(join(dir, ".code-pact", "state", "baselines"), { recursive: true });
   await mkdir(join(dir, "design", "phases"), { recursive: true });
   await mkdir(join(dir, "design", "decisions"), { recursive: true });
+  if (projectYaml !== undefined) {
+    await writeFile(join(dir, ".code-pact", "project.yaml"), projectYaml, "utf8");
+  }
+  await writeFile(join(dir, "focused.mjs"), "process.exit(0);\n", "utf8");
 
   await writeFile(join(dir, "design", "roadmap.yaml"), ROADMAP_YAML, "utf8");
   await writeFile(
@@ -131,6 +160,53 @@ describe("runVerify — project-a P1-T1 (dry-run)", () => {
     });
     const names = result.checks.map((c) => c.name);
     expect(names).toEqual(["commands", "progress_event", "decision", "task_status"]);
+  });
+});
+
+describe("runVerify — focused verification policy", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "code-pact-verify-focused-"));
+  });
+  afterEach(() => rm(dir, { recursive: true, force: true }));
+
+  it("rejects focused stage when no policy is configured", async () => {
+    await setupProject(dir, { projectYaml: PROJECT_YAML });
+
+    await expect(
+      runVerify({
+        cwd: dir,
+        phaseId: "P1",
+        taskId: "P1-T1",
+        dryRun: false,
+        stage: "focused",
+      }),
+    ).rejects.toMatchObject({ code: "FOCUSED_VERIFICATION_NOT_CONFIGURED" });
+  });
+
+  it("runs focused command and records the focused result", async () => {
+    await setupProject(dir, { projectYaml: PROJECT_YAML_WITH_POLICY });
+
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      stage: "focused",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.stage).toBe("focused");
+    expect(result.next?.stage).toBe("full");
+    const ledger = await readVerificationLedger(dir);
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]).toMatchObject({
+      task_id: "P1-T1",
+      phase_id: "P1",
+      stage: "focused",
+      failure: false,
+      attempt_number: 1,
+    });
   });
 });
 

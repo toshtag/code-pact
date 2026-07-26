@@ -34,6 +34,19 @@ agents:
     enabled: false
 `;
 
+const PROJECT_YAML_WITH_VERIFICATION_POLICY = `name: project-test
+version: 0.1.0
+locale: en-US
+default_agent: claude-code
+verification_policy:
+  focused_command: node scripts/verification-scope.mjs --local --stage focused --run --task-id {task_id} --no-ledger
+  max_full_attempts: 2
+agents:
+  - name: claude-code
+    profile: agent-profiles/claude-code.yaml
+    enabled: true
+`;
+
 const AGENT_PROFILE_YAML = `name: claude-code
 instruction_filename: CLAUDE.md
 context_dir: .context/claude-code
@@ -141,14 +154,14 @@ tasks:
 
 async function setupProject(
   dir: string,
-  opts: { phaseYaml?: string; progressYaml?: string } = {},
+  opts: { phaseYaml?: string; progressYaml?: string; projectYaml?: string } = {},
 ): Promise<void> {
   await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
   await mkdir(join(dir, ".code-pact", "agent-profiles"), { recursive: true });
   await mkdir(join(dir, "design", "phases"), { recursive: true });
   await writeFile(
     join(dir, ".code-pact", "project.yaml"),
-    PROJECT_YAML,
+    opts.projectYaml ?? PROJECT_YAML,
     "utf8",
   );
   await writeFile(
@@ -248,9 +261,7 @@ describe("runTaskPrepare — minimal mode state matrix", () => {
     expect(result.task.read_scope).toEqual([]);
     expect(result.task.write_scope).toEqual([]);
     expect(result.task.done_when).toEqual(["tests pass"]);
-    expect(result.task.verify).toEqual([
-      "node scripts/verification-scope.mjs --local --stage focused --run --task-id P1-T1",
-    ]);
+    expect(result.task.verify).toEqual(["echo ok"]);
     expect(result.task.decision_required).toBe(false);
 
     expect(result.next.type).toBe("start_task");
@@ -420,9 +431,7 @@ describe("runTaskPrepare — minimal mode actionable completeness", () => {
       "tests/unit/commands/task-prepare.test.ts",
     ]);
     expect(result.task.done_when).toEqual(["acceptance criteria met"]);
-    expect(result.task.verify).toEqual([
-      "node scripts/verification-scope.mjs --local --stage focused --run --task-id P1-T1",
-    ]);
+    expect(result.task.verify).toEqual(["pnpm typecheck", "pnpm test:unit"]);
     expect(result.task.acceptance_refs).toEqual([
       "design/decisions/P1-T1-rfc.md",
     ]);
@@ -529,7 +538,7 @@ describe("runTaskPrepare — full detail compatibility", () => {
       context: "code-pact task context P1-T1 --agent claude-code",
       start: "code-pact task start P1-T1 --agent claude-code",
       verify:
-        "node scripts/verification-scope.mjs --local --stage focused --run --task-id P1-T1",
+        "code-pact verify --phase P1 --task P1-T1 --json --detail agent",
       complete:
         "code-pact task complete P1-T1 --agent claude-code --json --detail agent",
       finalize: "code-pact task finalize P1-T1 --write --json",
@@ -537,6 +546,23 @@ describe("runTaskPrepare — full detail compatibility", () => {
         'code-pact task record-done P1-T1 --agent claude-code --evidence "<verification you ran>"',
     });
     expect(await fileExists(result.context_pack_path!)).toBe(true);
+  });
+
+  it("policy projects return a portable focused verify command in full detail", async () => {
+    await setupProject(dir, { projectYaml: PROJECT_YAML_WITH_VERIFICATION_POLICY });
+    const result = fullResult(
+      await runTaskPrepare({
+        cwd: dir,
+        taskId: "P1-T1",
+        agent: "claude-code",
+        detail: "full",
+      }),
+    );
+
+    expect(result.commands.verify).toBe(
+      "code-pact verify --phase P1 --task P1-T1 --stage focused --json --detail agent",
+    );
+    expect(result.commands.verify).not.toContain("scripts/verification-scope.mjs");
   });
 
   it("explicit budget flags imply full detail", async () => {
@@ -839,9 +865,7 @@ describe("cmdTask prepare — default minimal vs full", () => {
       expect(output).toContain("Done when:");
       expect(output).toContain("- tests pass");
       expect(output).toContain("Verify:");
-      expect(output).toContain(
-        "- node scripts/verification-scope.mjs --local --stage focused --run --task-id P1-T1",
-      );
+      expect(output).toContain("- echo ok");
       expect(output).toContain("Next: start_task");
       expect(output).toContain("More:");
       expect(output).toContain("--detail full");
