@@ -62,6 +62,8 @@ export {
   hashOwnedRegularFileSha256,
 } from "./operations.ts";
 
+export type { HashOwnedRegularFileOptions } from "./operations.ts";
+
 export {
   resolveDecisionReadPath,
   resolveDecisionDirectoryReadPath,

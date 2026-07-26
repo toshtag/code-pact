@@ -223,8 +223,30 @@ export async function fsyncOwnedRegularFile(
   }
 }
 
+export type HashOwnedRegularFileOptions = {
+  /** Cancels the read between chunks. */
+  signal?: AbortSignal;
+  /**
+   * Absolute `performance.now()` deadline. Checked between chunks, so a file
+   * of any size cannot read past it indefinitely.
+   */
+  deadline?: number;
+};
+
+function hashInterruptedError(reason: "timeout" | "abort"): Error {
+  const error = new Error(
+    reason === "timeout"
+      ? "hashing exceeded its deadline"
+      : "hashing was aborted",
+  );
+  (error as NodeJS.ErrnoException).code =
+    reason === "timeout" ? "ETIMEDOUT" : "ABORT_ERR";
+  return error;
+}
+
 export async function hashOwnedRegularFileSha256(
   path: OwnedReadPath,
+  options: HashOwnedRegularFileOptions = {},
 ): Promise<string> {
   const handle = await openReadNoFollow(unbrand(path));
   try {
@@ -238,6 +260,12 @@ export async function hashOwnedRegularFileSha256(
     const buffer = Buffer.allocUnsafe(64 * 1024);
     let offset = 0;
     while (true) {
+      // Check before each read so an already-expired budget stops the loop
+      // even when the file is empty or the first chunk is still pending.
+      if (options.signal?.aborted) throw hashInterruptedError("abort");
+      if (options.deadline !== undefined && performance.now() >= options.deadline) {
+        throw hashInterruptedError("timeout");
+      }
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
       if (bytesRead === 0) break;
       hash.update(buffer.subarray(0, bytesRead));
