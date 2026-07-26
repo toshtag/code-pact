@@ -20,7 +20,7 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Changed
 
-- **Right-sized the generated `claude-code` instruction file.** `CLAUDE.md` is now a bootstrap — repository purpose, the `task prepare` entrypoint, the envelope reference, and a bounded repository-gotcha section — instead of a restatement of the lifecycle, failure, repair, and model surfaces that `task prepare` already returns. The `codex`, `cursor`, `gemini-cli`, and `generic` instruction files are unchanged.
+- **Right-sized the generated `claude-code` instruction file.** `CLAUDE.md` is now a bootstrap — repository purpose, the `task prepare` entrypoint, the envelope reference, and a bounded repository-gotcha section — instead of a restatement of the lifecycle, failure, repair, and model surfaces that `task prepare` already returns. Every line of it is generator-owned, the repository-gotcha bullets included: the manifest pins the file's hash, so a repository's own conventions belong in the sources the generator does not write. The `codex`, `cursor`, `gemini-cli`, and `generic` instruction files are unchanged.
 - **Made the generated `claude-code` instruction file model-neutral.** `--model` and a profile `model_version` pin the profile as before; they no longer change the generated instruction bytes. Effort and tier guidance reach the agent per-task through `recommend` / `task prepare --detail full`.
 
 ## [2.8.0] — 2026-07-23
