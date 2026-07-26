@@ -82,6 +82,7 @@ function isContractLockPath(path: string): boolean {
 }
 
 const REVIEWS_CACHE_PREFIX = ".code-pact/cache/reviews";
+const VERIFICATION_RUNS_CACHE_PREFIX = ".code-pact/cache/verification-runs";
 
 function isReviewCacheDir(path: string): boolean {
   if (path === REVIEWS_CACHE_PREFIX) return true;
@@ -96,6 +97,14 @@ function isReviewManifestPath(path: string): boolean {
   const tail = path.slice(`${REVIEWS_CACHE_PREFIX}/`.length);
   const parts = tail.split("/");
   return parts.length === 2 && parts[1] === "manifest.json";
+}
+
+function isVerificationRunsCacheDir(path: string): boolean {
+  return path === VERIFICATION_RUNS_CACHE_PREFIX;
+}
+
+function isVerificationRunsLedgerPath(path: string): boolean {
+  return path === `${VERIFICATION_RUNS_CACHE_PREFIX}/ledger.jsonl`;
 }
 
 function isProgressEventPath(path: string): boolean {
@@ -330,6 +339,36 @@ export async function resolveReviewManifestWritePath(
     cwd,
     [".code-pact/cache/reviews", file].join("/"),
     isReviewManifestPath,
+  );
+}
+
+export async function resolveVerificationRunsDirWritePath(
+  cwd: string,
+): Promise<OwnedWritePath> {
+  return resolveAndBrandWriteForAuthority(
+    cwd,
+    VERIFICATION_RUNS_CACHE_PREFIX,
+    isVerificationRunsCacheDir,
+  );
+}
+
+export async function resolveVerificationLedgerReadPath(
+  cwd: string,
+): Promise<OwnedReadPath> {
+  return resolveAndBrandReadForAuthority(
+    cwd,
+    `${VERIFICATION_RUNS_CACHE_PREFIX}/ledger.jsonl`,
+    isVerificationRunsLedgerPath,
+  );
+}
+
+export async function resolveVerificationLedgerWritePath(
+  cwd: string,
+): Promise<OwnedWritePath> {
+  return resolveAndBrandWriteForAuthority(
+    cwd,
+    `${VERIFICATION_RUNS_CACHE_PREFIX}/ledger.jsonl`,
+    isVerificationRunsLedgerPath,
   );
 }
 

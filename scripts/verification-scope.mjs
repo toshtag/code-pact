@@ -1741,9 +1741,9 @@ async function runLocalVerification(options = {}) {
 
   const diffDigestValue = diffDigest(changeSet, headSha);
   const planDigestValue = planDigest(plan);
-  const ledger = loadLedger();
+  const ledger = options.noLedger ? [] : loadLedger();
 
-  if (stage === "full") {
+  if (!options.noLedger && stage === "full") {
     const permission = canRunFull(ledger, taskId, diffDigestValue);
     if (!permission.allowed) {
       const nextCommand = localStageCommand(taskId, "focused");
@@ -1772,15 +1772,17 @@ async function runLocalVerification(options = {}) {
     fullAttemptCount: fullAttemptCounter,
   });
 
-  recordVerificationRun({
-    taskId,
-    headSha,
-    diffDigestValue,
-    planDigestValue,
-    stage,
-    stepResults: run.stepResults,
-    failure: !run.ok,
-  });
+  if (!options.noLedger) {
+    recordVerificationRun({
+      taskId,
+      headSha,
+      diffDigestValue,
+      planDigestValue,
+      stage,
+      stepResults: run.stepResults,
+      failure: !run.ok,
+    });
+  }
 
   if (!run.ok) {
     const failedStep = run.stepResults.find(s => !s.ok) ?? run.result;
@@ -1941,6 +1943,7 @@ async function main() {
       "task-id": { type: "string" },
       "run-plan": { type: "string" },
       "test-file": { type: "string", multiple: true },
+      "no-ledger": { type: "boolean", default: false },
     },
     allowPositionals: false,
   });
@@ -2003,6 +2006,7 @@ async function main() {
       taskId: values["task-id"],
       forceFull: values["force-full"],
       testFiles: values["test-file"],
+      noLedger: values["no-ledger"],
     });
     return;
   }

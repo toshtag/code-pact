@@ -171,6 +171,7 @@ export async function runTaskComplete(
     timeoutMs: opts.timeoutMs,
     signal: opts.signal,
     skipConsistencyChecks: true,
+    stage: project.verification_policy ? "full" : undefined,
   });
 
   if (!verifyResult.ok) {

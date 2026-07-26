@@ -38,6 +38,10 @@ import {
   type AppliedContextBudget,
   type TaskPrepareBudgetSelection,
 } from "../core/context-fit/applied-context-budget.ts";
+import {
+  canonicalFocusedVerifyCommand,
+  hasVerificationPolicy,
+} from "../core/verification-policy.ts";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -202,6 +206,8 @@ async function loadAgentProfile(
 function buildCommands(
   agent: string,
   taskId: string,
+  phaseId: string,
+  focusedPolicyConfigured: boolean,
   contextBudgetBytes?: number | undefined,
 ): TaskPrepareCommands {
   return {
@@ -211,7 +217,9 @@ function buildCommands(
         : ""
     }`,
     start: `code-pact task start ${taskId} --agent ${agent}`,
-    verify: `node scripts/verification-scope.mjs --local --stage focused --run --task-id ${taskId}`,
+    verify: focusedPolicyConfigured
+      ? canonicalFocusedVerifyCommand(phaseId, taskId)
+      : `code-pact verify --phase ${phaseId} --task ${taskId} --json --detail agent`,
     complete: `code-pact task complete ${taskId} --agent ${agent} --json --detail agent`,
     finalize: `code-pact task finalize ${taskId} --write --json`,
     "record-done": `code-pact task record-done ${taskId} --agent ${agent} --evidence "<verification you ran>"`,
@@ -370,7 +378,7 @@ function buildMinimalResult(opts: {
     read_scope: task.reads ?? [],
     write_scope: task.writes ?? [],
     done_when: phase.definition_of_done,
-    verify: [buildCommands(agentName, taskId).verify],
+    verify: phase.verification.commands,
     decision_required: decisionRequired,
   };
 
@@ -495,7 +503,13 @@ export async function runTaskPrepare(
   // 8. Full-detail mode below. Keep early-return shape identical to the
   // historical contract so existing consumers / tests remain stable.
 
-  const commands = buildCommands(agentName, taskId);
+  const focusedPolicyConfigured = hasVerificationPolicy(project);
+  const commands = buildCommands(
+    agentName,
+    taskId,
+    phaseId,
+    focusedPolicyConfigured,
+  );
 
   // 8a. Early return — done or explicitly cancelled.
   if (task.status === "cancelled") {
@@ -677,7 +691,13 @@ export async function runTaskPrepare(
       type: nextActionType,
       message: messageFor(nextActionType, recommendation.lifecycleMode),
     },
-    commands: buildCommands(agentName, taskId, budgetBytes),
+    commands: buildCommands(
+      agentName,
+      taskId,
+      phaseId,
+      focusedPolicyConfigured,
+      budgetBytes,
+    ),
     blocked_by: [],
     applied_context_budget: appliedContextBudget,
   };

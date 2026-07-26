@@ -1510,6 +1510,57 @@ async function cmdTaskComplete(
       return 1;
     }
 
+    if (
+      code === "FULL_RETRY_REQUIRES_FOCUSED_PASS" ||
+      code === "FULL_VERIFICATION_BUDGET_EXCEEDED" ||
+      code === "VERIFICATION_LEDGER_INVALID"
+    ) {
+      const message =
+        error instanceof Error ? error.message : "Verification policy failed.";
+      const next = (
+        error as NodeJS.ErrnoException & {
+          next?: { stage: string; command: string };
+        }
+      ).next;
+      if (json) {
+        if (detail === "agent") {
+          process.stdout.write(
+            stringifyBoundedAgentEnvelope({
+              ok: false,
+              error: {
+                code,
+                message,
+              },
+              data: {
+                task_id: taskId,
+                ...(next ? { next } : {}),
+                ...projectPreflightFailureForAgent(
+                  "invalid_state",
+                  message,
+                  "verification_policy",
+                ),
+              },
+            }),
+          );
+        } else {
+          process.stdout.write(
+            `${JSON.stringify({
+              ok: false,
+              error: { code, message },
+              data: {
+                task_id: taskId,
+                ...(next ? { next } : {}),
+              },
+            })}\n`,
+          );
+        }
+      } else {
+        process.stderr.write(`${message}\n`);
+        if (next) process.stderr.write(`Next: ${next.command}\n`);
+      }
+      return 1;
+    }
+
     let message: string;
     let outCode: string;
     let errorData: Record<string, unknown> | undefined;

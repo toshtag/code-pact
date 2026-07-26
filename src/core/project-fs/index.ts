@@ -108,6 +108,9 @@ export {
   resolveReviewCacheDirWritePath,
   resolveReviewManifestReadPath,
   resolveReviewManifestWritePath,
+  resolveVerificationLedgerReadPath,
+  resolveVerificationLedgerWritePath,
+  resolveVerificationRunsDirWritePath,
 } from "./authorities/project-config-authority.ts";
 export {
   resolveContextManifestReadPath,

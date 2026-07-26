@@ -62,6 +62,7 @@ export type AgentVerifyProjection = {
   ok: boolean;
   checks: AgentCheckSummary[];
   successful_commands: AgentCommandSummary[];
+  next?: { stage: string; command: string };
   projection_truncated?: boolean;
 };
 
@@ -303,6 +304,7 @@ export function projectVerifySummaryForAgent(
     ok: result.ok,
     checks: summarizeAgentChecks(result),
     successful_commands: summarizeSuccessfulAgentCommands(result),
+    ...(result.next ? { next: result.next } : {}),
   };
   const truncated =
     countCappedChecks(result) || countCappedSuccessfulCommands(result);

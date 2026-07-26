@@ -4,6 +4,7 @@ import {
   type CommandExecutionResult,
   type ProcessTerminationResult,
 } from "../core/process/bounded-command.ts";
+import { loadProject } from "../core/project.ts";
 import { resolvePhaseInRoadmap } from "../core/plan/resolve-phase.ts";
 import type { Phase } from "../core/schemas/phase.ts";
 import type { Task } from "../core/schemas/task.ts";
@@ -19,6 +20,21 @@ import {
   MAX_TIMEOUT_MS,
   validateTimeoutMs,
 } from "../lib/timeout.ts";
+import {
+  appendVerificationLedgerEntry,
+  currentVerificationState,
+  lastStageEntryForState,
+  ledgerCommandsFromCheck,
+  readVerificationLedger,
+  stageAttemptCount,
+} from "../core/verification-ledger.ts";
+import {
+  canonicalFocusedVerifyCommand,
+  focusedVerificationCommand,
+  hasVerificationPolicy,
+  maxFullAttempts,
+  type VerificationStage,
+} from "../core/verification-policy.ts";
 
 export type VerifyOptions = {
   cwd: string;
@@ -31,6 +47,8 @@ export type VerifyOptions = {
   signal?: AbortSignal;
   /** Skip checks for state that `task complete` is about to create. */
   skipConsistencyChecks?: boolean;
+  /** Optional stage. Omitted preserves the historical full verification path. */
+  stage?: VerificationStage;
 };
 
 export type { CommandExecutionResult, ProcessTerminationResult };
@@ -38,6 +56,7 @@ export type { CommandExecutionResult, ProcessTerminationResult };
 export type CheckResult = {
   name: string;
   ok: boolean;
+  stage?: VerificationStage;
   reason?: string;
   command?: string;
   stdout?: string;
@@ -49,10 +68,13 @@ export type CheckResult = {
   exitCode?: number | null;
   elapsedMs?: number;
   commands?: CommandExecutionResult[];
+  next?: { stage: VerificationStage; command: string };
 };
 
 export type VerifyResult = {
   ok: boolean;
+  stage?: VerificationStage;
+  next?: { stage: VerificationStage; command: string };
   checks: CheckResult[];
 };
 
@@ -210,6 +232,92 @@ async function checkCommands(
   };
 }
 
+function fullRetryRequiresFocusedPass(
+  taskId: string,
+  phaseId: string,
+): { stage: VerificationStage; command: string } {
+  return {
+    stage: "focused",
+    command: canonicalFocusedVerifyCommand(phaseId, taskId),
+  };
+}
+
+async function assertFullStageAllowed(opts: {
+  cwd: string;
+  taskId: string;
+  phaseId: string;
+  maxAttempts: number;
+}): Promise<void> {
+  const state = await currentVerificationState(opts.cwd);
+  const ledger = await readVerificationLedger(opts.cwd);
+  if (stageAttemptCount(ledger, opts.taskId, "full") >= opts.maxAttempts) {
+    const error = new Error(
+      `Full verification budget exceeded for task "${opts.taskId}" (max ${opts.maxAttempts}).`,
+    );
+    (error as NodeJS.ErrnoException).code =
+      "FULL_VERIFICATION_BUDGET_EXCEEDED";
+    (
+      error as NodeJS.ErrnoException & {
+        next?: { stage: VerificationStage; command: string };
+      }
+    ).next = fullRetryRequiresFocusedPass(opts.taskId, opts.phaseId);
+    throw error;
+  }
+
+  const focusedSuccess = lastStageEntryForState(
+    ledger,
+    opts.taskId,
+    state,
+    "focused",
+  );
+  const lastFull = lastStageEntryForState(ledger, opts.taskId, state, "full");
+  const focusedAfterLastFull =
+    focusedSuccess &&
+    !focusedSuccess.failure &&
+    (!lastFull ||
+      new Date(focusedSuccess.finished_at).getTime() >
+        new Date(lastFull.finished_at).getTime());
+
+  if (!focusedAfterLastFull) {
+    const error = new Error(
+      `Full verification requires a successful focused pass first for the current change set.`,
+    );
+    (error as NodeJS.ErrnoException).code =
+      "FULL_RETRY_REQUIRES_FOCUSED_PASS";
+    (
+      error as NodeJS.ErrnoException & {
+        next?: { stage: VerificationStage; command: string };
+      }
+    ).next = fullRetryRequiresFocusedPass(opts.taskId, opts.phaseId);
+    throw error;
+  }
+}
+
+async function recordStageAttempt(opts: {
+  cwd: string;
+  taskId: string;
+  phaseId: string;
+  stage: VerificationStage;
+  startedAt: Date;
+  finishedAt: Date;
+  commandCheck: CheckResult;
+  failure: boolean;
+}): Promise<void> {
+  const state = await currentVerificationState(opts.cwd);
+  await appendVerificationLedgerEntry(opts.cwd, {
+    started_at: opts.startedAt.toISOString(),
+    finished_at: opts.finishedAt.toISOString(),
+    task_id: opts.taskId,
+    phase_id: opts.phaseId,
+    head_sha: state.headSha,
+    working_tree_diff_digest: state.workingTreeDiffDigest,
+    stage: opts.stage,
+    commands: ledgerCommandsFromCheck(opts.commandCheck),
+    duration_ms: opts.finishedAt.getTime() - opts.startedAt.getTime(),
+    failure: opts.failure,
+  });
+}
+
 async function checkProgressEvent(log: ProgressLog, taskId: string): Promise<CheckResult> {
   const event = log.events.find(
     (candidate: ProgressLog["events"][number]) =>
@@ -269,7 +377,10 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
   const { cwd, phaseId, taskId, dryRun, signal } = opts;
   const timeoutMs = validateTimeoutMs(opts.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS);
   const skipConsistencyChecks = opts.skipConsistencyChecks === true;
+  const stage = opts.stage;
 
+  throwIfAborted(signal);
+  const project = stage === undefined ? null : await loadProject(cwd);
   throwIfAborted(signal);
   const ref = await resolvePhaseInRoadmap(cwd, phaseId);
   throwIfAborted(signal);
@@ -283,6 +394,65 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
     throw error;
   }
 
+  if (stage === "focused") {
+    const focusedCommand = focusedVerificationCommand(project!, taskId, phaseId);
+    if (focusedCommand === null) {
+      const error = new Error(
+        "Focused verification is not configured for this project.",
+      );
+      (error as NodeJS.ErrnoException).code =
+        "FOCUSED_VERIFICATION_NOT_CONFIGURED";
+      throw error;
+    }
+
+    const startedAt = new Date();
+    const commandsCheck = await checkCommands(
+      [focusedCommand],
+      cwd,
+      dryRun,
+      timeoutMs,
+      signal,
+    );
+    commandsCheck.stage = "focused";
+    const finishedAt = new Date();
+    const result: VerifyResult = {
+      ok: commandsCheck.ok,
+      stage: "focused",
+      checks: [commandsCheck],
+      ...(commandsCheck.ok
+        ? {
+            next: {
+              stage: "full",
+              command: `code-pact task complete ${taskId} --json --detail agent`,
+            },
+          }
+        : {}),
+    };
+    if (!dryRun) {
+      await recordStageAttempt({
+        cwd,
+        taskId,
+        phaseId,
+        stage: "focused",
+        startedAt,
+        finishedAt,
+        commandCheck: commandsCheck,
+        failure: !result.ok,
+      });
+    }
+    return result;
+  }
+
+  if (stage === "full" && hasVerificationPolicy(project!)) {
+    await assertFullStageAllowed({
+      cwd,
+      taskId,
+      phaseId,
+      maxAttempts: maxFullAttempts(project!),
+    });
+  }
+
+  const startedAt = new Date();
   const commandsCheck = await checkCommands(
     phase.verification.commands,
     cwd,
@@ -290,10 +460,33 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
     timeoutMs,
     signal,
   );
+  if (stage === "full") commandsCheck.stage = "full";
   const checks: CheckResult[] = [commandsCheck];
 
   if (commandsCheck.aborted || commandsCheck.timedOut) {
-    return { ok: false, checks };
+    const finishedAt = new Date();
+    if (!dryRun && stage === "full" && hasVerificationPolicy(project!)) {
+      await recordStageAttempt({
+        cwd,
+        taskId,
+        phaseId,
+        stage: "full",
+        startedAt,
+        finishedAt,
+        commandCheck: commandsCheck,
+        failure: true,
+      });
+    }
+    return {
+      ok: false,
+      ...(stage === "full"
+        ? {
+            stage: "full" as const,
+            next: fullRetryRequiresFocusedPass(taskId, phaseId),
+          }
+        : {}),
+      checks,
+    };
   }
 
   throwIfAborted(signal);
@@ -308,7 +501,31 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
     checks.push(checkTaskStatus(phase, taskId));
   }
 
-  return { ok: checks.every(check => check.ok), checks };
+  const ok = checks.every(check => check.ok);
+  const finishedAt = new Date();
+  if (!dryRun && stage === "full" && hasVerificationPolicy(project!)) {
+    await recordStageAttempt({
+      cwd,
+      taskId,
+      phaseId,
+      stage: "full",
+      startedAt,
+      finishedAt,
+      commandCheck: commandsCheck,
+      failure: !ok,
+    });
+  }
+
+  return {
+    ok,
+    ...(stage === "full"
+      ? {
+          stage: "full" as const,
+          ...(!ok ? { next: fullRetryRequiresFocusedPass(taskId, phaseId) } : {}),
+        }
+      : {}),
+    checks,
+  };
 }
 
 export function formatVerify(result: VerifyResult): string {
