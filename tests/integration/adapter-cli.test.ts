@@ -22,6 +22,7 @@ import {
 } from "../../src/core/adapters/manifest.ts";
 import { STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION } from "../../src/core/adapters/conformance-spec.ts";
 import { ADAPTER_SPEC_ORDER } from "../../src/cli/spec/adapter.ts";
+import { CLAUDE_TIER_MODEL_IDS } from "../../src/core/models/catalog.ts";
 import { cliPath, ensureCliBuilt } from "../helpers/cli.ts";
 
 const ADAPTER_SUBCOMMAND_LIST = ADAPTER_SPEC_ORDER.join(" | ");
@@ -87,15 +88,27 @@ describe("adapter list — CLI", () => {
 });
 
 describe("adapter conformance — CLI", () => {
+  // Exercised against codex: `structural_projection_guidance_present` belongs to
+  // the schema-v1 instruction contract, and claude-code now generates the
+  // schema-v2 bootstrap, which carries no locale-variant anchors to tamper with.
   it("human failure output renders locale variant details as compact JSON", async () => {
+    // The shared setup enables claude-code only; re-init with codex enabled so
+    // its agent profile exists.
+    await runInit({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["codex"],
+      force: true,
+      json: false,
+    });
     await runAdapterInstall({
       cwd: dir,
-      agentName: "claude-code",
+      agentName: "codex",
       force: false,
       locale: "en-US",
       generatorVersionOverride: STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION,
     });
-    const manifest = await readManifest(dir, "claude-code");
+    const manifest = await readManifest(dir, "codex");
     const instruction = manifest!.files.find(file => file.role === "instruction");
     const instructionPath = join(dir, instruction!.path);
     const original = await readFile(instructionPath, "utf8");
@@ -105,7 +118,7 @@ describe("adapter conformance — CLI", () => {
     );
     expect(tampered).not.toBe(original);
     await writeFile(instructionPath, tampered, "utf8");
-    await writeManifest(dir, "claude-code", {
+    await writeManifest(dir, "codex", {
       ...manifest!,
       files: manifest!.files.map(file =>
         file.path === instruction!.path
@@ -114,7 +127,7 @@ describe("adapter conformance — CLI", () => {
       ),
     });
 
-    const res = runCli(["adapter", "conformance", "claude-code"]);
+    const res = runCli(["adapter", "conformance", "codex"]);
 
     expect(res.status).toBe(1);
     expect(res.stdout).toContain("structural_projection_guidance_present");
@@ -436,7 +449,7 @@ describe("adapter upgrade — MODEL_MAP_STALE remaining-advisory hint (CLI)", ()
     expect(res.status).toBe(0);
     expect(res.stderr).toContain("Remaining manual advisory: MODEL_MAP_STALE");
     expect(res.stderr).toContain("claude-opus-4-7");
-    expect(res.stderr).toContain("claude-opus-4-8");
+    expect(res.stderr).toContain(CLAUDE_TIER_MODEL_IDS.highest_reasoning);
     // Must not advise --model (it re-pins model_version, not model_map).
     expect(res.stderr).not.toContain("--model");
     // Must not mutate model_map — the stale pin is still on disk afterward.
