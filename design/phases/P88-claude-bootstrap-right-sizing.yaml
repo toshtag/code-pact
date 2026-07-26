@@ -3,7 +3,7 @@ name: Claude Bootstrap Right-Sizing
 weight: 1
 confidence: high
 risk: medium
-status: planned
+status: done
 objective: >
   Make the generated claude-code instruction file a bootstrap rather than a
   manual. The always-loaded file carries the repository purpose, the single
@@ -52,7 +52,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       Right-size the generated claude-code bootstrap. Introduce an
       adapter-schema-v2 instruction contract whose checks require the
