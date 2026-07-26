@@ -1,0 +1,65 @@
+schema_version: 1
+task_id: P88-T1A
+phase_id: P88
+phase_path: design/phases/P88-claude-bootstrap-right-sizing.yaml
+base_ref: HEAD
+base_sha: 5be1067c7f008707391e228923c999ca89e62aec
+phase_blob_sha: cb0164a225f9b19c0e43864cd6dd5f82393a6ec6
+contract_digest: 291a8f7527413e6925806d9c75cf5fe180a87542e8b0caee8f35c9a9243d6ae0
+contract:
+  description: >
+    Correct the schema-v2 bootstrap's generated references and the
+    adapter-doctor remediation text. The bootstrap names a scaffolded project
+    path the generator cannot guarantee survives, and tells the agent to wait
+    for a work-order pointer that `task prepare` never emits. Doctor describes
+    `--accept-modified` as preserving local edits when it discards them.
+  reads:
+    - design/phases/P88-claude-bootstrap-right-sizing.yaml
+    - docs/cli-contract.md
+    - src/commands/adapter-doctor.ts
+    - src/core/adapters/claude.ts
+    - tests/unit/commands/adapter-upgrade.test.ts
+  writes:
+    - design/phases/P88-claude-bootstrap-right-sizing.yaml
+    - docs/cli-contract.md
+    - src/commands/adapter-doctor.ts
+    - src/i18n/en-US.ts
+    - src/i18n/ja-JP.ts
+    - tests/unit/commands/adapter-doctor.test.ts
+    - tests/unit/core/adapters/claude-bootstrap.test.ts
+  depends_on:
+    - P88-T1
+  decision_refs: []
+  acceptance_refs:
+    - tests/unit/commands/adapter-doctor.test.ts
+    - tests/unit/core/adapters/claude-bootstrap.test.ts
+  definition_of_done:
+    - Adapter conformance selects its instruction-file contract from the
+      manifest adapter schema version, so schema-v1 installs keep the existing
+      checks
+    - The Claude model catalog carries the Claude 5 model ids for validation,
+      profile seeding, and advisory defaults
+    - The claude-code adapter declares adapter schema version 2
+    - The generated claude-code instruction file enumerates no lifecycle verb
+      set, no failure catalog, and no model selection guidance
+    - The generated claude-code instruction file is identical for every
+      supported Claude model version
+    - The generated claude-code instruction file presents `task prepare` as the
+      per-task entrypoint and names the progressive-disclosure fields the agent
+      reads from it
+    - The generated claude-code instruction file stays within the bootstrap
+      context budget
+    - The repository-gotcha section of the generated claude-code instruction
+      file is bounded
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm test:integration:smoke -- --no-file-parallelism --testTimeout=30000
+    - pnpm test:unit -- --no-file-parallelism --testTimeout=30000
+    - pnpm typecheck
+  base_sha: 5be1067c7f008707391e228923c999ca89e62aec
+  phase_blob_sha: cb0164a225f9b19c0e43864cd6dd5f82393a6ec6
+at: 2026-07-26T13:59:40.524Z
+actor: agent
+author: Pocket
