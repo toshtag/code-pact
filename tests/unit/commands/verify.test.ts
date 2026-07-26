@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -8,6 +8,7 @@ import {
   runVerify,
 } from "../../../src/commands/verify.ts";
 import { readVerificationLedger } from "../../../src/core/verification-ledger.ts";
+import * as boundedCommand from "../../../src/core/process/bounded-command.ts";
 
 const fixtureDir = new URL("../../../tests/fixtures/project-a", import.meta.url).pathname;
 
@@ -282,6 +283,140 @@ describe("runVerify — focused verification policy", () => {
       stage: "full",
       next: { stage: "focused" },
     });
+  });
+});
+
+/**
+ * Run every command for real, recording it, and cancel the controller once
+ * `abortAfter` recognises the command that just finished.
+ *
+ * Delegating to the real runner leaves the production call graph intact, so
+ * these assertions only hold when the signal genuinely reaches the step being
+ * cancelled. `ranSoFar` includes the command that just finished, which is how a
+ * repeated command such as `git rev-parse HEAD` is told apart per call.
+ */
+function interceptCommands(
+  controller: AbortController,
+  abortAfter: (command: string, ranSoFar: readonly string[]) => boolean,
+): { commands: string[]; restore: () => void } {
+  const commands: string[] = [];
+  const runBoundedCommand = boundedCommand.runBoundedCommand;
+  const spy = vi
+    .spyOn(boundedCommand, "runBoundedCommand")
+    .mockImplementation(async (command, cwd, timeoutMs, signal) => {
+      commands.push(command);
+      const result = await runBoundedCommand(command, cwd, timeoutMs, signal);
+      if (abortAfter(command, commands)) controller.abort();
+      return result;
+    });
+  return { commands, restore: () => spy.mockRestore() };
+}
+
+describe("runVerify — cancellation during verification state collection", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "code-pact-verify-cancel-"));
+    await setupProject(dir, { projectYaml: PROJECT_YAML_WITH_POLICY });
+  });
+  afterEach(() => rm(dir, { recursive: true, force: true }));
+
+  async function runFocusedPass(): Promise<void> {
+    await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      stage: "focused",
+    });
+  }
+
+  it("records no focused entry when cancelled after the focused command", async () => {
+    const controller = new AbortController();
+    const intercept = interceptCommands(controller, command =>
+      command.includes("focused.mjs"),
+    );
+
+    try {
+      await expect(
+        runVerify({
+          cwd: dir,
+          phaseId: "P1",
+          taskId: "P1-T1",
+          dryRun: false,
+          stage: "focused",
+          signal: controller.signal,
+        }),
+      ).rejects.toMatchObject({
+        code: "VERIFICATION_STATE_UNAVAILABLE",
+        aborted: true,
+      });
+      expect(await readVerificationLedger(dir)).toHaveLength(0);
+    } finally {
+      intercept.restore();
+    }
+  });
+
+  it("does not start the full commands when cancelled during full authorization", async () => {
+    await runFocusedPass();
+    const controller = new AbortController();
+    const intercept = interceptCommands(
+      controller,
+      command => command === "git rev-parse HEAD",
+    );
+
+    try {
+      await expect(
+        runVerify({
+          cwd: dir,
+          phaseId: "P1",
+          taskId: "P1-T1",
+          dryRun: false,
+          stage: "full",
+          signal: controller.signal,
+        }),
+      ).rejects.toMatchObject({
+        code: "VERIFICATION_STATE_UNAVAILABLE",
+        aborted: true,
+      });
+      expect(intercept.commands).not.toContain("echo ok");
+      expect(await readVerificationLedger(dir)).toHaveLength(1);
+    } finally {
+      intercept.restore();
+    }
+  });
+
+  it("records no full entry when cancelled after the full commands pass", async () => {
+    await runFocusedPass();
+    const controller = new AbortController();
+    // The first HEAD read authorizes the full stage; the second belongs to the
+    // ledger record taken once the commands have already passed. Cancel only
+    // the latter, so the run reaches the entry it must then refuse to write.
+    const intercept = interceptCommands(
+      controller,
+      (command, ranSoFar) =>
+        command === "git rev-parse HEAD" &&
+        ranSoFar.filter(ran => ran === command).length === 2,
+    );
+
+    try {
+      await expect(
+        runVerify({
+          cwd: dir,
+          phaseId: "P1",
+          taskId: "P1-T1",
+          dryRun: false,
+          stage: "full",
+          signal: controller.signal,
+        }),
+      ).rejects.toMatchObject({
+        code: "VERIFICATION_STATE_UNAVAILABLE",
+        aborted: true,
+      });
+      expect(intercept.commands).toContain("echo ok");
+      expect(await readVerificationLedger(dir)).toHaveLength(1);
+    } finally {
+      intercept.restore();
+    }
   });
 });
 
