@@ -5,7 +5,7 @@ phase_path: design/phases/P87-deterministic-ci-release.yaml
 base_ref: c6683f9
 base_sha: c6683f9d87842066b8ab0d857e6bacf1172adfc6
 phase_blob_sha: ba7e5f96c8a8cf0fca29b36c465ccfb07a8f6930
-contract_digest: f5c2c923046e3045971bb72eb6bcc0a8d9a883fb11f62b055c8acf65bde1840a
+contract_digest: 12ac1be64378c408c2aac9851539db4849bd14cff6a9b4e39ac90e6815864ba7
 contract:
   description: >
     Close the remaining P87-T3 trust and lifecycle gaps by executing
@@ -16,7 +16,9 @@ contract:
   reads:
     - .code-pact/project.yaml
     - .github/workflows/ci.yml
+    - docs/cli-contract.md
     - docs/cli-reference.generated.md
+    - docs/troubleshooting.md
     - scripts/verification-scope.d.mts
     - scripts/verification-scope.mjs
     - src/cli.ts
@@ -33,13 +35,16 @@ contract:
     - tests/unit/commands/task-prepare.test.ts
     - tests/unit/commands/verify.test.ts
     - tests/unit/core/project-loader.test.ts
+    - tests/unit/error-code-surface.test.ts
     - tests/unit/scripts/verification-scope.test.ts
     - tests/unit/workflows/ci-workflow.test.ts
   writes:
     - .code-pact/project.yaml
     - .github/workflows/ci.yml
+    - docs/cli-contract.md
     - design/phases/P87-deterministic-ci-release.yaml
     - docs/cli-reference.generated.md
+    - docs/troubleshooting.md
     - scripts/verification-scope.d.mts
     - scripts/verification-scope.mjs
     - src/cli.ts
@@ -56,6 +61,7 @@ contract:
     - tests/unit/commands/task-prepare.test.ts
     - tests/unit/commands/verify.test.ts
     - tests/unit/core/project-loader.test.ts
+    - tests/unit/error-code-surface.test.ts
     - tests/unit/scripts/verification-scope.test.ts
     - tests/unit/workflows/ci-workflow.test.ts
   depends_on:
@@ -67,6 +73,7 @@ contract:
     - tests/unit/commands/task-prepare.test.ts
     - tests/unit/commands/verify.test.ts
     - tests/unit/core/project-loader.test.ts
+    - tests/unit/error-code-surface.test.ts
     - tests/unit/workflows/ci-workflow.test.ts
   definition_of_done:
     - Local verification requires a successful focused run before full
