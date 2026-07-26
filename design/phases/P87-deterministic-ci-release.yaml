@@ -3,7 +3,7 @@ name: Deterministic CI and Release
 weight: 1
 confidence: high
 risk: low
-status: in_progress
+status: done
 objective: >
   Make release and CI behavior deterministic, hermetic, and context-efficient.
   P87-T1 closes release correctness gaps; P87-T2 applies change-aware test
@@ -139,16 +139,16 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       Close the P87-T2 verification-efficiency regression by making pull-request
       CI execute the generated focused verification plan, preventing repeated
       full-suite execution during local edit/fix loops, and recording selection
       reasons, command counts, and durations without weakening high-risk or
       main-branch gates.
+    requires_decision: false
     depends_on:
       - P87-T2
-    requires_decision: false
     reads:
       - .github/workflows/ci.yml
       - scripts/verification-scope.mjs

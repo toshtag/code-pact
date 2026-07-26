@@ -248,7 +248,9 @@ describe("runTaskPrepare — minimal mode state matrix", () => {
     expect(result.task.read_scope).toEqual([]);
     expect(result.task.write_scope).toEqual([]);
     expect(result.task.done_when).toEqual(["tests pass"]);
-    expect(result.task.verify).toEqual(["echo ok"]);
+    expect(result.task.verify).toEqual([
+      "node scripts/verification-scope.mjs --local --stage focused --run --task-id P1-T1",
+    ]);
     expect(result.task.decision_required).toBe(false);
 
     expect(result.next.type).toBe("start_task");
@@ -418,7 +420,9 @@ describe("runTaskPrepare — minimal mode actionable completeness", () => {
       "tests/unit/commands/task-prepare.test.ts",
     ]);
     expect(result.task.done_when).toEqual(["acceptance criteria met"]);
-    expect(result.task.verify).toEqual(["pnpm typecheck", "pnpm test:unit"]);
+    expect(result.task.verify).toEqual([
+      "node scripts/verification-scope.mjs --local --stage focused --run --task-id P1-T1",
+    ]);
     expect(result.task.acceptance_refs).toEqual([
       "design/decisions/P1-T1-rfc.md",
     ]);
@@ -524,7 +528,8 @@ describe("runTaskPrepare — full detail compatibility", () => {
     expect(result.commands).toEqual({
       context: "code-pact task context P1-T1 --agent claude-code",
       start: "code-pact task start P1-T1 --agent claude-code",
-      verify: "code-pact verify --phase P1 --task P1-T1 --json --detail agent",
+      verify:
+        "node scripts/verification-scope.mjs --local --stage focused --run --task-id P1-T1",
       complete:
         "code-pact task complete P1-T1 --agent claude-code --json --detail agent",
       finalize: "code-pact task finalize P1-T1 --write --json",
@@ -834,7 +839,9 @@ describe("cmdTask prepare — default minimal vs full", () => {
       expect(output).toContain("Done when:");
       expect(output).toContain("- tests pass");
       expect(output).toContain("Verify:");
-      expect(output).toContain("- echo ok");
+      expect(output).toContain(
+        "- node scripts/verification-scope.mjs --local --stage focused --run --task-id P1-T1",
+      );
       expect(output).toContain("Next: start_task");
       expect(output).toContain("More:");
       expect(output).toContain("--detail full");
