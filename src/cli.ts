@@ -825,7 +825,7 @@ async function cmdVerify(
             }),
           );
         } else {
-          emitOk({ checks: projectVerifyForPublicJson(result).checks });
+          emitOk(projectVerifyForPublicJson(result));
         }
       } else {
         if (detail === "agent") {
@@ -849,7 +849,7 @@ async function cmdVerify(
             aborted ? m.verify.aborted : "Verification failed",
             {
               ...(aborted ? { causeCode: "ABORTED" } : {}),
-              data: { checks: projectVerifyForPublicJson(result).checks },
+              data: projectVerifyForPublicJson(result),
             },
           );
         }
@@ -916,7 +916,8 @@ async function cmdVerify(
       code === "FOCUSED_VERIFICATION_NOT_CONFIGURED" ||
       code === "FULL_RETRY_REQUIRES_FOCUSED_PASS" ||
       code === "FULL_VERIFICATION_BUDGET_EXCEEDED" ||
-      code === "VERIFICATION_LEDGER_INVALID"
+      code === "VERIFICATION_LEDGER_INVALID" ||
+      code === "VERIFICATION_STATE_UNAVAILABLE"
     ) {
       const message =
         error instanceof Error ? error.message : "Verification policy failed.";
@@ -925,6 +926,13 @@ async function cmdVerify(
           next?: { stage: string; command: string };
         }
       ).next;
+      const stateFailure =
+        error as NodeJS.ErrnoException & {
+          operation?: string;
+          exit_code?: number | null;
+          timed_out?: boolean;
+          aborted?: boolean;
+        };
       if (detail === "agent") {
         emitAgentError(
           { code, message },
@@ -934,6 +942,18 @@ async function cmdVerify(
             task_id: taskId,
             ...(stage ? { stage } : {}),
             ...(next ? { next } : {}),
+            ...(stateFailure.operation
+              ? { operation: stateFailure.operation }
+              : {}),
+            ...(stateFailure.exit_code !== undefined
+              ? { exit_code: stateFailure.exit_code }
+              : {}),
+            ...(stateFailure.timed_out !== undefined
+              ? { timed_out: stateFailure.timed_out }
+              : {}),
+            ...(stateFailure.aborted !== undefined
+              ? { aborted: stateFailure.aborted }
+              : {}),
           },
         );
         return code === "FOCUSED_VERIFICATION_NOT_CONFIGURED" ? 2 : 1;
@@ -944,6 +964,18 @@ async function cmdVerify(
           task_id: taskId,
           ...(stage ? { stage } : {}),
           ...(next ? { next } : {}),
+          ...(stateFailure.operation
+            ? { operation: stateFailure.operation }
+            : {}),
+          ...(stateFailure.exit_code !== undefined
+            ? { exit_code: stateFailure.exit_code }
+            : {}),
+          ...(stateFailure.timed_out !== undefined
+            ? { timed_out: stateFailure.timed_out }
+            : {}),
+          ...(stateFailure.aborted !== undefined
+            ? { aborted: stateFailure.aborted }
+            : {}),
         },
       });
       return code === "FOCUSED_VERIFICATION_NOT_CONFIGURED" ? 2 : 1;

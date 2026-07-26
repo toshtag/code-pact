@@ -48,6 +48,7 @@ import {
   type PriorLocalSignal,
 } from "../../commands/task-complete.ts";
 import { projectVerifyForPublicJson } from "../../commands/verify.ts";
+import type { VerifyResult } from "../../commands/verify.ts";
 import {
   runTaskRecordDone,
   type DecisionRequiredData,
@@ -1416,7 +1417,39 @@ async function cmdTaskComplete(
             priorLocalSignal?: PriorLocalSignal;
           }
         ).priorLocalSignal ?? undefined;
+      const verificationNext =
+        (
+          error as NodeJS.ErrnoException & {
+            next?: { stage: string; command: string };
+            stage?: string;
+          }
+        ).next ?? undefined;
+      const verificationStage =
+        (error as NodeJS.ErrnoException & { stage?: string }).stage ??
+        undefined;
+      const normalizedVerificationStage =
+        verificationStage === "focused" || verificationStage === "full"
+          ? verificationStage
+          : undefined;
+      const normalizedVerificationNext: VerifyResult["next"] =
+        verificationNext &&
+        (verificationNext.stage === "focused" ||
+          verificationNext.stage === "full")
+          ? {
+              stage: verificationNext.stage,
+              command: verificationNext.command,
+            }
+          : undefined;
       const summary = buildFailureSummaryFromChecks(checks, taskId);
+      const suggestedNextCommand =
+        normalizedVerificationNext?.command ?? summary.suggested_next_command;
+      const summaryForOutput: FailureSummary = {
+        ...summary,
+        suggested_next_command: suggestedNextCommand,
+      };
+      const summaryForHuman: FailureSummary = verificationNext
+        ? { ...summary, suggested_next_command: null }
+        : summaryForOutput;
       const wasAborted = checks.some(
         check =>
           (check as FailureCheckLike & { aborted?: boolean }).aborted === true,
@@ -1459,7 +1492,16 @@ async function cmdTaskComplete(
       }
 
       if (json) {
-        const verifyResult = { ok: false as const, checks };
+        const verifyResult: VerifyResult = {
+          ok: false as const,
+          ...(normalizedVerificationStage
+            ? { stage: normalizedVerificationStage }
+            : {}),
+          ...(normalizedVerificationNext
+            ? { next: normalizedVerificationNext }
+            : {}),
+          checks,
+        };
         if (detail === "agent") {
           process.stdout.write(
             stringifyBoundedAgentEnvelope({
@@ -1479,7 +1521,7 @@ async function cmdTaskComplete(
                 ...(priorLocalSignal !== undefined
                   ? { prior_local_signal: priorLocalSignal }
                   : {}),
-                suggested_next_command: summary.suggested_next_command,
+                suggested_next_command: suggestedNextCommand,
                 ...(warnings !== undefined ? { warnings } : {}),
                 ...(wasAborted ? { aborted: true } : {}),
               },
@@ -1493,9 +1535,12 @@ async function cmdTaskComplete(
               data: {
                 task_id: taskId,
                 verify: projectVerifyForPublicJson(verifyResult),
-                failed_checks: summary.failed_checks,
-                first_failure: summary.first_failure,
-                suggested_next_command: summary.suggested_next_command,
+                ...(normalizedVerificationNext
+                  ? { next: normalizedVerificationNext }
+                  : {}),
+                failed_checks: summaryForOutput.failed_checks,
+                first_failure: summaryForOutput.first_failure,
+                suggested_next_command: suggestedNextCommand,
                 ...(warnings !== undefined ? { warnings } : {}),
                 ...(wasAborted ? { aborted: true } : {}),
               },
@@ -1504,8 +1549,11 @@ async function cmdTaskComplete(
         }
       } else {
         process.stderr.write(`${errorObj.message}\n`);
-        const lines = renderFailureSummaryLines(m.task.failure, summary);
+        const lines = renderFailureSummaryLines(m.task.failure, summaryForHuman);
         if (lines.length > 0) process.stderr.write(`${lines.join("\n")}\n`);
+        if (normalizedVerificationNext) {
+          process.stderr.write(`Next: ${normalizedVerificationNext.command}\n`);
+        }
       }
       return 1;
     }
@@ -1513,7 +1561,8 @@ async function cmdTaskComplete(
     if (
       code === "FULL_RETRY_REQUIRES_FOCUSED_PASS" ||
       code === "FULL_VERIFICATION_BUDGET_EXCEEDED" ||
-      code === "VERIFICATION_LEDGER_INVALID"
+      code === "VERIFICATION_LEDGER_INVALID" ||
+      code === "VERIFICATION_STATE_UNAVAILABLE"
     ) {
       const message =
         error instanceof Error ? error.message : "Verification policy failed.";
@@ -1522,6 +1571,13 @@ async function cmdTaskComplete(
           next?: { stage: string; command: string };
         }
       ).next;
+      const stateFailure =
+        error as NodeJS.ErrnoException & {
+          operation?: string;
+          exit_code?: number | null;
+          timed_out?: boolean;
+          aborted?: boolean;
+        };
       if (json) {
         if (detail === "agent") {
           process.stdout.write(
@@ -1534,6 +1590,18 @@ async function cmdTaskComplete(
               data: {
                 task_id: taskId,
                 ...(next ? { next } : {}),
+                ...(stateFailure.operation
+                  ? { operation: stateFailure.operation }
+                  : {}),
+                ...(stateFailure.exit_code !== undefined
+                  ? { exit_code: stateFailure.exit_code }
+                  : {}),
+                ...(stateFailure.timed_out !== undefined
+                  ? { timed_out: stateFailure.timed_out }
+                  : {}),
+                ...(stateFailure.aborted !== undefined
+                  ? { aborted: stateFailure.aborted }
+                  : {}),
                 ...projectPreflightFailureForAgent(
                   "invalid_state",
                   message,
@@ -1550,6 +1618,18 @@ async function cmdTaskComplete(
               data: {
                 task_id: taskId,
                 ...(next ? { next } : {}),
+                ...(stateFailure.operation
+                  ? { operation: stateFailure.operation }
+                  : {}),
+                ...(stateFailure.exit_code !== undefined
+                  ? { exit_code: stateFailure.exit_code }
+                  : {}),
+                ...(stateFailure.timed_out !== undefined
+                  ? { timed_out: stateFailure.timed_out }
+                  : {}),
+                ...(stateFailure.aborted !== undefined
+                  ? { aborted: stateFailure.aborted }
+                  : {}),
               },
             })}\n`,
           );

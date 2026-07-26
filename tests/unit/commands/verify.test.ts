@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runVerify } from "../../../src/commands/verify.ts";
+import { spawnSync } from "node:child_process";
+import {
+  projectVerifyForPublicJson,
+  runVerify,
+} from "../../../src/commands/verify.ts";
 import { readVerificationLedger } from "../../../src/core/verification-ledger.ts";
 
 const fixtureDir = new URL("../../../tests/fixtures/project-a", import.meta.url).pathname;
@@ -116,6 +120,12 @@ async function setupProject(
       "utf8",
     );
   }
+
+  spawnSync("git", ["init", "--quiet"], { cwd: dir });
+  spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
+  spawnSync("git", ["config", "user.name", "Test"], { cwd: dir });
+  spawnSync("git", ["add", "."], { cwd: dir });
+  spawnSync("git", ["commit", "--quiet", "-m", "initial"], { cwd: dir });
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +208,11 @@ describe("runVerify — focused verification policy", () => {
     expect(result.ok).toBe(true);
     expect(result.stage).toBe("focused");
     expect(result.next?.stage).toBe("full");
+    expect(projectVerifyForPublicJson(result)).toMatchObject({
+      ok: true,
+      stage: "focused",
+      next: { stage: "full" },
+    });
     const ledger = await readVerificationLedger(dir);
     expect(ledger).toHaveLength(1);
     expect(ledger[0]).toMatchObject({
@@ -206,6 +221,46 @@ describe("runVerify — focused verification policy", () => {
       stage: "focused",
       failure: false,
       attempt_number: 1,
+    });
+  });
+
+  it("returns focused next action in public projection when full commands fail", async () => {
+    await setupProject(dir, {
+      projectYaml: PROJECT_YAML_WITH_POLICY,
+      taskStatus: "planned",
+    });
+    await writeFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      PHASE_YAML("planned").replace("    - echo ok", '    - "false"'),
+      "utf8",
+    );
+
+    await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      stage: "focused",
+    });
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      stage: "full",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.stage).toBe("full");
+    expect(result.next).toEqual({
+      stage: "focused",
+      command:
+        "code-pact verify --phase P1 --task P1-T1 --stage focused --json --detail agent",
+    });
+    expect(projectVerifyForPublicJson(result)).toMatchObject({
+      ok: false,
+      stage: "full",
+      next: { stage: "focused" },
     });
   });
 });

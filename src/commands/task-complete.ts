@@ -213,6 +213,17 @@ export async function runTaskComplete(
     (error as NodeJS.ErrnoException).code = "VERIFICATION_FAILED";
     (error as NodeJS.ErrnoException & { checks?: CheckResult[] }).checks =
       verifyResult.checks;
+    if (verifyResult.stage !== undefined) {
+      (error as NodeJS.ErrnoException & { stage?: string }).stage =
+        verifyResult.stage;
+    }
+    if (verifyResult.next !== undefined) {
+      (
+        error as NodeJS.ErrnoException & {
+          next?: { stage: string; command: string };
+        }
+      ).next = verifyResult.next;
+    }
     if (priorLocalSignal !== undefined) {
       (
         error as NodeJS.ErrnoException & { priorLocalSignal?: PriorLocalSignal }

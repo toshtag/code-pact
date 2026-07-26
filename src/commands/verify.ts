@@ -94,6 +94,8 @@ export type PublicCheckResult = Omit<
 
 export type PublicVerifyResult = {
   ok: boolean;
+  stage?: VerificationStage;
+  next?: { stage: VerificationStage; command: string };
   checks: PublicCheckResult[];
 };
 
@@ -120,6 +122,8 @@ export function projectCheckForPublicJson(check: CheckResult): PublicCheckResult
 export function projectVerifyForPublicJson(result: VerifyResult): PublicVerifyResult {
   return {
     ok: result.ok,
+    ...(result.stage ? { stage: result.stage } : {}),
+    ...(result.next ? { next: result.next } : {}),
     checks: result.checks.map(projectCheckForPublicJson),
   };
 }
