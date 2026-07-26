@@ -626,9 +626,10 @@ export async function inspectAgent(
       // older code-pact version. Severity stays `warning` (soft
       // signal — never gates the overall doctor exit code; the
       // existing `ADAPTER_FILE_DRIFT` and friends still own that
-      // signal). Resolution: `code-pact adapter upgrade <agent>
-      // --write --accept-modified` reinstates the section while
-      // preserving any user edits.
+      // signal). Resolution: `code-pact adapter upgrade <agent> --write`
+      // reinstates the section; `--accept-modified` is needed only when the
+      // file also carries local modifications, and it discards them (see
+      // upgradeRemediation).
       // SECURITY: the heading/substring inspection IS a content oracle, so it
       // runs ONLY after classifyManifestFileForRead returned `owned` — never on
       // a dynamic write-namespace member that forged `role: instruction`.

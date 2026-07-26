@@ -653,6 +653,86 @@ describe("runGenerateAdapter — claude-code model pinning", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// `--accept-modified` is destructive, and every surface has to say so
+//
+// `--write WITH --accept-modified overwrites the user's edits`
+// (tests/unit/commands/adapter-upgrade.test.ts) is the shipped behaviour. The
+// schema-v1 failure guidance advertised it as preserving manual edits, so the
+// generated instruction file — the surface a user actually reads — contradicted
+// adapter doctor and the CLI contract. A user who trusted the generated text lost
+// the edits it promised to keep.
+// ---------------------------------------------------------------------------
+
+describe("runGenerateAdapter — schema-v1 remediation for a destructive flag", () => {
+  /** The exact claims that shipped. Neither may come back in either locale. */
+  const RETIRED_CLAIM = {
+    "en-US": /preserve manual edits/i,
+    "ja-JP": /手動編集を残したい/,
+  } as const;
+
+  /** What the guidance has to convey instead. */
+  const DISCARDS_CLAIM = {
+    "en-US": /`--accept-modified` discards them and regenerates the file/,
+    "ja-JP": /`--accept-modified` はその変更を破棄してファイルを再生成します/,
+  } as const;
+
+  for (const locale of ["en-US", "ja-JP"] as const) {
+    it(`codex AGENTS.md (${locale}) describes the flag as discarding local edits`, async () => {
+      await runInit({ cwd: dir, locale, agents: ["codex"], force: false, json: false });
+      await runGenerateAdapter({ cwd: dir, agentName: "codex", force: false, locale });
+      const content = await readFile(join(dir, "AGENTS.md"), "utf8");
+
+      expect(content).toContain("--accept-modified");
+      expect(content).not.toMatch(RETIRED_CLAIM[locale]);
+      expect(content).toMatch(DISCARDS_CLAIM[locale]);
+    });
+  }
+
+  it("generic instruction file carries the same corrected guidance", async () => {
+    await runInit({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["generic"],
+      force: false,
+      json: false,
+    });
+    const result = await runGenerateAdapter({
+      cwd: dir,
+      agentName: "generic",
+      force: false,
+      locale: "en-US",
+    });
+    const instruction = result.created.find(p => p.endsWith(".md"));
+    expect(instruction).toBeDefined();
+    const content = await readFile(instruction!, "utf8");
+    expect(content).not.toMatch(RETIRED_CLAIM["en-US"]);
+    expect(content).toMatch(DISCARDS_CLAIM["en-US"]);
+  });
+
+  it("keeps the schema-v1 failure guidance out of the claude-code bootstrap", async () => {
+    // The bootstrap shares `adapterCommon` for its managed notice only. If it ever
+    // rendered the failure guidance, it would fail its own no-failure-catalog check
+    // — and would pick up this remediation sentence along with it.
+    await runInit({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["claude-code"],
+      force: false,
+      json: false,
+    });
+    await runGenerateAdapter({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+    });
+    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(content).not.toContain("--accept-modified");
+    expect(content).not.toContain("adapter drift");
+  });
+});
+
 describe("runGenerateAdapter — unknown agent", () => {
   beforeEach(async () => {
     await runInit({

@@ -28,9 +28,11 @@ import { BOOTSTRAP_GOTCHA_SECTION_HEADING } from "./conformance-spec.ts";
 // Every line here is generator-owned, including the repository-gotcha bullets.
 // The manifest pins this file's hash under `ownership: managed`, so a hand edit
 // fails the `file_checksum_match` conformance check and `adapter upgrade`
-// refuses the file as `managed_modified`. The bootstrap therefore points at
-// `design/rules/` and `docs/` for the repository's own conventions rather than
-// inviting an edit its own contract would reject.
+// refuses the file as `managed_modified`. So the bootstrap names no project path
+// at all — `code-pact init` scaffolds `design/rules/coding-style.md` but nothing
+// keeps it there, and a bootstrap citing a reorganized project's old layout is
+// worse than one that defers to the task contract. It points at the references
+// the work order supplies, plus the secondary online CLI contract.
 // ---------------------------------------------------------------------------
 
 function claudeMd(locale: Locale): string {

@@ -28,8 +28,9 @@ import type { ModelProfile } from "../schemas/model-profile.ts";
 // ---------------------------------------------------------------------------
 
 /**
- * Supported Claude model versions for model-aware adapter generation.
- * "generic" (or undefined) produces the baseline template. Newest first.
+ * Supported canonical Claude model versions for `--model` validation and
+ * `model_version` profile pinning. Newest first. Not a template switch: the
+ * schema-v2 bootstrap renders identical bytes for every value here.
  */
 export const CLAUDE_MODEL_VERSIONS = [
   "opus-5",
