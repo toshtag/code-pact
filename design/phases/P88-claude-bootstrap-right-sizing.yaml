@@ -3,7 +3,7 @@ name: Claude Bootstrap Right-Sizing
 weight: 1
 confidence: high
 risk: medium
-status: done
+status: in_progress
 objective: >
   Make the generated claude-code instruction file a bootstrap rather than a
   manual. The always-loaded file carries the repository purpose, the single
@@ -151,3 +151,57 @@ tasks:
     acceptance_refs:
       - tests/unit/commands/adapter-doctor.test.ts
       - tests/unit/core/adapters/claude-bootstrap.test.ts
+  - id: P88-T1B
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    requires_decision: false
+    description: >
+      Close the `--accept-modified` correction where P88-T1A left it open: the
+      schema-v1 generated instruction body still tells the reader the flag
+      preserves manual edits, so codex, cursor, gemini-cli, and generic ship the
+      claim adapter doctor and the CLI contract no longer make. Align the
+      maintainer documentation and source comments that still describe
+      model-aware instruction generation with the model-neutral bootstrap.
+    depends_on:
+      - P88-T1A
+    reads:
+      - design/phases/P88-claude-bootstrap-right-sizing.yaml
+      - docs/cli-contract.md
+      - src/core/adapters/codex.ts
+      - src/core/adapters/generic.ts
+      - src/core/adapters/template-sections.ts
+      - tests/unit/commands/adapter-doctor.test.ts
+      - tests/unit/core/adapters/claude-bootstrap.test.ts
+    writes:
+      - design/phases/P88-claude-bootstrap-right-sizing.yaml
+      - docs/maintainers/operations.md
+      - src/commands/adapter-doctor.ts
+      - src/core/adapters/claude.ts
+      - src/core/models/catalog.ts
+      - src/core/schemas/agent-profile.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - tests/unit/commands/adapter.test.ts
+    acceptance_refs:
+      - tests/unit/commands/adapter.test.ts
+    definition_of_done:
+      - No generated adapter instruction describes `--accept-modified` as
+        preserving local edits
+      - The schema-v1 generated instruction states that `--accept-modified`
+        discards managed local modifications and regenerates the file
+      - Both locales carry equivalent destructive-overwrite guidance
+      - Doctor, the generated instructions, and the current CLI contract agree on
+        `--accept-modified` semantics
+      - The schema-v2 bootstrap carries no part of the schema-v1 failure guidance
+      - Maintainer documentation makes no claim that `--model` adds an effort or
+        thinking block to the generated instruction file
+      - Source comments describe `model_version` as a profile pin rather than a
+        template-content switch
+      - codex, cursor, gemini-cli, and generic stay on schema v1 with only the
+        unsafe remediation sentence changed
