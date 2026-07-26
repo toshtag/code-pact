@@ -1398,7 +1398,7 @@ existing manifest at `.code-pact/adapters/<agent>.manifest.yaml`; run
 **mutually exclusive and required** — passing neither (or both) is a
 `CONFIG_ERROR` exit 2 so the intent is unambiguous in CI logs.
 
-The generated adapter reference owns the exact flag list. The semantic constraints below are stable: `--check` is read-only, `--write` applies changes, `--accept-modified` is required to overwrite `managed-modified × stale` files, and `--model` has the same model-aware generation semantics as `adapter install --model`.
+The generated adapter reference owns the exact flag list. The semantic constraints below are stable: `--check` is read-only, `--write` applies changes, and `--accept-modified` is required to overwrite `managed-modified × stale` files. For `claude-code`, `--model` has the same validation and `model_version` profile-pinning semantics as `adapter install --model`; under adapter schema v2 it does not change the generated instruction bytes.
 
 #### Action enum (8 values)
 

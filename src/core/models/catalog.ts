@@ -11,9 +11,11 @@
 // schema layer imports FROM here, so a runtime import back would create a
 // cycle. Type-only imports are fine (erased at compile time).
 //
-// This whole layer is ADVISORY — it drives recommendation text and generated
-// instructions. No enforcement path (verify / audit / lifecycle gate) depends
-// on these ids. So a stale value mis-advises; it never breaks correctness.
+// This whole layer is ADVISORY — it drives model validation, profile and tier
+// default seeding, recommendation text, and the doctor model advisories. No
+// enforcement path (verify / audit / lifecycle gate) depends on these ids, and
+// per the note above, no generated instruction file does either. So a stale
+// value mis-advises; it never breaks correctness.
 //
 // Two DISTINCT namespaces live here. Keep them apart or doctor false-positives:
 //   - CLAUDE_MODEL_VERSIONS         short canonical versions, for `--model` /
