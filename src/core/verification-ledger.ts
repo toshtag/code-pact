@@ -13,6 +13,7 @@ import {
 } from "./project-fs/index.ts";
 import {
   runBoundedCommand,
+  runBoundedCommandDigest,
   type CommandExecutionResult,
 } from "./process/bounded-command.ts";
 
@@ -44,6 +45,16 @@ export type VerificationStateKey = {
 
 const GIT_STATE_TIMEOUT_MS = 30_000;
 const MAX_STATE_ERROR_STDERR_BYTES = 2048;
+/**
+ * Total budget for one state collection. Individual Git commands are bounded
+ * too, but their timeouts must not sum into an unbounded whole once untracked
+ * content hashing is added on top.
+ */
+const STATE_COLLECTION_DEADLINE_MS = 60_000;
+/** A path longer than this is not a path Git produced; fail closed instead. */
+const MAX_UNTRACKED_PATH_BYTES = 8192;
+
+const PATHSPEC = [".", ":(exclude).code-pact/cache/verification-runs/**"];
 
 function sha256(input: string | Buffer): string {
   if (typeof input !== "string") {
@@ -134,11 +145,91 @@ async function gitOutput(cwd: string, command: string): Promise<string> {
       stderr: result.stderr,
     });
   }
+  // A truncated capture maps distinct outputs onto one value, which would let a
+  // stale focused pass authorize a changed tree. It is never usable state.
+  if (result.stdoutTruncated || result.stderrTruncated) {
+    throw verificationStateUnavailable({
+      operation: command,
+      exitCode: result.exitCode,
+      stderr: "command output exceeded the capture limit",
+    });
+  }
   return result.stdout;
 }
 
-function parseNulDelimited(output: string): string[] {
-  return output.split("\0").filter(Boolean);
+type GitStreamDigest = { sha256: string; bytes: number };
+
+/**
+ * Digest one Git state command losslessly.
+ *
+ * Git status and diff output is unbounded in principle; capturing it as a
+ * string would either truncate it or hold the whole diff in memory. Only the
+ * digest and byte count are needed to detect a changed tree.
+ */
+async function gitStreamDigest(
+  cwd: string,
+  args: string[],
+  deadline: number,
+  onStdoutChunk?: (chunk: Buffer) => void,
+): Promise<GitStreamDigest> {
+  const operation = `git ${args.join(" ")}`;
+  const remainingMs = deadline - performance.now();
+  if (remainingMs <= 0) {
+    throw verificationStateUnavailable({ operation, timedOut: true });
+  }
+  const result = await runBoundedCommandDigest({
+    executable: "git",
+    args,
+    cwd,
+    timeoutMs: Math.min(GIT_STATE_TIMEOUT_MS, remainingMs),
+    onStdoutChunk,
+  });
+  if (result.exitCode !== 0 || result.timedOut || result.aborted) {
+    throw verificationStateUnavailable({
+      operation,
+      exitCode: result.exitCode,
+      timedOut: result.timedOut,
+      aborted: result.aborted,
+      stderr: result.stderr,
+    });
+  }
+  return { sha256: result.stdoutSha256, bytes: result.stdoutBytes };
+}
+
+/**
+ * Collect NUL-delimited entries from a byte stream.
+ *
+ * Paths must be reassembled across chunk boundaries, so entries accumulate
+ * until their terminator arrives. Only one pending entry is held at a time,
+ * never the whole listing.
+ */
+function createNulEntryCollector(): {
+  append: (chunk: Buffer) => void;
+  entries: () => string[];
+  pendingBytes: () => number;
+} {
+  const entries: string[] = [];
+  let pending: Buffer = Buffer.alloc(0);
+
+  return {
+    append(chunk: Buffer): void {
+      let rest = pending.length > 0 ? Buffer.concat([pending, chunk]) : chunk;
+      let index = rest.indexOf(0);
+      while (index !== -1) {
+        entries.push(rest.subarray(0, index).toString("utf8"));
+        rest = rest.subarray(index + 1);
+        index = rest.indexOf(0);
+      }
+      if (rest.length > MAX_UNTRACKED_PATH_BYTES) {
+        throw new Error(
+          `untracked path exceeded ${MAX_UNTRACKED_PATH_BYTES} bytes`,
+        );
+      }
+      pending = Buffer.from(rest);
+    },
+    entries: () => entries,
+    pendingBytes: () => pending.length,
+  };
 }
 
 function sortPathsByteStable(paths: string[]): string[] {
@@ -164,6 +255,7 @@ type UntrackedManifestEntry =
 async function hashUntrackedEntry(
   cwd: string,
   path: string,
+  deadline: number,
 ): Promise<UntrackedManifestEntry> {
   const readPath = await resolveVerificationStateReadPath(cwd, path);
   let stat;
@@ -206,11 +298,14 @@ async function hashUntrackedEntry(
       type: "file",
       mode: stat.mode,
       size: stat.size,
-      sha256: await hashOwnedRegularFileSha256(readPath),
+      sha256: await hashOwnedRegularFileSha256(readPath, { deadline }),
     };
   } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException).code;
     throw verificationStateUnavailable({
       operation: "hash untracked file content",
+      timedOut: code === "ETIMEDOUT",
+      aborted: code === "ABORT_ERR",
       stderr: cause instanceof Error ? cause.message : String(cause),
     });
   }
@@ -218,15 +313,27 @@ async function hashUntrackedEntry(
 
 async function collectUntrackedManifest(
   cwd: string,
+  deadline: number,
 ): Promise<UntrackedManifestEntry[]> {
-  const output = await gitOutput(
+  const collector = createNulEntryCollector();
+  await gitStreamDigest(
     cwd,
-    "git ls-files --others --exclude-standard -z -- . ':(exclude).code-pact/cache/verification-runs/**'",
+    ["ls-files", "--others", "--exclude-standard", "-z", "--", ...PATHSPEC],
+    deadline,
+    chunk => collector.append(chunk),
   );
-  const paths = sortPathsByteStable(parseNulDelimited(output));
+  // Git terminates every entry with NUL. Leftover bytes mean the listing was
+  // cut short, and a partial path must never be hashed as if it were complete.
+  if (collector.pendingBytes() > 0) {
+    throw verificationStateUnavailable({
+      operation: "git ls-files --others",
+      stderr: "untracked listing ended with an unterminated entry",
+    });
+  }
+  const paths = sortPathsByteStable(collector.entries().filter(Boolean));
   const entries: UntrackedManifestEntry[] = [];
   for (const path of paths) {
-    entries.push(await hashUntrackedEntry(cwd, path));
+    entries.push(await hashUntrackedEntry(cwd, path, deadline));
   }
   return entries;
 }
@@ -234,6 +341,7 @@ async function collectUntrackedManifest(
 export async function currentVerificationState(
   cwd: string,
 ): Promise<VerificationStateKey> {
+  const deadline = performance.now() + STATE_COLLECTION_DEADLINE_MS;
   const headRaw = await gitOutput(cwd, "git rev-parse HEAD");
   const head = headRaw.trim();
   if (!/^[0-9a-f]{40}$/i.test(head)) {
@@ -243,20 +351,29 @@ export async function currentVerificationState(
     });
   }
   const [status, diff, untracked] = await Promise.all([
-    gitOutput(
+    gitStreamDigest(
       cwd,
-      "git status --porcelain=v1 -z -- . ':(exclude).code-pact/cache/verification-runs/**'",
+      ["status", "--porcelain=v1", "-z", "--", ...PATHSPEC],
+      deadline,
     ),
-    gitOutput(
+    gitStreamDigest(
       cwd,
-      "git diff --binary --no-ext-diff HEAD -- . ':(exclude).code-pact/cache/verification-runs/**'",
+      ["diff", "--binary", "--no-ext-diff", "--no-textconv", "HEAD", "--", ...PATHSPEC],
+      deadline,
     ),
-    collectUntrackedManifest(cwd),
+    collectUntrackedManifest(cwd, deadline),
   ]);
   return {
     headSha: head,
     workingTreeDiffDigest: sha256(
-      JSON.stringify({ head, status, diff, untracked }),
+      JSON.stringify({
+        head,
+        status_sha256: status.sha256,
+        status_bytes: status.bytes,
+        diff_sha256: diff.sha256,
+        diff_bytes: diff.bytes,
+        untracked,
+      }),
     ),
   };
 }
