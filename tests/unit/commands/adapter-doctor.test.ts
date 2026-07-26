@@ -1034,6 +1034,24 @@ describe("adapter doctor — ADAPTER_CONTRACT_DRIFT (v1.7 P16-T5)", () => {
     // are independent diagnoses per design/decisions/agent-contract-rfc.md.
     expect(codes).toContain("ADAPTER_FILE_DRIFT");
   });
+
+  it("describes --accept-modified as discarding local edits, not preserving them", async () => {
+    // Same correction as the schema-v2 signal: both remediations share one
+    // string, so neither can drift back to advertising a destructive flag as
+    // preserving what it overwrites.
+    await installFreshCodex();
+    const original = await readAgentsMd();
+    await writeAgentsMd(
+      original.replace(/## Agent contract[\s\S]*?(?=\n## )/, ""),
+    );
+
+    const result = await codexDoctor();
+    const drift = result.issues.find(i => i.code === "ADAPTER_CONTRACT_DRIFT");
+    expect(drift).toBeDefined();
+    expect(drift!.message).not.toMatch(/preserve user edits/i);
+    expect(drift!.message).toMatch(/discards them/);
+    expect(drift!.message).toContain("adapter upgrade codex --write");
+  });
 });
 
 describe("adapter doctor — ADAPTER_CONTRACT_DRIFT for a schema-v2 bootstrap", () => {
@@ -1091,6 +1109,30 @@ describe("adapter doctor — ADAPTER_CONTRACT_DRIFT for a schema-v2 bootstrap", 
     const result = await claudeDoctor();
     const drift = result.issues.find(i => i.code === "ADAPTER_CONTRACT_DRIFT");
     expect(drift?.details).not.toMatchObject({ kind: "axes_incomplete" });
+  });
+
+  it("describes --accept-modified as discarding local edits, not preserving them", async () => {
+    // `--write WITH --accept-modified overwrites the user's edits`
+    // (tests/unit/commands/adapter-upgrade.test.ts) is the shipped behaviour.
+    // Doctor advertised the flag as preserving them, so a user who followed the
+    // remediation lost the edits it promised to keep.
+    await installFreshClaudeCode();
+    const original = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    await writeFile(
+      join(dir, "CLAUDE.md"),
+      original.replace(
+        /- Use `data\.more\.command`[\s\S]*?current action\.\n/,
+        "",
+      ),
+      "utf8",
+    );
+
+    const result = await claudeDoctor();
+    const drift = result.issues.find(i => i.code === "ADAPTER_CONTRACT_DRIFT");
+    expect(drift).toBeDefined();
+    expect(drift!.message).not.toMatch(/preserve user edits/i);
+    expect(drift!.message).toMatch(/discards them/);
+    expect(drift!.message).toContain("adapter upgrade claude-code --write");
   });
 });
 

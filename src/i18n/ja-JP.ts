@@ -606,7 +606,8 @@ export const messages = {
     adapterBootstrap: {
       ownershipNotice: [
         "このファイルは code-pact が生成し、`adapter upgrade` で書き直す。",
-        "リポジトリ固有の規約は `design/rules/` と `docs/` にある。",
+        "プロジェクト固有の規約は、task contract が指す project 所有の",
+        "ファイルに置く（このファイルには置かない）。",
       ].join("\n"),
       purposeHeader: "Purpose",
       purposeBody: [
@@ -630,13 +631,16 @@ export const messages = {
         "  状態と理由をユーザーへ報告する。",
       ].join("\n"),
       referenceBody: [
-        "envelope の完全なリファレンス（lifecycle verb、failure code、監査 flag の",
-        "すべて）は",
-        "[`docs/cli-contract.md`](https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md)",
-        "にある。work order がそこを指したときに読む（事前には読まない）。",
+        "それでも足りない CLI contract の詳細に限り、",
+        "[online の code-pact CLI contract](https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md)",
+        "を参照する。これは main branch を追うため、installed な command より",
+        "新しい release を記述している場合は、installed な command の structured",
+        "output を正式なものとして扱う。",
       ].join("\n"),
-      gotchasDefault:
-        "コードスタイルは `design/rules/coding-style.md` に従う。",
+      gotchasDefault: [
+        "phase/task contract と `.code-pact/state` を正式な状態として扱い、",
+        "  `task prepare` が返す現在の action に従う。",
+      ].join("\n"),
     },
     adapterCommon: {
       managedNotice:

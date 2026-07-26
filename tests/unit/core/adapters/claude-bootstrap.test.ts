@@ -28,6 +28,31 @@ const EDIT_INVITATION: Record<Locale, RegExp> = {
   "ja-JP": /(編集し|置き換え|書き換え|記入し)/,
 };
 
+/**
+ * Project paths `code-pact init` scaffolds. The bootstrap ships to every project
+ * and cannot know which of these still exist there, so it names none of them.
+ */
+const SCAFFOLDED_PROJECT_PATHS = [
+  "design/rules/coding-style.md",
+  "design/constitution.md",
+] as const;
+
+/** The one external reference the bootstrap is allowed to carry. */
+const ENVELOPE_REFERENCE_URL =
+  "https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md";
+
+/** The false claim that the work order hands the agent a docs pointer. */
+const WORK_ORDER_POINTER_CLAIM: Record<Locale, RegExp> = {
+  "en-US": /work order points you (there|to)/i,
+  "ja-JP": /work order がそこを指した/,
+};
+
+/** Version skew: the online reference tracks main; the installed command wins. */
+const INSTALLED_WINS_CLAIM: Record<Locale, RegExp> = {
+  "en-US": /installed command's structured output is\s+authoritative/,
+  "ja-JP": /installed な command の structured\s+output を正式なもの/,
+};
+
 async function renderInstruction(
   locale: Locale,
   modelVersion?: string,
@@ -116,9 +141,49 @@ describe("claude-code bootstrap instruction file", () => {
         expect(md).not.toMatch(EDIT_INVITATION[locale]);
       });
 
-      it("points repository conventions at the sources it does not own", async () => {
+      it("names no project path the generator does not own", async () => {
         const md = await renderInstruction(locale);
-        expect(md).toContain("design/rules/");
+        // `code-pact init` scaffolds design/rules/coding-style.md, but nothing
+        // keeps it there: this repository reorganized its own rules and the
+        // generated bootstrap went on citing a file it no longer has. Naming any
+        // scaffolded project path makes the bootstrap wrong the moment a project
+        // reorganizes, so the generator names none of them.
+        for (const path of SCAFFOLDED_PROJECT_PATHS) {
+          expect(md).not.toContain(path);
+        }
+      });
+
+      it("reaches the work order before any external reference", async () => {
+        const md = await renderInstruction(locale);
+        const more = md.indexOf("data.more.command");
+        const external = md.indexOf(ENVELOPE_REFERENCE_URL);
+        expect(more).toBeGreaterThan(-1);
+        expect(external).toBeGreaterThan(-1);
+        expect(more).toBeLessThan(external);
+      });
+
+      it("names each required anchor exactly once", async () => {
+        const md = await renderInstruction(locale);
+        // `adapter doctor` detects bootstrap drift by anchor presence, so a second
+        // mention anywhere in the file masks the anchor's removal from the place
+        // that carries it. Prose that needs to refer back to an anchor says "that"
+        // rather than repeating the field name.
+        for (const anchor of BOOTSTRAP_REQUIRED_ANCHORS) {
+          expect(md.split(anchor).length - 1).toBe(1);
+        }
+      });
+
+      it("claims no work-order pointer that task prepare does not emit", async () => {
+        const md = await renderInstruction(locale);
+        // `task prepare` never returns a docs path or URL — the only `docs/`
+        // strings in its output are a task's own declared read/write scope. An
+        // agent told to wait for the work order to point here waits forever.
+        expect(md).not.toMatch(WORK_ORDER_POINTER_CLAIM[locale]);
+      });
+
+      it("records the installed command as authoritative over the reference", async () => {
+        const md = await renderInstruction(locale);
+        expect(md).toMatch(INSTALLED_WINS_CLAIM[locale]);
       });
     });
   }

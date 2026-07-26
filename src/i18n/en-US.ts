@@ -602,8 +602,9 @@ export const messages = {
     // file — the manifest pins its hash, so an edit fails conformance.
     adapterBootstrap: {
       ownershipNotice: [
-        "code-pact generates this file and rewrites it on `adapter upgrade`;",
-        "the repository's own conventions live in `design/rules/` and `docs/`.",
+        "code-pact generates this file and rewrites it on `adapter upgrade`.",
+        "Project-specific conventions belong in the project-owned files the task",
+        "contract points at, not here.",
       ].join("\n"),
       purposeHeader: "Purpose",
       purposeBody: [
@@ -630,12 +631,17 @@ export const messages = {
         "  that state and its reason to the user.",
       ].join("\n"),
       referenceBody: [
-        "The full envelope reference — every lifecycle verb, failure code, and",
-        "audit flag — lives in",
-        "[`docs/cli-contract.md`](https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md).",
-        "Read it when the work order points you there, not in advance.",
+        "Only for a CLI contract detail the work order still lacks after that,",
+        "consult the",
+        "[online code-pact CLI contract](https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md).",
+        "It tracks the main branch: where it describes a newer release than the",
+        "installed command, the installed command's structured output is",
+        "authoritative.",
       ].join("\n"),
-      gotchasDefault: "Follow `design/rules/coding-style.md` for code style.",
+      gotchasDefault: [
+        "The phase/task contract and `.code-pact/state` are authoritative; follow",
+        "  the current action returned by `task prepare`.",
+      ].join("\n"),
     },
     adapterCommon: {
       managedNotice:

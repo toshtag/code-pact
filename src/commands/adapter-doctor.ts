@@ -225,6 +225,21 @@ import {
  * axis is not inspected; only the heading presence is locked.
  */
 /**
+ * The remediation both contract-drift signals carry, shared so the two cannot
+ * describe the flag differently.
+ *
+ * `--accept-modified` does not merge or keep local edits: it discards them and
+ * writes the generated content, which
+ * `tests/unit/commands/adapter-upgrade.test.ts` pins as "--write WITH
+ * --accept-modified overwrites the user's edits". Doctor advertised it as
+ * preserving those edits, so a user following the advice lost them — never
+ * describe a destructive flag by the outcome its name suggests.
+ */
+function upgradeRemediation(agentName: SupportedAgent): string {
+  return `Run "adapter upgrade ${agentName} --write". If it refuses because the managed file has local modifications, review those changes first; "--accept-modified" discards them and regenerates the file.`;
+}
+
+/**
  * Contract drift for a schema-v2 (bootstrap) instruction file. The schema-v1
  * signal — a missing `## Agent contract` section — cannot apply here, because a
  * conforming bootstrap has no such section: the drift signal is instead the loss
@@ -247,7 +262,7 @@ function detectBootstrapContractDrift(
   return {
     code: "ADAPTER_CONTRACT_DRIFT",
     severity: "warning",
-    message: `Managed instruction file "${relPath}" no longer presents the per-task entrypoint: missing ${missing.join(", ")}. Run "adapter upgrade ${agentName} --write" (use --accept-modified to preserve user edits).`,
+    message: `Managed instruction file "${relPath}" no longer presents the per-task entrypoint: missing ${missing.join(", ")}. ${upgradeRemediation(agentName)}`,
     agent: agentName,
     path: absPath,
     details: { kind: "bootstrap_entrypoint_missing", missing_anchors: missing },
@@ -276,7 +291,7 @@ function detectContractDrift(
     return {
       code: "ADAPTER_CONTRACT_DRIFT",
       severity: "warning",
-      message: `Managed instruction file "${relPath}" is missing the "${AGENT_CONTRACT_SECTION_HEADING}" section. Run "adapter upgrade ${agentName} --write" to apply the v1.7+ template (use --accept-modified to preserve user edits).`,
+      message: `Managed instruction file "${relPath}" is missing the "${AGENT_CONTRACT_SECTION_HEADING}" section, so the v1.7+ template needs applying. ${upgradeRemediation(agentName)}`,
       agent: agentName,
       path: absPath,
       details: { kind: "section_missing" },
