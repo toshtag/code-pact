@@ -33,4 +33,28 @@ describe("loadProject error contract", () => {
     );
     await expect(loadProject(cwd)).rejects.toMatchObject({ code: "CONFIG_ERROR" });
   });
+
+  it("rejects unknown verification_policy placeholders", async () => {
+    await writeFile(
+      join(cwd, ".code-pact", "project.yaml"),
+      [
+        "name: demo",
+        "version: 0.1.0",
+        "locale: en-US",
+        "default_agent: claude-code",
+        "verification_policy:",
+        "  focused_command: echo {unknown}",
+        "agents:",
+        "  - name: claude-code",
+        "    profile: agent-profiles/claude-code.yaml",
+        "    enabled: true",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await expect(loadProject(cwd)).rejects.toMatchObject({
+      code: "CONFIG_ERROR",
+    });
+  });
 });

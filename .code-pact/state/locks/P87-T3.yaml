@@ -1,0 +1,74 @@
+schema_version: 1
+task_id: P87-T3
+phase_id: P87
+phase_path: design/phases/P87-deterministic-ci-release.yaml
+base_ref: HEAD
+base_sha: 237fea5026a75ac725a10364ccd02e2570c577a4
+phase_blob_sha: f00a9eb2203052ea9c4343363bab0e993fe6b351
+contract_digest: a7f2319f68131c8146a51e42c31f6fb5df2f396abc525a1b317181e6cc8933c5
+contract:
+  description: >
+    Close the P87-T2 verification-efficiency regression by making pull-request
+    CI execute the generated focused verification plan, preventing repeated
+    full-suite execution during local edit/fix loops, and recording selection
+    reasons, command counts, and durations without weakening high-risk or
+    main-branch gates.
+  reads:
+    - .github/workflows/ci.yml
+    - package.json
+    - scripts/check-supply-chain-invariants.mjs
+    - scripts/lib/run-bounded-process.mjs
+    - scripts/verification-scope.d.mts
+    - scripts/verification-scope.mjs
+    - src/commands/task-prepare.ts
+    - tests/integration/task-prepare-commands-contract.test.ts
+    - tests/unit/commands/task-prepare.test.ts
+    - tests/unit/scripts/verification-scope.test.ts
+    - tests/unit/workflows/ci-workflow.test.ts
+  writes:
+    - .github/workflows/ci.yml
+    - design/phases/P87-deterministic-ci-release.yaml
+    - scripts/verification-scope.d.mts
+    - scripts/verification-scope.mjs
+    - src/commands/task-prepare.ts
+    - tests/integration/task-prepare-commands-contract.test.ts
+    - tests/unit/commands/task-prepare.test.ts
+    - tests/unit/scripts/verification-scope.test.ts
+    - tests/unit/workflows/ci-workflow.test.ts
+  depends_on:
+    - P87-T2
+  decision_refs: []
+  acceptance_refs:
+    - tests/integration/task-prepare-commands-contract.test.ts
+    - tests/unit/commands/task-prepare.test.ts
+    - tests/unit/scripts/verification-scope.test.ts
+    - tests/unit/workflows/ci-workflow.test.ts
+  definition_of_done:
+    - Local verification requires a successful focused run before full
+      verification and bounds full-suite attempts to two
+    - Main commits run one full standard gate
+    - Publish reuses the successful exact-SHA main CI result
+    - Publish workflow does not depend on ambient git identity
+    - Pull-request CI executes the generated focused plan while high-risk
+      changes and main pushes retain one full gate
+    - Pull-request verification uses deterministic focused selection with full
+      fallback
+    - Supply-chain invariants enforce the release contract
+    - Trusted publishing fails closed on existing-version collisions
+    - Verification processes are bounded and expose heartbeat and slowest-file
+      output
+    - npm provenance attestation is verified before GitHub Release creation
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm check:supply-chain
+    - pnpm test:integration:smoke -- --no-file-parallelism --testTimeout=30000
+    - pnpm test:unit -- --no-file-parallelism --testTimeout=30000
+    - pnpm typecheck
+  base_sha: 237fea5026a75ac725a10364ccd02e2570c577a4
+  phase_blob_sha: f00a9eb2203052ea9c4343363bab0e993fe6b351
+at: 2026-07-26T02:34:21.749Z
+actor: agent
+agent: claude-code
+author: Pocket

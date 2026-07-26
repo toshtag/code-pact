@@ -20,6 +20,9 @@ jobs:
       docs: ${{ steps.classify.outputs.docs }}
       standard: ${{ steps.classify.outputs.standard }}
       fallback_full: ${{ steps.classify.outputs.fallback_full }}
+      mode: ${{ steps.classify.outputs.mode }}
+      fallback_reason: ${{ steps.classify.outputs.fallback_reason }}
+      plan_json: ${{ steps.classify.outputs.plan_json }}
       base_ref: ${{ steps.base.outputs.ref }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -47,23 +50,42 @@ jobs:
             mkdir -p "$trusted_root/scripts/lib"
             git show "$BASE_REF:scripts/verification-scope.mjs" > "$trusted_classifier"
             git show "$BASE_REF:scripts/lib/run-bounded-process.mjs" > "$trusted_root/scripts/lib/run-bounded-process.mjs"
+
+            node "$trusted_classifier" --base "$BASE_REF" --plan > "$RUNNER_TEMP/verification-plan.json"
             node "$trusted_classifier" --base "$BASE_REF" --format github
+
             # Older base classifiers do not emit fallback_full. Default to true
             # (full gate) so downstream jobs always see a valid boolean.
             if ! grep -q '^fallback_full=' "$GITHUB_OUTPUT" 2>/dev/null; then
               echo "fallback_full=true" >> "$GITHUB_OUTPUT"
             fi
+            if ! grep -q '^mode=' "$GITHUB_OUTPUT" 2>/dev/null; then
+              mode=$(node -e 'const fs=require("node:fs"); const p=JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(p.mode)' "$RUNNER_TEMP/verification-plan.json")
+              echo "mode=$mode" >> "$GITHUB_OUTPUT"
+            fi
+            if ! grep -q '^fallback_reason=' "$GITHUB_OUTPUT" 2>/dev/null; then
+              fallback_reason=$(node -e 'const fs=require("node:fs"); const p=JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.stdout.write(p.fallback_full ? "legacy_trusted_classifier" : "")' "$RUNNER_TEMP/verification-plan.json")
+              echo "fallback_reason=$fallback_reason" >> "$GITHUB_OUTPUT"
+            fi
+
+            plan_json=$(base64 -w0 "$RUNNER_TEMP/verification-plan.json")
+            echo "plan_json=$plan_json" >> "$GITHUB_OUTPUT"
           else
             echo "docs=true" >> "$GITHUB_OUTPUT"
             echo "standard=true" >> "$GITHUB_OUTPUT"
             echo "fallback_full=true" >> "$GITHUB_OUTPUT"
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+            echo "fallback_reason=classifier_unavailable" >> "$GITHUB_OUTPUT"
           fi
 
   docs:
     name: Docs checks
     runs-on: ubuntu-latest
     needs: [classify]
-    if: needs.classify.outputs.docs == 'true'
+    if: >
+      github.event_name == 'pull_request' &&
+      needs.classify.outputs.docs == 'true' &&
+      needs.classify.outputs.standard != 'true'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -105,18 +127,38 @@ jobs:
       - name: Run bounded verification plan
         env:
           BASE_REF: ${{ needs.classify.outputs.base_ref }}
-          FALLBACK_FULL: ${{ needs.classify.outputs.fallback_full }}
           GITHUB_SHA: ${{ github.sha }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ "$FALLBACK_FULL" = "true" ] || [ "$GITHUB_EVENT_NAME" = "push" ]; then
+          plan_json="${{ needs.classify.outputs.plan_json }}"
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            node scripts/verification-scope.mjs --base "$BASE_REF" --force-full --run
+          elif git cat-file -e "$BASE_REF:scripts/verification-scope.mjs" 2>/dev/null; then
             trusted_root="$RUNNER_TEMP/trusted-verification"
             trusted_classifier="$trusted_root/scripts/verification-scope.mjs"
             mkdir -p "$trusted_root/scripts/lib"
             git show "$BASE_REF:scripts/verification-scope.mjs" > "$trusted_classifier"
             git show "$BASE_REF:scripts/lib/run-bounded-process.mjs" > "$trusted_root/scripts/lib/run-bounded-process.mjs"
-            node "$trusted_classifier" --base "$BASE_REF" --force-full --run
+
+            if [ -n "$plan_json" ]; then
+              echo "$plan_json" | base64 -d > "$RUNNER_TEMP/classify-verification-plan.json"
+              node "$trusted_classifier" --base "$BASE_REF" --plan > "$RUNNER_TEMP/standard-verification-plan.json"
+              classify_digest=$(sha256sum "$RUNNER_TEMP/classify-verification-plan.json" | cut -d ' ' -f1)
+              standard_digest=$(sha256sum "$RUNNER_TEMP/standard-verification-plan.json" | cut -d ' ' -f1)
+              if [ "$classify_digest" != "$standard_digest" ]; then
+                echo "trusted verification plan digest mismatch: classify=$classify_digest standard=$standard_digest"
+                exit 1
+              fi
+            fi
+
+            node "$trusted_classifier" --base "$BASE_REF" --run
           else
-            node scripts/verification-scope.mjs --base "$BASE_REF" --run
+            pnpm check:supply-chain
+            pnpm typecheck
+            pnpm test:unit -- --no-file-parallelism --testTimeout=30000
+            pnpm build
+            pnpm test:integration:smoke -- --no-file-parallelism --testTimeout=30000
+            node --version
           fi
 
   ci-status:
@@ -148,8 +190,8 @@ jobs:
             echo "classify job did not succeed: $CLASSIFY_RESULT"
             exit 1
           fi
-          if [ "$DOCS_OUTPUT" = "true" ] && [ "$DOCS_RESULT" != "success" ]; then
-            echo "docs job did not succeed: docs=$DOCS_RESULT"
+          if [ "$DOCS_OUTPUT" = "true" ] && [ "$DOCS_RESULT" != "success" ] && [ "$STANDARD_RESULT" != "success" ]; then
+            echo "docs job did not succeed and was not covered by standard gate: docs=$DOCS_RESULT"
             exit 1
           fi
           if [ "$GITHUB_EVENT_NAME" = "push" ] || [ "$STANDARD_OUTPUT" = "true" ]; then

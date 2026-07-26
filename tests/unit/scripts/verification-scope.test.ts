@@ -14,6 +14,7 @@ import {
   classifyChangedFiles,
   collectLocalChangedFiles,
   buildVerificationPlan,
+  validatePlan,
 } from "../../../scripts/verification-scope.mjs";
 
 const scriptPath = fileURLToPath(
@@ -22,6 +23,22 @@ const scriptPath = fileURLToPath(
 
 function stepLabels(plan: { steps: Array<{ command: string[] }> }) {
   return plan.steps.map(s => s.command.join(" "));
+}
+
+function buildPlanFor(files: string[], mergeBase = "abc123") {
+  const scope = classifyChangedFiles(files);
+  return buildVerificationPlan({
+    scope,
+    changeSet: {
+      baseFiles: scope.changedFiles,
+      workingTreeFiles: [],
+      untrackedFiles: [],
+      indeterminate: false,
+    },
+    mergeBase,
+    baseSha: mergeBase,
+    headSha: "def456",
+  });
 }
 
 describe("classifyChangedFiles", () => {
@@ -39,6 +56,7 @@ describe("classifyChangedFiles", () => {
       unknown: false,
       highRisk: false,
       fallbackFull: false,
+      fallbackReason: null,
       mode: "focused",
       reason: "no tracked changes",
     });
@@ -115,11 +133,14 @@ describe("classifyChangedFiles", () => {
     expect(result.reason).toBe("high-risk+toolchain");
   });
 
-  it("classifies workflow files as toolchain and standard", () => {
+  it("classifies workflow files as toolchain, standard, and full fallback", () => {
     const result = classifyChangedFiles([".github/workflows/ci.yml"]);
     expect(result.toolchain).toBe(true);
     expect(result.standard).toBe(true);
     expect(result.generic).toBe(false);
+    expect(result.fallbackFull).toBe(true);
+    expect(result.fallbackReason).toBe("workflow_changed");
+    expect(result.mode).toBe("full");
   });
 
   it("classifies vitest config as toolchain and standard", () => {
@@ -216,6 +237,39 @@ describe("classifyChangedFiles", () => {
     expect(result.reason).toBe("process-control");
   });
 
+  it("reports a machine-readable fallback reason for workflow changes", () => {
+    const result = classifyChangedFiles([".github/workflows/ci.yml"]);
+    expect(result.fallbackFull).toBe(true);
+    expect(result.fallbackReason).toBe("workflow_changed");
+  });
+
+  it("reports a machine-readable fallback reason for classifier changes", () => {
+    const result = classifyChangedFiles([
+      "scripts/verification-scope.mjs",
+      "src/commands/init.ts",
+    ]);
+    expect(result.fallbackFull).toBe(true);
+    expect(result.fallbackReason).toBe("verification_classifier_changed");
+  });
+
+  it("reports a machine-readable fallback reason for test runner base changes", () => {
+    const result = classifyChangedFiles(["tests/setup.ts"]);
+    expect(result.fallbackFull).toBe(true);
+    expect(result.fallbackReason).toBe("test_runner_base_changed");
+  });
+
+  it("reports a machine-readable fallback reason for toolchain changes", () => {
+    const result = classifyChangedFiles(["package.json"]);
+    expect(result.fallbackFull).toBe(true);
+    expect(result.fallbackReason).toBe("toolchain_changed");
+  });
+
+  it("reports a machine-readable fallback reason for unknown paths", () => {
+    const result = classifyChangedFiles(["foo.bar"]);
+    expect(result.fallbackFull).toBe(true);
+    expect(result.fallbackReason).toBe("unknown_path");
+  });
+
   it("combines process-control and toolchain in reason", () => {
     const result = classifyChangedFiles(["package.json", "src/lib/timeout.ts"]);
     expect(result.toolchain).toBe(true);
@@ -293,19 +347,20 @@ describe("plan command extraction", () => {
     expect(unit?.command).toContain("--passWithNoTests");
   });
 
-  it("workflow changes run mapped workflow tests without build", () => {
+  it("workflow changes fall back to the full suite", () => {
     const plan = planFor([".github/workflows/ci.yml"]);
+    expect(plan.mode).toBe("full");
+    expect(plan.fallback_full).toBe(true);
+    expect(plan.fallback_reason).toBe("workflow_changed");
     expect(plan.steps.map(s => s.id)).toEqual([
       "supply-chain",
       "typecheck",
-      "unit-focused",
+      "unit",
+      "build",
+      "integration-full",
+      "version-human",
+      "version-json",
     ]);
-    const wf = plan.steps.find(s => s.id === "unit-focused");
-    expect(wf?.command.join(" ")).toContain("ci-workflow.test.ts");
-    expect(wf?.command.join(" ")).toContain(
-      "check-supply-chain-invariants.test.ts",
-    );
-    expect(stepLabels(plan).some(l => l.includes(" build"))).toBe(false);
   });
 
   it("mapped release script changes run targeted release tests without build", () => {
@@ -335,14 +390,13 @@ describe("plan command extraction", () => {
     );
   });
 
-  it("source + unit test uses --changed and does not double-run unit-focused", () => {
+  it("source + unit test uses one changed/affected run without a direct duplicate", () => {
     const plan = planFor([
       "src/commands/init.ts",
       "tests/unit/commands/init.test.ts",
     ]);
     expect(plan.steps.some(s => s.id === "unit-base")).toBe(true);
-    expect(plan.steps.some(s => s.id === "unit-focused")).toBe(true);
-    expect(plan.steps.filter(s => s.id === "unit-focused").length).toBe(1);
+    expect(plan.steps.some(s => s.id === "unit-focused")).toBe(false);
   });
 
   it("source + integration test runs integration-direct and integration-smoke", () => {
@@ -618,11 +672,23 @@ describe("collectLocalChangedFiles", () => {
 describe("local verification integration", () => {
   const fakePnpmScript = `#!/usr/bin/env node
 const fs = require("node:fs");
+const command = process.argv.slice(2).join(" ");
 if (process.env.FAKE_PNPM_LOG) {
   fs.appendFileSync(
     process.env.FAKE_PNPM_LOG,
-    process.argv.slice(2).join(" ") + "\\n",
+    command + "\\n",
   );
+}
+if (process.env.FAKE_VITEST_FILE && command.includes("vitest")) {
+  console.log("[vitest:total] 1");
+  console.log("[vitest:start] " + process.env.FAKE_VITEST_FILE);
+  console.error("[vitest:failed] " + process.env.FAKE_VITEST_FILE);
+}
+if (
+  process.env.FAKE_PNPM_FAIL &&
+  command.includes(process.env.FAKE_PNPM_FAIL)
+) {
+  process.exit(1);
 }
 process.exit(0);
 `;
@@ -655,10 +721,13 @@ if (args.includes("--json")) {
     execFileSync("git", ["init", "--initial-branch=feature"], { cwd });
     execFileSync("git", ["config", "user.email", "test@example.com"], { cwd });
     execFileSync("git", ["config", "user.name", "Test"], { cwd });
+    writeFileSync(join(cwd, ".gitignore"), "/.code-pact/\n");
     writeFileSync(join(cwd, ".initial"), "initial\n");
     mkdirSync(join(cwd, "dist"), { recursive: true });
     writeFileSync(join(cwd, "dist", "cli.js"), fakeCliScript);
-    execFileSync("git", ["add", ".initial", "dist/cli.js"], { cwd });
+    execFileSync("git", ["add", ".gitignore", ".initial", "dist/cli.js"], {
+      cwd,
+    });
     execFileSync("git", ["commit", "-m", "initial"], { cwd });
   }
 
@@ -666,14 +735,17 @@ if (args.includes("--json")) {
     execFileSync("git", ["init", "--initial-branch=main"], { cwd });
     execFileSync("git", ["config", "user.email", "test@example.com"], { cwd });
     execFileSync("git", ["config", "user.name", "Test"], { cwd });
+    writeFileSync(join(cwd, ".gitignore"), "/.code-pact/\n");
     mkdirSync(join(cwd, "src"), { recursive: true });
     writeFileSync(join(cwd, ".initial"), "initial\n");
     writeFileSync(join(cwd, "src", "existing.ts"), "export const a = 1;\n");
     mkdirSync(join(cwd, "dist"), { recursive: true });
     writeFileSync(join(cwd, "dist", "cli.js"), fakeCliScript);
-    execFileSync("git", ["add", ".initial", "src/existing.ts", "dist/cli.js"], {
-      cwd,
-    });
+    execFileSync(
+      "git",
+      ["add", ".gitignore", ".initial", "src/existing.ts", "dist/cli.js"],
+      { cwd },
+    );
     execFileSync("git", ["commit", "-m", "initial"], { cwd });
     execFileSync("git", ["switch", "-c", "feature"], { cwd });
   }
@@ -754,7 +826,9 @@ if (args.includes("--json")) {
       npm_execpath: pnpmPath,
     });
     expect(out).toContain("verify:local: scope=fail-safe");
-    expect(out).toContain("verify:local: 8 checks passed");
+    expect(out).toContain("verify:local: 2 checks passed");
+    expect(out).toContain('"stage":"focused"');
+    expect(out).toContain('"stage":"full"');
     expect(out).not.toContain("no tracked changes");
   });
 
@@ -769,7 +843,7 @@ if (args.includes("--json")) {
     const pnpmLog = readFileSync(pnpmLogPath, "utf8");
     expect(out).toContain("verify:local: scope=fail-safe");
     expect(pnpmLog).toContain("check:supply-chain");
-    expect(pnpmLog).toContain("exec vitest run");
+    expect(pnpmLog).not.toContain("exec vitest run");
   });
 
   it("runs process-control checks when base is unknown and timeout changed", () => {
@@ -811,7 +885,7 @@ if (args.includes("--json")) {
     expect(pnpmLog).not.toContain("exec vitest run --changed");
   });
 
-  it("runs full unit tests for untracked source changes when base resolves", () => {
+  it("runs related unit tests for untracked source changes when base resolves", () => {
     rmSync(repoDir, { recursive: true, force: true });
     mkdirSync(repoDir, { recursive: true });
     initRepoWithMainAndFeature(repoDir);
@@ -821,10 +895,10 @@ if (args.includes("--json")) {
     const { pnpmLog } = runLocalWithPnpmLog();
     const unitLines = pnpmLog
       .split("\n")
-      .filter(l => l.startsWith("exec vitest run") && !l.includes("--config"));
+      .filter(l => l.startsWith("exec vitest related"));
     expect(unitLines.length).toBeGreaterThanOrEqual(1);
-    expect(unitLines[0]).toMatch(/exec vitest run --reporter=/);
-    expect(unitLines[0]).not.toContain("--passWithNoTests");
+    expect(unitLines[0]).toContain("related src/untracked.ts --run");
+    expect(unitLines[0]).toContain("--passWithNoTests");
   });
 
   it("keeps merge-base --changed for committed source changes only", () => {
@@ -856,27 +930,257 @@ if (args.includes("--json")) {
     expect(pnpmLog).toMatch(
       /exec vitest run --changed [0-9a-f]{40} --passWithNoTests/,
     );
-    expect(pnpmLog).toContain("exec vitest run --changed --passWithNoTests");
+    expect(
+      pnpmLog
+        .split("\n")
+        .filter(line => line.startsWith("exec vitest run --changed")).length,
+    ).toBe(1);
+  });
+
+  it("rejects a local full run before a focused pass", () => {
+    const pnpmPath = join(toolsDir, "pnpm.cjs");
+    writeFileSync(join(repoDir, "package.json"), "{}");
+    expect(() =>
+      runScript(
+        repoDir,
+        ["--local", "--stage", "full", "--run", "--task-id", "ledger-test"],
+        {
+          npm_execpath: pnpmPath,
+        },
+      ),
+    ).toThrow();
+  });
+
+  it("records a local full run after a focused pass", () => {
+    const pnpmPath = join(toolsDir, "pnpm.cjs");
+    writeFileSync(join(repoDir, "package.json"), "{}");
+    runScript(
+      repoDir,
+      ["--local", "--stage", "focused", "--run", "--task-id", "ledger-test"],
+      {
+        npm_execpath: pnpmPath,
+      },
+    );
+    const out = runScript(
+      repoDir,
+      ["--local", "--stage", "full", "--run", "--task-id", "ledger-test"],
+      {
+        npm_execpath: pnpmPath,
+      },
+    );
+    expect(out).toContain("stage=full");
+    const ledgerPath = join(
+      repoDir,
+      ".code-pact",
+      "cache",
+      "verification-runs",
+      "ledger.jsonl",
+    );
+    const ledger = readFileSync(ledgerPath, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map(line => JSON.parse(line));
+    expect(ledger.length).toBe(2);
+    expect(ledger[1].task_id).toBe("ledger-test");
+    expect(ledger[1].stage).toBe("full");
+    expect(ledger[1].failure).toBe(false);
+  });
+
+  it("blocks a repeated full run without a fresh focused pass", () => {
+    const pnpmPath = join(toolsDir, "pnpm.cjs");
+    writeFileSync(join(repoDir, "package.json"), "{}");
+    runScript(
+      repoDir,
+      ["--local", "--stage", "focused", "--run", "--task-id", "ledger-test"],
+      {
+        npm_execpath: pnpmPath,
+      },
+    );
+    runScript(
+      repoDir,
+      ["--local", "--stage", "full", "--run", "--task-id", "ledger-test"],
+      {
+        npm_execpath: pnpmPath,
+      },
+    );
+    let threw = false;
+    try {
+      runScript(
+        repoDir,
+        ["--local", "--stage", "full", "--run", "--task-id", "ledger-test"],
+        {
+          npm_execpath: pnpmPath,
+        },
+      );
+    } catch (err: any) {
+      threw = true;
+      expect(err.status).toBe(2);
+      expect(String(err.stderr ?? err.stdout ?? err)).toContain(
+        "FULL_RETRY_REQUIRES_FOCUSED_PASS",
+      );
+    }
+    expect(threw).toBe(true);
+  });
+
+  it("allows one full retry after a full failure and a new focused pass", () => {
+    const pnpmPath = join(toolsDir, "pnpm.cjs");
+    writeFileSync(join(repoDir, "package.json"), "{}");
+    const args = [
+      "--local",
+      "--stage",
+      "focused",
+      "--run",
+      "--task-id",
+      "ledger-test",
+    ];
+    runScript(repoDir, args, { npm_execpath: pnpmPath });
+
+    expect(() =>
+      runScript(
+        repoDir,
+        ["--local", "--stage", "full", "--run", "--task-id", "ledger-test"],
+        {
+          npm_execpath: pnpmPath,
+          FAKE_PNPM_FAIL: "check:supply-chain",
+        },
+      ),
+    ).toThrow();
+
+    expect(() =>
+      runScript(
+        repoDir,
+        ["--local", "--stage", "full", "--run", "--task-id", "ledger-test"],
+        { npm_execpath: pnpmPath },
+      ),
+    ).toThrow();
+
+    writeFileSync(join(repoDir, "package.json"), '{"changed":true}');
+    expect(() =>
+      runScript(
+        repoDir,
+        ["--local", "--stage", "full", "--run", "--task-id", "ledger-test"],
+        { npm_execpath: pnpmPath },
+      ),
+    ).toThrow();
+
+    runScript(repoDir, args, { npm_execpath: pnpmPath });
+    const retry = runScript(
+      repoDir,
+      ["--local", "--stage", "full", "--run", "--task-id", "ledger-test"],
+      { npm_execpath: pnpmPath },
+    );
+    expect(retry).toContain("stage=full");
+
+    runScript(repoDir, args, { npm_execpath: pnpmPath });
+    try {
+      runScript(
+        repoDir,
+        ["--local", "--stage", "full", "--run", "--task-id", "ledger-test"],
+        { npm_execpath: pnpmPath },
+      );
+      throw new Error("expected full verification budget rejection");
+    } catch (err: any) {
+      expect(String(err.stderr ?? err.stdout ?? err)).toContain(
+        "FULL_VERIFICATION_BUDGET_EXCEEDED",
+      );
+    }
+  });
+
+  it("returns a ledger-aware direct retry for a failed test file", () => {
+    rmSync(repoDir, { recursive: true, force: true });
+    mkdirSync(repoDir, { recursive: true });
+    initRepoWithMainAndFeature(repoDir);
+    mkdirSync(join(repoDir, "tests", "unit"), { recursive: true });
+    writeFileSync(
+      join(repoDir, "tests", "unit", "a.test.ts"),
+      "it('a', () => {});\n",
+    );
+    const pnpmPath = join(toolsDir, "pnpm.cjs");
+    try {
+      runScript(
+        repoDir,
+        [
+          "--local",
+          "--stage",
+          "focused",
+          "--run",
+          "--task-id",
+          "ledger-test",
+        ],
+        {
+          npm_execpath: pnpmPath,
+          FAKE_VITEST_FILE: "tests/unit/a.test.ts",
+          FAKE_PNPM_FAIL: "vitest",
+        },
+      );
+      throw new Error("expected focused verification failure");
+    } catch (err: any) {
+      const output = String(err.stdout ?? "");
+      expect(output).toContain('"failed_test_files":["tests/unit/a.test.ts"]');
+      expect(output).toContain("--test-file tests/unit/a.test.ts");
+    }
+  });
+
+  it("accepts a trusted legacy plan during the schema transition", () => {
+    const planPath = join(repoDir, "legacy-plan.json");
+    writeFileSync(
+      planPath,
+      JSON.stringify({
+        schema_version: "p87-t2/1",
+        base_sha: null,
+        head_sha: null,
+        mode: "full",
+        fallback_full: true,
+        reason: "high-risk",
+        changed_files: [],
+        steps: [
+          {
+            id: "version-human",
+            scope: "release",
+            enabled: true,
+            command: ["node", "dist/cli.js", "--version"],
+            timeout_ms: 60_000,
+            reason: "CLI version",
+          },
+        ],
+      }),
+    );
+    const out = runScript(repoDir, ["--run-plan", planPath]);
+    expect(out).toContain("0.0.0");
+  });
+
+  it("rejects unsupported local stage names", () => {
+    expect(() =>
+      runScript(repoDir, ["--local", "--stage", "banana", "--run"]),
+    ).toThrow();
+  });
+
+  it("fails closed when the local verification ledger is corrupt", () => {
+    const ledgerDir = join(
+      repoDir,
+      ".code-pact",
+      "cache",
+      "verification-runs",
+    );
+    mkdirSync(ledgerDir, { recursive: true });
+    writeFileSync(join(ledgerDir, "ledger.jsonl"), "{not-json}\n");
+    writeFileSync(join(repoDir, "package.json"), "{}");
+    try {
+      runScript(
+        repoDir,
+        ["--local", "--stage", "focused", "--run", "--task-id", "ledger-test"],
+        { npm_execpath: join(toolsDir, "pnpm.cjs") },
+      );
+      throw new Error("expected corrupt ledger rejection");
+    } catch (err: any) {
+      expect(String(err.stderr ?? err.stdout ?? err)).toContain(
+        "VERIFICATION_LEDGER_INVALID",
+      );
+    }
   });
 });
 
 describe("buildVerificationPlan selection regression matrix", () => {
-  function buildPlanFor(files: string[], mergeBase = "abc123") {
-    const scope = classifyChangedFiles(files);
-    return buildVerificationPlan({
-      scope,
-      changeSet: {
-        baseFiles: files,
-        workingTreeFiles: [],
-        untrackedFiles: [],
-        indeterminate: false,
-      },
-      mergeBase,
-      baseSha: mergeBase,
-      headSha: "def456",
-    });
-  }
-
   function stepIds(plan: ReturnType<typeof buildPlanFor>) {
     return plan.steps.map(s => s.id);
   }
@@ -910,19 +1214,28 @@ describe("buildVerificationPlan selection regression matrix", () => {
     expect(stepIds(plan)).toContain("integration-full");
   });
 
-  it("workflow changes run targeted workflow tests without build or integration", () => {
+  it("a changed supply-chain unit test runs directly without full fallback", () => {
+    const plan = buildPlanFor([
+      "tests/unit/scripts/check-supply-chain-invariants.test.ts",
+    ]);
+    expect(plan.fallback_full).toBe(false);
+    expect(stepIds(plan)).toEqual(["typecheck", "unit-focused"]);
+  });
+
+  it("workflow changes fall back to the full suite", () => {
     const plan = buildPlanFor([".github/workflows/ci.yml"]);
-    expect(plan.mode).toBe("focused");
+    expect(plan.mode).toBe("full");
+    expect(plan.fallback_full).toBe(true);
+    expect(plan.fallback_reason).toBe("workflow_changed");
     expect(stepIds(plan)).toEqual([
       "supply-chain",
       "typecheck",
-      "unit-focused",
+      "unit",
+      "build",
+      "integration-full",
+      "version-human",
+      "version-json",
     ]);
-    const wf = plan.steps.find(s => s.id === "unit-focused");
-    expect(wf?.command.join(" ")).toContain("ci-workflow.test.ts");
-    expect(wf?.command.join(" ")).toContain(
-      "check-supply-chain-invariants.test.ts",
-    );
   });
 
   it("process-control changes run targeted unit and integration tests", () => {
@@ -989,18 +1302,19 @@ describe("buildVerificationPlan selection regression matrix", () => {
     expect(stepIds(plan)).toContain("integration-full");
   });
 
-  it("workflow change runs targeted workflow tests without build", () => {
+  it("workflow change falls back to the full suite", () => {
     const plan = buildPlanFor([".github/workflows/publish.yml"]);
+    expect(plan.mode).toBe("full");
+    expect(plan.fallback_reason).toBe("workflow_changed");
     expect(stepIds(plan)).toEqual([
       "supply-chain",
       "typecheck",
-      "unit-focused",
+      "unit",
+      "build",
+      "integration-full",
+      "version-human",
+      "version-json",
     ]);
-    const wf = plan.steps.find(s => s.id === "unit-focused");
-    expect(wf?.command.join(" ")).toContain("publish-workflow.test.ts");
-    expect(wf?.command.join(" ")).toContain(
-      "check-supply-chain-invariants.test.ts",
-    );
   });
 
   it("generic source + changed integration test runs smoke and direct", () => {
@@ -1015,7 +1329,7 @@ describe("buildVerificationPlan selection regression matrix", () => {
 
   it("generic source + process-control source runs smoke and process-control integration", () => {
     const plan = buildPlanFor(["src/commands/init.ts", "src/lib/timeout.ts"]);
-    expect(stepIds(plan)).toContain("unit-base");
+    expect(stepIds(plan)).toContain("unit-related");
     expect(stepIds(plan)).toContain("unit-focused");
     expect(stepIds(plan)).toContain("integration-process-control");
     expect(stepIds(plan)).toContain("integration-smoke");
@@ -1036,16 +1350,72 @@ describe("buildVerificationPlan selection regression matrix", () => {
     );
   });
 
-  it("workflow + release script shared tests are executed once", () => {
+  it("workflow + release script falls back to the full suite", () => {
     const plan = buildPlanFor([
       ".github/workflows/publish.yml",
       "scripts/check-release-tag.mjs",
     ]);
-    const focused = plan.steps.filter(s => s.id === "unit-focused");
-    expect(focused.length).toBe(1);
-    const cmd = focused[0]?.command.join(" ") ?? "";
-    expect(cmd).toContain("publish-workflow.test.ts");
-    expect(cmd).toContain("check-supply-chain-invariants.test.ts");
-    expect(cmd).toContain("check-release-tag.test.ts");
+    expect(plan.mode).toBe("full");
+    expect(plan.fallback_reason).toBe("workflow_changed");
+    expect(plan.steps.some(s => s.id === "unit")).toBe(true);
+    expect(plan.steps.some(s => s.id === "integration-full")).toBe(true);
+  });
+
+  it("includes stage, selected test counts, and command count in plan", () => {
+    const plan = buildPlanFor([
+      "tests/unit/scripts/verification-scope.test.ts",
+    ]);
+    expect(plan.stage).toBe("focused");
+    expect(plan.selected_unit_tests).toBe(1);
+    expect(plan.selected_integration_tests).toBe(0);
+    expect(plan.command_count).toBe(plan.steps.length);
+    expect(plan.fallback_reason).toBeNull();
+  });
+
+  it("stage can be overridden independently of mode", () => {
+    const plan = buildVerificationPlan({
+      scope: classifyChangedFiles(["src/commands/init.ts"]),
+      changeSet: {
+        baseFiles: ["src/commands/init.ts"],
+        workingTreeFiles: [],
+        untrackedFiles: [],
+        indeterminate: false,
+      },
+      mergeBase: "abc123",
+      baseSha: "abc123",
+      headSha: "def456",
+      stage: "full",
+    });
+    expect(plan.mode).toBe("focused");
+    expect(plan.stage).toBe("full");
+  });
+});
+
+describe("validatePlan", () => {
+  it("accepts a valid focused plan", () => {
+    const plan = buildPlanFor(["src/commands/init.ts"]);
+    expect(validatePlan(plan)).toBe(true);
+  });
+
+  it("accepts a valid full plan with a fallback reason", () => {
+    const plan = buildPlanFor(["package.json"]);
+    expect(plan.fallback_full).toBe(true);
+    expect(plan.fallback_reason).toBe("toolchain_changed");
+    expect(validatePlan(plan)).toBe(true);
+  });
+
+  it("rejects a full plan without a fallback reason", () => {
+    const plan = buildPlanFor(["package.json"]);
+    const invalid = { ...plan, fallback_reason: null };
+    expect(() => validatePlan(invalid)).toThrow(/fallback_reason/);
+  });
+
+  it("rejects a plan without steps", () => {
+    expect(() => validatePlan({ fallback_full: false })).toThrow(/steps/);
+  });
+
+  it("rejects an invalid plan stage", () => {
+    const plan = buildPlanFor(["src/commands/init.ts"]);
+    expect(() => validatePlan({ ...plan, stage: "banana" })).toThrow(/stage/);
   });
 });

@@ -39,6 +39,7 @@ import {
   copyFile as copyFileRaw,
   link as linkRaw,
   open as openRaw,
+  readlink as readlinkRaw,
   openDirectoryNoFollow,
   openReadNoFollow,
   readRegularOwnedText as readRegularOwnedTextRaw,
@@ -48,6 +49,7 @@ import {
   readdirSync as readdirSyncRaw,
 } from "./raw-internal.ts";
 import { realpath as realpathRaw } from "node:fs/promises";
+import { createHash } from "node:crypto";
 
 export async function readOwnedText(path: OwnedReadPath): Promise<string> {
   return readRegularOwnedTextRaw(unbrand(path));
@@ -116,6 +118,10 @@ export async function statProjectPresence(path: ProjectPresencePath) {
 
 export async function lstatOwned(path: OwnedReadPath) {
   return lstatRaw(unbrand(path));
+}
+
+export async function readlinkOwned(path: OwnedReadPath): Promise<string> {
+  return readlinkRaw(unbrand(path));
 }
 
 export async function statOwnedList(path: OwnedListPath) {
@@ -212,6 +218,60 @@ export async function fsyncOwnedRegularFile(
       throw error;
     }
     await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+export type HashOwnedRegularFileOptions = {
+  /** Cancels the read between chunks. */
+  signal?: AbortSignal;
+  /**
+   * Absolute `performance.now()` deadline. Checked between chunks, so a file
+   * of any size cannot read past it indefinitely.
+   */
+  deadline?: number;
+};
+
+function hashInterruptedError(reason: "timeout" | "abort"): Error {
+  const error = new Error(
+    reason === "timeout"
+      ? "hashing exceeded its deadline"
+      : "hashing was aborted",
+  );
+  (error as NodeJS.ErrnoException).code =
+    reason === "timeout" ? "ETIMEDOUT" : "ABORT_ERR";
+  return error;
+}
+
+export async function hashOwnedRegularFileSha256(
+  path: OwnedReadPath,
+  options: HashOwnedRegularFileOptions = {},
+): Promise<string> {
+  const handle = await openReadNoFollow(unbrand(path));
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile()) {
+      const error = new Error("path is not a regular file");
+      (error as NodeJS.ErrnoException).code = "ENOTFILE";
+      throw error;
+    }
+    const hash = createHash("sha256");
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let offset = 0;
+    while (true) {
+      // Check before each read so an already-expired budget stops the loop
+      // even when the file is empty or the first chunk is still pending.
+      if (options.signal?.aborted) throw hashInterruptedError("abort");
+      if (options.deadline !== undefined && performance.now() >= options.deadline) {
+        throw hashInterruptedError("timeout");
+      }
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+      offset += bytesRead;
+    }
+    return hash.digest("hex");
   } finally {
     await handle.close();
   }

@@ -746,6 +746,7 @@ async function cmdVerify(
   const phaseId = values.phase as string | undefined;
   const taskId = values.task as string | undefined;
   const dryRun = values["dry-run"] === true;
+  const stage = values.stage as "focused" | "full" | undefined;
   const detail = values.detail as string | undefined;
   if (detail !== undefined && !json) {
     emitError(false, "CONFIG_ERROR", "verify: --detail requires --json");
@@ -769,6 +770,18 @@ async function cmdVerify(
       return 2;
     }
     emitError(json, "CONFIG_ERROR", "verify requires --phase and --task");
+    return 2;
+  }
+  if (stage !== undefined && stage !== "focused" && stage !== "full") {
+    if (detail === "agent") {
+      emitAgentError(
+        { code: "CONFIG_ERROR", message: "Invalid configuration" },
+        'verify: --stage must be "focused" or "full"',
+        { phase_id: phaseId, task_id: taskId },
+      );
+      return 2;
+    }
+    emitError(json, "CONFIG_ERROR", 'verify: --stage must be "focused" or "full"');
     return 2;
   }
 
@@ -799,6 +812,7 @@ async function cmdVerify(
       dryRun,
       timeoutMs: parsedTimeout.value,
       signal,
+      stage,
     });
     const aborted = result.checks.some(check => check.aborted === true);
     if (json) {
@@ -811,7 +825,7 @@ async function cmdVerify(
             }),
           );
         } else {
-          emitOk({ checks: projectVerifyForPublicJson(result).checks });
+          emitOk(projectVerifyForPublicJson(result));
         }
       } else {
         if (detail === "agent") {
@@ -835,7 +849,7 @@ async function cmdVerify(
             aborted ? m.verify.aborted : "Verification failed",
             {
               ...(aborted ? { causeCode: "ABORTED" } : {}),
-              data: { checks: projectVerifyForPublicJson(result).checks },
+              data: projectVerifyForPublicJson(result),
             },
           );
         }
@@ -897,6 +911,74 @@ async function cmdVerify(
       }
       emitError(json, "AMBIGUOUS_PHASE_ID", message, { data: { phases } });
       return 2;
+    }
+    if (
+      code === "FOCUSED_VERIFICATION_NOT_CONFIGURED" ||
+      code === "FULL_RETRY_REQUIRES_FOCUSED_PASS" ||
+      code === "FULL_VERIFICATION_BUDGET_EXCEEDED" ||
+      code === "VERIFICATION_LEDGER_INVALID" ||
+      code === "VERIFICATION_STATE_UNAVAILABLE"
+    ) {
+      const message =
+        error instanceof Error ? error.message : "Verification policy failed.";
+      const next = (
+        error as NodeJS.ErrnoException & {
+          next?: { stage: string; command: string };
+        }
+      ).next;
+      const stateFailure =
+        error as NodeJS.ErrnoException & {
+          operation?: string;
+          exit_code?: number | null;
+          timed_out?: boolean;
+          aborted?: boolean;
+        };
+      if (detail === "agent") {
+        emitAgentError(
+          { code, message },
+          message,
+          {
+            phase_id: phaseId,
+            task_id: taskId,
+            ...(stage ? { stage } : {}),
+            ...(next ? { next } : {}),
+            ...(stateFailure.operation
+              ? { operation: stateFailure.operation }
+              : {}),
+            ...(stateFailure.exit_code !== undefined
+              ? { exit_code: stateFailure.exit_code }
+              : {}),
+            ...(stateFailure.timed_out !== undefined
+              ? { timed_out: stateFailure.timed_out }
+              : {}),
+            ...(stateFailure.aborted !== undefined
+              ? { aborted: stateFailure.aborted }
+              : {}),
+          },
+        );
+        return code === "FOCUSED_VERIFICATION_NOT_CONFIGURED" ? 2 : 1;
+      }
+      emitError(json, code, message, {
+        data: {
+          phase_id: phaseId,
+          task_id: taskId,
+          ...(stage ? { stage } : {}),
+          ...(next ? { next } : {}),
+          ...(stateFailure.operation
+            ? { operation: stateFailure.operation }
+            : {}),
+          ...(stateFailure.exit_code !== undefined
+            ? { exit_code: stateFailure.exit_code }
+            : {}),
+          ...(stateFailure.timed_out !== undefined
+            ? { timed_out: stateFailure.timed_out }
+            : {}),
+          ...(stateFailure.aborted !== undefined
+            ? { aborted: stateFailure.aborted }
+            : {}),
+        },
+      });
+      return code === "FOCUSED_VERIFICATION_NOT_CONFIGURED" ? 2 : 1;
     }
     if (code === "TASK_NOT_FOUND") {
       if (detail === "agent") {

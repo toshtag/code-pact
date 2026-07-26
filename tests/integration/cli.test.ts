@@ -932,6 +932,39 @@ describe("CLI: task complete (v0.2)", () => {
     expectJsonOk(run(["task", "lock", "P1-T1", "--json"]));
   }
 
+  async function enableVerificationPolicy(): Promise<void> {
+    const projectPath = join(tmpDir, ".code-pact", "project.yaml");
+    const project = parseYaml(await readFile(projectPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    project.verification_policy = {
+      focused_command: "node focused.mjs",
+      max_full_attempts: 2,
+    };
+    await writeFile(projectPath, stringifyYaml(project), "utf8");
+    await writeFile(join(tmpDir, "focused.mjs"), "process.exit(0);\n", "utf8");
+  }
+
+  async function setupPolicyFullFailure(): Promise<void> {
+    await setupWithTask();
+    await rewritePhaseCommands(true);
+    await enableVerificationPolicy();
+    const focused = run([
+      "verify",
+      "--phase",
+      "P1",
+      "--task",
+      "P1-T1",
+      "--stage",
+      "focused",
+      "--json",
+      "--detail",
+      "agent",
+    ]);
+    expect(focused.code).toBe(0);
+  }
+
   it("happy path: appends done event, idempotent on re-run", async () => {
     await setupWithTask();
     await rewritePhaseCommands(false);
@@ -1096,6 +1129,90 @@ describe("CLI: task complete (v0.2)", () => {
     expect(res.stderr).toMatch(/cause: commands —/);
     expect(res.stderr).toMatch(
       /rerun after fixing: code-pact task complete P1-T1/,
+    );
+  });
+
+  it("policy full failure (--detail agent): suggests focused verify directly", async () => {
+    await setupPolicyFullFailure();
+
+    const res = run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+      "--detail",
+      "agent",
+    ]);
+
+    expect(res.code).toBe(1);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string; cause_code?: string };
+      data: {
+        verify?: { next?: { stage: string; command: string } };
+        suggested_next_command?: string;
+      };
+    };
+    const focusedCommand =
+      "code-pact verify --phase P1 --task P1-T1 --stage focused --json --detail agent";
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error).toMatchObject({
+      code: "VERIFICATION_FAILED",
+      cause_code: "COMMANDS_FAILED",
+    });
+    expect(parsed.data.verify?.next).toEqual({
+      stage: "focused",
+      command: focusedCommand,
+    });
+    expect(parsed.data.suggested_next_command).toBe(focusedCommand);
+    expect(parsed.data.suggested_next_command).not.toBe(
+      "code-pact task complete P1-T1",
+    );
+  });
+
+  it("policy full failure (--json): exposes focused next at top-level data", async () => {
+    await setupPolicyFullFailure();
+
+    const res = run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+
+    expect(res.code).toBe(1);
+    const parsed = JSON.parse(res.stdout) as {
+      data: {
+        next?: { stage: string; command: string };
+        verify?: { next?: { stage: string; command: string } };
+        suggested_next_command?: string;
+      };
+    };
+    const focusedCommand =
+      "code-pact verify --phase P1 --task P1-T1 --stage focused --json --detail agent";
+    expect(parsed.data.next).toEqual({
+      stage: "focused",
+      command: focusedCommand,
+    });
+    expect(parsed.data.verify?.next).toEqual(parsed.data.next);
+    expect(parsed.data.suggested_next_command).toBe(focusedCommand);
+  });
+
+  it("policy full failure (human): prints focused Next without task-complete rerun", async () => {
+    await setupPolicyFullFailure();
+
+    const res = run(["task", "complete", "P1-T1", "--agent", "claude-code"]);
+
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain(
+      "Next: code-pact verify --phase P1 --task P1-T1 --stage focused --json --detail agent",
+    );
+    expect(res.stderr).not.toContain(
+      "rerun after fixing: code-pact task complete P1-T1",
     );
   });
 

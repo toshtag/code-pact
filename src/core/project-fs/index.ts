@@ -39,6 +39,7 @@ export {
   accessProjectPresence,
   statProjectPresence,
   lstatOwned,
+  readlinkOwned,
   lstatExplicitUser,
   lstatOwnedList,
   mkdirOwned,
@@ -58,7 +59,10 @@ export {
   writeOwnedTempDurably,
   fsyncOwnedRegularFile,
   fsyncOwnedDirectory,
+  hashOwnedRegularFileSha256,
 } from "./operations.ts";
+
+export type { HashOwnedRegularFileOptions } from "./operations.ts";
 
 export {
   resolveDecisionReadPath,
@@ -108,6 +112,10 @@ export {
   resolveReviewCacheDirWritePath,
   resolveReviewManifestReadPath,
   resolveReviewManifestWritePath,
+  resolveVerificationLedgerReadPath,
+  resolveVerificationLedgerWritePath,
+  resolveVerificationRunsDirWritePath,
+  resolveVerificationStateReadPath,
 } from "./authorities/project-config-authority.ts";
 export {
   resolveContextManifestReadPath,

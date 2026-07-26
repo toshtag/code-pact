@@ -1,0 +1,98 @@
+schema_version: 1
+task_id: P87-T6
+phase_id: P87
+phase_path: design/phases/P87-deterministic-ci-release.yaml
+base_ref: 1c2b52a67677d5f7db9ea56445cdeb8beda83c15
+base_sha: 1c2b52a67677d5f7db9ea56445cdeb8beda83c15
+phase_blob_sha: 4b95951ead453d4fce42308c7e5237edacc7fc09
+contract_digest: b4b74bff5316201920fcdb4ad3fc590c89e52b94564fcbed7ee1e3e32fcbf435
+contract:
+  description: >
+    Make verification-state collection lossless for Git outputs larger than the
+    generic command-capture limit, bound untracked-content hashing, and carry
+    the verify cancellation signal through the whole collection so focused/full
+    authorization cannot reuse a truncated digest, hang indefinitely, or ignore
+    a cancelled run.
+  reads:
+    - src/commands/verify.ts
+    - src/core/process/bounded-command.ts
+    - src/core/project-fs/index.ts
+    - src/core/project-fs/operations.ts
+    - src/core/project-fs/raw-internal.ts
+    - src/core/verification-ledger.ts
+    - tests/unit/commands/verify.test.ts
+    - tests/unit/core/verification-ledger.test.ts
+  writes:
+    - design/phases/P87-deterministic-ci-release.yaml
+    - src/commands/verify.ts
+    - src/core/process/bounded-command.ts
+    - src/core/project-fs/index.ts
+    - src/core/project-fs/operations.ts
+    - src/core/verification-ledger.ts
+    - tests/unit/commands/verify.test.ts
+    - tests/unit/core/bounded-command-digest.test.ts
+    - tests/unit/core/verification-ledger.test.ts
+  depends_on:
+    - P87-T5
+  decision_refs: []
+  acceptance_refs:
+    - tests/unit/commands/verify.test.ts
+    - tests/unit/core/bounded-command-digest.test.ts
+    - tests/unit/core/verification-ledger.test.ts
+  definition_of_done:
+    - A first full verification failure from task complete immediately returns
+      the focused verify command
+    - A state collection cancelled before full verification starts prevents the
+      full verification commands from running
+    - Adding, deleting, renaming, or changing an untracked file changes the
+      verification-state digest
+    - Agent JSON, normal JSON, and human output expose the same focused next
+      action
+    - Changing the contents of an existing untracked file invalidates the prior
+      focused pass
+    - Existing tracked-file behavior and policy-absent compatibility remain
+      unchanged
+    - Git diff content larger than the generic command-capture limit is
+      represented losslessly in the verification-state digest
+    - Git state collection failure prevents focused/full authorization
+    - Local verification requires a successful focused run before full
+      verification and bounds full-suite attempts to two
+    - Main commits run one full standard gate
+    - Publish reuses the successful exact-SHA main CI result
+    - Publish workflow does not depend on ambient git identity
+    - Pull-request CI executes the generated focused plan while high-risk
+      changes and main pushes retain one full gate
+    - Pull-request verification uses deterministic focused selection with full
+      fallback
+    - Supply-chain invariants enforce the release contract
+    - The failure output never recommends task complete again before a new
+      focused pass
+    - The verify cancellation signal reaches every state-collection step, so a
+      cancelled run stops without waiting out the collection deadline
+    - Timeout or abort during state collection fails closed and records no
+      ledger entry
+    - Truncated Git status, diff, or untracked-listing output is never accepted
+      as complete verification state
+    - Trusted publishing fails closed on existing-version collisions
+    - Untracked regular-file hashing has a finite deadline and supports
+      cancellation
+    - Untracked symlinks are hashed without reading through them outside the
+      repository
+    - Verification processes are bounded and expose heartbeat and slowest-file
+      output
+    - Verification-state collection does not retain an arbitrarily large Git
+      diff in memory
+    - npm provenance attestation is verified before GitHub Release creation
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm check:supply-chain
+    - pnpm test:integration:smoke -- --no-file-parallelism --testTimeout=30000
+    - pnpm test:unit -- --no-file-parallelism --testTimeout=30000
+    - pnpm typecheck
+  base_sha: 1c2b52a67677d5f7db9ea56445cdeb8beda83c15
+  phase_blob_sha: 4b95951ead453d4fce42308c7e5237edacc7fc09
+at: 2026-07-26T07:33:27.511Z
+actor: agent
+author: Pocket

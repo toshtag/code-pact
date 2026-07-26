@@ -3,6 +3,11 @@ version: 0.1.0
 locale: en-US
 default_agent: claude-code
 decision_retention: keep-full
+verification_policy:
+  focused_command: >
+    node scripts/verification-scope.mjs --local --stage focused --run --task-id
+    {task_id} --no-ledger
+  max_full_attempts: 2
 agents:
   - name: claude-code
     profile: agent-profiles/claude-code.yaml

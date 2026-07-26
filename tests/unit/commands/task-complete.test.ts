@@ -4,9 +4,11 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runTaskComplete } from "../../../src/commands/task-complete.ts";
+import { runVerify } from "../../../src/commands/verify.ts";
 import { loadMergedProgress } from "../../../src/core/progress/io.ts";
 import { createTaskContractLock } from "../../../src/core/contract-lock.ts";
 import { scanLoopMemoryEpisodes } from "../../../src/core/loop-memory/episode-store.ts";
+import { readVerificationLedger } from "../../../src/core/verification-ledger.ts";
 import {
   __setLoopMemoryPruneFailureForTests,
   __setLoopMemoryRecordFailureForTests,
@@ -36,6 +38,19 @@ const PROJECT_YAML = (defaultAgent = "claude-code", agents = ["claude-code"]) =>
       `    enabled: true`,
     ]),
   ].join("\n") + "\n";
+
+const PROJECT_YAML_WITH_POLICY = `name: project-test
+version: 0.1.0
+locale: en-US
+default_agent: claude-code
+verification_policy:
+  focused_command: node focused.mjs
+  max_full_attempts: 2
+agents:
+  - name: claude-code
+    profile: agent-profiles/claude-code.yaml
+    enabled: true
+`;
 
 const PROJECT_YAML_WITH_DISABLED = `name: project-test
 version: 0.1.0
@@ -121,6 +136,7 @@ async function setupProject(
       }),
     "utf8",
   );
+  await writeFile(join(dir, "focused.mjs"), "process.exit(0);\n", "utf8");
 
   // Lock the contract before writing progress.yaml so createTaskContractLock
   // sees the task as not yet done. Progress events (including any pre-supplied
@@ -455,6 +471,167 @@ describe("runTaskComplete — verify failure", () => {
       ]);
     }
     expect((await scanLoopMemoryEpisodes(dir)).episodes).toHaveLength(0);
+  });
+});
+
+describe("runTaskComplete — verification policy", () => {
+  it("rejects full completion until focused verification passes", async () => {
+    await setupProject(dir, { projectYaml: PROJECT_YAML_WITH_POLICY });
+
+    await expect(
+      runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    ).rejects.toMatchObject({ code: "FULL_RETRY_REQUIRES_FOCUSED_PASS" });
+  });
+
+  it("runs phase verification once after a focused pass", async () => {
+    const marker = join(dir, "full-marker");
+    await setupProject(dir, {
+      projectYaml: PROJECT_YAML_WITH_POLICY,
+      command: "node full.mjs",
+    });
+    await writeFile(
+      join(dir, "full.mjs"),
+      `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "ok");\n`,
+      "utf8",
+    );
+
+    await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      stage: "focused",
+    });
+    const result = await runTaskComplete({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+
+    expect(result.kind).toBe("done");
+    expect(existsSync(marker)).toBe(true);
+    const ledger = await readVerificationLedger(dir);
+    expect(ledger.map(entry => entry.stage)).toEqual(["focused", "full"]);
+    expect(ledger.at(-1)?.failure).toBe(false);
+  });
+
+  it("rejects task complete when untracked file content changed after focused success", async () => {
+    const marker = join(dir, "full-marker");
+    await setupProject(dir, {
+      projectYaml: PROJECT_YAML_WITH_POLICY,
+      command: `node -e "require('node:fs').writeFileSync('${marker}', 'ran')"`,
+    });
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(join(dir, "src", "new.ts"), "one\n", "utf8");
+
+    await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      stage: "focused",
+    });
+    await writeFile(join(dir, "src", "new.ts"), "two\n", "utf8");
+
+    await expect(
+      runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    ).rejects.toMatchObject({ code: "FULL_RETRY_REQUIRES_FOCUSED_PASS" });
+    expect(existsSync(marker)).toBe(false);
+    const ledger = await readVerificationLedger(dir);
+    expect(ledger.map(entry => entry.stage)).toEqual(["focused"]);
+  });
+
+  it("preserves focused next action when first full verification fails", async () => {
+    await setupProject(dir, {
+      projectYaml: PROJECT_YAML_WITH_POLICY,
+      failingCommand: true,
+    });
+
+    await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      stage: "focused",
+    });
+
+    await expect(
+      runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    ).rejects.toMatchObject({
+      code: "VERIFICATION_FAILED",
+      stage: "full",
+      next: {
+        stage: "focused",
+        command:
+          "code-pact verify --phase P1 --task P1-T1 --stage focused --json --detail agent",
+      },
+    });
+  });
+
+  it("requires a fresh focused pass after a full failure before retrying", async () => {
+    await setupProject(dir, {
+      projectYaml: PROJECT_YAML_WITH_POLICY,
+      command: "node full.mjs",
+    });
+    await writeFile(join(dir, "full.mjs"), "process.exit(1);\n", "utf8");
+
+    await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      stage: "focused",
+    });
+    await expect(
+      runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    ).rejects.toMatchObject({ code: "VERIFICATION_FAILED" });
+
+    await expect(
+      runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    ).rejects.toMatchObject({ code: "FULL_RETRY_REQUIRES_FOCUSED_PASS" });
+
+    await writeFile(join(dir, "full.mjs"), "process.exit(0);\n", "utf8");
+    await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      stage: "focused",
+    });
+    const result = await runTaskComplete({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+
+    expect(result.kind).toBe("done");
+    const ledger = await readVerificationLedger(dir);
+    expect(ledger.filter(entry => entry.stage === "full")).toHaveLength(2);
+  });
+
+  it("blocks the third full attempt even after another focused pass", async () => {
+    await setupProject(dir, {
+      projectYaml: PROJECT_YAML_WITH_POLICY,
+      command: "node full.mjs",
+    });
+    await writeFile(join(dir, "full.mjs"), "process.exit(1);\n", "utf8");
+
+    await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: false, stage: "focused" });
+    await expect(
+      runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    ).rejects.toMatchObject({ code: "VERIFICATION_FAILED" });
+
+    await writeFile(join(dir, "full.mjs"), "process.exit(1); // retry\n", "utf8");
+    await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: false, stage: "focused" });
+    await expect(
+      runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    ).rejects.toMatchObject({ code: "VERIFICATION_FAILED" });
+
+    await writeFile(join(dir, "full.mjs"), "process.exit(0);\n", "utf8");
+    await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: false, stage: "focused" });
+    await expect(
+      runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    ).rejects.toMatchObject({ code: "FULL_VERIFICATION_BUDGET_EXCEEDED" });
   });
 });
 

@@ -779,8 +779,12 @@ function checkFastCiWorkflow(ciDoc, ciContent) {
         "ci.yml: standard job must install with pnpm install --frozen-lockfile",
       );
     }
-    const runsBoundedPlan = standardScripts.some(script =>
-      /verification-scope\.mjs[\s\S]*--base[\s\S]*--run/.test(script),
+    const runsBoundedPlan = standardScripts.some(
+      script =>
+        /verification-scope\.mjs[\s\S]*--base[\s\S]*--run/.test(script) ||
+        /trusted_classifier[\s\S]*verification-scope\.mjs[\s\S]*node\s+"\$trusted_classifier"\s+--base\s+"\$BASE_REF"\s+--run/.test(
+          script,
+        ),
     );
     if (
       !standardScripts.some(script => script.trim() === "pnpm test:ci") &&
@@ -2202,10 +2206,14 @@ export function checkSupplyChainInvariants(root) {
       }
 
       const standardScripts = collectRunScripts(ciDoc, "standard");
-      const standardRunsBoundedPlan = standardScripts.some(script =>
-        /node\s+scripts\/verification-scope\.mjs[\s\S]*--base[\s\S]*--run/.test(
-          script,
-        ),
+      const standardRunsBoundedPlan = standardScripts.some(
+        script =>
+          /node\s+scripts\/verification-scope\.mjs[\s\S]*--base[\s\S]*--run/.test(
+            script,
+          ) ||
+          /node\s+"\$trusted_classifier"\s+--base\s+"\$BASE_REF"\s+--run/.test(
+            script,
+          ),
       );
       if (
         standardScripts.some(script => script.trim() === "pnpm test:ci") ||

@@ -1,8 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runVerify } from "../../../src/commands/verify.ts";
+import { spawnSync } from "node:child_process";
+import {
+  projectVerifyForPublicJson,
+  runVerify,
+} from "../../../src/commands/verify.ts";
+import { readVerificationLedger } from "../../../src/core/verification-ledger.ts";
+import * as boundedCommand from "../../../src/core/process/bounded-command.ts";
 
 const fixtureDir = new URL("../../../tests/fixtures/project-a", import.meta.url).pathname;
 
@@ -45,6 +51,28 @@ const PHASE_YAML = (
     .join("\n");
 
 const ROADMAP_YAML = `phases:\n  - id: P1\n    path: design/phases/P1-foundation.yaml\n    weight: 12\n`;
+const PROJECT_YAML = `name: project-test
+version: 0.1.0
+locale: en-US
+default_agent: claude-code
+agents:
+  - name: claude-code
+    profile: agent-profiles/claude-code.yaml
+    enabled: true
+`;
+
+const PROJECT_YAML_WITH_POLICY = `name: project-test
+version: 0.1.0
+locale: en-US
+default_agent: claude-code
+verification_policy:
+  focused_command: node focused.mjs
+  max_full_attempts: 2
+agents:
+  - name: claude-code
+    profile: agent-profiles/claude-code.yaml
+    enabled: true
+`;
 
 async function setupProject(
   dir: string,
@@ -54,6 +82,7 @@ async function setupProject(
     hasAdr?: boolean;
     requiresDecision?: boolean;
     taskRequiresDecision?: boolean;
+    projectYaml?: string;
   } = {},
 ): Promise<void> {
   const {
@@ -62,11 +91,16 @@ async function setupProject(
     hasAdr = false,
     requiresDecision = false,
     taskRequiresDecision = false,
+    projectYaml,
   } = opts;
 
   await mkdir(join(dir, ".code-pact", "state", "baselines"), { recursive: true });
   await mkdir(join(dir, "design", "phases"), { recursive: true });
   await mkdir(join(dir, "design", "decisions"), { recursive: true });
+  if (projectYaml !== undefined) {
+    await writeFile(join(dir, ".code-pact", "project.yaml"), projectYaml, "utf8");
+  }
+  await writeFile(join(dir, "focused.mjs"), "process.exit(0);\n", "utf8");
 
   await writeFile(join(dir, "design", "roadmap.yaml"), ROADMAP_YAML, "utf8");
   await writeFile(
@@ -87,6 +121,12 @@ async function setupProject(
       "utf8",
     );
   }
+
+  spawnSync("git", ["init", "--quiet"], { cwd: dir });
+  spawnSync("git", ["config", "user.email", "test@example.com"], { cwd: dir });
+  spawnSync("git", ["config", "user.name", "Test"], { cwd: dir });
+  spawnSync("git", ["add", "."], { cwd: dir });
+  spawnSync("git", ["commit", "--quiet", "-m", "initial"], { cwd: dir });
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +171,252 @@ describe("runVerify — project-a P1-T1 (dry-run)", () => {
     });
     const names = result.checks.map((c) => c.name);
     expect(names).toEqual(["commands", "progress_event", "decision", "task_status"]);
+  });
+});
+
+describe("runVerify — focused verification policy", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "code-pact-verify-focused-"));
+  });
+  afterEach(() => rm(dir, { recursive: true, force: true }));
+
+  it("rejects focused stage when no policy is configured", async () => {
+    await setupProject(dir, { projectYaml: PROJECT_YAML });
+
+    await expect(
+      runVerify({
+        cwd: dir,
+        phaseId: "P1",
+        taskId: "P1-T1",
+        dryRun: false,
+        stage: "focused",
+      }),
+    ).rejects.toMatchObject({ code: "FOCUSED_VERIFICATION_NOT_CONFIGURED" });
+  });
+
+  it("runs focused command and records the focused result", async () => {
+    await setupProject(dir, { projectYaml: PROJECT_YAML_WITH_POLICY });
+
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      stage: "focused",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.stage).toBe("focused");
+    expect(result.next?.stage).toBe("full");
+    expect(projectVerifyForPublicJson(result)).toMatchObject({
+      ok: true,
+      stage: "focused",
+      next: { stage: "full" },
+    });
+    const ledger = await readVerificationLedger(dir);
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]).toMatchObject({
+      task_id: "P1-T1",
+      phase_id: "P1",
+      stage: "focused",
+      failure: false,
+      attempt_number: 1,
+    });
+  });
+
+  it("records no ledger entry when verification state is unavailable", async () => {
+    await setupProject(dir, { projectYaml: PROJECT_YAML_WITH_POLICY });
+    // Break Git state collection so the digest cannot be established. An entry
+    // written here would be bound to an unknown tree.
+    await rm(join(dir, ".git"), { recursive: true, force: true });
+    await mkdir(join(dir, ".git"), { recursive: true });
+
+    await expect(
+      runVerify({
+        cwd: dir,
+        phaseId: "P1",
+        taskId: "P1-T1",
+        dryRun: false,
+        stage: "focused",
+      }),
+    ).rejects.toMatchObject({ code: "VERIFICATION_STATE_UNAVAILABLE" });
+
+    expect(await readVerificationLedger(dir)).toHaveLength(0);
+  });
+
+  it("returns focused next action in public projection when full commands fail", async () => {
+    await setupProject(dir, {
+      projectYaml: PROJECT_YAML_WITH_POLICY,
+      taskStatus: "planned",
+    });
+    await writeFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      PHASE_YAML("planned").replace("    - echo ok", '    - "false"'),
+      "utf8",
+    );
+
+    await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      stage: "focused",
+    });
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      stage: "full",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.stage).toBe("full");
+    expect(result.next).toEqual({
+      stage: "focused",
+      command:
+        "code-pact verify --phase P1 --task P1-T1 --stage focused --json --detail agent",
+    });
+    expect(projectVerifyForPublicJson(result)).toMatchObject({
+      ok: false,
+      stage: "full",
+      next: { stage: "focused" },
+    });
+  });
+});
+
+/**
+ * Run every command for real, recording it, and cancel the controller once
+ * `abortAfter` recognises the command that just finished.
+ *
+ * Delegating to the real runner leaves the production call graph intact, so
+ * these assertions only hold when the signal genuinely reaches the step being
+ * cancelled. `ranSoFar` includes the command that just finished, which is how a
+ * repeated command such as `git rev-parse HEAD` is told apart per call.
+ */
+function interceptCommands(
+  controller: AbortController,
+  abortAfter: (command: string, ranSoFar: readonly string[]) => boolean,
+): { commands: string[]; restore: () => void } {
+  const commands: string[] = [];
+  const runBoundedCommand = boundedCommand.runBoundedCommand;
+  const spy = vi
+    .spyOn(boundedCommand, "runBoundedCommand")
+    .mockImplementation(async (command, cwd, timeoutMs, signal) => {
+      commands.push(command);
+      const result = await runBoundedCommand(command, cwd, timeoutMs, signal);
+      if (abortAfter(command, commands)) controller.abort();
+      return result;
+    });
+  return { commands, restore: () => spy.mockRestore() };
+}
+
+describe("runVerify — cancellation during verification state collection", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "code-pact-verify-cancel-"));
+    await setupProject(dir, { projectYaml: PROJECT_YAML_WITH_POLICY });
+  });
+  afterEach(() => rm(dir, { recursive: true, force: true }));
+
+  async function runFocusedPass(): Promise<void> {
+    await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+      stage: "focused",
+    });
+  }
+
+  it("records no focused entry when cancelled after the focused command", async () => {
+    const controller = new AbortController();
+    const intercept = interceptCommands(controller, command =>
+      command.includes("focused.mjs"),
+    );
+
+    try {
+      await expect(
+        runVerify({
+          cwd: dir,
+          phaseId: "P1",
+          taskId: "P1-T1",
+          dryRun: false,
+          stage: "focused",
+          signal: controller.signal,
+        }),
+      ).rejects.toMatchObject({
+        code: "VERIFICATION_STATE_UNAVAILABLE",
+        aborted: true,
+      });
+      expect(await readVerificationLedger(dir)).toHaveLength(0);
+    } finally {
+      intercept.restore();
+    }
+  });
+
+  it("does not start the full commands when cancelled during full authorization", async () => {
+    await runFocusedPass();
+    const controller = new AbortController();
+    const intercept = interceptCommands(
+      controller,
+      command => command === "git rev-parse HEAD",
+    );
+
+    try {
+      await expect(
+        runVerify({
+          cwd: dir,
+          phaseId: "P1",
+          taskId: "P1-T1",
+          dryRun: false,
+          stage: "full",
+          signal: controller.signal,
+        }),
+      ).rejects.toMatchObject({
+        code: "VERIFICATION_STATE_UNAVAILABLE",
+        aborted: true,
+      });
+      expect(intercept.commands).not.toContain("echo ok");
+      expect(await readVerificationLedger(dir)).toHaveLength(1);
+    } finally {
+      intercept.restore();
+    }
+  });
+
+  it("records no full entry when cancelled after the full commands pass", async () => {
+    await runFocusedPass();
+    const controller = new AbortController();
+    // The first HEAD read authorizes the full stage; the second belongs to the
+    // ledger record taken once the commands have already passed. Cancel only
+    // the latter, so the run reaches the entry it must then refuse to write.
+    const intercept = interceptCommands(
+      controller,
+      (command, ranSoFar) =>
+        command === "git rev-parse HEAD" &&
+        ranSoFar.filter(ran => ran === command).length === 2,
+    );
+
+    try {
+      await expect(
+        runVerify({
+          cwd: dir,
+          phaseId: "P1",
+          taskId: "P1-T1",
+          dryRun: false,
+          stage: "full",
+          signal: controller.signal,
+        }),
+      ).rejects.toMatchObject({
+        code: "VERIFICATION_STATE_UNAVAILABLE",
+        aborted: true,
+      });
+      expect(intercept.commands).toContain("echo ok");
+      expect(await readVerificationLedger(dir)).toHaveLength(1);
+    } finally {
+      intercept.restore();
+    }
   });
 });
 

@@ -24,12 +24,14 @@ execution contract before it records a done event. Read-only — never records a
 | `--phase` (required) | `<phase-id>` | Phase id containing the task. |
 | `--task` (required) | `<task-id>` | Task id to verify. |
 | `--dry-run` | — | Preview verification commands without executing them. |
+| `--stage` | `<stage>` | Verification stage: focused or full. Omitted preserves the historical full verification contract. |
 | `--timeout` | `<ms>` | Per-command timeout in decimal milliseconds (default: 300000). |
 | `--detail` | `<mode>` | JSON detail mode: full (default) or agent. Requires --json. |
 | `--json` | — | Emit JSON. |
 
 ```sh
 code-pact verify --phase P1 --task P1-T1 --json
+code-pact verify --phase P1 --task P1-T1 --stage focused --json --detail agent
 code-pact verify --phase P1 --task P1-T1 --json --detail agent
 code-pact verify --phase P1 --task P1-T1 --timeout 300000 --json
 ```

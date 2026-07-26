@@ -36,6 +36,25 @@ export const DECISION_RETENTION_VALUES = ["keep-full", "compress-on-ship", "prun
 export const DecisionRetention = z.enum(DECISION_RETENTION_VALUES);
 export type DecisionRetention = z.infer<typeof DecisionRetention>;
 
+export const VerificationPolicy = z
+  .object({
+    focused_command: z.string().min(1),
+    max_full_attempts: z.number().int().min(1).max(10).optional().default(2),
+  })
+  .superRefine((policy, ctx) => {
+    for (const match of policy.focused_command.matchAll(/\{([^}]+)\}/g)) {
+      const placeholder = match[1];
+      if (placeholder !== "task_id" && placeholder !== "phase_id") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["focused_command"],
+          message: `unknown verification_policy placeholder "{${placeholder}}"`,
+        });
+      }
+    }
+  });
+export type VerificationPolicy = z.infer<typeof VerificationPolicy>;
+
 export const Project = z.object({
   name: z.string().min(1),
   version: z.string().min(1),
@@ -48,5 +67,6 @@ export const Project = z.object({
   // runtime reader. The schema's job here is to REJECT an out-of-enum value so
   // `validate` / `doctor` flag a typo'd policy.
   decision_retention: DecisionRetention.optional(),
+  verification_policy: VerificationPolicy.optional(),
 });
 export type Project = z.infer<typeof Project>;

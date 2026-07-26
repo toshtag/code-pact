@@ -1,0 +1,12 @@
+task_id: P87-T5
+status: done
+at: 2026-07-26T04:53:30.452Z
+actor: agent
+agent: claude-code
+author: Pocket
+evidence:
+  - commands
+  - decision
+source: loop
+verification_ref: evidence:sha256:573d4073e96dc3b05cbda970f02267ab2d31fee91fbd53afd040003016280d0e
+id: a9b4d24cb48dfefd9b6842b48a7eaa0e0b599410afc0e825cf8a57790f194155
