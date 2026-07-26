@@ -130,11 +130,34 @@ function verificationStateUnavailable(opts: {
   return error;
 }
 
-async function gitOutput(cwd: string, command: string): Promise<string> {
+/**
+ * The shared budget for one state collection.
+ *
+ * The deadline and the cancellation signal travel together so no step can
+ * restart the budget, and so a cancelled run stops at the next step boundary
+ * instead of waiting the collection deadline out.
+ */
+type StateCollectionScope = {
+  cwd: string;
+  /** Absolute `performance.now()` value the whole collection must finish by. */
+  deadline: number;
+  signal?: AbortSignal;
+};
+
+function assertNotAborted(scope: StateCollectionScope, operation: string): void {
+  if (!scope.signal?.aborted) return;
+  throw verificationStateUnavailable({ operation, aborted: true });
+}
+
+async function gitOutput(
+  scope: StateCollectionScope,
+  command: string,
+): Promise<string> {
   const result = await runBoundedCommand(
     command,
-    cwd,
+    scope.cwd,
     GIT_STATE_TIMEOUT_MS,
+    scope.signal,
   );
   if (result.exitCode !== 0 || result.timedOut || result.aborted) {
     throw verificationStateUnavailable({
@@ -167,21 +190,22 @@ type GitStreamDigest = { sha256: string; bytes: number };
  * digest and byte count are needed to detect a changed tree.
  */
 async function gitStreamDigest(
-  cwd: string,
+  scope: StateCollectionScope,
   args: string[],
-  deadline: number,
   onStdoutChunk?: (chunk: Buffer) => void,
 ): Promise<GitStreamDigest> {
   const operation = `git ${args.join(" ")}`;
-  const remainingMs = deadline - performance.now();
+  assertNotAborted(scope, operation);
+  const remainingMs = scope.deadline - performance.now();
   if (remainingMs <= 0) {
     throw verificationStateUnavailable({ operation, timedOut: true });
   }
   const result = await runBoundedCommandDigest({
     executable: "git",
     args,
-    cwd,
+    cwd: scope.cwd,
     timeoutMs: Math.min(GIT_STATE_TIMEOUT_MS, remainingMs),
+    signal: scope.signal,
     onStdoutChunk,
   });
   if (result.exitCode !== 0 || result.timedOut || result.aborted) {
@@ -253,11 +277,13 @@ type UntrackedManifestEntry =
     };
 
 async function hashUntrackedEntry(
-  cwd: string,
+  scope: StateCollectionScope,
   path: string,
-  deadline: number,
 ): Promise<UntrackedManifestEntry> {
-  const readPath = await resolveVerificationStateReadPath(cwd, path);
+  // Runs once per untracked path, so this is also the per-entry cancellation
+  // point for the listing walk.
+  assertNotAborted(scope, "stat untracked entry");
+  const readPath = await resolveVerificationStateReadPath(scope.cwd, path);
   let stat;
   try {
     stat = await lstatOwned(readPath);
@@ -269,6 +295,7 @@ async function hashUntrackedEntry(
   }
 
   if (stat.isSymbolicLink()) {
+    assertNotAborted(scope, "read untracked symlink target");
     let target: string;
     try {
       target = await readlinkOwned(readPath);
@@ -298,7 +325,10 @@ async function hashUntrackedEntry(
       type: "file",
       mode: stat.mode,
       size: stat.size,
-      sha256: await hashOwnedRegularFileSha256(readPath, { deadline }),
+      sha256: await hashOwnedRegularFileSha256(readPath, {
+        deadline: scope.deadline,
+        signal: scope.signal,
+      }),
     };
   } catch (cause) {
     const code = (cause as NodeJS.ErrnoException).code;
@@ -312,14 +342,12 @@ async function hashUntrackedEntry(
 }
 
 async function collectUntrackedManifest(
-  cwd: string,
-  deadline: number,
+  scope: StateCollectionScope,
 ): Promise<UntrackedManifestEntry[]> {
   const collector = createNulEntryCollector();
   await gitStreamDigest(
-    cwd,
+    scope,
     ["ls-files", "--others", "--exclude-standard", "-z", "--", ...PATHSPEC],
-    deadline,
     chunk => collector.append(chunk),
   );
   // Git terminates every entry with NUL. Leftover bytes mean the listing was
@@ -333,16 +361,30 @@ async function collectUntrackedManifest(
   const paths = sortPathsByteStable(collector.entries().filter(Boolean));
   const entries: UntrackedManifestEntry[] = [];
   for (const path of paths) {
-    entries.push(await hashUntrackedEntry(cwd, path, deadline));
+    entries.push(await hashUntrackedEntry(scope, path));
   }
   return entries;
 }
 
+export type CurrentVerificationStateOptions = {
+  /**
+   * Cancels the collection. Every step observes it, so a cancelled verify run
+   * does not keep collecting state until the deadline expires.
+   */
+  signal?: AbortSignal;
+};
+
 export async function currentVerificationState(
   cwd: string,
+  options: CurrentVerificationStateOptions = {},
 ): Promise<VerificationStateKey> {
-  const deadline = performance.now() + STATE_COLLECTION_DEADLINE_MS;
-  const headRaw = await gitOutput(cwd, "git rev-parse HEAD");
+  const scope: StateCollectionScope = {
+    cwd,
+    deadline: performance.now() + STATE_COLLECTION_DEADLINE_MS,
+    signal: options.signal,
+  };
+  assertNotAborted(scope, "collect verification state");
+  const headRaw = await gitOutput(scope, "git rev-parse HEAD");
   const head = headRaw.trim();
   if (!/^[0-9a-f]{40}$/i.test(head)) {
     throw verificationStateUnavailable({
@@ -351,17 +393,17 @@ export async function currentVerificationState(
     });
   }
   const [status, diff, untracked] = await Promise.all([
-    gitStreamDigest(
-      cwd,
-      ["status", "--porcelain=v1", "-z", "--", ...PATHSPEC],
-      deadline,
-    ),
-    gitStreamDigest(
-      cwd,
-      ["diff", "--binary", "--no-ext-diff", "--no-textconv", "HEAD", "--", ...PATHSPEC],
-      deadline,
-    ),
-    collectUntrackedManifest(cwd, deadline),
+    gitStreamDigest(scope, ["status", "--porcelain=v1", "-z", "--", ...PATHSPEC]),
+    gitStreamDigest(scope, [
+      "diff",
+      "--binary",
+      "--no-ext-diff",
+      "--no-textconv",
+      "HEAD",
+      "--",
+      ...PATHSPEC,
+    ]),
+    collectUntrackedManifest(scope),
   ]);
   return {
     headSha: head,
