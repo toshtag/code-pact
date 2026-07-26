@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 
 export type ProcessTerminationResult = {
@@ -396,6 +397,202 @@ export async function runBoundedCommand(
     timedOut: cause === "timeout",
     aborted: cause === "abort",
     elapsedMs: elapsedSince(started),
+    termination,
+  };
+}
+
+export type BoundedCommandDigestResult = {
+  exitCode: number | null;
+  timedOut: boolean;
+  aborted: boolean;
+  elapsedMs: number;
+  /** SHA-256 over the complete stdout byte stream, which is never retained. */
+  stdoutSha256: string;
+  stdoutBytes: number;
+  stderr: string;
+  stderrTruncated: boolean;
+  termination?: ProcessTerminationResult;
+};
+
+export type BoundedCommandDigestOptions = {
+  executable: string;
+  args: string[];
+  cwd: string;
+  timeoutMs: number;
+  signal?: AbortSignal;
+  /**
+   * Receives stdout chunks as they arrive. Use it to parse the stream without
+   * buffering it; throwing from the sink fails the run.
+   */
+  onStdoutChunk?: (chunk: Buffer) => void;
+};
+
+function digestFailureResult(
+  overrides: Partial<BoundedCommandDigestResult> & { stderr: string },
+): BoundedCommandDigestResult {
+  return {
+    exitCode: null,
+    timedOut: false,
+    aborted: false,
+    elapsedMs: 0,
+    stdoutSha256: createHash("sha256").digest("hex"),
+    stdoutBytes: 0,
+    stderrTruncated: false,
+    ...overrides,
+  };
+}
+
+/**
+ * Run a trusted command without a shell and digest its stdout as it streams.
+ *
+ * `runBoundedCommand` caps captured stdout at `MAX_COMMAND_OUTPUT_BYTES`, which
+ * makes it unsafe for callers that must observe output *losslessly* — a
+ * truncated capture silently maps distinct outputs onto one value. This variant
+ * keeps the same timeout, cancellation, and process-tree termination guarantees
+ * while hashing stdout incrementally, so the digest covers every byte and no
+ * arbitrarily large output is retained in memory.
+ */
+export async function runBoundedCommandDigest(
+  options: BoundedCommandDigestOptions,
+): Promise<BoundedCommandDigestResult> {
+  const { executable, args, cwd, timeoutMs, signal, onStdoutChunk } = options;
+  if (signal?.aborted) {
+    return digestFailureResult({ stderr: "aborted before start", aborted: true });
+  }
+
+  const started = performance.now();
+  const stdoutHash = createHash("sha256");
+  let stdoutBytes = 0;
+  let sinkError: Error | undefined;
+  const stderr = createOutputCapture();
+  const proc = spawn(executable, args, {
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+    shell: false,
+    detached: process.platform !== "win32",
+  });
+
+  let closeSettled = false;
+  let resolveClose!: (result: CloseResult) => void;
+  const closePromise = new Promise<CloseResult>(resolve => {
+    resolveClose = resolve;
+  });
+  const settleClose = (result: CloseResult): void => {
+    if (closeSettled) return;
+    closeSettled = true;
+    resolveClose(result);
+  };
+
+  proc.stdout?.on("data", (chunk: Buffer) => {
+    if (sinkError) return;
+    stdoutHash.update(chunk);
+    stdoutBytes += chunk.byteLength;
+    if (!onStdoutChunk) return;
+    try {
+      onStdoutChunk(chunk);
+    } catch (error) {
+      // A failing sink invalidates the run; stop consuming and report it.
+      sinkError = error instanceof Error ? error : new Error(String(error));
+      stderr.append(Buffer.from(`\n[code-pact: stdout sink failed: ${sinkError.message}]\n`));
+    }
+  });
+  proc.stderr?.on("data", (chunk: Buffer) => stderr.append(chunk));
+
+  proc.once("close", code => settleClose({ exitCode: code }));
+  proc.once("error", error => {
+    stderr.append(Buffer.from(error.message));
+    settleClose({ exitCode: null });
+  });
+
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<{ kind: "terminate"; cause: "timeout" }>(resolve => {
+    timeoutHandle = setTimeout(
+      () => resolve({ kind: "terminate", cause: "timeout" }),
+      timeoutMs,
+    );
+  });
+
+  let abortHandler: (() => void) | undefined;
+  const abortPromise = new Promise<{ kind: "terminate"; cause: "abort" }>(resolve => {
+    if (!signal) return;
+    let delivered = false;
+    abortHandler = () => {
+      if (delivered) return;
+      delivered = true;
+      resolve({ kind: "terminate", cause: "abort" });
+    };
+    signal.addEventListener("abort", abortHandler, { once: true });
+    if (signal.aborted) abortHandler();
+  });
+
+  const closeOutcome = closePromise.then(result => ({ kind: "close" as const, result }));
+  const outcome = await Promise.race([closeOutcome, timeoutPromise, abortPromise]);
+  if (timeoutHandle) clearTimeout(timeoutHandle);
+  if (signal && abortHandler) signal.removeEventListener("abort", abortHandler);
+
+  const digest = (): string => stdoutHash.digest("hex");
+
+  if (outcome.kind === "close") {
+    if (sinkError) {
+      return {
+        exitCode: null,
+        timedOut: false,
+        aborted: false,
+        elapsedMs: elapsedSince(started),
+        stdoutSha256: digest(),
+        stdoutBytes,
+        stderr: stderr.value(),
+        stderrTruncated: stderr.truncated(),
+      };
+    }
+    return {
+      exitCode: outcome.result.exitCode,
+      timedOut: false,
+      aborted: false,
+      elapsedMs: elapsedSince(started),
+      stdoutSha256: digest(),
+      stdoutBytes,
+      stderr: stderr.value(),
+      stderrTruncated: stderr.truncated(),
+    };
+  }
+
+  const cause: TerminationCause = outcome.cause;
+  const termination = await terminateProcessTree(proc);
+  if (!termination.completed) {
+    stderr.append(
+      Buffer.from(
+        `\n[code-pact: process-tree termination incomplete: ${termination.error ?? "unknown error"}]\n`,
+      ),
+    );
+  }
+
+  let closeDeadline: ReturnType<typeof setTimeout> | undefined;
+  const closed = await Promise.race([
+    closePromise.then(result => ({ closed: true as const, result })),
+    new Promise<{ closed: false }>(resolve => {
+      closeDeadline = setTimeout(() => resolve({ closed: false }), CLOSE_DEADLINE_MS);
+    }),
+  ]);
+  if (closeDeadline) clearTimeout(closeDeadline);
+  termination.closeObserved = closed.closed;
+
+  if (!closed.closed) {
+    stderr.append(Buffer.from("\n[code-pact: process close deadline exceeded]\n"));
+    cleanupChildHandles(proc);
+  }
+
+  return {
+    // A terminated run never produced complete output, so no exit code is
+    // reported even when the platform delivered one after the kill.
+    exitCode: null,
+    timedOut: cause === "timeout",
+    aborted: cause === "abort",
+    elapsedMs: elapsedSince(started),
+    stdoutSha256: digest(),
+    stdoutBytes,
+    stderr: stderr.value(),
+    stderrTruncated: stderr.truncated(),
     termination,
   };
 }
