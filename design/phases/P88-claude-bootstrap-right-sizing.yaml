@@ -3,7 +3,7 @@ name: Claude Bootstrap Right-Sizing
 weight: 1
 confidence: high
 risk: medium
-status: done
+status: in_progress
 objective: >
   Make the generated claude-code instruction file a bootstrap rather than a
   manual. The always-loaded file carries the repository purpose, the single
@@ -116,3 +116,51 @@ tasks:
     acceptance_refs:
       - tests/unit/commands/adapter-conformance.test.ts
       - tests/unit/core/adapters/claude-bootstrap.test.ts
+  - id: P88-T1A
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    requires_decision: false
+    description: >
+      Correct the schema-v2 bootstrap's generated references and the
+      adapter-doctor remediation text. The bootstrap names a scaffolded project
+      path the generator cannot guarantee survives, and tells the agent to wait
+      for a work-order pointer that `task prepare` never emits. Doctor describes
+      `--accept-modified` as preserving local edits when it discards them.
+    depends_on:
+      - P88-T1
+    reads:
+      - design/phases/P88-claude-bootstrap-right-sizing.yaml
+      - src/core/adapters/claude.ts
+      - src/commands/adapter-doctor.ts
+      - docs/cli-contract.md
+      - tests/unit/commands/adapter-upgrade.test.ts
+    writes:
+      - design/phases/P88-claude-bootstrap-right-sizing.yaml
+      - docs/cli-contract.md
+      - src/commands/adapter-doctor.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - tests/unit/commands/adapter-doctor.test.ts
+      - tests/unit/core/adapters/claude-bootstrap.test.ts
+    acceptance_refs:
+      - tests/unit/commands/adapter-doctor.test.ts
+      - tests/unit/core/adapters/claude-bootstrap.test.ts
+    definition_of_done:
+      - The generated bootstrap names no project path the generator does not own
+      - The generated repository gotcha holds for every code-pact-managed project
+      - The generated bootstrap presents `data.more.command` before any external
+        reference
+      - The generated bootstrap makes no claim that `task prepare` points at the
+        envelope reference
+      - The generated bootstrap records the installed command's structured output
+        as authoritative over the online reference
+      - Adapter doctor describes `--accept-modified` as discarding local
+        modifications, for both the schema-v1 and the schema-v2 drift signal
+      - The current CLI contract documentation matches those overwrite semantics
+      - Both locales stay within the bootstrap context budget
