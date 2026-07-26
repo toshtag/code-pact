@@ -54,7 +54,7 @@ describe("runGenerateAdapter — claude-code", () => {
     expect(names.some(n => n.includes("progress.md"))).toBe(true);
   });
 
-  it("CLAUDE.md contains model tier entries", async () => {
+  it("CLAUDE.md carries no model tier entries", async () => {
     await runGenerateAdapter({
       cwd: dir,
       agentName: "claude-code",
@@ -62,17 +62,17 @@ describe("runGenerateAdapter — claude-code", () => {
       locale: "en-US",
     });
     const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
-    expect(content).toContain("highest_reasoning");
-    expect(content).toContain("claude-opus-4-8");
-    expect(content).toContain("balanced_coding");
-    expect(content).toContain("cheap_mechanical");
-    // The thinking-capable tier is labelled by capability, not as a manual
-    // "enabled" step (the current top-tier model uses adaptive thinking).
-    expect(content).toContain("(thinking-capable)");
-    expect(content).not.toContain("(thinking enabled)");
+    // The bootstrap is model-neutral. Tier names and vendor ids reach the agent
+    // through `recommend` / `task prepare --detail full`, which is per-task;
+    // restating them in always-loaded context only adds a copy that goes stale.
+    expect(content).not.toContain("highest_reasoning");
+    expect(content).not.toContain("balanced_coding");
+    expect(content).not.toContain("cheap_mechanical");
+    expect(content).not.toContain("(thinking-capable)");
+    expect(content).not.toContain("## Model selection");
   });
 
-  it("CLAUDE.md instructs the agent to use task context + task complete", async () => {
+  it("CLAUDE.md leads with task prepare as the per-task entrypoint", async () => {
     await runGenerateAdapter({
       cwd: dir,
       agentName: "claude-code",
@@ -80,11 +80,14 @@ describe("runGenerateAdapter — claude-code", () => {
       locale: "en-US",
     });
     const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
-    expect(content).toContain("code-pact task context");
-    expect(content).toContain("code-pact task complete");
+    expect(content).toContain("code-pact task prepare");
+    // The remaining lifecycle verbs are returned by that command, not listed
+    // here — see tests/unit/core/adapters/claude-bootstrap.test.ts.
+    expect(content).not.toContain("code-pact task context");
+    expect(content).not.toContain("code-pact task complete");
   });
 
-  it("CLAUDE.md tells agents to use commands.context without changing the budget", async () => {
+  it("CLAUDE.md names the disclosure fields instead of the context command", async () => {
     await runGenerateAdapter({
       cwd: dir,
       agentName: "claude-code",
@@ -92,10 +95,9 @@ describe("runGenerateAdapter — claude-code", () => {
       locale: "en-US",
     });
     const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
-    expect(content).toContain(
-      "`data.commands.context` is only present when `task prepare`",
-    );
-    expect(content).toContain("Do not reconstruct, widen, or replace");
+    expect(content).toContain("data.next.command");
+    expect(content).toContain("data.more.command");
+    expect(content).not.toContain("data.commands.context");
   });
 
   it("CLAUDE.md does NOT reference unimplemented `progress --add-event`", async () => {
@@ -582,7 +584,11 @@ describe("runGenerateAdapter — gemini-cli", () => {
 // Model-aware adapter (v0.5)
 // ---------------------------------------------------------------------------
 
-describe("runGenerateAdapter — claude-code model-aware (v0.5)", () => {
+describe("runGenerateAdapter — claude-code model pinning", () => {
+  // The bootstrap is model-neutral by contract, so `--model` and a profile
+  // `model_version` are observable in the PROFILE, not in the generated
+  // instruction file. These tests pin that split: the pin still resolves,
+  // normalizes, and takes CLI precedence, and none of it changes the bytes.
   beforeEach(async () => {
     await runInit({
       cwd: dir,
@@ -593,166 +599,139 @@ describe("runGenerateAdapter — claude-code model-aware (v0.5)", () => {
     });
   });
 
-  it("--model opus-4.7: CLAUDE.md includes effort guidance with high/medium/low", async () => {
+  const profileFor = (): string =>
+    join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+
+  async function generateWith(modelVersion?: string): Promise<string> {
     await runGenerateAdapter({
       cwd: dir,
       agentName: "claude-code",
       force: true,
       locale: "en-US",
-      modelVersion: "opus-4.7",
+      ...(modelVersion === undefined ? {} : { modelVersion }),
     });
-    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
-    expect(content).toContain("Model guidance (opus-4.7)");
-    expect(content).toContain("`high`");
-    expect(content).toContain("`medium`");
-    expect(content).toContain("`low`");
-    // Guidance is generation-resistant: it points at adaptive thinking, not a
-    // manual extended-thinking budget.
-    expect(content).toContain("adaptive thinking");
-    expect(content).not.toContain("Extended thinking is supported");
-  });
+    return readFile(join(dir, "CLAUDE.md"), "utf8");
+  }
 
-  it("--model opus-4.6: includes effort guidance with high/medium/low", async () => {
-    await runGenerateAdapter({
-      cwd: dir,
-      agentName: "claude-code",
-      force: true,
-      locale: "en-US",
-      modelVersion: "opus-4.6",
-    });
-    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
-    expect(content).toContain("Model guidance (opus-4.6)");
-    expect(content).toContain("`high`");
-  });
-
-  it("--model sonnet-4.6: guidance does not falsely claim high effort is unsupported", async () => {
-    await runGenerateAdapter({
-      cwd: dir,
-      agentName: "claude-code",
-      force: true,
-      locale: "en-US",
-      modelVersion: "sonnet-4.6",
-    });
-    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
-    expect(content).toContain("Model guidance (sonnet-4.6)");
-    expect(content).toContain("`high`");
-    // Sonnet 4.6 supports high effort (it is the default); the old
-    // "high is not supported" claim was false and must not reappear.
-    expect(content).not.toContain("not supported** on this model");
-    expect(content).not.toContain("Extended thinking is supported. Enable it");
-    expect(content).toContain("adaptive thinking");
-  });
-
-  it("no --model: CLAUDE.md does not include Model guidance section", async () => {
-    await runGenerateAdapter({
-      cwd: dir,
-      agentName: "claude-code",
-      force: true,
-      locale: "en-US",
-    });
-    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
-    expect(content).not.toContain("Model guidance");
-  });
-
-  it("unknown model string: rejects with CONFIG_ERROR before any mutation", async () => {
-    await expect(
-      runGenerateAdapter({
-        cwd: dir,
-        agentName: "claude-code",
-        force: true,
-        locale: "en-US",
-        modelVersion: "future-model-99",
-      }),
-    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
-
-    // Validation runs before any filesystem write: the profile is not pinned
-    // and no instruction file was produced.
-    const profile = await readFile(
-      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
-      "utf8",
+  it("--model pins model_version on the profile", async () => {
+    await generateWith("opus-4.7");
+    expect(await readFile(profileFor(), "utf8")).toContain(
+      "model_version: opus-4.7",
     );
-    expect(profile).not.toContain("model_version");
-    await expect(readFile(join(dir, "CLAUDE.md"), "utf8")).rejects.toThrow();
   });
 
-  it("model_version from profile.yaml is used when no CLI override", async () => {
-    // Write model_version into the agent profile yaml
-    const { writeFile: wf } = await import("node:fs/promises");
-    const profilePath = join(
-      dir,
-      ".code-pact",
-      "agent-profiles",
-      "claude-code.yaml",
+  it("normalizes a vendor-id --model to the canonical model_version", async () => {
+    await generateWith("claude-opus-5");
+    expect(await readFile(profileFor(), "utf8")).toContain(
+      "model_version: opus-5",
     );
-    const original = await readFile(profilePath, "utf8");
-    await wf(profilePath, original + "model_version: opus-4.7\n", "utf8");
-
-    await runGenerateAdapter({
-      cwd: dir,
-      agentName: "claude-code",
-      force: true,
-      locale: "en-US",
-    });
-    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
-    expect(content).toContain("Model guidance (opus-4.7)");
-  });
-
-  it("normalizes a vendor-id model_version from the profile before rendering guidance", async () => {
-    const { writeFile: wf } = await import("node:fs/promises");
-    const profilePath = join(
-      dir,
-      ".code-pact",
-      "agent-profiles",
-      "claude-code.yaml",
-    );
-    const original = await readFile(profilePath, "utf8");
-    // A vendor-id alias is a valid model_version (doctor accepts it via
-    // normalizeModelVersion); generation must canonicalize it, not fall back to
-    // the generic "no guidance" block keyed on the short canonical id.
-    await wf(
-      profilePath,
-      original + "model_version: claude-opus-4-8\n",
-      "utf8",
-    );
-
-    await runGenerateAdapter({
-      cwd: dir,
-      agentName: "claude-code",
-      force: true,
-      locale: "en-US",
-    });
-    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
-    expect(content).toContain("Model guidance (opus-4.8)");
-    expect(content).not.toContain("No model-specific guidance available");
   });
 
   it("CLI modelVersion overrides model_version from profile.yaml", async () => {
     const { writeFile: wf } = await import("node:fs/promises");
-    const profilePath = join(
-      dir,
-      ".code-pact",
-      "agent-profiles",
-      "claude-code.yaml",
-    );
-    const original = await readFile(profilePath, "utf8");
-    await wf(profilePath, original + "model_version: opus-4.7\n", "utf8");
+    const original = await readFile(profileFor(), "utf8");
+    await wf(profileFor(), original + "model_version: opus-4.7\n", "utf8");
 
-    await runGenerateAdapter({
-      cwd: dir,
-      agentName: "claude-code",
-      force: true,
-      locale: "en-US",
-      modelVersion: "sonnet-4.6", // CLI override wins
-    });
-    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
-    expect(content).toContain("Model guidance (sonnet-4.6)");
-    expect(content).not.toContain("Model guidance (opus-4.7)");
+    await generateWith("sonnet-4.6");
+    const pinned = await readFile(profileFor(), "utf8");
+    expect(pinned).toContain("model_version: sonnet-4.6");
+    expect(pinned).not.toContain("model_version: opus-4.7");
+  });
+
+  it("generates identical instruction bytes for every pinned model", async () => {
+    const baseline = await generateWith("opus-5");
+    for (const version of ["sonnet-5", "opus-4.8", "opus-4.7", "sonnet-4.6"]) {
+      expect(await generateWith(version)).toBe(baseline);
+    }
+  });
+
+  it("carries no per-model guidance section for any pin", async () => {
+    const content = await generateWith("opus-4.7");
+    expect(content).not.toContain("Model guidance");
+    expect(content).not.toContain("No model-specific guidance available");
+    expect(content).not.toContain("adaptive thinking");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Error: unknown agent
+// `--accept-modified` is destructive, and every surface has to say so
+//
+// `--write WITH --accept-modified overwrites the user's edits`
+// (tests/unit/commands/adapter-upgrade.test.ts) is the shipped behaviour. The
+// schema-v1 failure guidance advertised it as preserving manual edits, so the
+// generated instruction file — the surface a user actually reads — contradicted
+// adapter doctor and the CLI contract. A user who trusted the generated text lost
+// the edits it promised to keep.
 // ---------------------------------------------------------------------------
+
+describe("runGenerateAdapter — schema-v1 remediation for a destructive flag", () => {
+  /** The exact claims that shipped. Neither may come back in either locale. */
+  const RETIRED_CLAIM = {
+    "en-US": /preserve manual edits/i,
+    "ja-JP": /手動編集を残したい/,
+  } as const;
+
+  /** What the guidance has to convey instead. */
+  const DISCARDS_CLAIM = {
+    "en-US": /`--accept-modified` discards them and regenerates the file/,
+    "ja-JP": /`--accept-modified` はその変更を破棄してファイルを再生成します/,
+  } as const;
+
+  for (const locale of ["en-US", "ja-JP"] as const) {
+    it(`codex AGENTS.md (${locale}) describes the flag as discarding local edits`, async () => {
+      await runInit({ cwd: dir, locale, agents: ["codex"], force: false, json: false });
+      await runGenerateAdapter({ cwd: dir, agentName: "codex", force: false, locale });
+      const content = await readFile(join(dir, "AGENTS.md"), "utf8");
+
+      expect(content).toContain("--accept-modified");
+      expect(content).not.toMatch(RETIRED_CLAIM[locale]);
+      expect(content).toMatch(DISCARDS_CLAIM[locale]);
+    });
+  }
+
+  it("generic instruction file carries the same corrected guidance", async () => {
+    await runInit({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["generic"],
+      force: false,
+      json: false,
+    });
+    const result = await runGenerateAdapter({
+      cwd: dir,
+      agentName: "generic",
+      force: false,
+      locale: "en-US",
+    });
+    const instruction = result.created.find(p => p.endsWith(".md"));
+    expect(instruction).toBeDefined();
+    const content = await readFile(instruction!, "utf8");
+    expect(content).not.toMatch(RETIRED_CLAIM["en-US"]);
+    expect(content).toMatch(DISCARDS_CLAIM["en-US"]);
+  });
+
+  it("keeps the schema-v1 failure guidance out of the claude-code bootstrap", async () => {
+    // The bootstrap shares `adapterCommon` for its managed notice only. If it ever
+    // rendered the failure guidance, it would fail its own no-failure-catalog check
+    // — and would pick up this remediation sentence along with it.
+    await runInit({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["claude-code"],
+      force: false,
+      json: false,
+    });
+    await runGenerateAdapter({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+    });
+    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(content).not.toContain("--accept-modified");
+    expect(content).not.toContain("adapter drift");
+  });
+});
 
 describe("runGenerateAdapter — unknown agent", () => {
   beforeEach(async () => {

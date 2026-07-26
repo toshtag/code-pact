@@ -1,0 +1,59 @@
+schema_version: 1
+task_id: P88-T1C
+phase_id: P88
+phase_path: design/phases/P88-claude-bootstrap-right-sizing.yaml
+base_ref: HEAD
+base_sha: c67e300b06549dabbf9bdd073b07b3b654758779
+phase_blob_sha: 189fbb99d58dd41e4c66079a8d9bbd4b28f0a2c5
+contract_digest: 079b1f286a9377ec193c90943b96f2e6557bc96d8c40bf300eb5825a621a1e97
+contract:
+  description: >
+    Close the last current-contract wording that still describes Claude
+    `--model` as changing generated instruction content: the `adapter upgrade`
+    flag summary in the CLI contract, the model catalog's own responsibility
+    comment, and the three navigation labels left dangling by P88-T1B's rename
+    of the operations.md model section.
+  reads:
+    - design/phases/P88-claude-bootstrap-right-sizing.yaml
+    - docs/maintainers/operations.md
+  writes:
+    - design/phases/P88-claude-bootstrap-right-sizing.yaml
+    - docs/README.md
+    - docs/cli-contract.md
+    - docs/dogfood.md
+    - src/core/models/catalog.ts
+  depends_on:
+    - P88-T1B
+  decision_refs: []
+  acceptance_refs:
+    - docs/cli-contract.md
+  definition_of_done:
+    - Adapter conformance selects its instruction-file contract from the
+      manifest adapter schema version, so schema-v1 installs keep the existing
+      checks
+    - The Claude model catalog carries the Claude 5 model ids for validation,
+      profile seeding, and advisory defaults
+    - The claude-code adapter declares adapter schema version 2
+    - The generated claude-code instruction file enumerates no lifecycle verb
+      set, no failure catalog, and no model selection guidance
+    - The generated claude-code instruction file is identical for every
+      supported Claude model version
+    - The generated claude-code instruction file presents `task prepare` as the
+      per-task entrypoint and names the progressive-disclosure fields the agent
+      reads from it
+    - The generated claude-code instruction file stays within the bootstrap
+      context budget
+    - The repository-gotcha section of the generated claude-code instruction
+      file is bounded
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm test:integration:smoke -- --no-file-parallelism --testTimeout=30000
+    - pnpm test:unit -- --no-file-parallelism --testTimeout=30000
+    - pnpm typecheck
+  base_sha: c67e300b06549dabbf9bdd073b07b3b654758779
+  phase_blob_sha: 189fbb99d58dd41e4c66079a8d9bbd4b28f0a2c5
+at: 2026-07-26T14:44:06.350Z
+actor: agent
+author: Pocket

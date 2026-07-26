@@ -1,18 +1,21 @@
 // Single source of truth for Claude model facts.
 //
-// These values feed four otherwise-independent places that would otherwise
+// These values feed three otherwise-independent places that would otherwise
 // each hardcode their own copy and drift apart: the `--model` validator
-// (schemas/agent-profile.ts), the default agent profile (core/agents.ts), the
-// default model profiles (commands/init.ts), and the generated CLAUDE.md model
-// guidance (adapters/claude.ts). Bumping a Claude model is now a one-file edit.
+// (schemas/agent-profile.ts), the default agent profile (core/agents.ts), and
+// the default model profiles (commands/init.ts). Bumping a Claude model is a
+// one-file edit here. The generated claude-code instruction file is NOT one of
+// them — it is model-neutral and reads nothing from this module.
 //
 // This module is a LEAF: plain data only, no zod / schema runtime import. The
 // schema layer imports FROM here, so a runtime import back would create a
 // cycle. Type-only imports are fine (erased at compile time).
 //
-// This whole layer is ADVISORY — it drives recommendation text and generated
-// instructions. No enforcement path (verify / audit / lifecycle gate) depends
-// on these ids. So a stale value mis-advises; it never breaks correctness.
+// This whole layer is ADVISORY — it drives model validation, profile and tier
+// default seeding, recommendation text, and the doctor model advisories. No
+// enforcement path (verify / audit / lifecycle gate) depends on these ids, and
+// per the note above, no generated instruction file does either. So a stale
+// value mis-advises; it never breaks correctness.
 //
 // Two DISTINCT namespaces live here. Keep them apart or doctor false-positives:
 //   - CLAUDE_MODEL_VERSIONS         short canonical versions, for `--model` /
@@ -27,10 +30,13 @@ import type { ModelProfile } from "../schemas/model-profile.ts";
 // ---------------------------------------------------------------------------
 
 /**
- * Supported Claude model versions for model-aware adapter generation.
- * "generic" (or undefined) produces the baseline template. Newest first.
+ * Supported canonical Claude model versions for `--model` validation and
+ * `model_version` profile pinning. Newest first. Not a template switch: the
+ * schema-v2 bootstrap renders identical bytes for every value here.
  */
 export const CLAUDE_MODEL_VERSIONS = [
+  "opus-5",
+  "sonnet-5",
   "opus-4.8",
   "opus-4.7",
   "opus-4.6",
@@ -44,6 +50,8 @@ export type ClaudeModelVersion = (typeof CLAUDE_MODEL_VERSIONS)[number];
  * (e.g. "opus-4.7") so users can pass whichever form they have on hand.
  */
 export const MODEL_VERSION_ALIASES: Readonly<Record<string, ClaudeModelVersion>> = {
+  "claude-opus-5": "opus-5",
+  "claude-sonnet-5": "sonnet-5",
   "claude-opus-4-8": "opus-4.8",
   "claude-opus-4-7": "opus-4.7",
   "claude-opus-4-6": "opus-4.6",
@@ -60,8 +68,15 @@ export const MODEL_VERSION_ALIASES: Readonly<Record<string, ClaudeModelVersion>>
  * form — so this is a SEPARATE set from {@link CLAUDE_MODEL_VERSIONS}. doctor
  * validates `model_map` values against this set (not the version set), or
  * `cheap_mechanical: claude-haiku-4-5` would be a false `MODEL_ID_UNKNOWN`.
+ *
+ * `claude-fable-5` is listed for the same reason as haiku: it is a shipping
+ * Claude 5 model that a `model_map` may legitimately pin, but it is not a
+ * `model_version` value and is not a tier default.
  */
 export const CLAUDE_KNOWN_VENDOR_MODEL_IDS: readonly string[] = [
+  "claude-opus-5",
+  "claude-sonnet-5",
+  "claude-fable-5",
   "claude-opus-4-8",
   "claude-opus-4-7",
   "claude-opus-4-6",
@@ -76,45 +91,23 @@ export const CLAUDE_KNOWN_VENDOR_MODEL_IDS: readonly string[] = [
  * surface `MODEL_MAP_STALE` (a profile generated before a model bump).
  */
 export const CLAUDE_TIER_MODEL_IDS = {
-  highest_reasoning: "claude-opus-4-8",
-  balanced_coding: "claude-sonnet-4-6",
+  highest_reasoning: "claude-opus-5",
+  balanced_coding: "claude-sonnet-5",
+  // No Haiku 5 exists, so the cheap tier stays on Haiku 4.5.
   cheap_mechanical: "claude-haiku-4-5",
 } as const;
 
 // ---------------------------------------------------------------------------
-// Generated CLAUDE.md model-specific guidance
+// No per-model guidance block lives here any more.
+//
+// A `CLAUDE_MODEL_GUIDANCE` map used to render an effort/thinking section into
+// the generated CLAUDE.md. The claude-code bootstrap is model-neutral (P88), so
+// nothing consumed it, and per-model prose about thinking mechanics was the part
+// of this file that went stale fastest — the authoritative per-model capability
+// table is Anthropic's documentation, not a bundled copy of it. Effort guidance
+// now reaches the agent through `recommend` / `task prepare --detail full`,
+// which is per-task rather than per-model.
 // ---------------------------------------------------------------------------
-
-export type ModelGuidance = {
-  effortGuidance: string;
-  thinkingNote: string;
-};
-
-// Generation-resistant guidance. Per-model prose about thinking mechanics
-// drifts every release (Opus 4.7+ dropped manual extended thinking; effort
-// support and adaptive availability vary by generation; "high not supported on
-// Sonnet 4.6" was once written here and is false — Sonnet 4.6 supports high,
-// the default). This layer is advisory, so a single note that holds for every
-// current Claude version beats version-specific detail that goes stale. The
-// authoritative per-model capability table lives in Anthropic's docs, not here.
-const STANDARD_EFFORT_GUIDANCE = [
-  "- `high` — complex architecture decisions, high-ambiguity tasks, or large context",
-  "- `medium` — standard feature work",
-  "- `low` — small mechanical tasks (`type: refactor`, `expected_duration: short`)",
-].join("\n");
-
-const GENERAL_GUIDANCE: ModelGuidance = {
-  effortGuidance: STANDARD_EFFORT_GUIDANCE,
-  thinkingNote:
-    "For complex or `ambiguity: high` tasks, rely on the model's adaptive thinking and the effort level rather than a fixed manual thinking budget. See the model's current Anthropic documentation for its exact thinking support.",
-};
-
-export const CLAUDE_MODEL_GUIDANCE: Record<ClaudeModelVersion, ModelGuidance> = {
-  "opus-4.8": GENERAL_GUIDANCE,
-  "opus-4.7": GENERAL_GUIDANCE,
-  "opus-4.6": GENERAL_GUIDANCE,
-  "sonnet-4.6": GENERAL_GUIDANCE,
-};
 
 // ---------------------------------------------------------------------------
 // Default abstract tier profiles (init seed)

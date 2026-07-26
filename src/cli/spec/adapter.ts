@@ -36,7 +36,7 @@ const install: CommandSpec = {
   ],
   examples: [
     "code-pact adapter install claude-code --json",
-    "code-pact adapter install claude-code --model claude-opus-4-8 --json",
+    "code-pact adapter install claude-code --model claude-opus-5 --json",
   ],
 };
 

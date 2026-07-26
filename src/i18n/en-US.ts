@@ -587,6 +587,62 @@ export const messages = {
         ],
       },
     },
+    // The schema-v2 instruction file: a bootstrap, not a manual. It gets the
+    // agent to `task prepare` and tells it the few things about the repository
+    // that `task prepare` cannot. Every heading here is English-locked, because
+    // the bootstrap conformance checks anchor on `## Repository gotchas` and on
+    // the absence of the schema-v1 headings.
+    //
+    // Three rules govern edits to this bundle. Phrase instructions as the
+    // desired state rather than a prohibition — "run the command as written"
+    // carries the same contract as "do not reconstruct the command" and costs
+    // the reader less. Keep it short: the whole rendered file has to stay inside
+    // the bootstrap context budget in ja-JP too, where each character costs
+    // about three UTF-8 bytes. And never ask the reader to edit the rendered
+    // file — the manifest pins its hash, so an edit fails conformance.
+    adapterBootstrap: {
+      ownershipNotice: [
+        "code-pact generates this file and rewrites it on `adapter upgrade`.",
+        "Project-specific conventions belong in the project-owned files the task",
+        "contract points at, not here.",
+      ].join("\n"),
+      purposeHeader: "Purpose",
+      purposeBody: [
+        "This repository is planned and verified with code-pact: the plan lives",
+        "under `design/`, and code-pact derives each task's work order,",
+        "verification, and completion state from it. Treat that derived output as",
+        "the instruction of record for the task you are on.",
+      ].join("\n"),
+      startHeader: "Start here",
+      startIntro: "Run this once per task, before reading anything else:",
+      startOutcome: [
+        "It returns a compact work order: current state, goal, declared",
+        "read/write scope, done-when criteria, verification commands, and the",
+        "next action.",
+      ].join("\n"),
+      startRules: [
+        "- Run the command returned in `data.next.command` as written.",
+        "- Use `data.more.command` when the compact work order lacks a concrete",
+        "  detail required for the current action.",
+        "- During implementation, use the focused verification action returned by",
+        "  code-pact. Run the required completion gate when the lifecycle output",
+        "  advances to that action.",
+        "- When code-pact reports a blocked or decision-required state, report",
+        "  that state and its reason to the user.",
+      ].join("\n"),
+      referenceBody: [
+        "Only for a CLI contract detail the work order still lacks after that,",
+        "consult the",
+        "[online code-pact CLI contract](https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md).",
+        "It tracks the main branch: where it describes a newer release than the",
+        "installed command, the installed command's structured output is",
+        "authoritative.",
+      ].join("\n"),
+      gotchasDefault: [
+        "The phase/task contract and `.code-pact/state` are authoritative; follow",
+        "  the current action returned by `task prepare`.",
+      ].join("\n"),
+    },
     adapterCommon: {
       managedNotice:
         "This file is managed by [code-pact](https://github.com/toshtag/code-pact).",
@@ -727,7 +783,7 @@ export const messages = {
           "- `fingerprint`, excerpts, and Evidence fields are optional and usually exist only for command-output failures. Do not treat their absence on `invalid_state`, decision, preflight, or configuration failures as a new error.",
           "- Do not retrieve full evidence by default. Use `data.failure.retrieve_command` only for command-output failures when the excerpts are insufficient to decide the fix.",
           "- **missing context pack** — Default minimal `task prepare` does not build or write a context pack. To materialize the pack, use `data.more.command` from minimal output or run `code-pact task prepare <task-id> --agent <name> --detail full --json`. If you only need the pack body, run `code-pact task context <task-id> --agent <name>`.",
-          "- **adapter drift** (from `code-pact adapter doctor` or `code-pact adapter conformance <agent>`) — the installed adapter files diverged from the manifest, or the agent contract surface is incomplete. Re-run `code-pact adapter upgrade <agent> --write` (use `--accept-modified` to preserve manual edits).",
+          "- **adapter drift** (from `code-pact adapter doctor` or `code-pact adapter conformance <agent>`) — the installed adapter files diverged from the manifest, or the agent contract surface is incomplete. Re-run `code-pact adapter upgrade <agent> --write`. If it refuses because a managed file has local modifications, review those changes first; `--accept-modified` discards them and regenerates the file.",
           "- **`LOCK_HELD`** — another code-pact mutation is in progress. Wait and retry; `data.lock_holder` identifies the holder.",
           "- **`TASK_FINALIZE_NOT_ELIGIBLE`** — route via `code-pact task complete <task-id>` first; the derived state then advances.",
           "- **`WRITES_AUDIT_STRICT_FAILED`** — `--audit-strict` plus at least one `TASK_WRITES_AUDIT_*` warning. Either (a) fix the declared writes so the audit returns clean, or (b) drop `--audit-strict` and document the deviation. The design YAML is **not** mutated on this failure path (`applied: false`).",

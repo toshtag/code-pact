@@ -209,6 +209,8 @@ function fingerprintsEqual(
 import {
   AGENT_CONTRACT_SECTION_HEADING,
   AGENT_CONTRACT_AXIS_HEADINGS,
+  BOOTSTRAP_CONTRACT_FROM_ADAPTER_SCHEMA_VERSION,
+  BOOTSTRAP_REQUIRED_ANCHORS,
 } from "../core/adapters/conformance-spec.ts";
 
 /**
@@ -222,17 +224,74 @@ import {
  * is itself a contract break. Body content under each
  * axis is not inspected; only the heading presence is locked.
  */
-function detectContractDrift(
+/**
+ * The remediation both contract-drift signals carry, shared so the two cannot
+ * describe the flag differently.
+ *
+ * `--accept-modified` does not merge or keep local edits: it discards them and
+ * writes the generated content, which
+ * `tests/unit/commands/adapter-upgrade.test.ts` pins as "--write WITH
+ * --accept-modified overwrites the user's edits". Doctor advertised it as
+ * preserving those edits, so a user following the advice lost them — never
+ * describe a destructive flag by the outcome its name suggests.
+ */
+function upgradeRemediation(agentName: SupportedAgent): string {
+  return `Run "adapter upgrade ${agentName} --write". If it refuses because the managed file has local modifications, review those changes first; "--accept-modified" discards them and regenerates the file.`;
+}
+
+/**
+ * Contract drift for a schema-v2 (bootstrap) instruction file. The schema-v1
+ * signal — a missing `## Agent contract` section — cannot apply here, because a
+ * conforming bootstrap has no such section: the drift signal is instead the loss
+ * of the entrypoint or the progressive-disclosure fields, which is what makes a
+ * bootstrap unable to reach the work order at all.
+ *
+ * Without this branch, `adapter doctor` would report ADAPTER_CONTRACT_DRIFT
+ * against every freshly generated claude-code install.
+ */
+function detectBootstrapContractDrift(
   agentName: SupportedAgent,
   relPath: string,
   absPath: string,
   diskContent: string,
 ): AdapterDoctorIssue | null {
+  const missing = BOOTSTRAP_REQUIRED_ANCHORS.filter(
+    anchor => !diskContent.includes(anchor),
+  );
+  if (missing.length === 0) return null;
+  return {
+    code: "ADAPTER_CONTRACT_DRIFT",
+    severity: "warning",
+    message: `Managed instruction file "${relPath}" no longer presents the per-task entrypoint: missing ${missing.join(", ")}. ${upgradeRemediation(agentName)}`,
+    agent: agentName,
+    path: absPath,
+    details: { kind: "bootstrap_entrypoint_missing", missing_anchors: missing },
+  };
+}
+
+function detectContractDrift(
+  agentName: SupportedAgent,
+  relPath: string,
+  absPath: string,
+  diskContent: string,
+  adapterSchemaVersion: number,
+): AdapterDoctorIssue | null {
+  if (
+    adapterSchemaVersion >= BOOTSTRAP_CONTRACT_FROM_ADAPTER_SCHEMA_VERSION
+  ) {
+    return detectBootstrapContractDrift(
+      agentName,
+      relPath,
+      absPath,
+      diskContent,
+    );
+  }
+
   if (!diskContent.includes(AGENT_CONTRACT_SECTION_HEADING)) {
     return {
       code: "ADAPTER_CONTRACT_DRIFT",
       severity: "warning",
-      message: `Managed instruction file "${relPath}" is missing the "${AGENT_CONTRACT_SECTION_HEADING}" section. Run "adapter upgrade ${agentName} --write" to apply the v1.7+ template (use --accept-modified to preserve user edits).`,
+      message: `Managed instruction file "${relPath}" is missing the "${AGENT_CONTRACT_SECTION_HEADING}" section, so the v1.7+ template needs applying. ${upgradeRemediation(agentName)}`,
       agent: agentName,
       path: absPath,
       details: { kind: "section_missing" },
@@ -567,9 +626,10 @@ export async function inspectAgent(
       // older code-pact version. Severity stays `warning` (soft
       // signal — never gates the overall doctor exit code; the
       // existing `ADAPTER_FILE_DRIFT` and friends still own that
-      // signal). Resolution: `code-pact adapter upgrade <agent>
-      // --write --accept-modified` reinstates the section while
-      // preserving any user edits.
+      // signal). Resolution: `code-pact adapter upgrade <agent> --write`
+      // reinstates the section; `--accept-modified` is needed only when the
+      // file also carries local modifications, and it discards them (see
+      // upgradeRemediation).
       // SECURITY: the heading/substring inspection IS a content oracle, so it
       // runs ONLY after classifyManifestFileForRead returned `owned` — never on
       // a dynamic write-namespace member that forged `role: instruction`.
@@ -579,6 +639,7 @@ export async function inspectAgent(
           entry.path,
           absPath,
           diskContent,
+          manifest.adapter_schema_version,
         );
         if (contractIssue !== null) issues.push(contractIssue);
       }

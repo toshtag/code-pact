@@ -42,6 +42,10 @@ import {
 
 const STABLE_AGENTS = ["claude-code", "codex", "generic"] as const;
 
+// Adapters whose manifest still records adapter_schema_version 1, and so are
+// still held to the schema-v1 instruction contract.
+const SCHEMA_V1_AGENTS = ["codex", "generic"] as const;
+
 // v1.6 audit surface mentions kept as a local constant — these are
 // not part of the v1.11+ conformance spec but the existing
 // `agent contract section references every v1.6 audit surface` test
@@ -148,17 +152,6 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
     expect(actual).toEqual(expected);
   });
 
-  it("instruction file mentions every required CLI command", async () => {
-    await installAdapter(agent);
-    const manifest = await readManifest(dir, agent);
-    const instruction = manifest!.files.find((f) => f.role === "instruction");
-    expect(instruction).toBeDefined();
-    const content = await readFile(join(dir, instruction!.path), "utf8");
-    for (const ref of REQUIRED_CLI_REFS) {
-      expect(content).toContain(ref);
-    }
-  });
-
   it("instruction file mentions --json so agents discover the JSON mode", async () => {
     await installAdapter(agent);
     const manifest = await readManifest(dir, agent);
@@ -224,6 +217,63 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
   // v1.7 P16-T4: agent contract section
   // ---------------------------------------------------------------------
 
+  // ---------------------------------------------------------------------
+  // v1.11+ P21-T5: `code-pact adapter conformance <agent>` command
+  // ---------------------------------------------------------------------
+
+  it("runAdapterConformance returns compliant: true on a fresh install", async () => {
+    await installAdapter(agent);
+    const result = await runAdapterConformance({ cwd: dir, agentName: agent });
+    expect(result.agent).toBe(agent);
+    expect(result.compliant).toBe(true);
+    // Every check should pass on a fresh install.
+    const failed = result.checks.filter((c) => c.status === "fail");
+    expect(failed).toEqual([]);
+  });
+
+  it("runAdapterConformance returns compliant: false on file checksum mismatch", async () => {
+    await installAdapter(agent);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    const path = join(dir, instruction!.path);
+    const original = await readFile(path, "utf8");
+    // Append a single line so the sha256 mismatches the manifest but
+    // the contract heading + surfaces remain intact.
+    await import("node:fs/promises").then((fs) =>
+      fs.writeFile(path, original + "\n<!-- tampered -->\n", "utf8"),
+    );
+
+    const result = await runAdapterConformance({ cwd: dir, agentName: agent });
+    expect(result.compliant).toBe(false);
+    const checksumChecks = result.checks.filter(
+      (c) => c.id === "file_checksum_match",
+    );
+    expect(checksumChecks.some((c) => c.status === "fail")).toBe(true);
+  });
+
+  // ----- P30: adapter contract hardening -----
+
+});
+
+// The schema-v1 instruction contract: the generated file must SPELL OUT the
+// agent contract axes, the CLI surfaces, the failure catalog, and the
+// recommendation / bounded-repair / projection guidance. claude-code moved to
+// the schema-v2 bootstrap, which requires the ABSENCE of that detail, so these
+// assertions only make sense for the adapters still on schema v1.
+describe.each(SCHEMA_V1_AGENTS)(
+  "adapter conformance — schema-v1 instruction contract — %s",
+  (agent) => {
+  it("instruction file mentions every required CLI command", async () => {
+    await installAdapter(agent);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    expect(instruction).toBeDefined();
+    const content = await readFile(join(dir, instruction!.path), "utf8");
+    for (const ref of REQUIRED_CLI_REFS) {
+      expect(content).toContain(ref);
+    }
+  });
+
   it("instruction file contains the verbatim `## Agent contract` heading", async () => {
     await installAdapter(agent);
     const manifest = await readManifest(dir, agent);
@@ -280,10 +330,6 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
     expect(sectionStart).toBeGreaterThan(workflowHeader);
   });
 
-  // ---------------------------------------------------------------------
-  // v1.11+ P21-T5: `code-pact adapter conformance <agent>` command
-  // ---------------------------------------------------------------------
-
   it("instruction file mentions every lifecycle_required surface (v1.11+)", async () => {
     await installAdapter(agent);
     const manifest = await readManifest(dir, agent);
@@ -312,16 +358,6 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
     for (const keyword of REQUIRED_FAILURE_GUIDANCE) {
       expect(content).toContain(keyword);
     }
-  });
-
-  it("runAdapterConformance returns compliant: true on a fresh install", async () => {
-    await installAdapter(agent);
-    const result = await runAdapterConformance({ cwd: dir, agentName: agent });
-    expect(result.agent).toBe(agent);
-    expect(result.compliant).toBe(true);
-    // Every check should pass on a fresh install.
-    const failed = result.checks.filter((c) => c.status === "fail");
-    expect(failed).toEqual([]);
   });
 
   it("fresh instruction contains every recommendation consumption anchor", async () => {
@@ -536,28 +572,6 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
     expect(sectionCheck?.status).toBe("fail");
   });
 
-  it("runAdapterConformance returns compliant: false on file checksum mismatch", async () => {
-    await installAdapter(agent);
-    const manifest = await readManifest(dir, agent);
-    const instruction = manifest!.files.find((f) => f.role === "instruction");
-    const path = join(dir, instruction!.path);
-    const original = await readFile(path, "utf8");
-    // Append a single line so the sha256 mismatches the manifest but
-    // the contract heading + surfaces remain intact.
-    await import("node:fs/promises").then((fs) =>
-      fs.writeFile(path, original + "\n<!-- tampered -->\n", "utf8"),
-    );
-
-    const result = await runAdapterConformance({ cwd: dir, agentName: agent });
-    expect(result.compliant).toBe(false);
-    const checksumChecks = result.checks.filter(
-      (c) => c.id === "file_checksum_match",
-    );
-    expect(checksumChecks.some((c) => c.status === "fail")).toBe(true);
-  });
-
-  // ----- P30: adapter contract hardening -----
-
   it("the P30 hardening checks pass on a fresh install (template is P29-aligned)", async () => {
     await installAdapter(agent);
     const result = await runAdapterConformance({ cwd: dir, agentName: agent });
@@ -596,7 +610,9 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
     ).toBe("required");
     expect(at.compliant).toBe(true);
   });
-});
+  },
+);
+
 
 // P30: end-to-end severity behavior of a *violating* instruction. The
 // per-adapter suite above only exercises conformant templates (the checks
@@ -604,8 +620,12 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
 // predicates. This block closes the gap the P30 DoD calls for — the join
 // of manifest generator_version + violating content + remediation +
 // compliant — through runAdapterConformance. claude-code only is enough.
-describe("adapter conformance — P30 violating fixture severity (claude-code)", () => {
-  const agent = "claude-code" as const;
+// Retargeted to codex: this block is about the GENERATOR-VERSION gate on
+// `no_contract_antipatterns`, which only exists under the schema-v1 contract.
+// Under the schema-v2 bootstrap the same check is always required — see the
+// block below.
+describe("adapter conformance — P30 violating fixture severity (schema v1)", () => {
+  const agent = "codex" as const;
 
   // Inject the P29 anti-pattern (`task finalize ... --agent`) WITHOUT
   // removing any required content, so `no_contract_antipatterns` is the
@@ -671,6 +691,69 @@ describe("adapter conformance — P30 violating fixture severity (claude-code)",
     expect(check.status).toBe("fail");
     expect(check.severity).toBe("required");
     expect(result.compliant).toBe(false);
+  });
+});
+
+describe("adapter conformance — antipattern severity under the bootstrap contract", () => {
+  const agent = "claude-code" as const;
+
+  it("is required regardless of generator_version", async () => {
+    // A schema-v2 manifest only exists once a Code Pact that ships the bootstrap
+    // template regenerated it, so there is no pre-hardening install to soften
+    // the landing for: the check is required at any generator_version.
+    await installAdapter(agent); // generator_version 0.9.0-alpha.0
+    const manifest = await readManifest(dir, agent);
+    const instr = manifest!.files.find((f) => f.role === "instruction")!;
+    const instrPath = join(dir, instr.path);
+    const tampered =
+      (await readFile(instrPath, "utf8")) +
+      "\n\nExample (DO NOT FOLLOW): code-pact task finalize <id> --agent claude-code\n";
+    await writeFile(instrPath, tampered, "utf8");
+    const newSha = createHash("sha256")
+      .update(tampered.replace(/\r\n/g, "\n"), "utf8")
+      .digest("hex");
+    const manifestPath = join(
+      dir,
+      ".code-pact",
+      "adapters",
+      `${agent}.manifest.yaml`,
+    );
+    const raw = await readFile(manifestPath, "utf8");
+    await writeFile(manifestPath, raw.replace(instr.sha256, newSha), "utf8");
+
+    const result = await runAdapterConformance({ cwd: dir, agentName: agent });
+    const check = result.checks.find((c) => c.id === "no_contract_antipatterns")!;
+    expect(check.status).toBe("fail");
+    expect(check.severity).toBe("required");
+    expect(result.compliant).toBe(false);
+  });
+
+  it("emits the bootstrap checks and none of the schema-v1 instruction checks", async () => {
+    await installAdapter(agent);
+    const result = await runAdapterConformance({ cwd: dir, agentName: agent });
+    const ids = result.checks.map((c) => c.id);
+    for (const id of [
+      "bootstrap_entrypoint_present",
+      "bootstrap_no_lifecycle_enumeration",
+      "bootstrap_no_failure_catalog",
+      "bootstrap_model_neutral",
+      "bootstrap_gotchas_bounded",
+      "bootstrap_context_budget",
+    ]) {
+      expect(ids, `missing ${id}`).toContain(id);
+      expect(result.checks.find((c) => c.id === id)?.status).toBe("pass");
+    }
+    for (const id of [
+      "contract_section_present",
+      "required_cli_surface_mentions",
+      "required_failure_guidance",
+      "activation_rules_documented",
+      "repair_policy_guidance_present",
+      "structural_projection_guidance_present",
+    ]) {
+      expect(ids, `unexpected ${id}`).not.toContain(id);
+    }
+    expect(result.compliant).toBe(true);
   });
 });
 

@@ -592,6 +592,56 @@ export const messages = {
         ],
       },
     },
+    // schema-v2 の指示ファイル。マニュアルではなく bootstrap として、agent を
+    // `task prepare` まで運び、`task prepare` では伝えられないリポジトリ固有の
+    // 事項だけを渡す。見出しは英語固定（bootstrap conformance が
+    // `## Repository gotchas` と schema-v1 見出しの不在に anchor するため）。
+    //
+    // 編集時の規則は3つ。禁止形ではなく望ましい状態で書くこと（「command を
+    // そのまま実行する」は「command を組み立て直さない」と同じ契約で、読む側の
+    // 負荷が小さい）。短く保つこと。ja-JP は1文字あたり約3 UTF-8 bytes なので、
+    // budget を超えるのは en-US より先にこちらである。そして生成後のファイルを
+    // 編集するよう読者へ促さないこと。manifest が hash を固定しているため、
+    // 編集は conformance を落とす。
+    adapterBootstrap: {
+      ownershipNotice: [
+        "このファイルは code-pact が生成し、`adapter upgrade` で書き直す。",
+        "プロジェクト固有の規約は、task contract が指す project 所有の",
+        "ファイルに置く（このファイルには置かない）。",
+      ].join("\n"),
+      purposeHeader: "Purpose",
+      purposeBody: [
+        "このリポジトリは code-pact で計画・検証されている。計画は `design/` にあり、",
+        "各タスクの work order、検証、完了状態はそこから code-pact が導出する。",
+        "取り組んでいるタスクについては、その導出結果を正式な指示として扱う。",
+      ].join("\n"),
+      startHeader: "Start here",
+      startIntro: "タスクごとに、他の何かを読む前にこれを実行する:",
+      startOutcome: [
+        "compact な work order が返る: 現在の状態、goal、宣言された read/write",
+        "scope、done-when 基準、検証 command、そして次の action。",
+      ].join("\n"),
+      startRules: [
+        "- `data.next.command` が返す command をそのまま実行する。",
+        "- compact な work order に、現在の action に必要な具体的情報が欠けている",
+        "  場合は `data.more.command` を使う。",
+        "- 実装中は code-pact が返す focused な検証 action を使う。lifecycle の",
+        "  出力が完了 gate の action へ進んだ時点で、その gate を実行する。",
+        "- code-pact が blocked または decision-required を報告した場合は、その",
+        "  状態と理由をユーザーへ報告する。",
+      ].join("\n"),
+      referenceBody: [
+        "それでも足りない CLI contract の詳細に限り、",
+        "[online の code-pact CLI contract](https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md)",
+        "を参照する。これは main branch を追うため、installed な command より",
+        "新しい release を記述している場合は、installed な command の structured",
+        "output を正式なものとして扱う。",
+      ].join("\n"),
+      gotchasDefault: [
+        "phase/task contract と `.code-pact/state` を正式な状態として扱い、",
+        "  `task prepare` が返す現在の action に従う。",
+      ].join("\n"),
+    },
     adapterCommon: {
       managedNotice:
         "このファイルは [code-pact](https://github.com/toshtag/code-pact) によって管理されています。",
@@ -731,7 +781,7 @@ export const messages = {
           "- `fingerprint`、excerpt、Evidence field は optional で、通常は command-output failure にのみ存在します。`invalid_state`、decision、preflight、configuration failure で存在しないことを新しいエラー扱いしないでください。",
           "- full evidence はデフォルトで取得しないでください。command-output failure で、excerpt だけでは修正判断に不足する場合に限り、`data.failure.retrieve_command` を使います。",
           "- **missing context pack** — デフォルト minimal の `task prepare` は pack を生成・書き込みしません。pack を materialize する場合は、minimal 出力の `data.more.command` を使うか、`code-pact task prepare <task-id> --agent <name> --detail full --json` を実行してください。pack 本文だけ必要な場合は `code-pact task context <task-id> --agent <name>` を使ってください。",
-          "- **adapter drift** (`code-pact adapter doctor` / `code-pact adapter conformance <agent>` から) — インストール済み adapter ファイルが manifest と乖離している、または agent contract surface が不完全。`code-pact adapter upgrade <agent> --write` で再適用してください（手動編集を残したい場合は `--accept-modified`）。",
+          "- **adapter drift** (`code-pact adapter doctor` / `code-pact adapter conformance <agent>` から) — インストール済み adapter ファイルが manifest と乖離している、または agent contract surface が不完全。`code-pact adapter upgrade <agent> --write` で再適用してください。managed file のローカル変更が理由で拒否された場合は、先にその変更を確認してください。`--accept-modified` はその変更を破棄してファイルを再生成します。",
           "- **`LOCK_HELD`** — 別の code-pact mutation が同プロジェクトで進行中。待って retry。`data.lock_holder` で保持者を確認できます。",
           "- **`TASK_FINALIZE_NOT_ELIGIBLE`** — 先に `code-pact task complete <task-id>` を経由してください。derived state が進めば finalize 可能になります。",
           "- **`WRITES_AUDIT_STRICT_FAILED`** — `--audit-strict` + 1 つ以上の `TASK_WRITES_AUDIT_*` warning。(a) declared writes を修正して audit が clean になるようにする、または (b) `--audit-strict` を外して deviation を記録する、のいずれか。この失敗パスでは design YAML は **mutate されません** (`applied: false`)。",

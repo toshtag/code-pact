@@ -932,6 +932,129 @@ describe("adapter doctor — agent targeting", () => {
 // ---------------------------------------------------------------------------
 
 describe("adapter doctor — ADAPTER_CONTRACT_DRIFT (v1.7 P16-T5)", () => {
+  // The schema-v1 drift kinds (`section_missing` / `axes_incomplete`) anchor on
+  // the `## Agent contract` section, so they are exercised against codex — an
+  // adapter that still generates the schema-v1 instruction file. claude-code
+  // moved to the schema-v2 bootstrap, which has no such section; its own drift
+  // signal is covered in the schema-v2 block below.
+  // The shared beforeEach enables only claude-code, so re-init with codex
+  // enabled to get its agent profile and project entry.
+  async function installFreshCodex(): Promise<void> {
+    await runInit({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["codex"],
+      force: true,
+      json: false,
+    });
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "codex",
+      force: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+  }
+
+  async function readAgentsMd(): Promise<string> {
+    return readFile(join(dir, "AGENTS.md"), "utf8");
+  }
+
+  async function writeAgentsMd(content: string): Promise<void> {
+    await writeFile(join(dir, "AGENTS.md"), content, "utf8");
+  }
+
+  async function codexDoctor() {
+    return runAdapterDoctor({ cwd: dir, agentName: "codex", locale: "en-US" });
+  }
+
+  it("pristine install → no ADAPTER_CONTRACT_DRIFT issue", async () => {
+    await installFreshCodex();
+    const result = await codexDoctor();
+    const drift = result.issues.find(i => i.code === "ADAPTER_CONTRACT_DRIFT");
+    expect(drift).toBeUndefined();
+  });
+
+  it("section deleted → ADAPTER_CONTRACT_DRIFT with kind=section_missing", async () => {
+    await installFreshCodex();
+    const original = await readAgentsMd();
+    // Strip the section by replacing it with nothing.
+    const without = original.replace(/## Agent contract[\s\S]*?(?=\n## )/, "");
+    expect(without).not.toContain("## Agent contract");
+    await writeAgentsMd(without);
+
+    const result = await codexDoctor();
+    const drift = result.issues.find(i => i.code === "ADAPTER_CONTRACT_DRIFT");
+    expect(drift).toBeDefined();
+    expect(drift!.severity).toBe("warning");
+    expect(drift!.details).toEqual({ kind: "section_missing" });
+  });
+
+  it("one axis sub-heading deleted → ADAPTER_CONTRACT_DRIFT with kind=axes_incomplete + missing_axes", async () => {
+    await installFreshCodex();
+    const original = await readAgentsMd();
+    // Remove the "### What to verify first" sub-heading line only.
+    const without = original.replace(/### What to verify first\n/, "");
+    expect(without).toContain("## Agent contract"); // section heading kept
+    expect(without).not.toContain("### What to verify first");
+    await writeAgentsMd(without);
+
+    const result = await codexDoctor();
+    const drift = result.issues.find(i => i.code === "ADAPTER_CONTRACT_DRIFT");
+    expect(drift).toBeDefined();
+    expect(drift!.details).toEqual({
+      kind: "axes_incomplete",
+      missing_axes: ["### What to verify first"],
+    });
+  });
+
+  it("severity is warning — does NOT change the doctor exit code (soft signal)", async () => {
+    await installFreshCodex();
+    const original = await readAgentsMd();
+    const without = original.replace(/## Agent contract[\s\S]*?(?=\n## )/, "");
+    await writeAgentsMd(without);
+
+    const result = await codexDoctor();
+    // ok=true even though ADAPTER_CONTRACT_DRIFT fired — warnings
+    // never gate the exit code (ADAPTER_FILE_DRIFT also fires here
+    // but it's also a warning).
+    expect(result.ok).toBe(true);
+  });
+
+  it("fires INDEPENDENTLY of ADAPTER_FILE_DRIFT — both codes can appear in one run", async () => {
+    await installFreshCodex();
+    const original = await readAgentsMd();
+    const without = original.replace(/## Agent contract[\s\S]*?(?=\n## )/, "");
+    await writeAgentsMd(without);
+
+    const result = await codexDoctor();
+    const codes = result.issues.map(i => i.code);
+    expect(codes).toContain("ADAPTER_CONTRACT_DRIFT");
+    // Hand-edit also trips the file-level drift signal — both codes
+    // are independent diagnoses per design/decisions/agent-contract-rfc.md.
+    expect(codes).toContain("ADAPTER_FILE_DRIFT");
+  });
+
+  it("describes --accept-modified as discarding local edits, not preserving them", async () => {
+    // Same correction as the schema-v2 signal: both remediations share one
+    // string, so neither can drift back to advertising a destructive flag as
+    // preserving what it overwrites.
+    await installFreshCodex();
+    const original = await readAgentsMd();
+    await writeAgentsMd(
+      original.replace(/## Agent contract[\s\S]*?(?=\n## )/, ""),
+    );
+
+    const result = await codexDoctor();
+    const drift = result.issues.find(i => i.code === "ADAPTER_CONTRACT_DRIFT");
+    expect(drift).toBeDefined();
+    expect(drift!.message).not.toMatch(/preserve user edits/i);
+    expect(drift!.message).toMatch(/discards them/);
+    expect(drift!.message).toContain("adapter upgrade codex --write");
+  });
+});
+
+describe("adapter doctor — ADAPTER_CONTRACT_DRIFT for a schema-v2 bootstrap", () => {
   async function installFreshClaudeCode(): Promise<void> {
     await runAdapterInstall({
       cwd: dir,
@@ -942,99 +1065,74 @@ describe("adapter doctor — ADAPTER_CONTRACT_DRIFT (v1.7 P16-T5)", () => {
     });
   }
 
-  async function readClaudeMd(): Promise<string> {
-    return readFile(join(dir, "CLAUDE.md"), "utf8");
-  }
-
-  async function writeClaudeMd(content: string): Promise<void> {
-    await writeFile(join(dir, "CLAUDE.md"), content, "utf8");
+  async function claudeDoctor() {
+    return runAdapterDoctor({
+      cwd: dir,
+      agentName: "claude-code",
+      locale: "en-US",
+    });
   }
 
   it("pristine install → no ADAPTER_CONTRACT_DRIFT issue", async () => {
+    // The regression this pins: the schema-v1 drift check anchors on
+    // "## Agent contract", which a conforming bootstrap does not have. Applying
+    // it to a schema-v2 file would warn on every fresh install.
     await installFreshClaudeCode();
-    const result = await runAdapterDoctor({
-      cwd: dir,
-      agentName: "claude-code",
-      locale: "en-US",
-    });
-    const drift = result.issues.find(i => i.code === "ADAPTER_CONTRACT_DRIFT");
-    expect(drift).toBeUndefined();
+    const result = await claudeDoctor();
+    expect(
+      result.issues.find(i => i.code === "ADAPTER_CONTRACT_DRIFT"),
+    ).toBeUndefined();
   });
 
-  it("section deleted → ADAPTER_CONTRACT_DRIFT with kind=section_missing", async () => {
+  it("entrypoint removed → ADAPTER_CONTRACT_DRIFT with kind=bootstrap_entrypoint_missing", async () => {
     await installFreshClaudeCode();
-    const original = await readClaudeMd();
-    // Strip the section by replacing it with nothing.
-    const without = original.replace(/## Agent contract[\s\S]*?(?=\n## )/, "");
-    expect(without).not.toContain("## Agent contract");
-    await writeClaudeMd(without);
+    const original = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    const without = original.replace(
+      /- Use `data\.more\.command`[\s\S]*?current action\.\n/,
+      "",
+    );
+    expect(without).not.toContain("data.more.command");
+    await writeFile(join(dir, "CLAUDE.md"), without, "utf8");
 
-    const result = await runAdapterDoctor({
-      cwd: dir,
-      agentName: "claude-code",
-      locale: "en-US",
-    });
+    const result = await claudeDoctor();
     const drift = result.issues.find(i => i.code === "ADAPTER_CONTRACT_DRIFT");
     expect(drift).toBeDefined();
     expect(drift!.severity).toBe("warning");
-    expect(drift!.details).toEqual({ kind: "section_missing" });
+    expect(drift!.details).toEqual({
+      kind: "bootstrap_entrypoint_missing",
+      missing_anchors: ["data.more.command"],
+    });
   });
 
-  it("one axis sub-heading deleted → ADAPTER_CONTRACT_DRIFT with kind=axes_incomplete + missing_axes", async () => {
+  it("does not apply the schema-v1 axis check to a bootstrap file", async () => {
     await installFreshClaudeCode();
-    const original = await readClaudeMd();
-    // Remove the "### What to verify first" sub-heading line only.
-    const without = original.replace(/### What to verify first\n/, "");
-    expect(without).toContain("## Agent contract"); // section heading kept
-    expect(without).not.toContain("### What to verify first");
-    await writeClaudeMd(without);
+    const result = await claudeDoctor();
+    const drift = result.issues.find(i => i.code === "ADAPTER_CONTRACT_DRIFT");
+    expect(drift?.details).not.toMatchObject({ kind: "axes_incomplete" });
+  });
 
-    const result = await runAdapterDoctor({
-      cwd: dir,
-      agentName: "claude-code",
-      locale: "en-US",
-    });
+  it("describes --accept-modified as discarding local edits, not preserving them", async () => {
+    // `--write WITH --accept-modified overwrites the user's edits`
+    // (tests/unit/commands/adapter-upgrade.test.ts) is the shipped behaviour.
+    // Doctor advertised the flag as preserving them, so a user who followed the
+    // remediation lost the edits it promised to keep.
+    await installFreshClaudeCode();
+    const original = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    await writeFile(
+      join(dir, "CLAUDE.md"),
+      original.replace(
+        /- Use `data\.more\.command`[\s\S]*?current action\.\n/,
+        "",
+      ),
+      "utf8",
+    );
+
+    const result = await claudeDoctor();
     const drift = result.issues.find(i => i.code === "ADAPTER_CONTRACT_DRIFT");
     expect(drift).toBeDefined();
-    expect(drift!.details).toEqual({
-      kind: "axes_incomplete",
-      missing_axes: ["### What to verify first"],
-    });
-  });
-
-  it("severity is warning — does NOT change the doctor exit code (soft signal)", async () => {
-    await installFreshClaudeCode();
-    const original = await readClaudeMd();
-    const without = original.replace(/## Agent contract[\s\S]*?(?=\n## )/, "");
-    await writeClaudeMd(without);
-
-    const result = await runAdapterDoctor({
-      cwd: dir,
-      agentName: "claude-code",
-      locale: "en-US",
-    });
-    // ok=true even though ADAPTER_CONTRACT_DRIFT fired — warnings
-    // never gate the exit code (ADAPTER_FILE_DRIFT also fires here
-    // but it's also a warning).
-    expect(result.ok).toBe(true);
-  });
-
-  it("fires INDEPENDENTLY of ADAPTER_FILE_DRIFT — both codes can appear in one run", async () => {
-    await installFreshClaudeCode();
-    const original = await readClaudeMd();
-    const without = original.replace(/## Agent contract[\s\S]*?(?=\n## )/, "");
-    await writeClaudeMd(without);
-
-    const result = await runAdapterDoctor({
-      cwd: dir,
-      agentName: "claude-code",
-      locale: "en-US",
-    });
-    const codes = result.issues.map(i => i.code);
-    expect(codes).toContain("ADAPTER_CONTRACT_DRIFT");
-    // Hand-edit also trips the file-level drift signal — both codes
-    // are independent diagnoses per design/decisions/agent-contract-rfc.md.
-    expect(codes).toContain("ADAPTER_FILE_DRIFT");
+    expect(drift!.message).not.toMatch(/preserve user edits/i);
+    expect(drift!.message).toMatch(/discards them/);
+    expect(drift!.message).toContain("adapter upgrade claude-code --write");
   });
 });
 

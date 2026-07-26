@@ -1,0 +1,103 @@
+schema_version: 1
+task_id: P88-T1
+phase_id: P88
+phase_path: design/phases/P88-claude-bootstrap-right-sizing.yaml
+base_ref: HEAD
+base_sha: c236be3cc0c18b9a1ccb169f189b71c30ca91b60
+phase_blob_sha: 8a4350548e6b09606889bd2f0273726cd8b2835b
+contract_digest: d7656ffdafe93f0522dbe2d0a8b5e708407280ffbb3569f12b28c8209d331bcd
+contract:
+  description: >
+    Right-size the generated claude-code bootstrap. Introduce an
+    adapter-schema-v2 instruction contract whose checks require the
+    progressive-disclosure entrypoint and a bounded bootstrap context budget,
+    and whose checks reject the lifecycle enumeration, failure catalog, and
+    model selection guidance that the schema-v1 contract requires. Generate the
+    claude-code instruction file against that contract, bump the claude-code
+    adapter to schema version 2, and add the Claude 5 model ids to the model
+    catalog without branching the template on model version.
+  reads:
+    - design/phases/P88-claude-bootstrap-right-sizing.yaml
+    - design/roadmap.yaml
+    - docs/cli-contract.md
+    - src/commands/adapter-conformance.ts
+    - src/commands/adapter-doctor.ts
+    - src/core/adapters/claude.ts
+    - src/core/adapters/conformance-spec.ts
+    - src/core/adapters/template-sections.ts
+    - src/core/adapters/types.ts
+    - src/core/models/catalog.ts
+    - src/i18n/en-US.ts
+    - src/i18n/ja-JP.ts
+    - tests/fixtures/adapters/claude-code/expected-files.txt
+    - tests/integration/adapter-cli.test.ts
+    - tests/integration/adapter-conformance.test.ts
+    - tests/unit/commands/adapter-conformance.test.ts
+    - tests/unit/commands/adapter-upgrade.test.ts
+    - tests/unit/commands/adapter.test.ts
+    - tests/unit/commands/doctor.test.ts
+    - tests/unit/commands/init.test.ts
+    - tests/unit/core/adapters/model-version.test.ts
+    - tests/unit/schemas/agent-profile.test.ts
+  writes:
+    - .code-pact/agent-profiles/claude-code.yaml
+    - CHANGELOG.md
+    - design/phases/P88-claude-bootstrap-right-sizing.yaml
+    - docs/agent-contract.md
+    - docs/cli-contract.md
+    - docs/cli-reference.generated.md
+    - docs/maintainers/operations.md
+    - src/cli/spec/adapter.ts
+    - src/commands/adapter-conformance.ts
+    - src/commands/adapter-doctor.ts
+    - src/core/adapters/claude.ts
+    - src/core/adapters/conformance-spec.ts
+    - src/core/adapters/template-sections.ts
+    - src/core/models/catalog.ts
+    - src/i18n/en-US.ts
+    - src/i18n/ja-JP.ts
+    - tests/integration/adapter-cli.test.ts
+    - tests/integration/adapter-conformance.test.ts
+    - tests/unit/commands/adapter-conformance.test.ts
+    - tests/unit/commands/adapter-doctor.test.ts
+    - tests/unit/commands/adapter-upgrade.test.ts
+    - tests/unit/commands/adapter.test.ts
+    - tests/unit/commands/doctor.test.ts
+    - tests/unit/commands/init.test.ts
+    - tests/unit/core/adapters/claude-bootstrap.test.ts
+    - tests/unit/core/agent-profile-path.test.ts
+  depends_on: []
+  decision_refs: []
+  acceptance_refs:
+    - tests/unit/commands/adapter-conformance.test.ts
+    - tests/unit/core/adapters/claude-bootstrap.test.ts
+  definition_of_done:
+    - Adapter conformance selects its instruction-file contract from the
+      manifest adapter schema version, so schema-v1 installs keep the existing
+      checks
+    - The Claude model catalog carries the Claude 5 model ids for validation,
+      profile seeding, and advisory defaults
+    - The claude-code adapter declares adapter schema version 2
+    - The generated claude-code instruction file enumerates no lifecycle verb
+      set, no failure catalog, and no model selection guidance
+    - The generated claude-code instruction file is identical for every
+      supported Claude model version
+    - The generated claude-code instruction file presents `task prepare` as the
+      per-task entrypoint and names the progressive-disclosure fields the agent
+      reads from it
+    - The generated claude-code instruction file stays within the bootstrap
+      context budget
+    - The repository-gotcha section of the generated claude-code instruction
+      file is bounded
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm test:integration:smoke -- --no-file-parallelism --testTimeout=30000
+    - pnpm test:unit -- --no-file-parallelism --testTimeout=30000
+    - pnpm typecheck
+  base_sha: c236be3cc0c18b9a1ccb169f189b71c30ca91b60
+  phase_blob_sha: 8a4350548e6b09606889bd2f0273726cd8b2835b
+at: 2026-07-26T13:18:11.156Z
+actor: agent
+author: Pocket

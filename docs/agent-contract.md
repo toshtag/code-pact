@@ -269,6 +269,15 @@ manifest's recorded value. Drift is reported per file by
 The `checks[]` array in the conformance envelope uses these ids; new
 ids require an RFC and an entry in `src/core/adapters/conformance-spec.ts`.
 
+The instruction-file ids come in two mutually exclusive sets, selected from the
+manifest's `adapter_schema_version`. Schema v1 (`codex`, `cursor`, `gemini-cli`,
+`generic`) requires the instruction file to spell out the axes, surfaces,
+failure catalog, and guidance below. Schema v2 (`claude-code`) requires the
+opposite: an entrypoint plus progressive-disclosure fields, and the absence of
+that detail — see the bootstrap ids at the end of the table. `manifest_present`,
+`instruction_file_present`, `no_contract_antipatterns`, and the per-file
+checksum ids apply under both.
+
 | Check id                                       | Asserts                                                                                                                                                                                                                                                                                                                                         |
 | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `manifest_present`                             | Adapter manifest exists and parses                                                                                                                                                                                                                                                                                                              |
@@ -295,9 +304,18 @@ ids require an RFC and an entry in `src/core/adapters/conformance-spec.ts`.
 | `file_checksum_skipped_unverifiable`           | Manifest entry is a dynamic skill in the shared `.claude/skills/` namespace without `ownership: handed_off` — read-ownership cannot be proven, so it is not read/checksummed. Always `advisory`                                                                                                                                                 |
 | `dynamic_handoff_orphan_unverified`            | Manifest entry is `ownership: handed_off` and names a dynamic skill under the adapter's create namespace, but the file is missing. Existing bytes are not read; conformance compares only current desired output hash with manifest hash. Always `advisory`                                                                                     |
 | `dynamic_handoff_manifest_stale`               | Manifest entry is `ownership: handed_off` and names a dynamic skill under the adapter's create namespace, but current desired output hash differs from manifest hash. Existing bytes are not read/checksummed. Always `advisory`                                                                                                                |
+| `bootstrap_entrypoint_present`                 | **schema v2** — `code-pact task prepare`, `data.next.command`, and `data.more.command` are all present                                                                                                                                                                                                                                          |
+| `bootstrap_no_lifecycle_enumeration`           | **schema v2** — at most one of `code-pact task start` / `task complete` / `task finalize` appears; the lifecycle itself is in the `task prepare` response                                                                                                                                                                                        |
+| `bootstrap_no_failure_catalog`                 | **schema v2** — none of the failure keywords `required_failure_guidance` demands appears. The two contracts disagree about this exact set by design                                                                                                                                                                                              |
+| `bootstrap_model_neutral`                      | **schema v2** — no model selection/guidance heading and no tier name. The bootstrap is identical for every model version                                                                                                                                                                                                                        |
+| `bootstrap_gotchas_bounded`                    | **schema v2** — the `## Repository gotchas` section carries at most `BOOTSTRAP_MAX_GOTCHAS` bullets                                                                                                                                                                                                                                             |
+| `bootstrap_context_budget`                     | **schema v2** — the file is at most `BOOTSTRAP_CONTEXT_BUDGET_BYTES` UTF-8 bytes. Code Pact's own regression budget, **not** a published model limit; being under it is not itself a performance claim                                                                                                                                            |
 
 **Severity.** Each check carries a `severity` of `required`
-or `advisory`. `compliant` is `true` unless a **required** check fails;
+or `advisory`. Every `bootstrap_*` check is `required` with no
+generator-version gate: an adapter reaches that contract only by being
+regenerated from a schema-v2 adapter, so there is no pre-existing install to
+soften the landing for. `compliant` is `true` unless a **required** check fails;
 a failing `advisory` check is surfaced (with an `adapter upgrade`
 remediation) but does not break compliance. The three hardening checks
 above (`task_prepare_is_primary`, `no_contract_antipatterns`,

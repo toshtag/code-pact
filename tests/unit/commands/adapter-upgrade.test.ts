@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { runInit } from "../../../src/commands/init.ts";
+import { CLAUDE_TIER_MODEL_IDS } from "../../../src/core/models/catalog.ts";
 import { runAdapterInstall } from "../../../src/commands/adapter-install.ts";
 import {
   runAdapterUpgrade,
@@ -26,6 +27,15 @@ import {
 } from "../../../src/core/adapters/manifest.ts";
 import type { AdapterManifest } from "../../../src/core/schemas/adapter-manifest.ts";
 import { createPhase } from "../../../src/core/services/createPhase.ts";
+import { runAdapterConformance } from "../../../src/commands/adapter-conformance.ts";
+import { runAdapterDoctor } from "../../../src/commands/adapter-doctor.ts";
+import {
+  BOOTSTRAP_CONTEXT_BUDGET_BYTES,
+  BOOTSTRAP_EXCLUDED_FAILURE_CATALOG_KEYWORDS,
+  BOOTSTRAP_EXCLUDED_LIFECYCLE_SURFACES,
+  BOOTSTRAP_EXCLUDED_MODEL_GUIDANCE_ANCHORS,
+  BOOTSTRAP_REQUIRED_ANCHORS,
+} from "../../../src/core/adapters/conformance-spec.ts";
 
 let dir: string;
 
@@ -1573,7 +1583,7 @@ describe("detectAgentModelMapDrift", () => {
     expect(drift).toHaveLength(1);
     expect(drift[0]?.tier).toBe("highest_reasoning");
     expect(drift[0]?.current).toBe("claude-opus-4-7");
-    expect(drift[0]?.expected).toBe("claude-opus-4-8");
+    expect(drift[0]?.expected).toBe(CLAUDE_TIER_MODEL_IDS.highest_reasoning);
   });
 
   it("is scoped to claude-code — other agents always return empty drift", async () => {
@@ -1676,3 +1686,205 @@ async function readMutableManifest(
   if (m === null) throw new Error("manifest expected");
   return m;
 }
+
+// ---------------------------------------------------------------------------
+// schema v1 → schema v2 migration
+//
+// The upgrade path an already-installed repository takes when the claude-code
+// adapter moves to the bootstrap contract. `adapter conformance` selects the
+// instruction-file contract from the manifest's `adapter_schema_version`, so a
+// repository stays on the schema-v1 checks until `adapter upgrade --write`
+// regenerates the file and records schema 2. That handover is the contract this
+// block pins: nothing about it is implied by the schema-v2 generator tests.
+// ---------------------------------------------------------------------------
+
+/**
+ * A stand-in for an instruction file installed before the bootstrap contract
+ * existed. It carries the schema-v1 surfaces — the lifecycle enumeration, a
+ * failure catalog entry, and model selection guidance — that the schema-v2
+ * checks reject, so "the file changed shape" is observable rather than asserted.
+ */
+const LEGACY_INSTRUCTION_FILE = [
+  "# Claude Code — Project Instructions",
+  "",
+  "## How to work on a task",
+  "",
+  "1. `code-pact task start <task-id> --agent claude-code`",
+  "2. `code-pact task complete <task-id> --agent claude-code`",
+  "3. `code-pact task finalize <task-id> --agent claude-code`",
+  "",
+  "## Failure modes",
+  "",
+  "- On a dependency block, report the blocking task and stop.",
+  "",
+  "## Model selection",
+  "",
+  "- highest_reasoning for design work.",
+  "",
+].join("\n");
+
+/**
+ * Puts the install in the state an older release left behind: the legacy
+ * instruction file on disk, the manifest hash matching it (so the file is
+ * managed-clean rather than managed-modified), and `adapter_schema_version: 1`.
+ */
+async function installAtAdapterSchemaV1(): Promise<void> {
+  await freshInstall();
+  await writeFile(join(dir, "CLAUDE.md"), LEGACY_INSTRUCTION_FILE, "utf8");
+  const m = await readManifestMut();
+  m.adapter_schema_version = 1;
+  const entry = m.files.find(f => f.path === "CLAUDE.md");
+  if (entry === undefined) throw new Error("instruction manifest entry expected");
+  entry.sha256 = computeContentHash(LEGACY_INSTRUCTION_FILE);
+  await writeManifest(dir, "claude-code", m);
+}
+
+/** A skill the user owns: absent from the manifest, so the upgrade must leave it. */
+const UNMANAGED_SKILL_REL = join(".claude", "skills", "ship-task.md");
+const UNMANAGED_SKILL_BODY = "# /ship-task — hand-written, not code-pact's\n";
+
+async function writeUnmanagedSkill(): Promise<void> {
+  await mkdir(join(dir, ".claude", "skills"), { recursive: true });
+  await writeFile(join(dir, UNMANAGED_SKILL_REL), UNMANAGED_SKILL_BODY, "utf8");
+}
+
+describe("adapter upgrade — schema v1 → schema v2", () => {
+  beforeEach(async () => {
+    await installAtAdapterSchemaV1();
+    await writeUnmanagedSkill();
+  });
+
+  it("reports the schema-v1 install as needing an update without touching disk", async () => {
+    const manifestBefore = await readFile(
+      manifestPath(dir, "claude-code"),
+      "utf8",
+    );
+
+    const result = await runAdapterUpgrade({
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "check",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
+    });
+
+    expect(result.clean).toBe(false);
+    const claude = result.plan.find(p => p.relPath === "CLAUDE.md")!;
+    expect(claude.local).toBe("managed-clean");
+    expect(claude.desired).toBe("stale");
+    expect(claude.action).toBe("update");
+
+    // --check is read-only: the legacy file, the manifest bytes, and the
+    // recorded schema version all survive it.
+    expect(await readFile(join(dir, "CLAUDE.md"), "utf8")).toBe(
+      LEGACY_INSTRUCTION_FILE,
+    );
+    expect(await readFile(manifestPath(dir, "claude-code"), "utf8")).toBe(
+      manifestBefore,
+    );
+    expect((await readManifestMut()).adapter_schema_version).toBe(1);
+  });
+
+  it("does not classify the schema-v1 file under the schema-v2 contract before the upgrade", async () => {
+    const before = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    // The schema-v1 contract is still the one in force, so none of the
+    // bootstrap checks may appear — a schema-v1 file judged as a bootstrap
+    // would fail for restating exactly what schema v1 requires of it.
+    const bootstrapChecks = before.checks.filter(c =>
+      c.id.startsWith("bootstrap_"),
+    );
+    expect(bootstrapChecks).toEqual([]);
+  });
+
+  it("leaves a schema-v1 manifest diagnosable rather than crashing", async () => {
+    await expect(
+      runAdapterDoctor({ cwd: dir, agentName: "claude-code", locale: "en-US" }),
+    ).resolves.toBeDefined();
+    await expect(
+      runAdapterConformance({ cwd: dir, agentName: "claude-code" }),
+    ).resolves.toBeDefined();
+  });
+
+  it("rewrites the file as the bootstrap and records adapter schema 2", async () => {
+    await runAdapterUpgrade({
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "write",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
+    });
+
+    const md = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(md).not.toBe(LEGACY_INSTRUCTION_FILE);
+
+    // The manifest now selects the bootstrap contract, and its hash matches the
+    // regenerated file, so the install is managed-clean at schema 2.
+    const m = await readManifestMut();
+    expect(m.adapter_schema_version).toBe(2);
+    expect(m.files.find(f => f.path === "CLAUDE.md")!.sha256).toBe(
+      computeContentHash(md),
+    );
+
+    for (const anchor of BOOTSTRAP_REQUIRED_ANCHORS) {
+      expect(md).toContain(anchor);
+    }
+    for (const surface of BOOTSTRAP_EXCLUDED_LIFECYCLE_SURFACES) {
+      expect(md).not.toContain(surface);
+    }
+    for (const keyword of BOOTSTRAP_EXCLUDED_FAILURE_CATALOG_KEYWORDS) {
+      expect(md).not.toContain(keyword);
+    }
+    for (const anchor of BOOTSTRAP_EXCLUDED_MODEL_GUIDANCE_ANCHORS) {
+      expect(md).not.toContain(anchor);
+    }
+    expect(Buffer.byteLength(md, "utf8")).toBeLessThanOrEqual(
+      BOOTSTRAP_CONTEXT_BUDGET_BYTES,
+    );
+  });
+
+  it("passes the schema-v2 contract after the upgrade", async () => {
+    await runAdapterUpgrade({
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "write",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
+    });
+
+    const after = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    expect(after.checks.some(c => c.id.startsWith("bootstrap_"))).toBe(true);
+    const failed = after.checks.filter(
+      c => c.status === "fail" && c.severity === "required",
+    );
+    expect(failed).toEqual([]);
+    expect(after.compliant).toBe(true);
+  });
+
+  it("leaves a skill it does not manage untouched", async () => {
+    await runAdapterUpgrade({
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "write",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
+    });
+
+    expect(await readFile(join(dir, UNMANAGED_SKILL_REL), "utf8")).toBe(
+      UNMANAGED_SKILL_BODY,
+    );
+    const m = await readManifestMut();
+    expect(m.files.some(f => f.path === UNMANAGED_SKILL_REL)).toBe(false);
+  });
+});

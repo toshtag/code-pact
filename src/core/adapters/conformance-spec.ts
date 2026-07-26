@@ -307,3 +307,109 @@ export const STRUCTURAL_PROJECTION_GUIDANCE_ANCHORS: ReadonlyArray<{
     variants: STRUCTURAL_PROJECTION_GUIDANCE_VARIANTS,
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Bootstrap instruction contract (adapter schema v2)
+//
+// Everything above describes the schema-v1 instruction contract: the generated
+// instruction file must SPELL OUT the lifecycle surfaces, the failure catalog,
+// the repair policy paths, and the model tiers. That contract makes the file a
+// manual, and the file is loaded on every turn whether or not the current task
+// needs any of it.
+//
+// The schema-v2 contract inverts it. `task prepare` already returns the work
+// order, the next action, and the disclosure command for everything else, so
+// the always-loaded file only has to get the agent to that entrypoint and tell
+// it the few things about the repository that the entrypoint cannot. The checks
+// below therefore assert the ABSENCE of the schema-v1 detail: an adapter that
+// keeps enumerating it has not moved to progressive disclosure, it has only
+// added a pointer to it.
+//
+// Which contract applies is chosen from the manifest `adapter_schema_version`,
+// not from a release threshold — an installed schema-v1 file is checked against
+// the schema-v1 contract for as long as it stays installed.
+// ---------------------------------------------------------------------------
+
+/**
+ * The manifest `adapter_schema_version` at which the bootstrap instruction
+ * contract replaces the schema-v1 instruction contract.
+ */
+export const BOOTSTRAP_CONTRACT_FROM_ADAPTER_SCHEMA_VERSION = 2;
+
+/**
+ * Code Pact's own regression budget for a schema-v2 instruction file, in UTF-8
+ * bytes. It is NOT a published Claude Code or Anthropic limit, and staying
+ * under it does not by itself make an agent perform better. Its only job is to
+ * make growth visible: a bootstrap that drifts back toward a manual crosses it,
+ * and the check says so before the file ships.
+ *
+ * Sized to hold the purpose, the entrypoint, the disclosure fields, and a
+ * bounded gotcha section in either bundled locale (ja-JP costs roughly three
+ * UTF-8 bytes per character), with room to spare rather than room to grow into.
+ */
+export const BOOTSTRAP_CONTEXT_BUDGET_BYTES = 4096;
+
+/**
+ * Surfaces a schema-v2 instruction file MUST present: the primary entrypoint,
+ * and the two response fields the agent reads to continue without widening
+ * context. Substring-matched, same rule as the schema-v1 anchors.
+ */
+export const BOOTSTRAP_REQUIRED_ANCHORS: ReadonlyArray<string> = [
+  PRIMARY_ENTRYPOINT_SURFACE,
+  "data.next.command",
+  "data.more.command",
+];
+
+/**
+ * Lifecycle verbs beyond the entrypoint. A schema-v2 file may name at most one
+ * of them in passing; naming every one is the lifecycle enumeration itself, and
+ * the enumeration belongs in the `task prepare` response the agent is holding.
+ */
+export const BOOTSTRAP_EXCLUDED_LIFECYCLE_SURFACES: ReadonlyArray<string> = [
+  "code-pact task start",
+  "code-pact task complete",
+  "code-pact task finalize",
+];
+
+/**
+ * The most that {@link BOOTSTRAP_EXCLUDED_LIFECYCLE_SURFACES} may appear in a
+ * schema-v2 instruction file. One reference is a mention; the whole set is a
+ * lifecycle manual.
+ */
+export const BOOTSTRAP_MAX_LIFECYCLE_SURFACES = 1;
+
+/**
+ * Failure-mode keywords whose presence means the file carries a failure
+ * catalog. None of them may appear in a schema-v2 instruction file: every one
+ * is reachable from the `task prepare` response or the envelope reference at
+ * the moment the failure actually happens.
+ *
+ * Deliberately the same list the schema-v1 contract REQUIRES
+ * ({@link REQUIRED_FAILURE_GUIDANCE}) — the two contracts disagree about this
+ * exact set, and deriving it here keeps that disagreement in one place.
+ */
+export const BOOTSTRAP_EXCLUDED_FAILURE_CATALOG_KEYWORDS: ReadonlyArray<string> =
+  REQUIRED_FAILURE_GUIDANCE;
+
+/**
+ * Model-selection surfaces that must not appear in a schema-v2 instruction
+ * file. The bootstrap is model-neutral: the model catalog drives `--model`
+ * validation, profile seeding, and advisory recommendation defaults, and none
+ * of that needs to be restated in always-loaded context.
+ */
+export const BOOTSTRAP_EXCLUDED_MODEL_GUIDANCE_ANCHORS: ReadonlyArray<string> = [
+  "## Model selection",
+  "## Model guidance",
+  "highest_reasoning",
+  "balanced_coding",
+  "cheap_mechanical",
+];
+
+/**
+ * The English-locked heading of the repository-gotcha section, and the most
+ * bullets it may hold. The bound is what keeps the section from becoming the
+ * manual the rest of this contract removed; anything longer belongs in
+ * `design/rules/` or `docs/`.
+ */
+export const BOOTSTRAP_GOTCHA_SECTION_HEADING = "## Repository gotchas";
+export const BOOTSTRAP_MAX_GOTCHAS = 5;

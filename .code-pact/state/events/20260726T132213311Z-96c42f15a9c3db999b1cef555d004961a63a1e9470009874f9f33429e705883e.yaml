@@ -1,0 +1,12 @@
+task_id: P88-T1
+status: done
+at: 2026-07-26T13:22:13.311Z
+actor: agent
+agent: claude-code
+author: Pocket
+evidence:
+  - commands
+  - decision
+source: loop
+verification_ref: evidence:sha256:81288925ebcea7dacfa38d90af2e9aad4b47f1911ff78be4819530b34e3ad102
+id: 96c42f15a9c3db999b1cef555d004961a63a1e9470009874f9f33429e705883e

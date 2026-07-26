@@ -1,0 +1,221 @@
+id: P88
+name: Claude Bootstrap Right-Sizing
+weight: 1
+confidence: high
+risk: medium
+status: done
+objective: >
+  Make the generated claude-code instruction file a bootstrap rather than a
+  manual. The always-loaded file carries the repository purpose, the single
+  per-task entrypoint, and a bounded set of non-obvious repository gotchas;
+  every lifecycle, verification, failure, and model detail is disclosed through
+  `task prepare` output and the envelope reference instead. The existing
+  adapter-schema-v1 conformance contract stays in force for the adapters that
+  still generate the full instruction file, so no installed adapter changes
+  behavior until it is upgraded.
+non_goals:
+  - Change the `task prepare` output contract or any command envelope
+  - Thin the codex, cursor, gemini-cli, or generic instruction templates
+  - Migrate generated skills to a `<name>/SKILL.md` layout
+  - Branch the generated instruction file on model id or model version
+definition_of_done:
+  - The claude-code adapter declares adapter schema version 2
+  - Adapter conformance selects its instruction-file contract from the manifest
+    adapter schema version, so schema-v1 installs keep the existing checks
+  - The generated claude-code instruction file presents `task prepare` as the
+    per-task entrypoint and names the progressive-disclosure fields the agent
+    reads from it
+  - The generated claude-code instruction file stays within the bootstrap
+    context budget
+  - The generated claude-code instruction file enumerates no lifecycle verb set,
+    no failure catalog, and no model selection guidance
+  - The repository-gotcha section of the generated claude-code instruction file
+    is bounded
+  - The generated claude-code instruction file is identical for every supported
+    Claude model version
+  - The Claude model catalog carries the Claude 5 model ids for validation,
+    profile seeding, and advisory defaults
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test:unit -- --no-file-parallelism --testTimeout=30000
+    - pnpm build
+    - pnpm test:integration:smoke -- --no-file-parallelism --testTimeout=30000
+    - pnpm check:docs
+    - git diff --check
+tasks:
+  - id: P88-T1
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: large
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: >
+      Right-size the generated claude-code bootstrap. Introduce an
+      adapter-schema-v2 instruction contract whose checks require the
+      progressive-disclosure entrypoint and a bounded bootstrap context budget,
+      and whose checks reject the lifecycle enumeration, failure catalog, and
+      model selection guidance that the schema-v1 contract requires. Generate
+      the claude-code instruction file against that contract, bump the
+      claude-code adapter to schema version 2, and add the Claude 5 model ids to
+      the model catalog without branching the template on model version.
+    requires_decision: false
+    reads:
+      - design/phases/P88-claude-bootstrap-right-sizing.yaml
+      - design/roadmap.yaml
+      - docs/cli-contract.md
+      - src/commands/adapter-conformance.ts
+      - src/commands/adapter-doctor.ts
+      - src/core/adapters/claude.ts
+      - src/core/adapters/conformance-spec.ts
+      - src/core/adapters/template-sections.ts
+      - src/core/adapters/types.ts
+      - src/core/models/catalog.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - tests/fixtures/adapters/claude-code/expected-files.txt
+      - tests/integration/adapter-cli.test.ts
+      - tests/integration/adapter-conformance.test.ts
+      - tests/unit/commands/adapter-conformance.test.ts
+      - tests/unit/commands/adapter-upgrade.test.ts
+      - tests/unit/commands/adapter.test.ts
+      - tests/unit/commands/doctor.test.ts
+      - tests/unit/commands/init.test.ts
+      - tests/unit/core/adapters/model-version.test.ts
+      - tests/unit/schemas/agent-profile.test.ts
+    writes:
+      - .code-pact/agent-profiles/claude-code.yaml
+      - CHANGELOG.md
+      - design/phases/P88-claude-bootstrap-right-sizing.yaml
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - docs/cli-reference.generated.md
+      - docs/maintainers/operations.md
+      - src/cli/spec/adapter.ts
+      - src/commands/adapter-conformance.ts
+      - src/commands/adapter-doctor.ts
+      - src/core/adapters/claude.ts
+      - src/core/adapters/conformance-spec.ts
+      - src/core/adapters/template-sections.ts
+      - src/core/models/catalog.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - tests/integration/adapter-cli.test.ts
+      - tests/integration/adapter-conformance.test.ts
+      - tests/unit/commands/adapter-conformance.test.ts
+      - tests/unit/commands/adapter-doctor.test.ts
+      - tests/unit/commands/adapter-upgrade.test.ts
+      - tests/unit/commands/adapter.test.ts
+      - tests/unit/commands/doctor.test.ts
+      - tests/unit/commands/init.test.ts
+      - tests/unit/core/adapters/claude-bootstrap.test.ts
+      - tests/unit/core/agent-profile-path.test.ts
+    acceptance_refs:
+      - tests/unit/commands/adapter-conformance.test.ts
+      - tests/unit/core/adapters/claude-bootstrap.test.ts
+  - id: P88-T1A
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Correct the schema-v2 bootstrap's generated references and the
+      adapter-doctor remediation text. The bootstrap names a scaffolded project
+      path the generator cannot guarantee survives, and tells the agent to wait
+      for a work-order pointer that `task prepare` never emits. Doctor describes
+      `--accept-modified` as preserving local edits when it discards them.
+    requires_decision: false
+    depends_on:
+      - P88-T1
+    reads:
+      - design/phases/P88-claude-bootstrap-right-sizing.yaml
+      - src/core/adapters/claude.ts
+      - src/commands/adapter-doctor.ts
+      - docs/cli-contract.md
+      - tests/unit/commands/adapter-upgrade.test.ts
+    writes:
+      - design/phases/P88-claude-bootstrap-right-sizing.yaml
+      - docs/cli-contract.md
+      - src/commands/adapter-doctor.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - tests/unit/commands/adapter-doctor.test.ts
+      - tests/unit/core/adapters/claude-bootstrap.test.ts
+    acceptance_refs:
+      - tests/unit/commands/adapter-doctor.test.ts
+      - tests/unit/core/adapters/claude-bootstrap.test.ts
+  - id: P88-T1B
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Close the `--accept-modified` correction where P88-T1A left it open: the
+      schema-v1 generated instruction body still tells the reader the flag
+      preserves manual edits, so codex, cursor, gemini-cli, and generic ship the
+      claim adapter doctor and the CLI contract no longer make. Align the
+      maintainer documentation and source comments that still describe
+      model-aware instruction generation with the model-neutral bootstrap.
+    requires_decision: false
+    depends_on:
+      - P88-T1A
+    reads:
+      - design/phases/P88-claude-bootstrap-right-sizing.yaml
+      - docs/cli-contract.md
+      - src/core/adapters/codex.ts
+      - src/core/adapters/generic.ts
+      - src/core/adapters/template-sections.ts
+      - tests/unit/commands/adapter-doctor.test.ts
+      - tests/unit/core/adapters/claude-bootstrap.test.ts
+    writes:
+      - design/phases/P88-claude-bootstrap-right-sizing.yaml
+      - docs/maintainers/operations.md
+      - src/commands/adapter-doctor.ts
+      - src/core/adapters/claude.ts
+      - src/core/models/catalog.ts
+      - src/core/schemas/agent-profile.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - tests/unit/commands/adapter.test.ts
+    acceptance_refs:
+      - tests/unit/commands/adapter.test.ts
+  - id: P88-T1C
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: done
+    description: >
+      Close the last current-contract wording that still describes Claude
+      `--model` as changing generated instruction content: the `adapter upgrade`
+      flag summary in the CLI contract, the model catalog's own responsibility
+      comment, and the three navigation labels left dangling by P88-T1B's rename
+      of the operations.md model section.
+    requires_decision: false
+    depends_on:
+      - P88-T1B
+    reads:
+      - design/phases/P88-claude-bootstrap-right-sizing.yaml
+      - docs/maintainers/operations.md
+    writes:
+      - design/phases/P88-claude-bootstrap-right-sizing.yaml
+      - docs/README.md
+      - docs/cli-contract.md
+      - docs/dogfood.md
+      - src/core/models/catalog.ts
+    acceptance_refs:
+      - docs/cli-contract.md
