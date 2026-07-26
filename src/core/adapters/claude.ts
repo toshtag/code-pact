@@ -1,11 +1,3 @@
-import type { AgentProfile } from "../schemas/agent-profile.ts";
-import { normalizeModelVersion } from "../schemas/agent-profile.ts";
-import {
-  CLAUDE_MODEL_VERSIONS,
-  CLAUDE_MODEL_GUIDANCE,
-  type ClaudeModelVersion,
-} from "../models/catalog.ts";
-import type { ModelProfile } from "../schemas/model-profile.ts";
 import { loadPhase } from "../plan/load-phase.ts";
 import { loadRoadmap } from "../plan/roadmap.ts";
 import type { Locale } from "../../i18n/index.ts";
@@ -14,81 +6,60 @@ import type {
   AdapterGenerateInput,
   DesiredAdapterFile,
 } from "./types.ts";
-import {
-  adapterCommon,
-  renderWorkflowSection,
-  renderAgentContractSection,
-  renderModelSelectionSection,
-  renderProjectConventionsSection,
-} from "./template-sections.ts";
+import { adapterBootstrap, adapterCommon } from "./template-sections.ts";
+import { BOOTSTRAP_GOTCHA_SECTION_HEADING } from "./conformance-spec.ts";
 
 // ---------------------------------------------------------------------------
-// Model-specific guidance blocks (data lives in core/models/catalog.ts)
+// CLAUDE.md template — the schema-v2 bootstrap
+//
+// This file is loaded on every turn, whether or not the current task needs any
+// of it, so it carries only what `task prepare` cannot: what the repository is,
+// how to reach the work order, and the few repository facts that are invisible
+// from the filesystem. The lifecycle verbs, the failure catalog, the repair
+// policy, and the model tiers used to live here; they are all in the
+// `task prepare` response or the envelope reference at the moment they matter,
+// and `adapter conformance` now fails a schema-v2 file that restates them (see
+// core/adapters/conformance-spec.ts).
+//
+// Model-neutral by contract: no branch on model id or model version. The model
+// catalog drives `--model` validation, profile seeding, and advisory
+// recommendation defaults — none of which the agent needs restated here.
 // ---------------------------------------------------------------------------
 
-function modelGuidanceSection(modelVersion: string): string {
-  const isKnown = (CLAUDE_MODEL_VERSIONS as readonly string[]).includes(
-    modelVersion,
-  );
-  if (!isKnown) {
-    return [
-      `## Model guidance (${modelVersion})`,
-      ``,
-      `No model-specific guidance available for \`${modelVersion}\`. Refer to the Anthropic documentation.`,
-    ].join("\n");
-  }
-  const g = CLAUDE_MODEL_GUIDANCE[modelVersion as ClaudeModelVersion];
-  return [
-    `## Model guidance (${modelVersion})`,
-    ``,
-    `**Effort levels:**`,
-    g.effortGuidance,
-    ``,
-    `**Thinking:** ${g.thinkingNote}`,
-  ].join("\n");
-}
-
-// ---------------------------------------------------------------------------
-// CLAUDE.md template
-// ---------------------------------------------------------------------------
-
-function claudeMd(
-  profile: AgentProfile,
-  modelProfiles: ModelProfile[],
-  locale: Locale,
-  modelVersion?: string,
-): string {
-  const t = adapterCommon(locale);
-  const modelSection = modelVersion
-    ? `\n\n${modelGuidanceSection(modelVersion)}`
-    : "";
+function claudeMd(locale: Locale): string {
+  const common = adapterCommon(locale);
+  const t = adapterBootstrap(locale);
 
   return [
     `# Claude Code — Project Instructions`,
     ``,
-    `> ${t.managedNotice}`,
+    `> ${common.managedNotice}`,
     `> ${t.editNotice}`,
     ``,
-    ...renderWorkflowSection(t, "claude-code", {
-      step0: true,
-      validateNote: true,
-    }),
+    `## ${t.purposeHeader}`,
     ``,
-    ...renderAgentContractSection(t),
+    t.purposeBody,
     ``,
-    ...renderModelSelectionSection(modelProfiles, profile, { thinking: true }),
-    modelSection,
+    `## ${t.startHeader}`,
     ``,
-    `## Skills`,
+    t.startIntro,
     ``,
-    `Skills are stored in \`${profile.skill_dir ?? ".claude/skills"}/\`.`,
-    `Each \`.md\` file in that directory is automatically loaded as a slash command.`,
+    "```sh",
+    `code-pact task prepare <task-id> --agent claude-code --json`,
+    "```",
     ``,
-    `## Hooks`,
+    t.startOutcome,
     ``,
-    `Hooks are stored in \`${profile.hook_dir ?? ".claude/hooks"}/\`.`,
+    t.startRules,
     ``,
-    ...renderProjectConventionsSection(t),
+    t.referenceBody,
+    ``,
+    BOOTSTRAP_GOTCHA_SECTION_HEADING,
+    ``,
+    ...t.gotchasHint.split("\n").map(line => `> ${line}`),
+    ``,
+    `- ${t.gotchasDefault}`,
+    ``,
   ].join("\n");
 }
 
@@ -286,24 +257,19 @@ async function readVerificationCommands(cwd: string): Promise<string[]> {
 export async function generateClaudeDesiredFiles(
   input: AdapterGenerateInput,
 ): Promise<DesiredAdapterFile[]> {
-  const { cwd, profile, modelProfiles, locale, modelVersion } = input;
-  // Normalize to the canonical version before rendering guidance: a profile
-  // may carry a vendor-id alias (e.g. `model_version: claude-opus-4-8`), which
-  // doctor accepts as valid. Without this, the guidance lookup (keyed by the
-  // short canonical id) would miss it and fall back to the generic block.
-  // Unknown values pass through unchanged → the generic block, as before.
-  const rawModelVersion = modelVersion ?? profile.model_version;
-  const resolvedModelVersion =
-    rawModelVersion === undefined
-      ? undefined
-      : (normalizeModelVersion(rawModelVersion) ?? rawModelVersion);
+  // `modelVersion` and `modelProfiles` are deliberately unread: the bootstrap
+  // is model-neutral, so the same bytes are generated for every Claude model
+  // version. `--model` still records a pin on the profile, and the model
+  // catalog still drives validation and advisory recommendation defaults; none
+  // of that reaches the instruction file.
+  const { cwd, profile, locale } = input;
   const skillDir = profile.skill_dir ?? ".claude/skills";
 
   const files: DesiredAdapterFile[] = [
     {
       path: profile.instruction_filename,
       role: "instruction",
-      content: claudeMd(profile, modelProfiles, locale, resolvedModelVersion),
+      content: claudeMd(locale),
     },
     { path: `${skillDir}/context.md`, role: "skill", content: SKILL_CONTEXT },
     { path: `${skillDir}/verify.md`, role: "skill", content: SKILL_VERIFY },
@@ -374,5 +340,8 @@ export const claudeAdapterDescriptor: AdapterDescriptor = {
     skillDir: ".claude/skills",
     hookDir: ".claude/hooks",
   },
-  adapterSchemaVersion: 1,
+  // Schema 2 selects the bootstrap instruction contract in adapter conformance
+  // (see core/adapters/conformance-spec.ts). The other adapters stay at 1 and
+  // keep generating and being checked against the schema-v1 instruction file.
+  adapterSchemaVersion: 2,
 };

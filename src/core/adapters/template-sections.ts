@@ -21,6 +21,19 @@ export function adapterCommon(locale: Locale): AdapterCommon {
   return messageCatalog[locale].templates.adapterCommon;
 }
 
+type AdapterBootstrap =
+  (typeof messageCatalog)[Locale]["templates"]["adapterBootstrap"];
+
+/**
+ * The localized `adapterBootstrap` bundle — the schema-v2 instruction file.
+ * Separate from {@link adapterCommon} on purpose: the adapters that still
+ * generate the schema-v1 instruction file share `adapterCommon`, and thinning
+ * one adapter must not thin theirs.
+ */
+export function adapterBootstrap(locale: Locale): AdapterBootstrap {
+  return messageCatalog[locale].templates.adapterBootstrap;
+}
+
 /**
  * The `## <workflow>` section: the numbered task-lifecycle steps and the
  * verify/validate/pack notes. `agent` is interpolated into the `--agent <name>`

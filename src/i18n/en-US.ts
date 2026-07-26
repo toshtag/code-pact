@@ -587,6 +587,58 @@ export const messages = {
         ],
       },
     },
+    // The schema-v2 instruction file: a bootstrap, not a manual. It gets the
+    // agent to `task prepare` and tells it the few things about the repository
+    // that `task prepare` cannot. Every heading here is English-locked, because
+    // the bootstrap conformance checks anchor on `## Repository gotchas` and on
+    // the absence of the schema-v1 headings.
+    //
+    // Two rules govern edits to this bundle. Phrase instructions as the desired
+    // state rather than a prohibition — "run the command as written" carries the
+    // same contract as "do not reconstruct the command" and costs the reader
+    // less. And keep it short: the whole rendered file has to stay inside the
+    // bootstrap context budget in ja-JP too, where each character costs about
+    // three UTF-8 bytes.
+    adapterBootstrap: {
+      editNotice:
+        'Edit the "Repository gotchas" section to reflect this repository.',
+      purposeHeader: "Purpose",
+      purposeBody: [
+        "This repository is planned and verified with code-pact: the plan lives",
+        "under `design/`, and code-pact derives each task's work order,",
+        "verification, and completion state from it. Treat that derived output as",
+        "the instruction of record for the task you are on.",
+      ].join("\n"),
+      startHeader: "Start here",
+      startIntro: "Run this once per task, before reading anything else:",
+      startOutcome: [
+        "It returns a compact work order: current state, goal, declared",
+        "read/write scope, done-when criteria, verification commands, and the",
+        "next action.",
+      ].join("\n"),
+      startRules: [
+        "- Run the command returned in `data.next.command` as written.",
+        "- Use `data.more.command` when the compact work order lacks a concrete",
+        "  detail required for the current action.",
+        "- During implementation, use the focused verification action returned by",
+        "  code-pact. Run the required completion gate when the lifecycle output",
+        "  advances to that action.",
+        "- When code-pact reports a blocked or decision-required state, report",
+        "  that state and its reason to the user.",
+      ].join("\n"),
+      referenceBody: [
+        "The full envelope reference — every lifecycle verb, failure code, and",
+        "audit flag — lives in",
+        "[`docs/cli-contract.md`](https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md).",
+        "Read it when the work order points you there, not in advance.",
+      ].join("\n"),
+      gotchasHint: [
+        "Replace these with the few things that are true of this repository and",
+        "are not visible from the filesystem or the type signatures. Keep it to",
+        "five or fewer; anything longer belongs in `design/rules/` or `docs/`.",
+      ].join("\n"),
+      gotchasDefault: "Follow `design/rules/coding-style.md` for code style.",
+    },
     adapterCommon: {
       managedNotice:
         "This file is managed by [code-pact](https://github.com/toshtag/code-pact).",

@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { runInit } from "../../../src/commands/init.ts";
+import { CLAUDE_TIER_MODEL_IDS } from "../../../src/core/models/catalog.ts";
 import { runAdapterInstall } from "../../../src/commands/adapter-install.ts";
 import {
   runAdapterUpgrade,
@@ -1573,7 +1574,7 @@ describe("detectAgentModelMapDrift", () => {
     expect(drift).toHaveLength(1);
     expect(drift[0]?.tier).toBe("highest_reasoning");
     expect(drift[0]?.current).toBe("claude-opus-4-7");
-    expect(drift[0]?.expected).toBe("claude-opus-4-8");
+    expect(drift[0]?.expected).toBe(CLAUDE_TIER_MODEL_IDS.highest_reasoning);
   });
 
   it("is scoped to claude-code — other agents always return empty drift", async () => {

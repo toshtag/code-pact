@@ -209,6 +209,8 @@ function fingerprintsEqual(
 import {
   AGENT_CONTRACT_SECTION_HEADING,
   AGENT_CONTRACT_AXIS_HEADINGS,
+  BOOTSTRAP_CONTRACT_FROM_ADAPTER_SCHEMA_VERSION,
+  BOOTSTRAP_REQUIRED_ANCHORS,
 } from "../core/adapters/conformance-spec.ts";
 
 /**
@@ -222,12 +224,54 @@ import {
  * is itself a contract break. Body content under each
  * axis is not inspected; only the heading presence is locked.
  */
-function detectContractDrift(
+/**
+ * Contract drift for a schema-v2 (bootstrap) instruction file. The schema-v1
+ * signal — a missing `## Agent contract` section — cannot apply here, because a
+ * conforming bootstrap has no such section: the drift signal is instead the loss
+ * of the entrypoint or the progressive-disclosure fields, which is what makes a
+ * bootstrap unable to reach the work order at all.
+ *
+ * Without this branch, `adapter doctor` would report ADAPTER_CONTRACT_DRIFT
+ * against every freshly generated claude-code install.
+ */
+function detectBootstrapContractDrift(
   agentName: SupportedAgent,
   relPath: string,
   absPath: string,
   diskContent: string,
 ): AdapterDoctorIssue | null {
+  const missing = BOOTSTRAP_REQUIRED_ANCHORS.filter(
+    anchor => !diskContent.includes(anchor),
+  );
+  if (missing.length === 0) return null;
+  return {
+    code: "ADAPTER_CONTRACT_DRIFT",
+    severity: "warning",
+    message: `Managed instruction file "${relPath}" no longer presents the per-task entrypoint: missing ${missing.join(", ")}. Run "adapter upgrade ${agentName} --write" (use --accept-modified to preserve user edits).`,
+    agent: agentName,
+    path: absPath,
+    details: { kind: "bootstrap_entrypoint_missing", missing_anchors: missing },
+  };
+}
+
+function detectContractDrift(
+  agentName: SupportedAgent,
+  relPath: string,
+  absPath: string,
+  diskContent: string,
+  adapterSchemaVersion: number,
+): AdapterDoctorIssue | null {
+  if (
+    adapterSchemaVersion >= BOOTSTRAP_CONTRACT_FROM_ADAPTER_SCHEMA_VERSION
+  ) {
+    return detectBootstrapContractDrift(
+      agentName,
+      relPath,
+      absPath,
+      diskContent,
+    );
+  }
+
   if (!diskContent.includes(AGENT_CONTRACT_SECTION_HEADING)) {
     return {
       code: "ADAPTER_CONTRACT_DRIFT",
@@ -579,6 +623,7 @@ export async function inspectAgent(
           entry.path,
           absPath,
           diskContent,
+          manifest.adapter_schema_version,
         );
         if (contractIssue !== null) issues.push(contractIssue);
       }

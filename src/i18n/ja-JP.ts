@@ -592,6 +592,53 @@ export const messages = {
         ],
       },
     },
+    // schema-v2 の指示ファイル。マニュアルではなく bootstrap として、agent を
+    // `task prepare` まで運び、`task prepare` では伝えられないリポジトリ固有の
+    // 事項だけを渡す。見出しは英語固定（bootstrap conformance が
+    // `## Repository gotchas` と schema-v1 見出しの不在に anchor するため）。
+    //
+    // 編集時の規則は2つ。禁止形ではなく望ましい状態で書くこと（「command を
+    // そのまま実行する」は「command を組み立て直さない」と同じ契約で、読む側の
+    // 負荷が小さい）。そして短く保つこと。ja-JP は1文字あたり約3 UTF-8 bytes
+    // なので、budget を超えるのは en-US より先にこちらである。
+    adapterBootstrap: {
+      editNotice:
+        "「Repository gotchas」セクションを編集して、このリポジトリの内容を反映させてください。",
+      purposeHeader: "Purpose",
+      purposeBody: [
+        "このリポジトリは code-pact で計画・検証されている。計画は `design/` にあり、",
+        "各タスクの work order、検証、完了状態はそこから code-pact が導出する。",
+        "取り組んでいるタスクについては、その導出結果を正式な指示として扱う。",
+      ].join("\n"),
+      startHeader: "Start here",
+      startIntro: "タスクごとに、他の何かを読む前にこれを実行する:",
+      startOutcome: [
+        "compact な work order が返る: 現在の状態、goal、宣言された read/write",
+        "scope、done-when 基準、検証 command、そして次の action。",
+      ].join("\n"),
+      startRules: [
+        "- `data.next.command` が返す command をそのまま実行する。",
+        "- compact な work order に、現在の action に必要な具体的情報が欠けている",
+        "  場合は `data.more.command` を使う。",
+        "- 実装中は code-pact が返す focused な検証 action を使う。lifecycle の",
+        "  出力が完了 gate の action へ進んだ時点で、その gate を実行する。",
+        "- code-pact が blocked または decision-required を報告した場合は、その",
+        "  状態と理由をユーザーへ報告する。",
+      ].join("\n"),
+      referenceBody: [
+        "envelope の完全なリファレンス（lifecycle verb、failure code、監査 flag の",
+        "すべて）は",
+        "[`docs/cli-contract.md`](https://github.com/toshtag/code-pact/blob/main/docs/cli-contract.md)",
+        "にある。work order がそこを指したときに読む（事前には読まない）。",
+      ].join("\n"),
+      gotchasHint: [
+        "このリポジトリで実際に成り立ち、かつ filesystem や型定義からは分からない",
+        "事項だけに置き換える。5項目以下に保つ。それより長いものは",
+        "`design/rules/` または `docs/` に属する。",
+      ].join("\n"),
+      gotchasDefault:
+        "コードスタイルは `design/rules/coding-style.md` に従う。",
+    },
     adapterCommon: {
       managedNotice:
         "このファイルは [code-pact](https://github.com/toshtag/code-pact) によって管理されています。",

@@ -1,10 +1,11 @@
 // Single source of truth for Claude model facts.
 //
-// These values feed four otherwise-independent places that would otherwise
+// These values feed three otherwise-independent places that would otherwise
 // each hardcode their own copy and drift apart: the `--model` validator
-// (schemas/agent-profile.ts), the default agent profile (core/agents.ts), the
-// default model profiles (commands/init.ts), and the generated CLAUDE.md model
-// guidance (adapters/claude.ts). Bumping a Claude model is now a one-file edit.
+// (schemas/agent-profile.ts), the default agent profile (core/agents.ts), and
+// the default model profiles (commands/init.ts). Bumping a Claude model is a
+// one-file edit here. The generated claude-code instruction file is NOT one of
+// them — it is model-neutral and reads nothing from this module.
 //
 // This module is a LEAF: plain data only, no zod / schema runtime import. The
 // schema layer imports FROM here, so a runtime import back would create a
@@ -94,41 +95,16 @@ export const CLAUDE_TIER_MODEL_IDS = {
 } as const;
 
 // ---------------------------------------------------------------------------
-// Generated CLAUDE.md model-specific guidance
+// No per-model guidance block lives here any more.
+//
+// A `CLAUDE_MODEL_GUIDANCE` map used to render an effort/thinking section into
+// the generated CLAUDE.md. The claude-code bootstrap is model-neutral (P88), so
+// nothing consumed it, and per-model prose about thinking mechanics was the part
+// of this file that went stale fastest — the authoritative per-model capability
+// table is Anthropic's documentation, not a bundled copy of it. Effort guidance
+// now reaches the agent through `recommend` / `task prepare --detail full`,
+// which is per-task rather than per-model.
 // ---------------------------------------------------------------------------
-
-export type ModelGuidance = {
-  effortGuidance: string;
-  thinkingNote: string;
-};
-
-// Generation-resistant guidance. Per-model prose about thinking mechanics
-// drifts every release (Opus 4.7+ dropped manual extended thinking; effort
-// support and adaptive availability vary by generation; "high not supported on
-// Sonnet 4.6" was once written here and is false — Sonnet 4.6 supports high,
-// the default). This layer is advisory, so a single note that holds for every
-// current Claude version beats version-specific detail that goes stale. The
-// authoritative per-model capability table lives in Anthropic's docs, not here.
-const STANDARD_EFFORT_GUIDANCE = [
-  "- `high` — complex architecture decisions, high-ambiguity tasks, or large context",
-  "- `medium` — standard feature work",
-  "- `low` — small mechanical tasks (`type: refactor`, `expected_duration: short`)",
-].join("\n");
-
-const GENERAL_GUIDANCE: ModelGuidance = {
-  effortGuidance: STANDARD_EFFORT_GUIDANCE,
-  thinkingNote:
-    "For complex or `ambiguity: high` tasks, rely on the model's adaptive thinking and the effort level rather than a fixed manual thinking budget. See the model's current Anthropic documentation for its exact thinking support.",
-};
-
-export const CLAUDE_MODEL_GUIDANCE: Record<ClaudeModelVersion, ModelGuidance> = {
-  "opus-5": GENERAL_GUIDANCE,
-  "sonnet-5": GENERAL_GUIDANCE,
-  "opus-4.8": GENERAL_GUIDANCE,
-  "opus-4.7": GENERAL_GUIDANCE,
-  "opus-4.6": GENERAL_GUIDANCE,
-  "sonnet-4.6": GENERAL_GUIDANCE,
-};
 
 // ---------------------------------------------------------------------------
 // Default abstract tier profiles (init seed)
