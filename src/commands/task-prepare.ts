@@ -201,7 +201,6 @@ async function loadAgentProfile(
 
 function buildCommands(
   agent: string,
-  phaseId: string,
   taskId: string,
   contextBudgetBytes?: number | undefined,
 ): TaskPrepareCommands {
@@ -212,7 +211,7 @@ function buildCommands(
         : ""
     }`,
     start: `code-pact task start ${taskId} --agent ${agent}`,
-    verify: `code-pact verify --phase ${phaseId} --task ${taskId} --json --detail agent`,
+    verify: `node scripts/verification-scope.mjs --local --stage focused --run --task-id ${taskId}`,
     complete: `code-pact task complete ${taskId} --agent ${agent} --json --detail agent`,
     finalize: `code-pact task finalize ${taskId} --write --json`,
     "record-done": `code-pact task record-done ${taskId} --agent ${agent} --evidence "<verification you ran>"`,
@@ -371,7 +370,7 @@ function buildMinimalResult(opts: {
     read_scope: task.reads ?? [],
     write_scope: task.writes ?? [],
     done_when: phase.definition_of_done,
-    verify: phase.verification.commands,
+    verify: [buildCommands(agentName, taskId).verify],
     decision_required: decisionRequired,
   };
 
@@ -496,7 +495,7 @@ export async function runTaskPrepare(
   // 8. Full-detail mode below. Keep early-return shape identical to the
   // historical contract so existing consumers / tests remain stable.
 
-  const commands = buildCommands(agentName, phaseId, taskId);
+  const commands = buildCommands(agentName, taskId);
 
   // 8a. Early return — done or explicitly cancelled.
   if (task.status === "cancelled") {
@@ -678,7 +677,7 @@ export async function runTaskPrepare(
       type: nextActionType,
       message: messageFor(nextActionType, recommendation.lifecycleMode),
     },
-    commands: buildCommands(agentName, phaseId, taskId, budgetBytes),
+    commands: buildCommands(agentName, taskId, budgetBytes),
     blocked_by: [],
     applied_context_budget: appliedContextBudget,
   };

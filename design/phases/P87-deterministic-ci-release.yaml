@@ -30,9 +30,13 @@ definition_of_done:
     verification and bounds full-suite attempts to two
 verification:
   commands:
-    - pnpm test:ci
-    - pnpm release:check
     - pnpm check:supply-chain
+    - pnpm typecheck
+    - pnpm test:unit -- --no-file-parallelism --testTimeout=30000
+    - pnpm build
+    - pnpm test:integration:smoke -- --no-file-parallelism --testTimeout=30000
+    - pnpm check:docs
+    - git diff --check
 tasks:
   - id: P87-T1
     type: bugfix

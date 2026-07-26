@@ -4,15 +4,25 @@
 // Used by both local `pnpm verify:local` and the GitHub Actions classify job.
 // No external dependencies — only Node.js built-ins and `git`.
 
-import { writeFileSync } from "node:fs";
+import {
+  writeFileSync,
+  readFileSync,
+  mkdirSync,
+  appendFileSync,
+  existsSync,
+} from "node:fs";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
+import { createHash } from "node:crypto";
 import { runBoundedProcess } from "./lib/run-bounded-process.mjs";
 
 const repoRoot = process.cwd();
 
 const REPORTER_PATH = "scripts/vitest-ci-reporter.mjs";
 const DEFAULT_HEARTBEAT_MS = 30_000;
+const LEDGER_DIR = ".code-pact/cache/verification-runs";
+const LEDGER_FILE = `${LEDGER_DIR}/ledger.jsonl`;
+const MAX_FULL_ATTEMPTS = 2;
 
 const WORKFLOW_PREFIXES = [".github/workflows/"];
 
@@ -136,7 +146,6 @@ const TOOLCHAIN_EXACT = [
   "vitest.integration.smoke.config.ts",
   "scripts/check-supply-chain-invariants.mjs",
   "scripts/check-toolchain-binaries.mjs",
-  "tests/unit/scripts/check-supply-chain-invariants.test.ts",
 ];
 
 const TOOLCHAIN_PREFIXES = [".github/workflows/"];
@@ -238,8 +247,10 @@ function isUnknown(file) {
 function isClassifier(file) {
   return (
     file === "scripts/verification-scope.mjs" ||
+    file === "scripts/verification-scope.d.mts" ||
     file === "scripts/lib/run-bounded-process.mjs" ||
-    file === REPORTER_PATH
+    file === REPORTER_PATH ||
+    file === "scripts/vitest-ci-reporter.d.mts"
   );
 }
 
@@ -268,6 +279,14 @@ function isGenericCode(file) {
     !isProcessControl(file) &&
     !isWorkflow(file) &&
     !isReleaseScript(file)
+  );
+}
+
+function isProductionSource(file) {
+  return (
+    isGenericCode(file) &&
+    (file.startsWith("src/") ||
+      (file.startsWith("scripts/") && /\.[cm]?[jt]s$/.test(file)))
   );
 }
 
@@ -306,8 +325,38 @@ export function classifyChangedFiles(files) {
   )
     reasons.push("standard");
 
+  const classifierChanged = changedFiles.some(isClassifier);
+  const workflowChanged = changedFiles.some(isWorkflow);
+  const testRunnerBaseChanged = changedFiles.some(isSharedTestInfra);
+  const toolchainOnlyChanged = changedFiles.some(
+    f => isToolchain(f) && !isWorkflow(f) && !isSharedTestInfra(f),
+  );
+  const unknownChanged = changedFiles.some(isUnknown);
+
+  const fallbackReason = classifierChanged
+    ? "verification_classifier_changed"
+    : workflowChanged
+      ? "workflow_changed"
+      : testRunnerBaseChanged
+        ? "test_runner_base_changed"
+        : toolchainOnlyChanged
+          ? "toolchain_changed"
+          : unknownChanged
+            ? "unknown_path"
+            : unmappedReleaseScript
+              ? "unmapped_release_script"
+              : unmappedWorkflow
+                ? "unmapped_workflow"
+                : null;
+
   const fallbackFull =
-    highRisk || unknown || unmappedReleaseScript || unmappedWorkflow;
+    classifierChanged ||
+    workflowChanged ||
+    testRunnerBaseChanged ||
+    toolchainOnlyChanged ||
+    unknownChanged ||
+    unmappedReleaseScript ||
+    unmappedWorkflow;
   const mode = fallbackFull ? "full" : "focused";
 
   return {
@@ -323,6 +372,7 @@ export function classifyChangedFiles(files) {
     unknown,
     highRisk,
     fallbackFull,
+    fallbackReason,
     mode,
     reason:
       changedFiles.length === 0
@@ -341,6 +391,7 @@ function buildFailSafeScope(files) {
     generic: true,
     highRisk: true,
     fallbackFull: true,
+    fallbackReason: "fail_safe",
     mode: "full",
     reason: "fail-safe",
   };
@@ -349,7 +400,7 @@ function buildFailSafeScope(files) {
 function buildFullScope(files = []) {
   return {
     changedFiles: files,
-    docs: false,
+    docs: true,
     standard: true,
     toolchain: true,
     processControl: true,
@@ -360,6 +411,7 @@ function buildFullScope(files = []) {
     unknown: false,
     highRisk: true,
     fallbackFull: true,
+    fallbackReason: "main_full_gate",
     mode: "full",
     reason: "main full gate",
   };
@@ -370,12 +422,7 @@ function uniqueFiles(files) {
 }
 
 function genericFiles(files) {
-  return uniqueFiles(files.filter(isGenericCode));
-}
-
-function isSubset(left, right) {
-  const rightSet = new Set(right);
-  return left.every(file => rightSet.has(file));
+  return uniqueFiles(files.filter(isProductionSource));
 }
 
 function hasGenericFiles(files) {
@@ -410,7 +457,11 @@ function withReporter(args, forceReporter = true) {
         : a,
     );
   }
-  if (forceReporter && args.includes("run") && args.includes("vitest")) {
+  if (
+    forceReporter &&
+    args.includes("vitest") &&
+    (args.includes("run") || args.includes("related"))
+  ) {
     return [...args, `--reporter=${REPORTER_PATH}`];
   }
   return args;
@@ -439,21 +490,24 @@ function buildUnitSteps(scope, changeSet, mergeBase) {
     ...(changeSet.untrackedFiles ?? []),
   ]);
   const directUnitFiles = allChanged.filter(isUnitTest);
-  const sourceFiles = allChanged.filter(
-    f => isGenericCode(f) && !isUnitTest(f) && !isIntegrationTest(f),
-  );
+  const sourceFiles = allChanged.filter(isProductionSource);
+  const untrackedFiles = new Set(changeSet.untrackedFiles ?? []);
+  const directUnitFilesToRun =
+    sourceFiles.length === 0
+      ? directUnitFiles
+      : directUnitFiles.filter(file => untrackedFiles.has(file));
   const targetedUnitFiles = collectTargetedUnitTests(scope, changeSet);
 
   const processUnitFiles = scope.processControl
     ? uniqueFiles([
         "tests/unit/core/project-fs-authority-resolvers.test.ts",
         "tests/unit/commands/verify-process.test.ts",
-        ...directUnitFiles,
+        ...directUnitFilesToRun,
       ])
     : [];
 
   const explicitFiles = uniqueFiles([
-    ...directUnitFiles,
+    ...directUnitFilesToRun,
     ...targetedUnitFiles,
     ...processUnitFiles,
   ]);
@@ -473,39 +527,41 @@ function buildUnitSteps(scope, changeSet, mergeBase) {
   // When source files changed, use --changed to discover affected tests.
   if (sourceFiles.length > 0) {
     if (
+      explicitFiles.length > 0 ||
       mergeBase === null ||
       changeSet.indeterminate ||
       hasGenericFiles(changeSet.untrackedFiles ?? [])
     ) {
       addVitestStep(
         steps,
-        "unit",
-        "full",
+        "unit-related",
+        "focused",
         "pnpm",
-        ["exec", "vitest", "run"],
-        480_000,
-        "untracked or indeterminate: full unit tests",
+        [
+          "exec",
+          "vitest",
+          "related",
+          ...sourceFiles,
+          "--run",
+          "--passWithNoTests",
+        ],
+        300_000,
+        `related selection: ${sourceFiles.length} source file(s)`,
       );
     } else {
-      const baseGenericFiles = genericFiles(changeSet.baseFiles ?? []);
-      const workingGenericFiles = genericFiles(
-        changeSet.workingTreeFiles ?? [],
+      const sourceFileSet = new Set(sourceFiles);
+      const baseGenericFiles = uniqueFiles(
+        (changeSet.baseFiles ?? []).filter(file => sourceFileSet.has(file)),
+      );
+      const workingGenericFiles = uniqueFiles(
+        (changeSet.workingTreeFiles ?? []).filter(file =>
+          sourceFileSet.has(file),
+        ),
       );
       const hasBaseGenericFiles = baseGenericFiles.length > 0;
       const hasWorkingGenericFiles = workingGenericFiles.length > 0;
 
-      let runBaseChanged = hasBaseGenericFiles;
-      let runWorkingChanged = hasWorkingGenericFiles;
-
-      if (hasBaseGenericFiles && hasWorkingGenericFiles) {
-        if (isSubset(baseGenericFiles, workingGenericFiles)) {
-          runBaseChanged = false;
-        } else if (isSubset(workingGenericFiles, baseGenericFiles)) {
-          runWorkingChanged = false;
-        }
-      }
-
-      if (runBaseChanged) {
+      if (hasBaseGenericFiles) {
         addVitestStep(
           steps,
           "unit-base",
@@ -520,11 +576,12 @@ function buildUnitSteps(scope, changeSet, mergeBase) {
             "--passWithNoTests",
           ],
           300_000,
-          `committed generic changes: ${baseGenericFiles.length} file(s)`,
+          `changed/affected tests since base: ${uniqueFiles([
+            ...baseGenericFiles,
+            ...workingGenericFiles,
+          ]).length} source file(s)`,
         );
-      }
-
-      if (runWorkingChanged) {
+      } else if (hasWorkingGenericFiles) {
         addVitestStep(
           steps,
           "unit-working",
@@ -561,9 +618,7 @@ function buildIntegrationSteps(scope, changeSet) {
   const remainingDirect = directIntegrationFiles.filter(
     f => !processControlFiles.includes(f),
   );
-  const sourceFiles = allChanged.filter(
-    f => isGenericCode(f) && !isUnitTest(f) && !isIntegrationTest(f),
-  );
+  const sourceFiles = allChanged.filter(isProductionSource);
   const hasSource = sourceFiles.length > 0;
 
   if (scope.processControl) {
@@ -677,14 +732,105 @@ function buildVersionSteps(steps) {
   );
 }
 
+function countSelectedUnitTests(steps) {
+  if (steps.some(s => s.id === "unit")) return null;
+  if (
+    steps.some(
+      s =>
+        s.id === "unit-base" ||
+        s.id === "unit-working" ||
+        s.id === "unit-related",
+    )
+  )
+    return null;
+  const selected = new Set(
+    steps
+      .filter(s => s.id === "unit-focused")
+      .flatMap(s => s.command.filter(arg => arg.startsWith("tests/unit/"))),
+  );
+  return selected.size;
+}
+
+function countSelectedIntegrationTests(steps) {
+  if (
+    steps.some(
+      s => s.id === "integration-full" || s.id === "integration-smoke",
+    )
+  )
+    return null;
+  const selected = new Set(
+    steps
+      .filter(
+        s =>
+          s.id === "integration-direct" ||
+          s.id === "integration-process-control",
+      )
+      .flatMap(s =>
+        s.command.filter(arg => arg.startsWith("tests/integration/")),
+      ),
+  );
+  return selected.size;
+}
+
+function finalizePlan({
+  steps,
+  mode,
+  planStage,
+  scope,
+  changeSet,
+  mergeBase,
+  baseSha,
+  headSha,
+}) {
+  return {
+    schema_version: "p87-t3/1",
+    base_sha: baseSha ?? mergeBase ?? null,
+    head_sha: headSha ?? null,
+    mode,
+    stage: planStage,
+    fallback_full: scope.fallbackFull,
+    fallback_reason: scope.fallbackReason ?? null,
+    reason: scope.reason,
+    changed_files: scope.changedFiles,
+    selected_unit_tests: countSelectedUnitTests(steps),
+    selected_integration_tests: countSelectedIntegrationTests(steps),
+    command_count: steps.length,
+    categories: {
+      docs: scope.docs,
+      standard: scope.standard,
+      toolchain: scope.toolchain,
+      process_control: scope.processControl,
+      generic: scope.generic,
+      workflow: scope.workflow,
+      release: scope.releaseScript,
+      shared_test_infra: scope.sharedTestInfra,
+      unknown: scope.unknown,
+      high_risk: scope.highRisk,
+    },
+    scope: {
+      ...scope,
+      changedFiles: scope.changedFiles,
+    },
+    change_set: changeSet,
+    steps,
+  };
+}
+
 export function buildVerificationPlan({
   scope,
   changeSet = {},
   mergeBase = null,
   baseSha = null,
   headSha = null,
+  stage = null,
 }) {
+  if (stage !== null && stage !== "focused" && stage !== "full") {
+    throw new Error(
+      `PLAN_INVALID: stage must be "focused" or "full", received ${String(stage)}`,
+    );
+  }
   const mode = getTestMode(scope, changeSet, mergeBase);
+  const planStage = stage ?? mode;
   const steps = [];
 
   if (scope.docs) {
@@ -693,7 +839,7 @@ export function buildVerificationPlan({
     );
   }
 
-  if (mode === "full") {
+  if (planStage === "full") {
     steps.push(
       makeStep(
         "supply-chain",
@@ -734,28 +880,16 @@ export function buildVerificationPlan({
       "full fallback: all integration tests",
     );
     buildVersionSteps(steps);
-    return {
-      schema_version: "p87-t2/1",
-      base_sha: baseSha ?? mergeBase ?? null,
-      head_sha: headSha ?? null,
-      mode,
-      fallback_full: true,
-      reason: scope.reason,
-      changed_files: scope.changedFiles,
-      categories: {
-        docs: scope.docs,
-        standard: scope.standard,
-        toolchain: scope.toolchain,
-        process_control: scope.processControl,
-        generic: scope.generic,
-        workflow: scope.workflow,
-        release: scope.releaseScript,
-        shared_test_infra: scope.sharedTestInfra,
-        unknown: scope.unknown,
-        high_risk: scope.highRisk,
-      },
+    return finalizePlan({
       steps,
-    };
+      mode,
+      planStage,
+      scope,
+      changeSet,
+      mergeBase,
+      baseSha,
+      headSha,
+    });
   }
 
   const hasStandard =
@@ -803,28 +937,16 @@ export function buildVerificationPlan({
   }
   steps.push(...integrationSteps);
 
-  return {
-    schema_version: "p87-t2/1",
-    base_sha: baseSha ?? mergeBase ?? null,
-    head_sha: headSha ?? null,
-    mode,
-    fallback_full: scope.fallbackFull,
-    reason: scope.reason,
-    changed_files: scope.changedFiles,
-    categories: {
-      docs: scope.docs,
-      standard: scope.standard,
-      toolchain: scope.toolchain,
-      process_control: scope.processControl,
-      generic: scope.generic,
-      workflow: scope.workflow,
-      release: scope.releaseScript,
-      shared_test_infra: scope.sharedTestInfra,
-      unknown: scope.unknown,
-      high_risk: scope.highRisk,
-    },
+  return finalizePlan({
     steps,
-  };
+    mode,
+    planStage,
+    scope,
+    changeSet,
+    mergeBase,
+    baseSha,
+    headSha,
+  });
 }
 
 function parseVitestProgress(stdout) {
@@ -844,10 +966,225 @@ function parseVitestProgress(stdout) {
   };
 }
 
+function parseVitestFiles(stdout, stderr = "") {
+  const combined = `${stdout}\n${stderr}`;
+  const totalMatch = /\[vitest:total\]\s+(\d+)/.exec(combined);
+  const total = totalMatch ? Number(totalMatch[1]) : null;
+  const starts = [...combined.matchAll(/\[vitest:start\]\s+(\S+)/g)].map(
+    match => match[1],
+  );
+  const selected = new Set(total === null ? starts : starts.slice(0, total));
+  const failedCandidates = new Set();
+  for (const match of combined.matchAll(
+    /\[vitest:failed\]\s+(\S+?)(?::|\s|$)/g,
+  )) {
+    failedCandidates.add(match[1]);
+  }
+  for (const match of combined.matchAll(
+    /\[vitest:done\]\s+(\S+)\s+\S+ms\s+fail(?:ed)?/g,
+  )) {
+    failedCandidates.add(match[1]);
+  }
+  const failed = [...failedCandidates].filter(
+    file => selected.size === 0 || selected.has(file),
+  );
+
+  return {
+    selected: [...selected],
+    failed,
+  };
+}
+
+function formatDuration(ms) {
+  if (ms === undefined || ms === null) return "-";
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const remSeconds = seconds % 60;
+  if (minutes > 0) return `${minutes}m ${remSeconds}s`;
+  return `${remSeconds}s`;
+}
+
+function writeGitHubSummary(plan, stepResults, fullAttemptCount) {
+  const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+  if (!summaryFile) return;
+
+  const totalMs = stepResults.reduce((sum, s) => sum + (s.elapsedMs ?? 0), 0);
+  const observedFiles = new Set(stepResults.flatMap(s => s.testFiles ?? []));
+  const observedUnit = [...observedFiles].filter(isUnitTest).length;
+  const observedIntegration =
+    [...observedFiles].filter(isIntegrationTest).length;
+  const ranUnit = stepResults.some(s => s.id.startsWith("unit"));
+  const ranIntegration = stepResults.some(s => s.id.startsWith("integration"));
+  const unitCount = ranUnit
+    ? String(observedUnit)
+    : plan.selected_unit_tests === null
+      ? "-"
+      : String(plan.selected_unit_tests);
+  const intCount = ranIntegration
+    ? String(observedIntegration)
+    : plan.selected_integration_tests === null
+      ? "-"
+      : String(plan.selected_integration_tests);
+
+  const lines = [
+    "## Verification summary",
+    "",
+    `| Key | Value |`,
+    `|---|---|`,
+    `| Mode | ${plan.mode} |`,
+    `| Stage | ${plan.stage} |`,
+    `| Fallback full | ${plan.fallback_full} |`,
+    `| Fallback reason | ${plan.fallback_reason ?? "-"} |`,
+    `| Changed files | ${plan.changed_files.length} |`,
+    `| Unit tests selected | ${unitCount} |`,
+    `| Integration tests selected | ${intCount} |`,
+    `| Commands | ${plan.steps.length} |`,
+    `| Full-suite attempt count | ${fullAttemptCount} |`,
+    `| Total duration | ${formatDuration(totalMs)} |`,
+    "",
+    "### Steps",
+    "",
+    `| Step | Scope | Duration | Reason |`,
+    `|---|---|---|---|`,
+    ...stepResults.map(
+      s =>
+        `| ${s.id} | ${s.scope} | ${formatDuration(s.elapsedMs)} | ${s.reason} |`,
+    ),
+    "",
+  ];
+
+  writeFileSync(summaryFile, lines.join("\n"), { flag: "a" });
+}
+
+function buildFocusedNextPlan(plan) {
+  if (!plan.scope || !plan.change_set) return null;
+  const nextScope = {
+    ...plan.scope,
+    fallbackFull: false,
+    fallbackReason: null,
+    highRisk: false,
+    unknown: false,
+    mode: "focused",
+    reason: "focused-retry",
+  };
+  return buildVerificationPlan({
+    scope: nextScope,
+    changeSet: plan.change_set,
+    mergeBase: plan.base_sha,
+    baseSha: plan.base_sha,
+    headSha: plan.head_sha,
+    stage: "focused",
+  });
+}
+
+function findNextCommand(plan, failedStepId) {
+  const focused = buildFocusedNextPlan(plan);
+  if (!focused) return { stage: "focused", command: null };
+
+  const preferredOrder = [
+    "unit-focused",
+    "unit-base",
+    "unit-working",
+    "unit-related",
+    "integration-direct",
+    "integration-process-control",
+    "integration-smoke",
+  ];
+  for (const id of preferredOrder) {
+    const step = focused.steps.find(s => s.id === id);
+    if (step) {
+      return { stage: "focused", command: step.command.join(" ") };
+    }
+  }
+
+  const failedStep = plan.steps.find(s => s.id === failedStepId);
+  if (failedStep) {
+    return {
+      stage: plan.stage ?? "focused",
+      command: failedStep.command.join(" "),
+    };
+  }
+  return { stage: "focused", command: null };
+}
+
+export function validatePlan(plan) {
+  if (!plan || typeof plan !== "object") {
+    throw new Error("PLAN_INVALID: plan must be an object");
+  }
+  if (!Array.isArray(plan.steps)) {
+    throw new Error("PLAN_INVALID: plan.steps must be an array");
+  }
+  if (plan.stage !== "focused" && plan.stage !== "full") {
+    throw new Error('PLAN_INVALID: plan.stage must be "focused" or "full"');
+  }
+  if (typeof plan.fallback_full !== "boolean") {
+    throw new Error("PLAN_INVALID: plan.fallback_full must be a boolean");
+  }
+  if (plan.fallback_full === true && !plan.fallback_reason) {
+    throw new Error(
+      "PLAN_INVALID: fallback_full=true requires a machine-readable fallback_reason",
+    );
+  }
+  if (plan.fallback_full === true && !plan.reason) {
+    throw new Error("PLAN_INVALID: fallback_full=true requires a human reason");
+  }
+  if (
+    plan.fallback_reason !== null &&
+    plan.fallback_reason !== undefined &&
+    !/^[a-z0-9_]+$/.test(plan.fallback_reason)
+  ) {
+    throw new Error(
+      "PLAN_INVALID: fallback_reason must be a machine-readable identifier",
+    );
+  }
+  for (const [index, step] of plan.steps.entries()) {
+    if (
+      !step ||
+      typeof step.id !== "string" ||
+      typeof step.reason !== "string" ||
+      typeof step.enabled !== "boolean" ||
+      !Array.isArray(step.command) ||
+      step.command.length === 0 ||
+      !step.command.every(arg => typeof arg === "string") ||
+      !Number.isSafeInteger(step.timeout_ms) ||
+      step.timeout_ms <= 0
+    ) {
+      throw new Error(`PLAN_INVALID: invalid step at index ${index}`);
+    }
+  }
+  return true;
+}
+
+function normalizeRunnablePlan(plan) {
+  if (!plan || typeof plan !== "object") return plan;
+  if (plan.schema_version === "p87-t3/1") return plan;
+  if (plan.schema_version !== "p87-t2/1") {
+    throw new Error(
+      `PLAN_INVALID: unsupported schema_version ${String(plan.schema_version)}`,
+    );
+  }
+
+  const steps = Array.isArray(plan.steps) ? plan.steps : [];
+  return {
+    ...plan,
+    stage: plan.mode === "full" ? "full" : "focused",
+    fallback_full: plan.fallback_full === true,
+    fallback_reason:
+      plan.fallback_full === true ? "legacy_trusted_classifier" : null,
+    selected_unit_tests: countSelectedUnitTests(steps),
+    selected_integration_tests: countSelectedIntegrationTests(steps),
+    command_count: steps.length,
+  };
+}
+
 export async function runVerificationPlan(plan, options = {}) {
+  validatePlan(plan);
   const heartbeatMs = options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
   const commandLabel = cmd => cmd.join(" ");
   const enabledSteps = plan.steps.filter(s => s.enabled);
+  const stepResults = [];
+  const fullAttemptCount = options.fullAttemptCount ?? 0;
+  const startMs = Date.now();
 
   let progress = {
     step: null,
@@ -920,6 +1257,22 @@ export async function runVerificationPlan(plan, options = {}) {
         }
       },
     });
+    const vitestFiles = parseVitestFiles(result.stdout, result.stderr);
+
+    const stepResult = {
+      id: step.id,
+      scope: step.scope,
+      command: step.command,
+      reason: step.reason,
+      elapsedMs: result.elapsedMs,
+      exitCode: result.exitCode,
+      signal: result.signal,
+      timedOut: result.timedOut,
+      ok: result.ok,
+      testFiles: vitestFiles.selected,
+      failedTestFiles: vitestFiles.failed,
+    };
+    stepResults.push(stepResult);
 
     if (result.stdout) {
       console.log(result.stdout);
@@ -933,7 +1286,16 @@ export async function runVerificationPlan(plan, options = {}) {
         `verify:local: step=${step.id} failed after ${result.elapsedMs}ms ` +
           `(exit=${result.exitCode}, signal=${result.signal}, timedOut=${result.timedOut})`,
       );
-      return { ok: false, step: step.id, result };
+      writeGitHubSummary(plan, stepResults, fullAttemptCount);
+      return {
+        ok: false,
+        failed: true,
+        step: step.id,
+        result: stepResult,
+        stepResults,
+        totalMs: Date.now() - startMs,
+        next: findNextCommand(plan, step.id),
+      };
     }
 
     console.error(
@@ -942,7 +1304,14 @@ export async function runVerificationPlan(plan, options = {}) {
   }
 
   console.error(`verify:local: ${enabledSteps.length} step(s) passed`);
-  return { ok: true, steps: enabledSteps.length };
+  writeGitHubSummary(plan, stepResults, fullAttemptCount);
+  return {
+    ok: true,
+    failed: false,
+    steps: stepResults,
+    stepResults,
+    totalMs: Date.now() - startMs,
+  };
 }
 
 // --- git helpers ---
@@ -1062,6 +1431,235 @@ async function collectBaseChangedFiles(baseRef) {
   return { files, mergeBase };
 }
 
+// --- local verification run ledger ---
+
+function sha256(input) {
+  return createHash("sha256").update(input).digest("hex");
+}
+
+function digestObject(obj) {
+  return sha256(JSON.stringify(obj));
+}
+
+function diffDigest(changeSet, headSha) {
+  const workingFiles = uniqueFiles([
+    ...(changeSet.workingTreeFiles ?? []),
+    ...(changeSet.untrackedFiles ?? []),
+  ])
+    .sort()
+    .map(file => ({
+      file,
+      content_digest: existsSync(file)
+        ? sha256(readFileSync(file))
+        : "deleted",
+    }));
+
+  return digestObject({
+    headSha,
+    workingFiles,
+  });
+}
+
+function planDigest(plan) {
+  return digestObject(plan.steps.map(s => [s.id, s.command]));
+}
+
+function ensureLedgerDir() {
+  mkdirSync(LEDGER_DIR, { recursive: true });
+}
+
+function loadLedger() {
+  if (!existsSync(LEDGER_FILE)) return [];
+  const content = readFileSync(LEDGER_FILE, "utf8");
+  try {
+    return content
+      .split("\n")
+      .map(line => line.trim())
+      .filter(Boolean)
+      .map(line => JSON.parse(line));
+  } catch (cause) {
+    throw new Error(
+      `VERIFICATION_LEDGER_INVALID: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+  }
+}
+
+function appendLedgerEntry(entry) {
+  ensureLedgerDir();
+  appendFileSync(LEDGER_FILE, JSON.stringify(entry) + "\n");
+}
+
+function stageAttemptCount(ledger, taskId, stage) {
+  return ledger.filter(e => e.task_id === taskId && e.stage === stage).length;
+}
+
+function fullAttemptCount(ledger, taskId) {
+  return stageAttemptCount(ledger, taskId, "full");
+}
+
+function lastEntryForDiff(ledger, taskId, diffDigest, stage) {
+  return ledger.findLast(
+    e =>
+      e.task_id === taskId &&
+      e.working_tree_diff_digest === diffDigest &&
+      e.stage === stage,
+  );
+}
+
+function canRunFull(ledger, taskId, diffDigestValue) {
+  if (fullAttemptCount(ledger, taskId) >= MAX_FULL_ATTEMPTS) {
+    return {
+      allowed: false,
+      error: "FULL_VERIFICATION_BUDGET_EXCEEDED",
+      message: `Full verification budget exceeded for task ${taskId} (max ${MAX_FULL_ATTEMPTS}).`,
+    };
+  }
+
+  const focusedSuccess = lastEntryForDiff(
+    ledger,
+    taskId,
+    diffDigestValue,
+    "focused",
+  );
+  if (!focusedSuccess || focusedSuccess.failure) {
+    return {
+      allowed: false,
+      error: "FULL_RETRY_REQUIRES_FOCUSED_PASS",
+      message: `Full verification requires a successful focused run first for the current change set.`,
+    };
+  }
+
+  const lastFull = ledger.findLast(
+    e =>
+      e.task_id === taskId &&
+      e.working_tree_diff_digest === diffDigestValue &&
+      e.stage === "full",
+  );
+
+  if (
+    lastFull &&
+    new Date(focusedSuccess.finished_at).getTime() <=
+      new Date(lastFull.finished_at).getTime()
+  ) {
+    return {
+      allowed: false,
+      error: "FULL_RETRY_REQUIRES_FOCUSED_PASS",
+      message: `A new focused pass is required after the last full attempt before retrying full.`,
+    };
+  }
+
+  return { allowed: true };
+}
+
+function recordVerificationRun({
+  taskId,
+  headSha,
+  diffDigestValue,
+  planDigestValue,
+  stage,
+  stepResults,
+  failure,
+}) {
+  const ledger = loadLedger();
+  const attemptNumber = stageAttemptCount(ledger, taskId, stage) + 1;
+  const totalMs = stepResults.reduce((sum, s) => sum + (s.elapsedMs ?? 0), 0);
+  const selectedTestFiles = stepResults.flatMap(s => [
+    ...(s.testFiles ?? []),
+    ...s.command.filter(
+      arg =>
+        arg.startsWith("tests/unit/") || arg.startsWith("tests/integration/"),
+    ),
+  ]);
+
+  appendLedgerEntry({
+    id: `${taskId}-${stage}-${Date.now()}`,
+    task_id: taskId,
+    head_sha: headSha,
+    working_tree_diff_digest: diffDigestValue,
+    plan_digest: planDigestValue,
+    stage,
+    started_at: new Date(Date.now() - totalMs).toISOString(),
+    finished_at: new Date().toISOString(),
+    commands: stepResults.map(s => ({
+      id: s.id,
+      command: s.command,
+      exit_code: s.exitCode,
+      duration_ms: s.elapsedMs,
+    })),
+    duration_ms: totalMs,
+    selected_test_files: [...new Set(selectedTestFiles)],
+    failure,
+    attempt_number: attemptNumber,
+  });
+}
+
+function buildFocusedTestRetryPlan(plan, testFiles) {
+  const unitFiles = uniqueFiles(testFiles.filter(isUnitTest));
+  const integrationFiles = uniqueFiles(testFiles.filter(isIntegrationTest));
+  const steps = [];
+
+  if (unitFiles.length > 0) {
+    addVitestStep(
+      steps,
+      "unit-focused",
+      "focused",
+      "pnpm",
+      ["exec", "vitest", "run", ...unitFiles],
+      300_000,
+      `failed tests: ${unitFiles.length} unit test file(s)`,
+    );
+  }
+  if (integrationFiles.length > 0) {
+    addVitestStep(
+      steps,
+      "integration-direct",
+      "focused",
+      "pnpm",
+      [
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "vitest.integration.config.ts",
+        ...integrationFiles,
+      ],
+      300_000,
+      `failed tests: ${integrationFiles.length} integration test file(s)`,
+    );
+  }
+
+  if (steps.length === 0) return plan;
+  return {
+    ...plan,
+    mode: "focused",
+    stage: "focused",
+    fallback_full: false,
+    fallback_reason: null,
+    reason: "failed_test_retry",
+    selected_unit_tests: unitFiles.length,
+    selected_integration_tests: integrationFiles.length,
+    command_count: steps.length,
+    steps,
+  };
+}
+
+function localStageCommand(taskId, stage, testFiles = []) {
+  const args = [
+    "node",
+    "scripts/verification-scope.mjs",
+    "--local",
+    "--stage",
+    stage,
+    "--run",
+    "--task-id",
+    taskId,
+  ];
+  for (const file of testFiles) {
+    args.push("--test-file", file);
+  }
+  return args.join(" ");
+}
+
 // --- command execution ---
 
 async function resolveHeadSha(runGitImpl = runGit) {
@@ -1112,17 +1710,23 @@ async function runLocalVerification(options = {}) {
 
   const headSha = await resolveHeadSha();
   const baseSha = failSafe ? null : changeSet.mergeBase;
+  const stage = options.stage ?? (options.forceFull ? "full" : "focused");
+  const taskId = options.taskId ?? "local";
 
-  const plan = buildVerificationPlan({
+  let plan = buildVerificationPlan({
     scope,
     changeSet,
     mergeBase: changeSet.mergeBase,
     baseSha,
     headSha,
+    stage,
   });
+  if (stage === "focused" && (options.testFiles?.length ?? 0) > 0) {
+    plan = buildFocusedTestRetryPlan(plan, options.testFiles);
+  }
 
   console.log(
-    `verify:local: scope=${scope.reason} mode=${plan.mode} steps=${plan.steps.length}`,
+    `verify:local: scope=${scope.reason} mode=${plan.mode} stage=${plan.stage} steps=${plan.steps.length}`,
   );
 
   if (options.writePlan) {
@@ -1135,16 +1739,85 @@ async function runLocalVerification(options = {}) {
     process.exit(0);
   }
 
+  const diffDigestValue = diffDigest(changeSet, headSha);
+  const planDigestValue = planDigest(plan);
+  const ledger = loadLedger();
+
+  if (stage === "full") {
+    const permission = canRunFull(ledger, taskId, diffDigestValue);
+    if (!permission.allowed) {
+      const nextCommand = localStageCommand(taskId, "focused");
+      console.error(`verify:local: ${permission.error}`);
+      console.log(
+        JSON.stringify({
+          status: "rejected",
+          stage: "full",
+          error: permission.error,
+          message: permission.message,
+          next: {
+            stage: "focused",
+            command: nextCommand,
+          },
+        }),
+      );
+      process.exit(2);
+    }
+  }
+
+  const fullAttempts = fullAttemptCount(ledger, taskId);
+  const fullAttemptCounter = stage === "full" ? fullAttempts + 1 : fullAttempts;
+
   const run = await runVerificationPlan(plan, {
     heartbeatMs: options.heartbeatMs,
+    fullAttemptCount: fullAttemptCounter,
   });
+
+  recordVerificationRun({
+    taskId,
+    headSha,
+    diffDigestValue,
+    planDigestValue,
+    stage,
+    stepResults: run.stepResults,
+    failure: !run.ok,
+  });
+
   if (!run.ok) {
+    const failedStep = run.stepResults.find(s => !s.ok) ?? run.result;
+    const failedTestFiles = uniqueFiles(
+      run.stepResults.flatMap(s => s.failedTestFiles ?? []),
+    );
+    const next = {
+      stage: "focused",
+      command: localStageCommand(taskId, "focused", failedTestFiles),
+    };
+    console.log(
+      JSON.stringify({
+        status: "failed",
+        stage,
+        failed_steps: [failedStep?.id ?? run.step].filter(Boolean),
+        failed_test_files: failedTestFiles,
+        next,
+      }),
+    );
     process.exit(1);
   }
 
   console.log(
-    `verify:local: ${run.steps} check${run.steps === 1 ? "" : "s"} passed`,
+    `verify:local: ${run.steps.length} check${run.steps.length === 1 ? "" : "s"} passed`,
   );
+  if (stage === "focused") {
+    console.log(
+      JSON.stringify({
+        status: "passed",
+        stage: "focused",
+        next: {
+          stage: "full",
+          command: localStageCommand(taskId, "full"),
+        },
+      }),
+    );
+  }
 }
 
 async function runBaseVerification(baseRef, options = {}) {
@@ -1189,16 +1862,22 @@ async function runBaseVerification(baseRef, options = {}) {
       : classifyChangedFiles(files);
 
   const headSha = await resolveHeadSha();
+  const stage =
+    options.stage ??
+    (forceFull || scope.fallbackFull || scope.mode === "full"
+      ? "full"
+      : "focused");
   const plan = buildVerificationPlan({
     scope,
     changeSet,
     mergeBase,
     baseSha: mergeBase,
     headSha,
+    stage,
   });
 
   console.log(
-    `verify: scope=${scope.reason} mode=${plan.mode} steps=${plan.steps.length}`,
+    `verify: scope=${scope.reason} mode=${plan.mode} stage=${plan.stage} steps=${plan.steps.length}`,
   );
 
   if (options.writePlan) {
@@ -1211,14 +1890,18 @@ async function runBaseVerification(baseRef, options = {}) {
     process.exit(0);
   }
 
+  const fullAttemptCount = stage === "full" ? 1 : 0;
   const run = await runVerificationPlan(plan, {
     heartbeatMs: options.heartbeatMs,
+    fullAttemptCount,
   });
   if (!run.ok) {
     process.exit(1);
   }
 
-  console.log(`verify: ${run.steps} check${run.steps === 1 ? "" : "s"} passed`);
+  console.log(
+    `verify: ${run.steps.length} check${run.steps.length === 1 ? "" : "s"} passed`,
+  );
 }
 
 // --- output formatters ---
@@ -1229,6 +1912,8 @@ function outputGitHub(scope) {
     `docs=${scope.docs}`,
     `standard=${scope.standard}`,
     `fallback_full=${scope.fallbackFull}`,
+    `mode=${scope.mode}`,
+    `fallback_reason=${scope.fallbackReason ?? ""}`,
   ];
 
   if (env) {
@@ -1252,6 +1937,10 @@ async function main() {
       "write-plan": { type: "string" },
       "heartbeat-ms": { type: "string" },
       "force-full": { type: "boolean", default: false },
+      stage: { type: "string" },
+      "task-id": { type: "string" },
+      "run-plan": { type: "string" },
+      "test-file": { type: "string", multiple: true },
     },
     allowPositionals: false,
   });
@@ -1259,11 +1948,61 @@ async function main() {
   const heartbeatMs = values["heartbeat-ms"]
     ? Number(values["heartbeat-ms"])
     : DEFAULT_HEARTBEAT_MS;
+  if (
+    values.stage !== undefined &&
+    values.stage !== "focused" &&
+    values.stage !== "full"
+  ) {
+    console.error('verify: --stage must be "focused" or "full"');
+    process.exit(2);
+  }
+  if (values["force-full"] && values.stage === "focused") {
+    console.error(
+      'verify: --force-full cannot be combined with --stage focused',
+    );
+    process.exit(2);
+  }
+  if ((values["test-file"]?.length ?? 0) > 0 && values.stage !== "focused") {
+    console.error("verify: --test-file requires --stage focused");
+    process.exit(2);
+  }
+
+  if (values["run-plan"]) {
+    const planPath = values["run-plan"];
+    let plan;
+    try {
+      plan = normalizeRunnablePlan(JSON.parse(readFileSync(planPath, "utf8")));
+    } catch (err) {
+      console.error(`verify: failed to load plan ${planPath}: ${err.message}`);
+      process.exit(2);
+    }
+    validatePlan(plan);
+    if (
+      process.env.GITHUB_SHA &&
+      plan.head_sha &&
+      process.env.GITHUB_SHA !== plan.head_sha
+    ) {
+      console.error(
+        `verify: plan head_sha ${plan.head_sha} does not match GITHUB_SHA ${process.env.GITHUB_SHA}`,
+      );
+      process.exit(2);
+    }
+    const fullAttemptCount = plan.stage === "full" ? 1 : 0;
+    const run = await runVerificationPlan(plan, {
+      heartbeatMs,
+      fullAttemptCount,
+    });
+    process.exit(run.ok ? 0 : 1);
+  }
 
   if (values.run && values.local) {
     await runLocalVerification({
       writePlan: values["write-plan"],
       heartbeatMs,
+      stage: values.stage,
+      taskId: values["task-id"],
+      forceFull: values["force-full"],
+      testFiles: values["test-file"],
     });
     return;
   }
@@ -1273,6 +2012,7 @@ async function main() {
       writePlan: values["write-plan"],
       heartbeatMs,
       forceFull: values["force-full"],
+      stage: values.stage,
     });
     return;
   }

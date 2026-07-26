@@ -11,6 +11,7 @@ export interface VerificationScope {
   unknown: boolean;
   highRisk: boolean;
   fallbackFull: boolean;
+  fallbackReason: string | null;
   mode: "focused" | "full";
   reason: string;
 }
@@ -31,9 +32,14 @@ export interface VerificationPlan {
   base_sha: string | null;
   head_sha: string | null;
   mode: "focused" | "full";
+  stage: "focused" | "full";
   fallback_full: boolean;
+  fallback_reason: string | null;
   reason: string;
   changed_files: string[];
+  selected_unit_tests: number | null;
+  selected_integration_tests: number | null;
+  command_count: number;
   categories: {
     docs: boolean;
     standard: boolean;
@@ -46,8 +52,12 @@ export interface VerificationPlan {
     unknown: boolean;
     high_risk: boolean;
   };
+  scope: VerificationScope;
+  change_set: Partial<LocalChangedFiles>;
   steps: VerificationStep[];
 }
+
+export function validatePlan(plan: unknown): true;
 
 export function buildVerificationPlan(options: {
   scope: VerificationScope;
@@ -55,6 +65,7 @@ export function buildVerificationPlan(options: {
   mergeBase?: string | null;
   baseSha?: string | null;
   headSha?: string | null;
+  stage?: "focused" | "full" | null;
 }): VerificationPlan;
 
 export interface LocalChangedFiles {
