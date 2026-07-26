@@ -137,33 +137,29 @@ describe("ci.yml topology", () => {
     );
   });
 
-  it("standard job runs the generated verification plan directly", () => {
+  it("PR standard job runs verification through the trusted base classifier", () => {
     const scripts = collectRunScripts(content, "standard");
-    const planScript = scripts.find(s => s.includes("run-plan"));
+    const planScript = scripts.find(s => s.includes("trusted-verification"));
     expect(planScript).toBeDefined();
     expect(planScript).toMatch(/plan_json=/);
     expect(planScript).toMatch(/base64\s+-d/);
-    expect(planScript).toMatch(
-      /node scripts\/verification-scope\.mjs --run-plan/,
-    );
-    expect(planScript).not.toMatch(/pnpm\s+test:unit/);
+    expect(planScript).toContain('git show "$BASE_REF:scripts/verification-scope.mjs"');
+    expect(planScript).toContain('node "$trusted_classifier" --base "$BASE_REF" --run');
+    expect(planScript).not.toContain("node scripts/verification-scope.mjs --run-plan");
     expect(planScript).not.toMatch(/pnpm\s+test:ci/);
-    expect(planScript).not.toMatch(/pnpm\s+test:integration:smoke/);
   });
 
-  it("standard job falls back to a full gate when no plan is available", () => {
+  it("PR standard job compares trusted plan digests before execution", () => {
     const scripts = collectRunScripts(content, "standard");
-    const planScript = scripts.find(s => s.includes("run-plan"));
+    const planScript = scripts.find(s => s.includes("trusted-verification"));
     expect(planScript).toBeDefined();
-    expect(planScript).toMatch(/else/);
-    expect(planScript).toMatch(
-      /node scripts\/verification-scope\.mjs --base "\$BASE_REF" --force-full --run/,
-    );
+    expect(planScript).toContain('node "$trusted_classifier" --base "$BASE_REF" --plan');
+    expect(planScript).toContain("trusted verification plan digest mismatch");
   });
 
   it("main push runs one full gate instead of the pull-request plan", () => {
     const scripts = collectRunScripts(content, "standard");
-    const planScript = scripts.find(s => s.includes("run-plan"));
+    const planScript = scripts.find(s => s.includes("trusted-verification"));
     expect(planScript).toMatch(/GITHUB_EVENT_NAME.*push/s);
     const fullIndex =
       planScript?.indexOf(
@@ -171,10 +167,21 @@ describe("ci.yml topology", () => {
       ) ?? -1;
     const planIndex =
       planScript?.indexOf(
-        'node scripts/verification-scope.mjs --run-plan "$RUNNER_TEMP/verification-plan.json"',
+        'node "$trusted_classifier" --base "$BASE_REF" --run',
       ) ?? -1;
     expect(fullIndex).toBeGreaterThanOrEqual(0);
     expect(planIndex).toBeGreaterThan(fullIndex);
+  });
+
+  it("base classifier absence uses a workflow-fixed full gate", () => {
+    const scripts = collectRunScripts(content, "standard");
+    const planScript = scripts.find(s => s.includes("trusted-verification"));
+    expect(planScript).toContain("pnpm check:supply-chain");
+    expect(planScript).toContain("pnpm typecheck");
+    expect(planScript).toContain("pnpm test:unit -- --no-file-parallelism --testTimeout=30000");
+    expect(planScript).toContain("pnpm build");
+    expect(planScript).toContain("pnpm test:integration:smoke -- --no-file-parallelism --testTimeout=30000");
+    expect(planScript).toContain("node --version");
   });
 
   it("classifier can be materialized and emit a verification plan", () => {

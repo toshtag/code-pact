@@ -133,11 +133,32 @@ jobs:
           plan_json="${{ needs.classify.outputs.plan_json }}"
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
             node scripts/verification-scope.mjs --base "$BASE_REF" --force-full --run
-          elif [ -n "$plan_json" ]; then
-            echo "$plan_json" | base64 -d > "$RUNNER_TEMP/verification-plan.json"
-            node scripts/verification-scope.mjs --run-plan "$RUNNER_TEMP/verification-plan.json"
+          elif git cat-file -e "$BASE_REF:scripts/verification-scope.mjs" 2>/dev/null; then
+            trusted_root="$RUNNER_TEMP/trusted-verification"
+            trusted_classifier="$trusted_root/scripts/verification-scope.mjs"
+            mkdir -p "$trusted_root/scripts/lib"
+            git show "$BASE_REF:scripts/verification-scope.mjs" > "$trusted_classifier"
+            git show "$BASE_REF:scripts/lib/run-bounded-process.mjs" > "$trusted_root/scripts/lib/run-bounded-process.mjs"
+
+            if [ -n "$plan_json" ]; then
+              echo "$plan_json" | base64 -d > "$RUNNER_TEMP/classify-verification-plan.json"
+              node "$trusted_classifier" --base "$BASE_REF" --plan > "$RUNNER_TEMP/standard-verification-plan.json"
+              classify_digest=$(sha256sum "$RUNNER_TEMP/classify-verification-plan.json" | cut -d ' ' -f1)
+              standard_digest=$(sha256sum "$RUNNER_TEMP/standard-verification-plan.json" | cut -d ' ' -f1)
+              if [ "$classify_digest" != "$standard_digest" ]; then
+                echo "trusted verification plan digest mismatch: classify=$classify_digest standard=$standard_digest"
+                exit 1
+              fi
+            fi
+
+            node "$trusted_classifier" --base "$BASE_REF" --run
           else
-            node scripts/verification-scope.mjs --base "$BASE_REF" --force-full --run
+            pnpm check:supply-chain
+            pnpm typecheck
+            pnpm test:unit -- --no-file-parallelism --testTimeout=30000
+            pnpm build
+            pnpm test:integration:smoke -- --no-file-parallelism --testTimeout=30000
+            node --version
           fi
 
   ci-status:
