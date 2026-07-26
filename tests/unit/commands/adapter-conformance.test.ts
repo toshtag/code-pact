@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   checkLocalizedGuidanceAnchors,
+  countBootstrapGotchas,
   resolveBoundedRepairSeverity,
   resolveStructuralProjectionSeverity,
   runAdapterConformance,
@@ -18,6 +19,9 @@ import {
   writeManifest,
 } from "../../../src/core/adapters/manifest.ts";
 import {
+  BOOTSTRAP_CONTEXT_BUDGET_BYTES,
+  BOOTSTRAP_GOTCHA_SECTION_HEADING,
+  BOOTSTRAP_MAX_GOTCHAS,
   BOUNDED_REPAIR_GUIDANCE_FROM_VERSION,
   STRUCTURAL_PROJECTION_GUIDANCE_ANCHORS,
   STRUCTURAL_PROJECTION_GUIDANCE_FROM_VERSION,
@@ -136,17 +140,22 @@ function sha256(content: string): string {
 
 async function setupAdapter(
   dir: string,
-  opts: { instructionContent?: string; generatorVersion?: string } = {},
+  opts: {
+    instructionContent?: string;
+    generatorVersion?: string;
+    adapterSchemaVersion?: number;
+  } = {},
 ): Promise<void> {
   const instructionContent = opts.instructionContent ?? VALID_CONTRACT_BODY;
   const generatorVersion = opts.generatorVersion ?? "1.11.0";
+  const adapterSchemaVersion = opts.adapterSchemaVersion ?? 1;
   await mkdir(join(dir, ".code-pact", "adapters"), { recursive: true });
   await writeFile(join(dir, "CLAUDE.md"), instructionContent, "utf8");
   const manifest = {
     schema_version: 1,
     agent_name: "claude-code",
     generator_version: generatorVersion,
-    adapter_schema_version: 1,
+    adapter_schema_version: adapterSchemaVersion,
     generated_at: "2026-05-22T00:00:00+00:00",
     profile_fingerprint: {
       instruction_filename: "CLAUDE.md",
@@ -166,7 +175,7 @@ async function setupAdapter(
     `schema_version: 1`,
     `agent_name: claude-code`,
     `generator_version: ${generatorVersion}`,
-    `adapter_schema_version: 1`,
+    `adapter_schema_version: ${adapterSchemaVersion}`,
     `generated_at: "${manifest.generated_at}"`,
     `profile_fingerprint:`,
     `  instruction_filename: CLAUDE.md`,
@@ -935,5 +944,289 @@ describe("runAdapterConformance — role swap security", () => {
         c.file === ".claude/skills/context.md",
     );
     expect(checksumCheck).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bootstrap instruction contract (adapter schema v2)
+// ---------------------------------------------------------------------------
+
+const BOOTSTRAP_BODY = `# Some Adapter
+
+> Managed file.
+
+## Purpose
+
+This repository is planned and verified with code-pact.
+
+## Start here
+
+\`\`\`sh
+code-pact task prepare <task-id> --agent claude-code --json
+\`\`\`
+
+- Run the command returned in \`data.next.command\` as written.
+- Use \`data.more.command\` when the work order lacks a required detail.
+
+## Repository gotchas
+
+> Replace these with what is true of this repository.
+
+- Follow \`design/rules/coding-style.md\` for code style.
+`;
+
+describe("runAdapterConformance — bootstrap contract selection", () => {
+  it("applies the bootstrap contract to a schema-v2 manifest", async () => {
+    await setupAdapter(dir, {
+      instructionContent: BOOTSTRAP_BODY,
+      adapterSchemaVersion: 2,
+    });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+    expect(result.compliant).toBe(true);
+    const ids = result.checks.map(c => c.id);
+    expect(ids).toContain("bootstrap_entrypoint_present");
+    expect(ids).toContain("bootstrap_context_budget");
+    // The schema-v1 instruction checks must not run at all: they require the
+    // very surfaces the bootstrap contract forbids.
+    expect(ids).not.toContain("contract_section_present");
+    expect(ids).not.toContain("required_cli_surface_mentions");
+    expect(ids).not.toContain("required_failure_guidance");
+  });
+
+  it("keeps applying the schema-v1 contract to a schema-v1 manifest", async () => {
+    await setupAdapter(dir, { adapterSchemaVersion: 1 });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+    expect(result.compliant).toBe(true);
+    const ids = result.checks.map(c => c.id);
+    expect(ids).toContain("required_cli_surface_mentions");
+    expect(ids).toContain("required_failure_guidance");
+    expect(ids).not.toContain("bootstrap_entrypoint_present");
+  });
+
+  it("fails a schema-v2 file that is missing the disclosure fields", async () => {
+    await setupAdapter(dir, {
+      instructionContent: BOOTSTRAP_BODY.replace(
+        "- Use `data.more.command` when the work order lacks a required detail.\n",
+        "",
+      ),
+      adapterSchemaVersion: 2,
+    });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+    expect(result.compliant).toBe(false);
+    const check = result.checks.find(c => c.id === "bootstrap_entrypoint_present");
+    expect(check?.status).toBe("fail");
+    expect(check?.severity).toBe("required");
+    expect(check?.details?.missing).toEqual(["data.more.command"]);
+  });
+
+  it("fails a schema-v2 file that still enumerates the lifecycle verbs", async () => {
+    await setupAdapter(dir, {
+      instructionContent: `${BOOTSTRAP_BODY}
+\`\`\`sh
+code-pact task start <id> --agent claude-code
+code-pact task complete <id> --agent claude-code
+code-pact task finalize <id> --write --json
+\`\`\`
+`,
+      adapterSchemaVersion: 2,
+    });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+    expect(result.compliant).toBe(false);
+    const check = result.checks.find(
+      c => c.id === "bootstrap_no_lifecycle_enumeration",
+    );
+    expect(check?.status).toBe("fail");
+    expect(check?.details?.present).toHaveLength(3);
+  });
+
+  it("allows a schema-v2 file to mention a single lifecycle verb", async () => {
+    await setupAdapter(dir, {
+      instructionContent: `${BOOTSTRAP_BODY}
+Run \`code-pact task complete <id>\` when the lifecycle output asks for it.
+`,
+      adapterSchemaVersion: 2,
+    });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+    const check = result.checks.find(
+      c => c.id === "bootstrap_no_lifecycle_enumeration",
+    );
+    expect(check?.status).toBe("pass");
+    expect(result.compliant).toBe(true);
+  });
+
+  it("fails a schema-v2 file that still carries the failure catalog", async () => {
+    await setupAdapter(dir, {
+      instructionContent: `${BOOTSTRAP_BODY}
+- **dependency block** — resolve dependencies and re-run prepare.
+- **adapter drift** — re-upgrade.
+`,
+      adapterSchemaVersion: 2,
+    });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+    expect(result.compliant).toBe(false);
+    const check = result.checks.find(c => c.id === "bootstrap_no_failure_catalog");
+    expect(check?.status).toBe("fail");
+    expect(check?.details?.present).toEqual([
+      "dependency block",
+      "adapter drift",
+    ]);
+  });
+
+  it("fails a schema-v2 file that carries model selection guidance", async () => {
+    await setupAdapter(dir, {
+      instructionContent: `${BOOTSTRAP_BODY}
+## Model selection
+
+- **balanced_coding** → \`claude-sonnet-5\`
+`,
+      adapterSchemaVersion: 2,
+    });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+    expect(result.compliant).toBe(false);
+    const check = result.checks.find(c => c.id === "bootstrap_model_neutral");
+    expect(check?.status).toBe("fail");
+    expect(check?.details?.present).toContain("## Model selection");
+    expect(check?.details?.present).toContain("balanced_coding");
+  });
+
+  it("fails a schema-v2 file whose gotcha section exceeds the bound", async () => {
+    const gotchas = Array.from(
+      { length: BOOTSTRAP_MAX_GOTCHAS + 1 },
+      (_, i) => `- gotcha number ${i + 1}`,
+    ).join("\n");
+    await setupAdapter(dir, {
+      instructionContent: `# Some Adapter
+
+## Start here
+
+\`\`\`sh
+code-pact task prepare <task-id> --agent claude-code --json
+\`\`\`
+
+Read \`data.next.command\` and \`data.more.command\`.
+
+${BOOTSTRAP_GOTCHA_SECTION_HEADING}
+
+${gotchas}
+`,
+      adapterSchemaVersion: 2,
+    });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+    expect(result.compliant).toBe(false);
+    const check = result.checks.find(c => c.id === "bootstrap_gotchas_bounded");
+    expect(check?.status).toBe("fail");
+    expect(check?.details?.count).toBe(BOOTSTRAP_MAX_GOTCHAS + 1);
+    expect(check?.details?.allowed).toBe(BOOTSTRAP_MAX_GOTCHAS);
+  });
+
+  it("counts only bullets inside the gotcha section", () => {
+    expect(
+      countBootstrapGotchas(`## Start here
+
+- not a gotcha
+- also not a gotcha
+
+${BOOTSTRAP_GOTCHA_SECTION_HEADING}
+
+> A block quote, not a bullet.
+
+- one
+- two
+
+## Next section
+
+- not a gotcha either
+`),
+    ).toBe(2);
+  });
+
+  it("reports zero gotchas when the section is absent", () => {
+    expect(countBootstrapGotchas("## Start here\n\n- a bullet\n")).toBe(0);
+  });
+
+  it("fails a schema-v2 file that exceeds the bootstrap context budget", async () => {
+    // A single oversized gotcha: over budget, but still one bullet, so this
+    // isolates the budget check from the gotcha-count check.
+    const filler = "x".repeat(BOOTSTRAP_CONTEXT_BUDGET_BYTES);
+    await setupAdapter(dir, {
+      instructionContent: BOOTSTRAP_BODY.replace(
+        "- Follow `design/rules/coding-style.md` for code style.",
+        `- ${filler}`,
+      ),
+      adapterSchemaVersion: 2,
+    });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+    expect(result.compliant).toBe(false);
+    const check = result.checks.find(c => c.id === "bootstrap_context_budget");
+    expect(check?.status).toBe("fail");
+    expect(check?.details?.budget_bytes).toBe(BOOTSTRAP_CONTEXT_BUDGET_BYTES);
+    expect(check?.details?.bytes).toBeGreaterThan(
+      BOOTSTRAP_CONTEXT_BUDGET_BYTES,
+    );
+  });
+
+  it("measures the budget in UTF-8 bytes, not characters", async () => {
+    // Just under the budget in characters, comfortably over it in UTF-8 bytes.
+    const multibyte = "あ".repeat(BOOTSTRAP_CONTEXT_BUDGET_BYTES - 500);
+    await setupAdapter(dir, {
+      instructionContent: BOOTSTRAP_BODY.replace(
+        "- Follow `design/rules/coding-style.md` for code style.",
+        `- ${multibyte}`,
+      ),
+      adapterSchemaVersion: 2,
+    });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+    const check = result.checks.find(c => c.id === "bootstrap_context_budget");
+    expect(check?.status).toBe("fail");
+    expect(check?.details?.bytes).toBeGreaterThan(
+      BOOTSTRAP_CONTEXT_BUDGET_BYTES * 2,
+    );
+  });
+
+  it("still rejects contract antipatterns under the bootstrap contract", async () => {
+    await setupAdapter(dir, {
+      instructionContent: `${BOOTSTRAP_BODY}
+Run \`code-pact task finalize <id> --agent claude-code --write\`.
+`,
+      adapterSchemaVersion: 2,
+    });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+    expect(result.compliant).toBe(false);
+    const check = result.checks.find(c => c.id === "no_contract_antipatterns");
+    expect(check?.status).toBe("fail");
+    expect(check?.severity).toBe("required");
   });
 });
