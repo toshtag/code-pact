@@ -3,7 +3,7 @@ name: Deterministic CI and Release
 weight: 1
 confidence: high
 risk: low
-status: in_progress
+status: done
 objective: >
   Make release and CI behavior deterministic, hermetic, and context-efficient.
   P87-T1 closes release correctness gaps; P87-T2 applies change-aware test
@@ -35,12 +35,11 @@ definition_of_done:
   - Untracked symlinks are hashed without reading through them outside the
     repository
   - Git state collection failure prevents focused/full authorization
-  - A first full verification failure from task complete immediately returns
-    the focused verify command
-  - The failure output never recommends task complete again before a new
-    focused pass
-  - Agent JSON, normal JSON, and human output expose the same focused next
-    action
+  - A first full verification failure from task complete immediately returns the
+    focused verify command
+  - The failure output never recommends task complete again before a new focused
+    pass
+  - Agent JSON, normal JSON, and human output expose the same focused next action
   - Existing tracked-file behavior and policy-absent compatibility remain
     unchanged
 verification:
@@ -282,7 +281,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       Bind focused verification evidence to the exact tracked and untracked
       working-tree contents, fail closed when Git state cannot be established,
