@@ -1,5 +1,7 @@
 import type { Phase, PhaseStatus } from "../schemas/phase.ts";
 
+// Measurement-only touchpoint for the focused-verification runtime trial.
+
 // ---------------------------------------------------------------------------
 // Task status diff
 //

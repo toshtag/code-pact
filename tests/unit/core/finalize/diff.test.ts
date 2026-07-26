@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+
+// Measurement-only touchpoint for the focused-verification runtime trial.
+
 import {
   computeTaskStatusDiff,
   formatTaskStatusDiff,
