@@ -1,0 +1,69 @@
+schema_version: 1
+task_id: P88-T1B
+phase_id: P88
+phase_path: design/phases/P88-claude-bootstrap-right-sizing.yaml
+base_ref: HEAD
+base_sha: a48e87354a59addc890b3eb9bf368b9e7c1564b2
+phase_blob_sha: ac0352c066d4a8630c0376a895a4edc909b64da2
+contract_digest: 585f88178e111c58f702d0f7db442730433225e9d1caaaa0a2ed91929f9e3087
+contract:
+  description: >
+    Close the `--accept-modified` correction where P88-T1A left it open: the
+    schema-v1 generated instruction body still tells the reader the flag
+    preserves manual edits, so codex, cursor, gemini-cli, and generic ship the
+    claim adapter doctor and the CLI contract no longer make. Align the
+    maintainer documentation and source comments that still describe model-aware
+    instruction generation with the model-neutral bootstrap.
+  reads:
+    - design/phases/P88-claude-bootstrap-right-sizing.yaml
+    - docs/cli-contract.md
+    - src/core/adapters/codex.ts
+    - src/core/adapters/generic.ts
+    - src/core/adapters/template-sections.ts
+    - tests/unit/commands/adapter-doctor.test.ts
+    - tests/unit/core/adapters/claude-bootstrap.test.ts
+  writes:
+    - design/phases/P88-claude-bootstrap-right-sizing.yaml
+    - docs/maintainers/operations.md
+    - src/commands/adapter-doctor.ts
+    - src/core/adapters/claude.ts
+    - src/core/models/catalog.ts
+    - src/core/schemas/agent-profile.ts
+    - src/i18n/en-US.ts
+    - src/i18n/ja-JP.ts
+    - tests/unit/commands/adapter.test.ts
+  depends_on:
+    - P88-T1A
+  decision_refs: []
+  acceptance_refs:
+    - tests/unit/commands/adapter.test.ts
+  definition_of_done:
+    - Adapter conformance selects its instruction-file contract from the
+      manifest adapter schema version, so schema-v1 installs keep the existing
+      checks
+    - The Claude model catalog carries the Claude 5 model ids for validation,
+      profile seeding, and advisory defaults
+    - The claude-code adapter declares adapter schema version 2
+    - The generated claude-code instruction file enumerates no lifecycle verb
+      set, no failure catalog, and no model selection guidance
+    - The generated claude-code instruction file is identical for every
+      supported Claude model version
+    - The generated claude-code instruction file presents `task prepare` as the
+      per-task entrypoint and names the progressive-disclosure fields the agent
+      reads from it
+    - The generated claude-code instruction file stays within the bootstrap
+      context budget
+    - The repository-gotcha section of the generated claude-code instruction
+      file is bounded
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm test:integration:smoke -- --no-file-parallelism --testTimeout=30000
+    - pnpm test:unit -- --no-file-parallelism --testTimeout=30000
+    - pnpm typecheck
+  base_sha: a48e87354a59addc890b3eb9bf368b9e7c1564b2
+  phase_blob_sha: ac0352c066d4a8630c0376a895a4edc909b64da2
+at: 2026-07-26T14:24:48.530Z
+actor: agent
+author: Pocket
