@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { extname } from "node:path";
+import { win32 as winPath } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
 export type ProcessTerminationResult = {
@@ -309,9 +309,24 @@ export type ResolveProcessLaunchInput = {
 };
 
 const JAVASCRIPT_EXTENSIONS = new Set([".js", ".cjs", ".mjs"]);
+/** Extensions Windows can start as a process image without an interpreter. */
+const WINDOWS_NATIVE_EXTENSIONS = new Set([".exe", ".com"]);
 
 const WINDOWS_SHIM_HINT =
   "on Windows a package-manager command is usually a .cmd shim, which only cmd.exe can run; cmd expands %VAR% while parsing, so this runner will not route arguments through it. Run the command through its package manager (which sets npm_execpath) or name a native executable.";
+
+/**
+ * `C:\\pnpm\\bin\\pnpm.cjs` and `pnpm` both reduce to `pnpm`.
+ *
+ * Windows path semantics explicitly: the POSIX implementation does not treat
+ * `\` as a separator, so on a POSIX host — which is where these branches are
+ * unit-tested — it would return the whole path and never match.
+ */
+function commandIdentity(pathOrName: string): string {
+  return winPath
+    .basename(pathOrName, winPath.extname(pathOrName))
+    .toLowerCase();
+}
 
 /**
  * Decides how to start `program` so that every element of `args` reaches the
@@ -327,15 +342,22 @@ export function resolveProcessLaunch(
     return { executable: program, args };
   }
 
-  // The package manager's own JavaScript entrypoint, when the environment
-  // points at one. Preferred over the bare name so the `.cmd` shim that a
-  // Windows PATH lookup would find is never reached.
+  // The package manager's own entrypoint, when the environment points at one
+  // AND it is the program being asked for. The identity check matters: without
+  // it a `["node", "dist/cli.js"]` command would be rewritten to run pnpm's
+  // entrypoint with `dist/cli.js` as an argument.
   const execPath = env.npm_execpath;
-  if (
-    execPath !== undefined &&
-    JAVASCRIPT_EXTENSIONS.has(extname(execPath).toLowerCase())
-  ) {
-    return { executable: nodeExecPath, args: [execPath, ...args] };
+  if (execPath !== undefined && commandIdentity(execPath) === commandIdentity(program)) {
+    const extension = winPath.extname(execPath).toLowerCase();
+    // A JavaScript entrypoint needs Node; a packaged binary is already an image.
+    if (JAVASCRIPT_EXTENSIONS.has(extension)) {
+      return { executable: nodeExecPath, args: [execPath, ...args] };
+    }
+    if (WINDOWS_NATIVE_EXTENSIONS.has(extension)) {
+      return { executable: execPath, args };
+    }
+    // Anything else (a `.cmd` shim, most likely) is no better than the bare
+    // name, so fall through rather than pretend it is launchable.
   }
 
   // A named executable still launches directly. If it turns out to be a shim,
@@ -343,7 +365,9 @@ export function resolveProcessLaunch(
   return {
     executable: program,
     args,
-    ...(extname(program) === "" ? { spawnFailureHint: WINDOWS_SHIM_HINT } : {}),
+    ...(winPath.extname(program) === ""
+      ? { spawnFailureHint: WINDOWS_SHIM_HINT }
+      : {}),
   };
 }
 

@@ -155,12 +155,18 @@ describe("the package manager launches on this platform", () => {
       ["pnpm", "--version"],
     ]);
 
-    expect(results[0]?.stderr_excerpt ?? "").not.toContain(
-      "could not be resolved safely",
-    );
-    expect(results[0]?.exit_code).toBe(0);
-    expect(results[0]?.stdout_excerpt.trim()).toMatch(/^\d+\.\d+\.\d+/);
-    expect(ok).toBe(true);
+    // A launch failure here is platform-specific and expensive to reproduce, so
+    // carry the evidence into the assertion rather than a bare exit code.
+    const detail = [
+      `platform=${process.platform}`,
+      `npm_execpath=${process.env.npm_execpath ?? "(unset)"}`,
+      `exit=${results[0]?.exit_code}`,
+      `stderr=${results[0]?.stderr_excerpt ?? ""}`,
+    ].join(" | ");
+
+    expect(results[0]?.exit_code, detail).toBe(0);
+    expect(results[0]?.stdout_excerpt.trim(), detail).toMatch(/^\d+\.\d+\.\d+/);
+    expect(ok, detail).toBe(true);
   }, 60_000);
 
   it("keeps a hostile argument literal through the classifier path", async () => {

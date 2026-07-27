@@ -84,11 +84,43 @@ describe("resolveProcessLaunch — Windows", () => {
     }
   });
 
-  it("ignores an npm_execpath that is not a JavaScript file", () => {
-    // A `.cmd` in npm_execpath is the shim again, not an entrypoint Node runs.
+  it("launches a packaged package-manager binary directly", () => {
+    const result = resolve({ env: { npm_execpath: "C:\\pnpm\\pnpm.exe" } });
+
+    expect(result).toEqual({
+      executable: "C:\\pnpm\\pnpm.exe",
+      args: ["exec", "vitest", "run"],
+    });
+  });
+
+  it("ignores an npm_execpath that is neither JavaScript nor a native image", () => {
+    // A `.cmd` in npm_execpath is the shim again, not something we can launch.
     const result = resolve({ env: { npm_execpath: "C:\\pnpm\\pnpm.cmd" } });
 
     expect(result.executable).toBe("pnpm");
+  });
+
+  it("does not rewrite a command that is not the package manager", () => {
+    // Without an identity check, `node dist/cli.js` would be turned into
+    // `node <pnpm entrypoint> dist/cli.js` — a different program entirely.
+    const result = resolve({
+      program: "node",
+      args: ["dist/cli.js", "--version"],
+      env: { npm_execpath: PNPM_ENTRYPOINT },
+    });
+
+    expect(result.executable).toBe("node");
+    expect(result.args).toEqual(["dist/cli.js", "--version"]);
+  });
+
+  it("matches the package manager regardless of the program's extension", () => {
+    const result = resolve({
+      program: "pnpm.CMD",
+      env: { npm_execpath: PNPM_ENTRYPOINT },
+    });
+
+    expect(result.executable).toBe(NODE);
+    expect(result.args[0]).toBe(PNPM_ENTRYPOINT);
   });
 
   it("launches a named executable directly", () => {
