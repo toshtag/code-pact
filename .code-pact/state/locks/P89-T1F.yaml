@@ -1,0 +1,66 @@
+schema_version: 1
+task_id: P89-T1F
+phase_id: P89
+phase_path: design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+base_ref: HEAD
+base_sha: 4c6fc76f6b7955de0d330864bed842e714fc3f63
+phase_blob_sha: 97b8d9ab7b0495a2d7e7e3fe491f610b7981ba08
+contract_digest: c495926f95d5ea74e67b2248b6492ad31519aedee0d95663feee4d162c81d81d
+contract:
+  description: >
+    Restore parity between project-config filesystem authority exports and the
+    fs-authority checker's trusted registry. The verification ledger already
+    resolves its read and write paths through narrow branded authorities, but
+    the registry omits those resolver exports and therefore reports four false
+    authority findings. Register the direct authority exports and their
+    project-fs/index re-exports from one shared map, verify read/write
+    capability matching, and make the global fs-authority and release gates pass
+    without changing the ledger or broadening an allowlist.
+  reads:
+    - scripts/check-fs-authority.mjs
+    - src/core/project-fs/authorities/project-config-authority.ts
+    - src/core/project-fs/index.ts
+    - src/core/verification-ledger.ts
+    - tests/unit/scripts/check-fs-authority.test.ts
+  writes:
+    - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+    - scripts/check-fs-authority.mjs
+    - tests/unit/scripts/check-fs-authority.test.ts
+  depends_on:
+    - P89-T1E
+  decision_refs: []
+  acceptance_refs:
+    - tests/unit/scripts/check-fs-authority.test.ts
+  definition_of_done:
+    - Bounded-process tests do not depend on shared-runner wall-clock ceilings
+    - CI assertion failures identify the exact test and assertion
+    - Native executables and JavaScript entrypoints execute with canonical argv.
+      Windows batch shims accept only a verified cmd-safe subset and fail closed
+      before spawning for all other arguments or paths
+    - Phase status mutation preserves every non-target source byte
+    - The global fs-authority gate recognizes verification-ledger path
+      authorities through both their defining module and project-fs/index
+      re-export, while capability mismatches remain rejected
+    - The verification command contract is validated at the producer-consumer
+      boundary, so review-bundle and ci-parity run the classifier commands the
+      scope script actually emits
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm exec vitest run
+      tests/unit/core/finalize/task-status-source-edit.test.ts
+      tests/unit/core/finalize/safe-write.test.ts
+      tests/unit/commands/task-finalize.test.ts
+      tests/unit/commands/phase-reconcile.test.ts
+      tests/unit/core/verify/classify.test.ts
+      tests/unit/core/review-bundle.test.ts
+      tests/unit/commands/review-bundle.test.ts
+      tests/unit/scripts/vitest-ci-reporter.test.ts
+      tests/unit/scripts/run-bounded-process.test.ts
+    - pnpm typecheck
+  base_sha: 4c6fc76f6b7955de0d330864bed842e714fc3f63
+  phase_blob_sha: 97b8d9ab7b0495a2d7e7e3fe491f610b7981ba08
+at: 2026-07-27T08:14:54.692Z
+actor: agent
+author: Pocket
