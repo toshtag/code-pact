@@ -21,7 +21,7 @@ definition_of_done:
     boundary, so review-bundle and ci-parity run the classifier commands the
     scope script actually emits
   - Classifier commands execute as their canonical argv, so no argument or
-    changed-file path is re-interpreted by a shell
+    changed-file path is re-interpreted by a shell, on every supported platform
   - CI assertion failures identify the exact test and assertion
   - Bounded-process tests do not depend on shared-runner wall-clock ceilings
 verification:
@@ -157,6 +157,43 @@ tasks:
     acceptance_refs:
       - tests/unit/core/verify/classify.test.ts
       - tests/unit/core/bounded-command-argv.test.ts
+  - id: P89-T1C
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: >
+      Preserve canonical verification argv semantics on Windows. P89-T1B spawns
+      the classifier argv with no shell, but a Windows `pnpm` is a `.cmd` shim
+      that cannot be spawned that way, so the classifier would not launch at
+      all. Native executables run directly, the package-manager command
+      resolves through its JavaScript entrypoint, and a bare `.cmd` / `.bat`
+      shim fails closed rather than routing arguments back through a shell that
+      would re-interpret them. Cover the argv runner and the real package
+      manager launch on Windows deep CI.
+    requires_decision: false
+    depends_on:
+      - P89-T1B
+    reads:
+      - src/core/process/bounded-command.ts
+      - src/core/verify/classify.ts
+      - scripts/verification-scope.mjs
+      - .github/workflows/ci-deep.yml
+      - tests/unit/core/bounded-command-argv.test.ts
+      - tests/unit/commands/verify-process.test.ts
+    writes:
+      - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+      - src/core/process/bounded-command.ts
+      - tests/unit/core/bounded-command-argv.test.ts
+      - tests/unit/core/windows-command-launch.test.ts
+      - .github/workflows/ci-deep.yml
+    acceptance_refs:
+      - tests/unit/core/bounded-command-argv.test.ts
+      - tests/unit/core/windows-command-launch.test.ts
   - id: P89-T2
     type: bugfix
     ambiguity: low
@@ -172,7 +209,7 @@ tasks:
       rerun.
     requires_decision: false
     depends_on:
-      - P89-T1B
+      - P89-T1C
   - id: P89-T3
     type: bugfix
     ambiguity: low
