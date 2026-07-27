@@ -1,0 +1,75 @@
+schema_version: 1
+task_id: P89-T1E
+phase_id: P89
+phase_path: design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+base_ref: HEAD
+base_sha: 00e33a63b4e3df3b118c6fa43b7e304fa9c7df0e
+phase_blob_sha: 893b32ececddf9c647a363d46b64a4b33b6ba1a5
+contract_digest: e349a6a6485410d9854329f669a431e7492859af7dbc8ab4d1bec80fc71c52cd
+contract:
+  description: >
+    Make the Windows batch-shim boundary fail closed. P89-T1D claimed exact argv
+    across every platform, but the `.cmd` launcher escapes carets and quotes
+    while passing CR and LF through untouched — a newline terminates a cmd
+    command line, so the argument becomes a second command. No runtime test ever
+    put a hostile argument through a real shim; the literal-argv evidence
+    covered the pure resolver and the native launch only. Native and JavaScript
+    launches keep exact argv; a batch launch is permitted only for a verified
+    cmd-safe subset and refuses before spawning otherwise. Narrow the resolver's
+    filesystem authority from every raw operation in the module to the two
+    read-only existence probes it actually performs.
+  reads:
+    - .github/workflows/ci-deep.yml
+    - scripts/check-fs-authority.mjs
+    - src/core/process/bounded-command.ts
+    - src/core/process/executable-resolution.ts
+    - tests/unit/core/bounded-command-argv.test.ts
+    - tests/unit/core/executable-resolution.test.ts
+    - tests/unit/core/windows-command-launch.test.ts
+    - tests/unit/scripts/check-fs-authority.test.ts
+  writes:
+    - .github/workflows/ci-deep.yml
+    - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+    - scripts/check-fs-authority.mjs
+    - src/core/process/bounded-command.ts
+    - src/core/process/executable-resolution.ts
+    - tests/unit/core/bounded-command-argv.test.ts
+    - tests/unit/core/executable-resolution.test.ts
+    - tests/unit/core/windows-command-launch.test.ts
+    - tests/unit/scripts/check-fs-authority.test.ts
+  depends_on:
+    - P89-T1D
+  decision_refs: []
+  acceptance_refs:
+    - tests/unit/core/windows-command-launch.test.ts
+    - tests/unit/scripts/check-fs-authority.test.ts
+  definition_of_done:
+    - Bounded-process tests do not depend on shared-runner wall-clock ceilings
+    - CI assertion failures identify the exact test and assertion
+    - Native executables and JavaScript entrypoints execute with canonical argv.
+      Windows batch shims accept only a verified cmd-safe subset and fail closed
+      before spawning for all other arguments or paths
+    - Phase status mutation preserves every non-target source byte
+    - The verification command contract is validated at the producer-consumer
+      boundary, so review-bundle and ci-parity run the classifier commands the
+      scope script actually emits
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm exec vitest run
+      tests/unit/core/finalize/task-status-source-edit.test.ts
+      tests/unit/core/finalize/safe-write.test.ts
+      tests/unit/commands/task-finalize.test.ts
+      tests/unit/commands/phase-reconcile.test.ts
+      tests/unit/core/verify/classify.test.ts
+      tests/unit/core/review-bundle.test.ts
+      tests/unit/commands/review-bundle.test.ts
+      tests/unit/scripts/vitest-ci-reporter.test.ts
+      tests/unit/scripts/run-bounded-process.test.ts
+    - pnpm typecheck
+  base_sha: 00e33a63b4e3df3b118c6fa43b7e304fa9c7df0e
+  phase_blob_sha: 893b32ececddf9c647a363d46b64a4b33b6ba1a5
+at: 2026-07-27T05:25:14.824Z
+actor: agent
+author: Pocket
