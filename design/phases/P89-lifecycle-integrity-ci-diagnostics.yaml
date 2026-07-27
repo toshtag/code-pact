@@ -128,7 +128,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Execute verification-scope commands as their canonical flat argv without
       reconstructing a shell command. P89-T1A validated the argv at the parse
