@@ -1,6 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { win32 as winPath } from "node:path";
+import {
+  resolveExecutable,
+  type ExecutableResolution,
+} from "./executable-resolution.ts";
 import { StringDecoder } from "node:string_decoder";
 
 export type ProcessTerminationResult = {
@@ -254,120 +257,49 @@ function cleanupChildHandles(proc: ChildProcess): void {
 }
 
 // ---------------------------------------------------------------------------
-// Platform launch resolution
+// Launching a resolved executable
 //
 // `runBoundedArgv` promises that each argv element reaches the child unchanged.
-// On POSIX that is exactly what `spawn(program, args, { shell: false })` does.
+// WHICH image a program name starts is an OS question, answered by
+// `executable-resolution.ts` — that module owns the PATH/PATHEXT probe and is
+// the only place in src/ that touches the filesystem for it. This module takes
+// the resolution and starts it; it imports no filesystem module.
 //
-// Windows is different in a way that matters here: the verification classifier
-// emits `["pnpm", ...]`, and a Windows `pnpm` is normally the batch shim
-// `pnpm.cmd`. A `.cmd` is not an executable image — it needs `cmd.exe` — and
-// Node refuses to spawn one without a shell (the CVE-2024-27980 mitigation).
-// So the argv path would simply not launch there.
-//
-// Routing it through `cmd.exe` is NOT a fix. When cmd parses a command line for
-// a batch file it expands `%VAR%` during parsing, and the caller cannot escape
-// that away — `windowsVerbatimArguments` does not help. A shim launcher would
-// have to either corrupt arguments containing `%` or reject them, and a `%` is
-// legal in a changed-file path. Both outcomes break the contract this module
-// exists to keep, so a bare shim FAILS CLOSED with a message the caller can act
-// on, rather than silently changing what runs.
-//
-// What is safe, and what covers every command the classifier actually emits:
-// launch the package manager's JavaScript entrypoint with the Node binary. That
-// is a native image and plain argv, so the guarantee holds. It is also exactly
-// what `scripts/verification-scope.mjs` already does for its own steps.
-//
-// Nothing here touches the filesystem — src/ reaches the filesystem only
-// through the project-fs authorities, and a PATH probe would be outside any
-// project authority. Resolution is therefore syntactic: when it cannot produce
-// a launch that keeps argv intact, the spawn itself refuses (Node will not run
-// a `.cmd` without a shell) and the caller gets the reason. A wrong guess fails
-// loudly; it never silently runs something else.
-//
-// Platform, environment, and the Node binary are injected, so the Windows
-// branches are testable from any host.
+// Three shapes come back. A `direct` launch is `spawn(exe, args, {shell:false})`
+// and argv survives verbatim. A `windows-shim` is a `.cmd` / `.bat`, which only
+// cmd.exe can run — that goes through the dedicated launcher below, never a
+// general `shell: true`. An `unresolvable` program is refused before any spawn.
 // ---------------------------------------------------------------------------
 
-export type ProcessLaunch = {
-  executable: string;
-  args: string[];
-  /**
-   * Appended to stderr when the spawn itself fails, so an operator sees why a
-   * platform could not start the program rather than a bare errno.
-   */
-  spawnFailureHint?: string;
-};
-
-export type ResolveProcessLaunchInput = {
-  program: string;
-  args: readonly string[];
-  platform: NodeJS.Platform;
-  env: NodeJS.ProcessEnv;
-  /** The Node binary used to run a JavaScript entrypoint. */
-  nodeExecPath: string;
-};
-
-const JAVASCRIPT_EXTENSIONS = new Set([".js", ".cjs", ".mjs"]);
-/** Extensions Windows can start as a process image without an interpreter. */
-const WINDOWS_NATIVE_EXTENSIONS = new Set([".exe", ".com"]);
-
-const WINDOWS_SHIM_HINT =
-  "on Windows a package-manager command is usually a .cmd shim, which only cmd.exe can run; cmd expands %VAR% while parsing, so this runner will not route arguments through it. Run the command through its package manager (which sets npm_execpath) or name a native executable.";
-
 /**
- * `C:\\pnpm\\bin\\pnpm.cjs` and `pnpm` both reduce to `pnpm`.
+ * Quotes one argument for a `cmd.exe /c` command line.
  *
- * Windows path semantics explicitly: the POSIX implementation does not treat
- * `\` as a separator, so on a POSIX host — which is where these branches are
- * unit-tested — it would return the whole path and never match.
+ * Two layers, in order: the C runtime's argv rules so the child parses the
+ * argument back out whole, then a caret escape of every character cmd itself
+ * acts on, so cmd hands that quoted form through instead of interpreting it.
  */
-function commandIdentity(pathOrName: string): string {
-  return winPath
-    .basename(pathOrName, winPath.extname(pathOrName))
-    .toLowerCase();
+function escapeForCmd(arg: string): string {
+  const quoted = `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, "$1$1")}"`;
+  return quoted.replace(/([()\][%!^"`<>&|;, *?])/g, "^$1");
 }
 
 /**
- * Decides how to start `program` so that every element of `args` reaches the
- * child unchanged. Never produces a shell command.
+ * Builds the `cmd.exe` invocation for a batch shim.
+ *
+ * `/d` skips AutoRun commands from the registry, so a machine-local setting
+ * cannot inject work into a verification run. `/s` fixes how the outer quotes
+ * are stripped, and `windowsVerbatimArguments` stops Node from re-quoting the
+ * line we just built.
  */
-export function resolveProcessLaunch(
-  input: ResolveProcessLaunchInput,
-): ProcessLaunch {
-  const { program, platform, env, nodeExecPath } = input;
-  const args = [...input.args];
-
-  if (platform !== "win32") {
-    return { executable: program, args };
-  }
-
-  // The package manager's own entrypoint, when the environment points at one
-  // AND it is the program being asked for. The identity check matters: without
-  // it a `["node", "dist/cli.js"]` command would be rewritten to run pnpm's
-  // entrypoint with `dist/cli.js` as an argument.
-  const execPath = env.npm_execpath;
-  if (execPath !== undefined && commandIdentity(execPath) === commandIdentity(program)) {
-    const extension = winPath.extname(execPath).toLowerCase();
-    // A JavaScript entrypoint needs Node; a packaged binary is already an image.
-    if (JAVASCRIPT_EXTENSIONS.has(extension)) {
-      return { executable: nodeExecPath, args: [execPath, ...args] };
-    }
-    if (WINDOWS_NATIVE_EXTENSIONS.has(extension)) {
-      return { executable: execPath, args };
-    }
-    // Anything else (a `.cmd` shim, most likely) is no better than the bare
-    // name, so fall through rather than pretend it is launchable.
-  }
-
-  // A named executable still launches directly. If it turns out to be a shim,
-  // Node refuses the spawn and the hint explains the refusal.
+function windowsShimSpawnArgs(
+  shimPath: string,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+): { executable: string; args: string[] } {
+  const line = [shimPath, ...args].map(escapeForCmd).join(" ");
   return {
-    executable: program,
-    args,
-    ...(winPath.extname(program) === ""
-      ? { spawnFailureHint: WINDOWS_SHIM_HINT }
-      : {}),
+    executable: env.ComSpec ?? env.COMSPEC ?? "cmd.exe",
+    args: ["/d", "/s", "/c", `"${line}"`],
   };
 }
 
@@ -439,9 +371,9 @@ export async function runBoundedCommand(
  * the same argv into a shell line and running that is not equivalent: JSON
  * quoting is not shell quoting, and a double-quoted `$(...)` is still expanded.
  *
- * How `program` becomes a process image is platform-dependent — see
- * {@link resolveProcessLaunch}. When no launch can preserve the argv, this
- * refuses rather than falling back to a shell.
+ * Which image `program` names is platform-dependent — see
+ * {@link resolveExecutable}. When nothing can start it with its argv intact,
+ * this refuses rather than falling back to a shell.
  */
 export async function runBoundedArgv(
   program: string,
@@ -450,25 +382,46 @@ export async function runBoundedArgv(
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<BoundedCommandResult> {
-  if (!program) return refusedBeforeStart("empty verification command program");
-  const launch = resolveProcessLaunch({
+  const resolution = resolveExecutable({
     program,
     args,
     platform: process.platform,
     env: process.env,
     nodeExecPath: process.execPath,
   });
+  return runResolvedExecutable(resolution, cwd, timeoutMs, signal);
+}
+
+/** Starts an already-resolved executable, or refuses an unresolvable one. */
+async function runResolvedExecutable(
+  resolution: ExecutableResolution,
+  cwd: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<BoundedCommandResult> {
+  if (resolution.kind === "unresolvable") {
+    return refusedBeforeStart(
+      `verification program could not be resolved safely: ${resolution.reason}`,
+    );
+  }
+  const spawned =
+    resolution.kind === "windows-shim"
+      ? windowsShimSpawnArgs(resolution.shimPath, resolution.args, process.env)
+      : { executable: resolution.executable, args: resolution.args };
+
   return superviseBoundedProcess(
     () =>
-      spawn(launch.executable, launch.args, {
+      spawn(spawned.executable, spawned.args, {
         cwd,
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
         detached: process.platform !== "win32",
+        ...(resolution.kind === "windows-shim"
+          ? { windowsVerbatimArguments: true }
+          : {}),
       }),
     timeoutMs,
     signal,
-    launch.spawnFailureHint,
   );
 }
 
@@ -482,7 +435,6 @@ async function superviseBoundedProcess(
   spawnChild: () => ChildProcess,
   timeoutMs: number,
   signal?: AbortSignal,
-  spawnFailureHint?: string,
 ): Promise<BoundedCommandResult> {
   if (signal?.aborted) return abortedBeforeStart();
 
@@ -507,9 +459,6 @@ async function superviseBoundedProcess(
   proc.once("close", code => settleClose({ exitCode: code }));
   proc.once("error", error => {
     stderr.append(Buffer.from(error.message));
-    if (spawnFailureHint) {
-      stderr.append(Buffer.from(`\n[code-pact: ${spawnFailureHint}]\n`));
-    }
     settleClose({ exitCode: null });
   });
 

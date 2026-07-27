@@ -91,7 +91,8 @@ describe("runBoundedArgv — arguments are not interpreted by a shell", () => {
     const result = await runBoundedArgv("", [], dir, 10_000);
 
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("empty verification command program");
+    expect(result.stderr).toContain("could not be resolved safely");
+    expect(result.stderr).toContain("the program is empty");
     expect(result.elapsedMs).toBe(0);
   });
 });

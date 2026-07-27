@@ -693,6 +693,15 @@ const RAW_FS_IMPORT_ALLOWLIST = new Set([
   join("src", "core", "path-safety.ts"),
   join("src", "io", "atomic-text.ts"),
   join("src", "lib", "package-version.ts"),
+  // — OS executable namespace (NOT project filesystem authority) —
+  // Resolving a program name against PATH + PATHEXT answers "what image would
+  // the OS start", not "does the project own this path". PATH entries are
+  // system directories no project authority owns, so the authority helpers
+  // cannot express the question. The exception is deliberately one module wide
+  // and read-only: existence probes of launch candidates, never file content,
+  // never a write. `bounded-command.ts` consumes the resolution and imports no
+  // filesystem module itself.
+  join("src", "core", "process", "executable-resolution.ts"),
 ]);
 
 // Result properties that extract a path from an authority result object.
