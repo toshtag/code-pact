@@ -115,14 +115,25 @@ function formatValue(value) {
   }
 }
 
-function hasComparisonValue(error, key) {
-  if (typeof error !== "object" || error === null) return false;
-  try {
-    if (!(key in error)) return false;
-  } catch {
-    return false;
+// Presence decides whether a comparison line is printed; the value decides what
+// it says. An assertion that failed on an explicit `undefined` still carries the
+// property, and dropping that line would hide the value that failed.
+function readComparisonValue(error, key) {
+  if (typeof error !== "object" || error === null) {
+    return { present: false };
   }
-  return safeRead(error, key) !== undefined;
+  try {
+    if (!(key in error)) {
+      return { present: false };
+    }
+  } catch {
+    return { present: false };
+  }
+  try {
+    return { present: true, value: error[key] };
+  } catch {
+    return { present: true, value: "<unreadable value>" };
+  }
 }
 
 function errorList(errors) {
@@ -150,16 +161,16 @@ function emitFailedCase(path, fullName, errors) {
     console.error(
       `[vitest:assertion] ${context}: ${bounded(errorMessage(error), MAX_MESSAGE_BYTES)}`,
     );
-    if (hasComparisonValue(error, "expected")) {
-      const expected = formatValue(safeRead(error, "expected"));
+    const expected = readComparisonValue(error, "expected");
+    if (expected.present) {
       console.error(
-        `[vitest:expected] ${context}: ${bounded(expected, MAX_VALUE_BYTES)}`,
+        `[vitest:expected] ${context}: ${bounded(formatValue(expected.value), MAX_VALUE_BYTES)}`,
       );
     }
-    if (hasComparisonValue(error, "actual")) {
-      const actual = formatValue(safeRead(error, "actual"));
+    const actual = readComparisonValue(error, "actual");
+    if (actual.present) {
       console.error(
-        `[vitest:actual] ${context}: ${bounded(actual, MAX_VALUE_BYTES)}`,
+        `[vitest:actual] ${context}: ${bounded(formatValue(actual.value), MAX_VALUE_BYTES)}`,
       );
     }
   }

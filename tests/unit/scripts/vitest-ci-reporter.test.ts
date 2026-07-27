@@ -10,6 +10,10 @@ import type { TestErrorLike } from "../../../scripts/vitest-ci-reporter.mjs";
 
 // prefix + bounded context + bounded value, with room for the separator.
 const MAX_DIAGNOSTIC_LINE_BYTES = 3072;
+// Lifetime and output caps for the nested Vitest child, so a child that hangs
+// or floods cannot hold the CI job.
+const NESTED_VITEST_TIMEOUT_MS = 60_000;
+const NESTED_VITEST_MAX_OUTPUT_BYTES = 1024 * 1024;
 const ANSI_CONTROL = /[\u001B\u009B]/;
 
 describe("VitestCiReporter", () => {
@@ -196,6 +200,59 @@ describe("VitestCiReporter", () => {
     expect(errors).toEqual([]);
   });
 
+  it("reports comparison properties whose value is undefined", () => {
+    const reporter = new VitestCiReporter();
+    const file = "tests/unit/undefined.test.ts";
+    const fullName = "suite > undefined comparison";
+    reporter.onTestCaseResult(
+      failedCase(file, fullName, [
+        {
+          message: "expected undefined to be defined",
+          expected: "defined",
+          actual: undefined,
+        },
+      ]),
+    );
+
+    const context = `${file} > ${fullName}`;
+    expect(errors).toContain(`[vitest:expected] ${context}: defined`);
+    expect(errors).toContain(`[vitest:actual] ${context}: undefined`);
+  });
+
+  it("omits comparison lines when the property is absent", () => {
+    const reporter = new VitestCiReporter();
+    reporter.onTestCaseResult(
+      failedCase("tests/unit/a.test.ts", "suite > plain failure", [
+        { message: "plain error" },
+      ]),
+    );
+
+    expect(errors).toEqual([
+      "[vitest:failed] tests/unit/a.test.ts > suite > plain failure",
+      "[vitest:assertion] tests/unit/a.test.ts > suite > plain failure: plain error",
+    ]);
+  });
+
+  it("survives a comparison accessor that throws", () => {
+    const reporter = new VitestCiReporter();
+    const file = "tests/unit/a.test.ts";
+    const fullName = "suite > throwing accessor";
+    const error = {
+      message: "comparison getter failed",
+      get actual() {
+        throw new Error("do not propagate");
+      },
+    };
+
+    expect(() =>
+      reporter.onTestCaseResult(failedCase(file, fullName, [error])),
+    ).not.toThrow();
+
+    expect(errors).toContain(
+      `[vitest:actual] ${file} > ${fullName}: <unreadable value>`,
+    );
+  });
+
   it("bounds diagnostics to single lines without control sequences", () => {
     const reporter = new VitestCiReporter();
     const circular: Record<string, unknown> = { name: "cycle" };
@@ -284,6 +341,9 @@ describe("VitestCiReporter against a real Vitest run", () => {
           '  it("a failing assertion inside a test case", () => {',
           "    expect(1 + 1).toBe(3);",
           "  });",
+          '  it("reports undefined as the actual value", () => {',
+          '    expect(undefined).toBe("defined");',
+          "  });",
           "});",
           "",
         ].join("\n"),
@@ -305,10 +365,22 @@ describe("VitestCiReporter against a real Vitest run", () => {
           "reporter-repro.test.ts",
           `--reporter=${reporterPath}`,
         ],
-        { encoding: "utf8", env },
+        {
+          encoding: "utf8",
+          env,
+          // spawnSync blocks the event loop, so the surrounding Vitest timeout
+          // cannot interrupt a child that never exits. These caps are the
+          // hang-safety boundary for that child — not a speed assertion.
+          timeout: NESTED_VITEST_TIMEOUT_MS,
+          killSignal: "SIGKILL",
+          maxBuffer: NESTED_VITEST_MAX_OUTPUT_BYTES,
+          windowsHide: true,
+        },
       );
 
       const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+      expect(result.error).toBeUndefined();
+      expect(result.signal).toBeNull();
       expect(result.status).not.toBe(0);
       expect(output).toMatch(/\[vitest:done\] .*failed/);
       expect(output).toMatch(
@@ -319,6 +391,21 @@ describe("VitestCiReporter against a real Vitest run", () => {
       );
       expect(output).toMatch(/\[vitest:expected\] .*: 3$/m);
       expect(output).toMatch(/\[vitest:actual\] .*: 2$/m);
+
+      const undefinedCase =
+        /reporter-repro\.test\.ts > repro > reports undefined as the actual value/;
+      expect(output).toMatch(
+        new RegExp(`\\[vitest:failed\\] \\S*${undefinedCase.source}`),
+      );
+      expect(output).toMatch(
+        new RegExp(`\\[vitest:assertion\\] \\S*${undefinedCase.source}:`),
+      );
+      expect(output).toMatch(
+        new RegExp(`\\[vitest:expected\\] \\S*${undefinedCase.source}: .*defined`),
+      );
+      expect(output).toMatch(
+        new RegExp(`\\[vitest:actual\\] \\S*${undefinedCase.source}: undefined$`, "m"),
+      );
     } finally {
       rmSync(workDir, { recursive: true, force: true });
     }
