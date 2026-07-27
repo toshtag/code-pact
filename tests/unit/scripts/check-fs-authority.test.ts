@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
@@ -8,6 +9,10 @@ import { fileURLToPath } from "node:url";
 
 // @ts-expect-error .mjs scripts are not included in tsconfig and are imported as untyped modules across the test suite.
 import { checkSourceText as checkSourceTextUntyped } from "../../../scripts/check-fs-authority.mjs";
+// @ts-expect-error .mjs scripts are not included in tsconfig and are imported as untyped modules across the test suite.
+import { registeredAuthorityExportsFor as registeredAuthorityExportsForUntyped } from "../../../scripts/check-fs-authority.mjs";
+// @ts-expect-error .mjs scripts are not included in tsconfig and are imported as untyped modules across the test suite.
+import tsCompilerApi from "../../../scripts/lib/typescript-compiler-api.mjs";
 
 type FsAuthorityFinding = { line: number; fn: string; arg?: string };
 
@@ -16,6 +21,16 @@ const checkSourceText = checkSourceTextUntyped as (input: {
   relPath: string;
   sourceText: string;
 }) => FsAuthorityFinding[];
+
+/** The trusted registry for one module, as a copy the caller may not mutate. */
+const registeredAuthorityExportsFor =
+  registeredAuthorityExportsForUntyped as (
+    relPath: string,
+  ) => Map<string, string>;
+
+// The same pinned compiler API the checker parses with, so the parity test
+// reads the module exactly as the gate does.
+const ts = tsCompilerApi as typeof import("typescript-compiler-api");
 
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -1519,5 +1534,220 @@ describe("check-fs-authority — the executable resolver's narrow exception", ()
     ]);
 
     expect(findings.map(f => f.arg)).toContain("readdirSync");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Registry parity with the project-config authority module.
+//
+// The gate trusts a resolver by name. A resolver that exists, is re-exported,
+// and is called with the right capability is still reported as unauthorized
+// when the registry has never heard of it — the failure looks like a call-site
+// bug and invites "fixing" a correct call site. These tests hold the registry
+// to the module's real export surface from both import paths, so the next
+// resolver added to project-config-authority.ts cannot be trusted through one
+// path and unknown through the other.
+// ---------------------------------------------------------------------------
+
+describe("check-fs-authority — project-config authority registry parity", () => {
+  const projectConfigAuthorityModule = join(
+    "src",
+    "core",
+    "project-fs",
+    "authorities",
+    "project-config-authority.ts",
+  );
+  const projectFsIndexModule = join(
+    "src",
+    "core",
+    "project-fs",
+    "index.ts",
+  );
+
+  function parseModule(relPath: string) {
+    const absPath = join(repoRoot, relPath);
+    return ts.createSourceFile(
+      absPath,
+      readFileSync(absPath, "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+  }
+
+  /** Exported function declaration names, in source order. */
+  function exportedFunctionNames(relPath: string): string[] {
+    const names: string[] = [];
+    for (const stmt of parseModule(relPath).statements) {
+      if (!ts.isFunctionDeclaration(stmt) || stmt.name === undefined) continue;
+      const exported = stmt.modifiers?.some(
+        m => m.kind === ts.SyntaxKind.ExportKeyword,
+      );
+      if (exported === true) names.push(stmt.name.text);
+    }
+    return names;
+  }
+
+  /** Names index.ts re-exports from one module, in source order. */
+  function reExportedNames(relPath: string, fromModule: string): string[] {
+    const names: string[] = [];
+    for (const stmt of parseModule(relPath).statements) {
+      if (!ts.isExportDeclaration(stmt)) continue;
+      const specifier = stmt.moduleSpecifier;
+      if (specifier === undefined || !ts.isStringLiteral(specifier)) continue;
+      if (specifier.text !== fromModule) continue;
+      const clause = stmt.exportClause;
+      if (clause === undefined || !ts.isNamedExports(clause)) continue;
+      for (const element of clause.elements) names.push(element.name.text);
+    }
+    return names;
+  }
+
+  it("registers every path resolver the defining module exports", () => {
+    const registered = registeredAuthorityExportsFor(
+      projectConfigAuthorityModule,
+    );
+
+    // Every export of this module is a path resolver. Should that stop being
+    // true, list the non-authority export here explicitly — never let a name
+    // through on a naming guess.
+    const nonAuthorityExports = new Set<string>();
+    const expected = exportedFunctionNames(projectConfigAuthorityModule).filter(
+      name => !nonAuthorityExports.has(name),
+    );
+
+    expect(expected.length).toBeGreaterThan(0);
+    expect([...registered.keys()].sort()).toEqual([...expected].sort());
+  });
+
+  it("registers the index re-exports with the defining module's kinds", () => {
+    const defining = registeredAuthorityExportsFor(
+      projectConfigAuthorityModule,
+    );
+    const viaIndex = registeredAuthorityExportsFor(projectFsIndexModule);
+    const reExported = reExportedNames(
+      projectFsIndexModule,
+      "./authorities/project-config-authority.ts",
+    );
+
+    expect(reExported.length).toBeGreaterThan(0);
+    expect(
+      reExported.map(name => [name, viaIndex.get(name)]),
+    ).toEqual(reExported.map(name => [name, defining.get(name)]));
+  });
+
+  it("does not register an index authority the index does not re-export", () => {
+    const viaIndex = registeredAuthorityExportsFor(projectFsIndexModule);
+    const reExported = new Set(
+      reExportedNames(
+        projectFsIndexModule,
+        "./authorities/project-config-authority.ts",
+      ),
+    );
+    const definedElsewhere = new Set(
+      exportedFunctionNames(projectConfigAuthorityModule).filter(
+        name => !reExported.has(name),
+      ),
+    );
+
+    expect(definedElsewhere.size).toBeGreaterThan(0);
+    expect(
+      [...viaIndex.keys()].filter(name => definedElsewhere.has(name)),
+    ).toEqual([]);
+  });
+});
+
+describe("check-fs-authority — verification ledger path authorities", () => {
+  const ledgerPath = "src/core/verification-ledger.ts";
+
+  function checkLedgerSource(lines: string[]): FsAuthorityFinding[] {
+    return checkSourceText({
+      relPath: ledgerPath,
+      sourceText: lines.join("\n"),
+    });
+  }
+
+  const indexImport = [
+    "import {",
+    "  lstatOwned,",
+    "  mkdirOwned,",
+    "  readOwnedText,",
+    "  writeOwnedText,",
+    "  resolveVerificationLedgerReadPath,",
+    "  resolveVerificationLedgerWritePath,",
+    "  resolveVerificationRunsDirWritePath,",
+    "  resolveVerificationStateReadPath,",
+    '} from "./project-fs/index.ts";',
+    "",
+  ];
+
+  const directImport = [
+    "import {",
+    "  lstatOwned,",
+    "  mkdirOwned,",
+    "  readOwnedText,",
+    "  writeOwnedText,",
+    '} from "./project-fs/index.ts";',
+    "import {",
+    "  resolveVerificationLedgerReadPath,",
+    "  resolveVerificationLedgerWritePath,",
+    "  resolveVerificationRunsDirWritePath,",
+    "  resolveVerificationStateReadPath,",
+    '} from "./project-fs/authorities/project-config-authority.ts";',
+    "",
+  ];
+
+  // Both propagation shapes the ledger actually uses: the resolver result held
+  // in a local variable, and the awaited resolver handed straight to the sink.
+  const ledgerCalls = [
+    "export async function verify(cwd: string, path: string): Promise<void> {",
+    "  const readPath = await resolveVerificationStateReadPath(cwd, path);",
+    "  await lstatOwned(readPath);",
+    "  await readOwnedText(await resolveVerificationLedgerReadPath(cwd));",
+    "  await mkdirOwned(await resolveVerificationRunsDirWritePath(cwd), {",
+    "    recursive: true,",
+    "  });",
+    '  await writeOwnedText(await resolveVerificationLedgerWritePath(cwd), "entry\\n");',
+    "}",
+    "",
+  ];
+
+  it("accepts the ledger's real call shapes through the index re-export", () => {
+    expect(checkLedgerSource([...indexImport, ...ledgerCalls])).toEqual([]);
+  });
+
+  it("accepts the same call shapes imported from the defining module", () => {
+    expect(checkLedgerSource([...directImport, ...ledgerCalls])).toEqual([]);
+  });
+
+  it("rejects the ledger read authority at a write sink", () => {
+    const findings = checkLedgerSource([
+      ...indexImport,
+      "export async function verify(cwd: string): Promise<void> {",
+      "  await writeOwnedText(",
+      "    await resolveVerificationLedgerReadPath(cwd),",
+      '    "must fail",',
+      "  );",
+      "}",
+      "",
+    ]);
+
+    expect(findings.map(f => f.fn)).toContain("writeOwnedText");
+    expect(findings.map(f => f.arg).join(" ")).toContain(
+      "resolveVerificationLedgerReadPath",
+    );
+  });
+
+  it("rejects a raw path at a ledger write sink", () => {
+    const findings = checkLedgerSource([
+      ...indexImport,
+      "export async function verify(cwd: string): Promise<void> {",
+      "  await mkdirOwned(cwd, { recursive: true });",
+      "}",
+      "",
+    ]);
+
+    expect(findings.map(f => f.fn)).toContain("mkdirOwned");
+    expect(findings.map(f => f.arg)).toContain("cwd");
   });
 });
