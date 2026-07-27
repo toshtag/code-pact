@@ -165,7 +165,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Preserve canonical verification argv semantics on Windows. P89-T1B spawns
       the classifier argv with no shell, but a Windows `pnpm` is a `.cmd` shim
