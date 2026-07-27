@@ -1,0 +1,104 @@
+id: P89
+name: Lifecycle Integrity and CI Diagnostics
+weight: 1
+confidence: high
+risk: medium
+status: in_progress
+objective: >
+  Eliminate silent lifecycle data loss and CI failure modes that cause
+  unnecessary diagnosis, reruns, and agent repair rounds. Phase status mutation
+  becomes a source edit that touches only the selected task status scalar, CI
+  assertion failures name the test case and the assertion that failed, and the
+  bounded-process tests stop asserting shared-runner wall-clock ceilings.
+non_goals:
+  - Add product features unrelated to lifecycle or CI diagnostics
+  - Change adapter or model behavior
+  - Add a new benchmark or telemetry system
+  - Clean ignored files or retire historical task specs
+definition_of_done:
+  - Phase status mutation preserves every non-target source byte
+  - CI assertion failures identify the exact test and assertion
+  - Bounded-process tests do not depend on shared-runner wall-clock ceilings
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm exec vitest run tests/unit/core/finalize/task-status-source-edit.test.ts
+      tests/unit/core/finalize/safe-write.test.ts
+      tests/unit/commands/task-finalize.test.ts
+      tests/unit/commands/phase-reconcile.test.ts
+      tests/unit/scripts/vitest-ci-reporter.test.ts
+      tests/unit/scripts/run-bounded-process.test.ts
+    - pnpm build
+    - pnpm check:docs
+    - git diff --check
+tasks:
+  - id: P89-T1
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Replace phase-model reserialization in finalize/reconcile writes with a
+      lossless, CAS-guarded source edit that changes only the selected task
+      status scalar and preserves evidence, unknown keys, comments, and
+      formatting.
+    requires_decision: false
+    depends_on:
+      - P88-T1C
+    reads:
+      - src/core/finalize/safe-write.ts
+      - src/core/finalize/diff.ts
+      - src/commands/task-finalize.ts
+      - src/commands/phase-reconcile.ts
+      - src/core/schemas/phase.ts
+      - src/io/atomic-text.ts
+      - tests/unit/core/finalize/safe-write.test.ts
+      - tests/unit/commands/task-finalize.test.ts
+      - tests/unit/commands/phase-reconcile.test.ts
+    writes:
+      - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+      - src/core/finalize/task-status-source-edit.ts
+      - src/core/finalize/safe-write.ts
+      - tests/unit/core/finalize/task-status-source-edit.test.ts
+      - tests/unit/core/finalize/safe-write.test.ts
+      - tests/unit/commands/task-finalize.test.ts
+      - tests/unit/commands/phase-reconcile.test.ts
+    acceptance_refs:
+      - tests/unit/core/finalize/task-status-source-edit.test.ts
+      - tests/unit/core/finalize/safe-write.test.ts
+  - id: P89-T2
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: >
+      Make the CI Vitest reporter emit the failed test-case name and bounded
+      assertion diagnostics so CI failures do not require a speculative local
+      rerun.
+    requires_decision: false
+    depends_on:
+      - P89-T1
+  - id: P89-T3
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: >
+      Remove shared-runner wall-clock ceilings from run-bounded-process tests
+      and assert observable heartbeat and process-tree properties
+      deterministically.
+    requires_decision: false
+    depends_on:
+      - P89-T2

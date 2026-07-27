@@ -1,0 +1,58 @@
+schema_version: 1
+task_id: P89-T1
+phase_id: P89
+phase_path: design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+base_ref: HEAD
+base_sha: 626d573e7f8cbb4ce4600a5f891dd2c25113738c
+phase_blob_sha: 13a414cdc84748f7cbaf1b1a3cad3fd4063c7088
+contract_digest: bd7e86b366043fd215afc76e86da2a33ba619cd5aa37e5c5ea8f9b476c7a87f4
+contract:
+  description: >
+    Replace phase-model reserialization in finalize/reconcile writes with a
+    lossless, CAS-guarded source edit that changes only the selected task status
+    scalar and preserves evidence, unknown keys, comments, and formatting.
+  reads:
+    - src/commands/phase-reconcile.ts
+    - src/commands/task-finalize.ts
+    - src/core/finalize/diff.ts
+    - src/core/finalize/safe-write.ts
+    - src/core/schemas/phase.ts
+    - src/io/atomic-text.ts
+    - tests/unit/commands/phase-reconcile.test.ts
+    - tests/unit/commands/task-finalize.test.ts
+    - tests/unit/core/finalize/safe-write.test.ts
+  writes:
+    - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+    - src/core/finalize/safe-write.ts
+    - src/core/finalize/task-status-source-edit.ts
+    - tests/unit/commands/phase-reconcile.test.ts
+    - tests/unit/commands/task-finalize.test.ts
+    - tests/unit/core/finalize/safe-write.test.ts
+    - tests/unit/core/finalize/task-status-source-edit.test.ts
+  depends_on:
+    - P88-T1C
+  decision_refs: []
+  acceptance_refs:
+    - tests/unit/core/finalize/safe-write.test.ts
+    - tests/unit/core/finalize/task-status-source-edit.test.ts
+  definition_of_done:
+    - Bounded-process tests do not depend on shared-runner wall-clock ceilings
+    - CI assertion failures identify the exact test and assertion
+    - Phase status mutation preserves every non-target source byte
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm exec vitest run
+      tests/unit/core/finalize/task-status-source-edit.test.ts
+      tests/unit/core/finalize/safe-write.test.ts
+      tests/unit/commands/task-finalize.test.ts
+      tests/unit/commands/phase-reconcile.test.ts
+      tests/unit/scripts/vitest-ci-reporter.test.ts
+      tests/unit/scripts/run-bounded-process.test.ts
+    - pnpm typecheck
+  base_sha: 626d573e7f8cbb4ce4600a5f891dd2c25113738c
+  phase_blob_sha: 13a414cdc84748f7cbaf1b1a3cad3fd4063c7088
+at: 2026-07-27T01:33:21.059Z
+actor: agent
+author: Pocket

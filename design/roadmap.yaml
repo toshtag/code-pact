@@ -230,3 +230,6 @@ phases:
   - id: P88
     path: design/phases/P88-claude-bootstrap-right-sizing.yaml
     weight: 1
+  - id: P89
+    path: design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+    weight: 1
