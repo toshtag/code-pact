@@ -58,6 +58,10 @@ function collectRunScripts(content: string, jobName: string): string[] {
   return [];
 }
 
+function occurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
+
 function jobOutputs(content: string, jobName: string): string[] {
   const doc = parseDocument(content);
   const jobs = doc.get("jobs") as {
@@ -221,6 +225,31 @@ describe("ci.yml topology", () => {
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it("standard job runs the filesystem security invariants as fixed steps", () => {
+    const script = collectRunScripts(content, "standard").join("\n");
+    const containment = script.indexOf("pnpm check:fs-containment");
+    const hardening = script.indexOf("pnpm check:security-hardening");
+
+    expect(containment).toBeGreaterThanOrEqual(0);
+    expect(hardening).toBeGreaterThan(containment);
+    expect(occurrences(script, "pnpm check:fs-containment")).toBe(1);
+    expect(occurrences(script, "pnpm check:security-hardening")).toBe(1);
+  });
+
+  it("standard job does not scan fs-authority twice", () => {
+    // check:security-hardening already runs the global fs-authority gate.
+    const script = collectRunScripts(content, "standard").join("\n");
+
+    expect(occurrences(script, "pnpm check:fs-authority")).toBe(0);
+  });
+
+  it("docs job stays docs-only and skips the filesystem invariants", () => {
+    const script = collectRunScripts(content, "docs").join("\n");
+
+    expect(script).not.toContain("pnpm check:fs-containment");
+    expect(script).not.toContain("pnpm check:security-hardening");
   });
 
   it("ci-status job validates all required results", () => {

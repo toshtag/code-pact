@@ -819,6 +819,25 @@ const RAW_FS_IMPORT_ONLY_ALLOWLIST = new Map([
   ],
 ]);
 
+/**
+ * The modules holding a narrow raw-fs import-only exception, so a downstream
+ * gate that asserts which modules import raw fs can read the set from here
+ * instead of keeping a copy that drifts the moment an entry is added.
+ *
+ * Paths only. Which functions each module may call is what makes the exception
+ * narrow, and publishing that would let a caller widen a module's authority
+ * without touching this file. Returns a fresh array of repository-relative
+ * POSIX paths, so the same value reads the same on Windows and a caller
+ * mutating it cannot change what the gate trusts.
+ *
+ * @returns {string[]} Sorted repository-relative module paths.
+ */
+export function registeredRawFsImportOnlyModules() {
+  return [...RAW_FS_IMPORT_ONLY_ALLOWLIST.keys()]
+    .map(path => path.split(/[\\/]/).join("/"))
+    .sort();
+}
+
 // Result properties that extract a path from an authority result object.
 const AUTHORITY_RESULT_PROPS = new Set(["absPath"]);
 const AUTHORITY_PROOF_PROPS = new Set([
