@@ -27,6 +27,10 @@ definition_of_done:
     authorities through both their defining module and project-fs/index
     re-export, while capability mismatches remain rejected
   - CI assertion failures identify the exact test and assertion
+  - A failed Vitest test case is identified by repository-relative file and
+    full test name, with bounded single-line assertion, expected, and actual
+    diagnostics, while existing heartbeat and failed-file parser prefixes
+    remain compatible
   - Bounded-process tests do not depend on shared-runner wall-clock ceilings
 verification:
   commands:
@@ -375,10 +379,32 @@ tasks:
     description: >
       Make the CI Vitest reporter emit the failed test-case name and bounded
       assertion diagnostics so CI failures do not require a speculative local
-      rerun.
+      rerun. Consume final test-case results through the reporter's test-case
+      hook instead of module-level errors only, recognize the canonical failed
+      state instead of the legacy spelling, keep the module collection-failure
+      and unknown-module fallbacks, and emit bounded single-line message,
+      expected, and actual diagnostics that cannot flood CI logs. Preserve the
+      file-first failed-line shape that verification-scope parses.
     requires_decision: false
     depends_on:
       - P89-T1G
+    reads:
+      - scripts/vitest-ci-reporter.mjs
+      - scripts/vitest-ci-reporter.d.mts
+      - scripts/verification-scope.mjs
+      - scripts/lib/run-bounded-process.mjs
+      - tests/unit/scripts/vitest-ci-reporter.test.ts
+      - tests/unit/scripts/verification-scope.test.ts
+      - package.json
+    writes:
+      - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+      - scripts/vitest-ci-reporter.mjs
+      - scripts/vitest-ci-reporter.d.mts
+      - tests/unit/scripts/vitest-ci-reporter.test.ts
+      - tests/unit/scripts/verification-scope.test.ts
+    acceptance_refs:
+      - tests/unit/scripts/vitest-ci-reporter.test.ts
+      - tests/unit/scripts/verification-scope.test.ts
   - id: P89-T3
     type: bugfix
     ambiguity: low
