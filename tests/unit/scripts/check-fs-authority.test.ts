@@ -1,10 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+
+// @ts-expect-error .mjs scripts are not included in tsconfig and are imported as untyped modules across the test suite.
+import { checkSourceText as checkSourceTextUntyped } from "../../../scripts/check-fs-authority.mjs";
+
+type FsAuthorityFinding = { line: number; fn: string; arg?: string };
+
+/** The checker's pure entry point: source text in, findings out, no fs. */
+const checkSourceText = checkSourceTextUntyped as (input: {
+  relPath: string;
+  sourceText: string;
+}) => FsAuthorityFinding[];
 
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -1175,106 +1186,96 @@ describe("check-fs-authority", () => {
 // through every filesystem sink in the file, so a `writeFileSync` added later
 // could have ridden in on the import permission with nobody noticing.
 //
-// The allowlist is keyed by the real repo-relative path, so proving this needs
-// the real file: each case rewrites it, runs the gate, and restores it.
+// The allowlist is keyed by the repo-relative path, so these drive the
+// checker's pure entry point with that path and synthetic source text. An
+// earlier version rewrote the real file on disk and restored it afterwards,
+// which made every other test in the run — and any watcher or typecheck
+// alongside it — race against a module that briefly was not itself. A proof
+// that corrupts the tree it is proving things about is not a proof.
 // ---------------------------------------------------------------------------
 
 describe("check-fs-authority — the executable resolver's narrow exception", () => {
-  const resolverPath = join(
-    repoRoot,
-    "src",
-    "core",
-    "process",
-    "executable-resolution.ts",
-  );
+  const resolverPath = "src/core/process/executable-resolution.ts";
 
-  async function runWithResolverSource(
-    source: string,
-  ): Promise<{ ok: boolean; output: string }> {
-    const original = await readFile(resolverPath, "utf8");
-    try {
-      await writeFile(resolverPath, source, "utf8");
-      await execFileAsync("node", [scriptPath, resolverPath], { cwd: repoRoot });
-      return { ok: true, output: "" };
-    } catch (err) {
-      return {
-        ok: false,
-        output: `${(err as { stdout?: string }).stdout ?? ""}\n${
-          (err as { stderr?: string }).stderr ?? ""
-        }`,
-      };
-    } finally {
-      await writeFile(resolverPath, original, "utf8");
-    }
+  function checkResolverSource(lines: string[]): FsAuthorityFinding[] {
+    return checkSourceText({
+      relPath: resolverPath,
+      sourceText: lines.join("\n"),
+    });
   }
 
-  it("passes the read-only probes it is allowed to make", async () => {
-    const result = await runWithResolverSource(
-      [
-        'import { existsSync, statSync } from "node:fs";',
-        "",
-        "export function probe(path: string): boolean {",
-        "  return existsSync(path) && statSync(path).isFile();",
-        "}",
-        "",
-      ].join("\n"),
-    );
+  it("passes the read-only probes it is allowed to make", () => {
+    const findings = checkResolverSource([
+      'import { existsSync, statSync } from "node:fs";',
+      "",
+      "export function probe(path: string): boolean {",
+      "  return existsSync(path) && statSync(path).isFile();",
+      "}",
+      "",
+    ]);
 
-    expect(result.output).toBe("");
-    expect(result.ok).toBe(true);
+    expect(findings).toEqual([]);
   });
 
-  for (const [label, call] of [
+  for (const [fn, call] of [
     ["readFileSync", 'readFileSync(path, "utf8");'],
     ["writeFileSync", 'writeFileSync(path, "x");'],
     ["rmSync", "rmSync(path);"],
     ["renameSync", "renameSync(path, path);"],
   ] as const) {
-    it(`rejects ${label}, which the import permission must not cover`, async () => {
-      const fn = call.slice(0, call.indexOf("("));
-      const result = await runWithResolverSource(
-        [
-          `import { existsSync, ${fn} } from "node:fs";`,
-          "",
-          "export function probe(path: string): boolean {",
-          `  ${call}`,
-          "  return existsSync(path);",
-          "}",
-          "",
-        ].join("\n"),
-      );
+    it(`rejects ${fn}, which the import permission must not cover`, () => {
+      const findings = checkResolverSource([
+        `import { existsSync, ${fn} } from "node:fs";`,
+        "",
+        "export function probe(path: string): boolean {",
+        `  ${call}`,
+        "  return existsSync(path);",
+        "}",
+        "",
+      ]);
 
-      expect(result.ok).toBe(false);
-      expect(result.output).toContain(fn);
+      expect(findings.length).toBeGreaterThan(0);
+      expect(findings.map(f => f.fn).join(" ")).toContain(fn);
     });
   }
 
-  it("rejects a namespace import, which would hide every call site", async () => {
-    const result = await runWithResolverSource(
-      [
-        'import * as fs from "node:fs";',
-        "",
-        "export function probe(path: string): boolean {",
-        "  return fs.existsSync(path);",
-        "}",
-        "",
-      ].join("\n"),
-    );
+  it("rejects a namespace import, which would hide every call site", () => {
+    const findings = checkResolverSource([
+      'import * as fs from "node:fs";',
+      "",
+      "export function probe(path: string): boolean {",
+      "  return fs.existsSync(path);",
+      "}",
+      "",
+    ]);
 
-    expect(result.ok).toBe(false);
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings.map(f => f.fn).join(" ")).toContain("unbounded node:fs import");
   });
 
-  it("rejects a dynamic import, which no static allowlist can bound", async () => {
-    const result = await runWithResolverSource(
-      [
-        "export async function probe(path: string): Promise<boolean> {",
-        '  const fs = await import("node:fs");',
-        "  return fs.existsSync(path);",
-        "}",
-        "",
-      ].join("\n"),
-    );
+  it("rejects a dynamic import, which no static allowlist can bound", () => {
+    const findings = checkResolverSource([
+      "export async function probe(path: string): Promise<boolean> {",
+      '  const fs = await import("node:fs");',
+      "  return fs.existsSync(path);",
+      "}",
+      "",
+    ]);
 
-    expect(result.ok).toBe(false);
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings.map(f => f.fn).join(" ")).toContain("dynamic node:fs import");
+  });
+
+  it("still reports an unauthorized named import of an allowed-module function", () => {
+    const findings = checkResolverSource([
+      'import { existsSync, readdirSync } from "node:fs";',
+      "",
+      "export function probe(path: string): boolean {",
+      "  return existsSync(path);",
+      "}",
+      "",
+    ]);
+
+    expect(findings.map(f => f.arg)).toContain("readdirSync");
   });
 });

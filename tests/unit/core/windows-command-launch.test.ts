@@ -422,10 +422,17 @@ describe("resolveExecutable — argv is never rewritten", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The tests above resolve; these LAUNCH. Until now the only evidence that a
+// The tests above resolve; these LAUNCH. Until P89-T1E the only evidence that a
 // batch shim preserves anything came from the pure resolver and from native
 // executables, which never touch cmd.exe. These build a real `.cmd`, run it
 // through `runBoundedArgv`, and compare the argv the child actually received.
+//
+// The shim writes a marker the moment it is invoked, and each hostile value is
+// passed ALONE. An earlier version appended a second, always-unsafe argument to
+// every hostile case, so the refusal proved only that at least one argument was
+// unsafe — a value wrongly permitted would still have passed. With one argument
+// and an invocation marker, a wrongly-permitted value starts the shim and the
+// marker fails the test.
 //
 // They only run on Windows, where a `.cmd` is a real launch path. Windows deep
 // CI is the gate that executes them.
@@ -440,9 +447,11 @@ describe("a real Windows batch shim", () => {
 
   beforeEach(async () => {
     shimDir = await mkdtemp(join(tmpdir(), "code-pact-cmd-shim-"));
-    markerPath = join(shimDir, "injected-marker");
-    // The shim forwards its arguments to a Node script that prints them back,
-    // so the comparison is against what the child truly received.
+    markerPath = join(shimDir, "shim-was-invoked");
+    // The shim records that it ran BEFORE doing anything else, then forwards
+    // its arguments to a Node script that prints them back — so the comparison
+    // is against what the child truly received, and a launch that should never
+    // have happened leaves proof behind.
     const echoScript = join(shimDir, "echo-argv.cjs");
     await writeFile(
       echoScript,
@@ -452,7 +461,12 @@ describe("a real Windows batch shim", () => {
     shimPath = join(shimDir, "echo.cmd");
     await writeFile(
       shimPath,
-      `@echo off\r\n"${process.execPath}" "${echoScript}" %*\r\n`,
+      [
+        "@echo off",
+        `echo invoked> "${markerPath}"`,
+        `"${process.execPath}" "${echoScript}" %*`,
+        "",
+      ].join("\r\n"),
       "utf8",
     );
   });
@@ -463,6 +477,7 @@ describe("a real Windows batch shim", () => {
 
   onWindows("passes every representable argument through unchanged", async () => {
     const args = [
+      "",
       "a b",
       "日本語",
       "--config",
@@ -478,6 +493,7 @@ describe("a real Windows batch shim", () => {
     const result = await runBoundedArgv(shimPath, args, shimDir, 60_000);
 
     expect(result.exitCode, result.stderr).toBe(0);
+    expect(existsSync(markerPath)).toBe(true);
     expect(JSON.parse(result.stdout)).toEqual(args);
   }, 60_000);
 
@@ -487,24 +503,22 @@ describe("a real Windows batch shim", () => {
     ["a caret", "^"],
     ["an ampersand", "&"],
     ["a pipe", "|"],
-    ["a redirect", ">"],
-    ["a parenthesis", "("],
+    ["an input redirect", "<"],
+    ["an output redirect", ">"],
+    ["an opening parenthesis", "("],
+    ["a closing parenthesis", ")"],
     ["an embedded quote", 'quote"value'],
-    ["a newline", "line\nbreak"],
+    ["a line feed", "line\nbreak"],
     ["a carriage return", "line\r\nbreak"],
   ] as const) {
-    onWindows(`refuses ${label} before spawning anything`, async () => {
-      const result = await runBoundedArgv(
-        shimPath,
-        // The injection an unescaped separator would enable, if it ran.
-        [`${hostile}`, `& echo x > "${markerPath}"`],
-        shimDir,
-        60_000,
-      );
+    onWindows(`refuses ${label} on its own, before spawning anything`, async () => {
+      const result = await runBoundedArgv(shimPath, [hostile], shimDir, 60_000);
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain("could not be resolved safely");
       expect(result.elapsedMs).toBe(0);
+      // The shim marks its own invocation, so a value wrongly permitted here
+      // would leave this behind rather than pass unnoticed.
       expect(existsSync(markerPath)).toBe(false);
     }, 60_000);
   }
