@@ -1,0 +1,67 @@
+schema_version: 1
+task_id: P89-T1C
+phase_id: P89
+phase_path: design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+base_ref: HEAD
+base_sha: 2fd0aafb024a9a64046e9fee3a733b042b46ce06
+phase_blob_sha: e461e2a7707b3d48a24be83063c5b52d5dc2577c
+contract_digest: cf522c98b29f2bbf0abf0e6821ade3a72701d138ea25356fbfab7cbceeceed1c
+contract:
+  description: >
+    Preserve canonical verification argv semantics on Windows. P89-T1B spawns
+    the classifier argv with no shell, but a Windows `pnpm` is a `.cmd` shim
+    that cannot be spawned that way, so the classifier would not launch at all.
+    Native executables run directly, the package-manager command resolves
+    through its JavaScript entrypoint, and a bare `.cmd` / `.bat` shim fails
+    closed rather than routing arguments back through a shell that would
+    re-interpret them. Cover the argv runner and the real package manager launch
+    on Windows deep CI.
+  reads:
+    - .github/workflows/ci-deep.yml
+    - scripts/verification-scope.mjs
+    - src/core/process/bounded-command.ts
+    - src/core/verify/classify.ts
+    - tests/unit/commands/verify-process.test.ts
+    - tests/unit/core/bounded-command-argv.test.ts
+  writes:
+    - .github/workflows/ci-deep.yml
+    - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+    - src/core/process/bounded-command.ts
+    - tests/unit/core/bounded-command-argv.test.ts
+    - tests/unit/core/windows-command-launch.test.ts
+  depends_on:
+    - P89-T1B
+  decision_refs: []
+  acceptance_refs:
+    - tests/unit/core/bounded-command-argv.test.ts
+    - tests/unit/core/windows-command-launch.test.ts
+  definition_of_done:
+    - Bounded-process tests do not depend on shared-runner wall-clock ceilings
+    - CI assertion failures identify the exact test and assertion
+    - Classifier commands execute as their canonical argv, so no argument or
+      changed-file path is re-interpreted by a shell, on every supported
+      platform
+    - Phase status mutation preserves every non-target source byte
+    - The verification command contract is validated at the producer-consumer
+      boundary, so review-bundle and ci-parity run the classifier commands the
+      scope script actually emits
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm exec vitest run
+      tests/unit/core/finalize/task-status-source-edit.test.ts
+      tests/unit/core/finalize/safe-write.test.ts
+      tests/unit/commands/task-finalize.test.ts
+      tests/unit/commands/phase-reconcile.test.ts
+      tests/unit/core/verify/classify.test.ts
+      tests/unit/core/review-bundle.test.ts
+      tests/unit/commands/review-bundle.test.ts
+      tests/unit/scripts/vitest-ci-reporter.test.ts
+      tests/unit/scripts/run-bounded-process.test.ts
+    - pnpm typecheck
+  base_sha: 2fd0aafb024a9a64046e9fee3a733b042b46ce06
+  phase_blob_sha: e461e2a7707b3d48a24be83063c5b52d5dc2577c
+at: 2026-07-27T04:19:07.162Z
+actor: agent
+author: Pocket
