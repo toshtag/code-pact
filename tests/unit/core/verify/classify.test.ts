@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { execFile } from "node:child_process";
+import { existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import {
   VerificationCommand,
@@ -262,5 +265,37 @@ describe("runVerificationCommands", () => {
     expect(ok).toBe(false);
     expect(results).toHaveLength(1);
     expect(results[0]?.exit_code).toBe(3);
+  });
+
+  // The validated argv used to be rendered back into a shell line and run with
+  // `shell: true`, which undid the contract one step before execution.
+  it("runs the argv without a shell, so metacharacters stay literal", async () => {
+    const marker = join(tmpdir(), `code-pact-classify-shell-proof-${process.pid}`);
+    rmSync(marker, { force: true });
+
+    const { ok, results } = await runVerificationCommands(process.cwd(), [
+      [
+        process.execPath,
+        "-e",
+        "process.stdout.write(JSON.stringify(process.argv.slice(1)))",
+        `$(touch ${marker})`,
+      ],
+    ]);
+
+    expect(ok).toBe(true);
+    expect(JSON.parse(results[0]!.stdout_excerpt)).toEqual([
+      `$(touch ${marker})`,
+    ]);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it("still renders the command string for the manifest", async () => {
+    const { results } = await runVerificationCommands(process.cwd(), [
+      ["node", "-e", "process.stdout.write('ok')"],
+    ]);
+    // Diagnostic rendering is unchanged, and is not what gets executed.
+    expect(results[0]?.command).toBe(
+      '"node" "-e" "process.stdout.write(\'ok\')"',
+    );
   });
 });

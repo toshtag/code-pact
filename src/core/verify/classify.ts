@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { runBoundedCommand } from "../process/bounded-command.ts";
+import { runBoundedArgv } from "../process/bounded-command.ts";
 import { DEFAULT_COMMAND_TIMEOUT_MS } from "../../commands/verify.ts";
 
 const execFileAsync = promisify(execFile);
@@ -92,8 +92,16 @@ function excerpt(text: string): string {
   return `${text.slice(0, cut)}\n[code-pact: excerpt truncated]\n`;
 }
 
-/** Renders `[program, ...args]` as a quoted shell line for the bounded runner. */
-function shellJoin(command: VerificationCommand): string {
+/**
+ * Renders `[program, ...args]` for manifests and failure messages.
+ *
+ * DIAGNOSTIC ONLY — this string is never executed. It used to be fed to a
+ * shell, which silently undid the argv contract: `JSON.stringify` is not shell
+ * quoting, so an argument containing `$(...)` was expanded rather than passed
+ * through. Commands run from their argv via `runBoundedArgv`; this rendering
+ * exists so a human can read what ran.
+ */
+function formatArgvForDisplay(command: VerificationCommand): string {
   return command.map(arg => JSON.stringify(arg)).join(" ");
 }
 
@@ -127,8 +135,9 @@ export async function runVerificationCommands(
 ): Promise<{ ok: boolean; results: LocalVerificationResult[] }> {
   const results: LocalVerificationResult[] = [];
   for (const argv of commands) {
-    const command = shellJoin(argv);
-    const outcome = await runBoundedCommand(command, cwd, timeoutMs);
+    const [program, ...args] = argv;
+    const command = formatArgvForDisplay(argv);
+    const outcome = await runBoundedArgv(program, args, cwd, timeoutMs);
     results.push({
       command,
       exit_code: outcome.exitCode ?? -1,

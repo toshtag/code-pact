@@ -252,9 +252,41 @@ function cleanupChildHandles(proc: ChildProcess): void {
   proc.unref();
 }
 
+function refusedBeforeStart(stderr: string): BoundedCommandResult {
+  return {
+    exitCode: 1,
+    stdout: "",
+    stderr,
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    timedOut: false,
+    aborted: false,
+    elapsedMs: 0,
+  };
+}
+
+function abortedBeforeStart(): BoundedCommandResult {
+  return {
+    exitCode: null,
+    stdout: "",
+    stderr: "aborted before start",
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    timedOut: false,
+    aborted: true,
+    elapsedMs: 0,
+  };
+}
+
 /**
  * Run a trusted project shell command with bounded output, timeout, external
  * cancellation, and descendant-tree termination diagnostics.
+ *
+ * The command string is handed to a shell, so every argument in it is subject
+ * to expansion. Callers that already hold the argv — the verification
+ * classifier does — must use {@link runBoundedArgv} instead: there is no
+ * portable way to render an argv into a shell line without changing its
+ * meaning.
  */
 export async function runBoundedCommand(
   command: string,
@@ -263,40 +295,69 @@ export async function runBoundedCommand(
   signal?: AbortSignal,
 ): Promise<BoundedCommandResult> {
   const shellCommand = command.trim();
-  if (!shellCommand) {
-    return {
-      exitCode: 1,
-      stdout: "",
-      stderr: "empty verification command",
-      stdoutTruncated: false,
-      stderrTruncated: false,
-      timedOut: false,
-      aborted: false,
-      elapsedMs: 0,
-    };
-  }
-  if (signal?.aborted) {
-    return {
-      exitCode: null,
-      stdout: "",
-      stderr: "aborted before start",
-      stdoutTruncated: false,
-      stderrTruncated: false,
-      timedOut: false,
-      aborted: true,
-      elapsedMs: 0,
-    };
-  }
+  if (!shellCommand) return refusedBeforeStart("empty verification command");
+  return superviseBoundedProcess(
+    () =>
+      spawn(shellCommand, {
+        cwd,
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: true,
+        detached: process.platform !== "win32",
+      }),
+    timeoutMs,
+    signal,
+  );
+}
+
+/**
+ * Run a command from its canonical argv with the same bounded-output, timeout,
+ * cancellation, and process-tree guarantees as {@link runBoundedCommand}, but
+ * WITHOUT a shell.
+ *
+ * `spawn(program, args, { shell: false })` passes each element through as one
+ * argument, so a changed-file path or an argument containing `$(...)`, `;`,
+ * `*`, a quote, or whitespace reaches the child exactly as written. Rendering
+ * the same argv into a shell line and running that is not equivalent: JSON
+ * quoting is not shell quoting, and a double-quoted `$(...)` is still expanded.
+ */
+export async function runBoundedArgv(
+  program: string,
+  args: readonly string[],
+  cwd: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<BoundedCommandResult> {
+  if (!program) return refusedBeforeStart("empty verification command program");
+  return superviseBoundedProcess(
+    () =>
+      spawn(program, [...args], {
+        cwd,
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: false,
+        detached: process.platform !== "win32",
+      }),
+    timeoutMs,
+    signal,
+  );
+}
+
+/**
+ * Owns everything a bounded run needs once a child exists: output caps, the
+ * timeout and abort races, process-tree termination, and the close deadline.
+ * The caller supplies only how the child is spawned, so the shell and argv
+ * entry points cannot drift apart in any of those guarantees.
+ */
+async function superviseBoundedProcess(
+  spawnChild: () => ChildProcess,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<BoundedCommandResult> {
+  if (signal?.aborted) return abortedBeforeStart();
 
   const started = performance.now();
   const stdout = createOutputCapture();
   const stderr = createOutputCapture();
-  const proc = spawn(shellCommand, {
-    cwd,
-    stdio: ["ignore", "pipe", "pipe"],
-    shell: true,
-    detached: process.platform !== "win32",
-  });
+  const proc = spawnChild();
 
   proc.stdout?.on("data", (chunk: Buffer) => stdout.append(chunk));
   proc.stderr?.on("data", (chunk: Buffer) => stderr.append(chunk));
