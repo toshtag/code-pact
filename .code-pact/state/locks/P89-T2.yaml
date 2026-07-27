@@ -1,0 +1,75 @@
+schema_version: 1
+task_id: P89-T2
+phase_id: P89
+phase_path: design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+base_ref: HEAD
+base_sha: e5ba55a5f8167e096cd848a462a6ba4f945715a7
+phase_blob_sha: 09e0fbc34f44fbd6ce13675b9c04e809085c803e
+contract_digest: fedd2c30a25fcb8761813af1682b7d9a36d7eb65029e419def1dc6e7e1adbaa2
+contract:
+  description: >
+    Make the CI Vitest reporter emit the failed test-case name and bounded
+    assertion diagnostics so CI failures do not require a speculative local
+    rerun. Consume final test-case results through the reporter's test-case hook
+    instead of module-level errors only, recognize the canonical failed state
+    instead of the legacy spelling, keep the module collection-failure and
+    unknown-module fallbacks, and emit bounded single-line message, expected,
+    and actual diagnostics that cannot flood CI logs. Preserve the file-first
+    failed-line shape that verification-scope parses.
+  reads:
+    - package.json
+    - scripts/lib/run-bounded-process.mjs
+    - scripts/verification-scope.mjs
+    - scripts/vitest-ci-reporter.d.mts
+    - scripts/vitest-ci-reporter.mjs
+    - tests/unit/scripts/verification-scope.test.ts
+    - tests/unit/scripts/vitest-ci-reporter.test.ts
+  writes:
+    - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+    - scripts/vitest-ci-reporter.d.mts
+    - scripts/vitest-ci-reporter.mjs
+    - tests/unit/scripts/verification-scope.test.ts
+    - tests/unit/scripts/vitest-ci-reporter.test.ts
+  depends_on:
+    - P89-T1G
+  decision_refs: []
+  acceptance_refs:
+    - tests/unit/scripts/verification-scope.test.ts
+    - tests/unit/scripts/vitest-ci-reporter.test.ts
+  definition_of_done:
+    - A failed Vitest test case is identified by repository-relative file and
+      full test name, with bounded single-line assertion, expected, and actual
+      diagnostics, while existing heartbeat and failed-file parser prefixes
+      remain compatible
+    - Bounded-process tests do not depend on shared-runner wall-clock ceilings
+    - CI assertion failures identify the exact test and assertion
+    - Native executables and JavaScript entrypoints execute with canonical argv.
+      Windows batch shims accept only a verified cmd-safe subset and fail closed
+      before spawning for all other arguments or paths
+    - Phase status mutation preserves every non-target source byte
+    - The global fs-authority gate recognizes verification-ledger path
+      authorities through both their defining module and project-fs/index
+      re-export, while capability mismatches remain rejected
+    - The verification command contract is validated at the producer-consumer
+      boundary, so review-bundle and ci-parity run the classifier commands the
+      scope script actually emits
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm exec vitest run
+      tests/unit/core/finalize/task-status-source-edit.test.ts
+      tests/unit/core/finalize/safe-write.test.ts
+      tests/unit/commands/task-finalize.test.ts
+      tests/unit/commands/phase-reconcile.test.ts
+      tests/unit/core/verify/classify.test.ts
+      tests/unit/core/review-bundle.test.ts
+      tests/unit/commands/review-bundle.test.ts
+      tests/unit/scripts/vitest-ci-reporter.test.ts
+      tests/unit/scripts/run-bounded-process.test.ts
+    - pnpm typecheck
+  base_sha: e5ba55a5f8167e096cd848a462a6ba4f945715a7
+  phase_blob_sha: 09e0fbc34f44fbd6ce13675b9c04e809085c803e
+at: 2026-07-27T12:18:34.685Z
+actor: agent
+author: Pocket

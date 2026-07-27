@@ -680,9 +680,15 @@ if (process.env.FAKE_PNPM_LOG) {
   );
 }
 if (process.env.FAKE_VITEST_FILE && command.includes("vitest")) {
+  const file = process.env.FAKE_VITEST_FILE;
+  const testCase = file + " > suite > failed test";
   console.log("[vitest:total] 1");
-  console.log("[vitest:start] " + process.env.FAKE_VITEST_FILE);
-  console.error("[vitest:failed] " + process.env.FAKE_VITEST_FILE);
+  console.log("[vitest:start] " + file);
+  console.log("[vitest:done] " + file + " 12ms failed");
+  console.error("[vitest:failed] " + testCase);
+  console.error("[vitest:assertion] " + testCase + ": expected 2 to be 3");
+  console.error("[vitest:expected] " + testCase + ": 3");
+  console.error("[vitest:actual] " + testCase + ": 2");
 }
 if (
   process.env.FAKE_PNPM_FAIL &&
@@ -1118,6 +1124,10 @@ if (args.includes("--json")) {
       const output = String(err.stdout ?? "");
       expect(output).toContain('"failed_test_files":["tests/unit/a.test.ts"]');
       expect(output).toContain("--test-file tests/unit/a.test.ts");
+      // The reporter appends the full test name and assertion diagnostics to
+      // its failure lines; neither may leak into a failed test-file path.
+      expect(output).not.toMatch(/"failed_test_files":\[[^\]]*suite/);
+      expect(output).not.toMatch(/"failed_test_files":\[[^\]]*expected/);
     }
   });
 
