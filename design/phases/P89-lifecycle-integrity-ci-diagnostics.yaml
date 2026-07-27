@@ -329,7 +329,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Restore parity between the fs-authority checker's narrow raw-filesystem
       import-only exceptions and the security-hardening exact import invariant.
