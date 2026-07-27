@@ -1,0 +1,69 @@
+schema_version: 1
+task_id: P89-T1A
+phase_id: P89
+phase_path: design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+base_ref: HEAD
+base_sha: fc783aba1d01d050aff88d83e13ba4dc426fec9e
+phase_blob_sha: 895a61846b942bab935a41276bb1ba808502e1e9
+contract_digest: 4577f715624fe5d44091dfaa077fa195aca72efa847af96e2ec3c32a3f8874ab
+contract:
+  description: >
+    Make the verification command contract one shape end to end. The scope
+    script emits a flat, non-empty argv array per command; the classifier
+    consumer declares a nested pair and spreads the second element character by
+    character, so every classifier command becomes unrunnable and both `task
+    review-bundle` and `ci-parity` refuse with a false VERIFICATION_FAILED.
+    Adopt the producer's flat argv as canonical, validate the script output at
+    the parse boundary instead of trusting an unchecked cast, and correct the
+    fake classifiers in the review-bundle and ci-parity fixtures that encode the
+    nested shape.
+  reads:
+    - scripts/verification-scope.mjs
+    - src/commands/ci-parity.ts
+    - src/core/process/bounded-command.ts
+    - src/core/review-bundle.ts
+    - src/core/verify/classify.ts
+    - tests/integration/ci-parity.test.ts
+    - tests/integration/review-bundle.test.ts
+    - tests/unit/commands/review-bundle.test.ts
+    - tests/unit/core/review-bundle.test.ts
+  writes:
+    - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+    - src/core/verify/classify.ts
+    - tests/integration/ci-parity.test.ts
+    - tests/integration/review-bundle.test.ts
+    - tests/unit/commands/review-bundle.test.ts
+    - tests/unit/core/review-bundle.test.ts
+    - tests/unit/core/verify/classify.test.ts
+  depends_on:
+    - P89-T1
+  decision_refs: []
+  acceptance_refs:
+    - tests/unit/core/verify/classify.test.ts
+  definition_of_done:
+    - Bounded-process tests do not depend on shared-runner wall-clock ceilings
+    - CI assertion failures identify the exact test and assertion
+    - Phase status mutation preserves every non-target source byte
+    - The verification command contract is validated at the producer-consumer
+      boundary, so review-bundle and ci-parity run the classifier commands the
+      scope script actually emits
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm exec vitest run
+      tests/unit/core/finalize/task-status-source-edit.test.ts
+      tests/unit/core/finalize/safe-write.test.ts
+      tests/unit/commands/task-finalize.test.ts
+      tests/unit/commands/phase-reconcile.test.ts
+      tests/unit/core/verify/classify.test.ts
+      tests/unit/core/review-bundle.test.ts
+      tests/unit/commands/review-bundle.test.ts
+      tests/unit/scripts/vitest-ci-reporter.test.ts
+      tests/unit/scripts/run-bounded-process.test.ts
+    - pnpm typecheck
+  base_sha: fc783aba1d01d050aff88d83e13ba4dc426fec9e
+  phase_blob_sha: 895a61846b942bab935a41276bb1ba808502e1e9
+at: 2026-07-27T02:38:37.222Z
+actor: agent
+author: Pocket

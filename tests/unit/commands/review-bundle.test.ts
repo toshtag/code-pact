@@ -98,8 +98,14 @@ const { values } = parseArgs({
 });
 if (values.commands && values.format === "json") {
   process.stdout.write(JSON.stringify({
-    scope: { changed: [], added: [], removed: [], mergeBase: values.base ?? null, failSafe: false },
-    commands: [["echo", ["ok"]]],
+    scope: {
+      changedFiles: [], docs: false, standard: true, toolchain: false,
+      processControl: false, generic: true, workflow: false, releaseScript: false,
+      sharedTestInfra: false, unknown: false, highRisk: false, fallbackFull: false,
+      fallbackReason: null, mode: "focused", reason: "standard",
+      mergeBase: values.base ?? null,
+    },
+    commands: [["git", "--version"]],
     failSafe: false,
   }));
 } else {

@@ -17,6 +17,12 @@ non_goals:
   - Clean ignored files or retire historical task specs
 definition_of_done:
   - Phase status mutation preserves every non-target source byte
+  - The verification command contract is validated at the producer-consumer
+    boundary, so review-bundle and ci-parity run the classifier commands the
+    scope script actually emits
+  - Native executables and JavaScript entrypoints execute with canonical argv.
+    Windows batch shims accept only a verified cmd-safe subset and fail closed
+    before spawning for all other arguments or paths
   - CI assertion failures identify the exact test and assertion
   - Bounded-process tests do not depend on shared-runner wall-clock ceilings
 verification:
@@ -26,6 +32,9 @@ verification:
       tests/unit/core/finalize/safe-write.test.ts
       tests/unit/commands/task-finalize.test.ts
       tests/unit/commands/phase-reconcile.test.ts
+      tests/unit/core/verify/classify.test.ts
+      tests/unit/core/review-bundle.test.ts
+      tests/unit/commands/review-bundle.test.ts
       tests/unit/scripts/vitest-ci-reporter.test.ts
       tests/unit/scripts/run-bounded-process.test.ts
     - pnpm build
@@ -70,6 +79,211 @@ tasks:
     acceptance_refs:
       - tests/unit/core/finalize/task-status-source-edit.test.ts
       - tests/unit/core/finalize/safe-write.test.ts
+  - id: P89-T1A
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Make the verification command contract one shape end to end. The scope
+      script emits a flat, non-empty argv array per command; the classifier
+      consumer declares a nested pair and spreads the second element character
+      by character, so every classifier command becomes unrunnable and both
+      `task review-bundle` and `ci-parity` refuse with a false
+      VERIFICATION_FAILED. Adopt the producer's flat argv as canonical,
+      validate the script output at the parse boundary instead of trusting an
+      unchecked cast, and correct the fake classifiers in the review-bundle and
+      ci-parity fixtures that encode the nested shape.
+    requires_decision: false
+    depends_on:
+      - P89-T1
+    reads:
+      - scripts/verification-scope.mjs
+      - src/core/verify/classify.ts
+      - src/core/review-bundle.ts
+      - src/commands/ci-parity.ts
+      - src/core/process/bounded-command.ts
+      - tests/unit/core/review-bundle.test.ts
+      - tests/unit/commands/review-bundle.test.ts
+      - tests/integration/review-bundle.test.ts
+      - tests/integration/ci-parity.test.ts
+    writes:
+      - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+      - src/core/verify/classify.ts
+      - tests/unit/core/verify/classify.test.ts
+      - tests/unit/core/review-bundle.test.ts
+      - tests/unit/commands/review-bundle.test.ts
+      - tests/integration/review-bundle.test.ts
+      - tests/integration/ci-parity.test.ts
+    acceptance_refs:
+      - tests/unit/core/verify/classify.test.ts
+  - id: P89-T1B
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Execute verification-scope commands as their canonical flat argv without
+      reconstructing a shell command. P89-T1A validated the argv at the parse
+      boundary but the runner still rebuilt a shell line from it, and
+      JSON quoting is not shell escaping: a changed-file path or argument
+      carrying shell syntax was re-interpreted rather than passed through.
+      Preserve timeout, cancellation, bounded-output, and process-tree
+      termination behavior, and keep the rendered command string for manifests
+      and diagnostics only.
+    requires_decision: false
+    depends_on:
+      - P89-T1A
+    reads:
+      - src/core/verify/classify.ts
+      - src/core/process/bounded-command.ts
+      - tests/unit/core/verify/classify.test.ts
+      - tests/unit/commands/verify-process.test.ts
+      - tests/integration/review-bundle.test.ts
+      - tests/integration/ci-parity.test.ts
+    writes:
+      - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+      - src/core/verify/classify.ts
+      - src/core/process/bounded-command.ts
+      - tests/unit/core/verify/classify.test.ts
+      - tests/unit/core/bounded-command-argv.test.ts
+    acceptance_refs:
+      - tests/unit/core/verify/classify.test.ts
+      - tests/unit/core/bounded-command-argv.test.ts
+  - id: P89-T1C
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Preserve canonical verification argv semantics on Windows. P89-T1B spawns
+      the classifier argv with no shell, but a Windows `pnpm` is a `.cmd` shim
+      that cannot be spawned that way, so the classifier would not launch at
+      all. Native executables run directly, the package-manager command
+      resolves through its JavaScript entrypoint, and a bare `.cmd` / `.bat`
+      shim fails closed rather than routing arguments back through a shell that
+      would re-interpret them. Cover the argv runner and the real package
+      manager launch on Windows deep CI.
+    requires_decision: false
+    depends_on:
+      - P89-T1B
+    reads:
+      - src/core/process/bounded-command.ts
+      - src/core/verify/classify.ts
+      - scripts/verification-scope.mjs
+      - .github/workflows/ci-deep.yml
+      - tests/unit/core/bounded-command-argv.test.ts
+      - tests/unit/commands/verify-process.test.ts
+    writes:
+      - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+      - src/core/process/bounded-command.ts
+      - tests/unit/core/bounded-command-argv.test.ts
+      - tests/unit/core/windows-command-launch.test.ts
+      - .github/workflows/ci-deep.yml
+    acceptance_refs:
+      - tests/unit/core/bounded-command-argv.test.ts
+      - tests/unit/core/windows-command-launch.test.ts
+  - id: P89-T1D
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Separate OS executable resolution from project filesystem authority.
+      P89-T1C assumed `npm_execpath` identifies the package manager, but that
+      variable is a `pnpm run` lifecycle value: under `pnpm exec` and under a
+      plain `node dist/cli.js` — the way the CLI actually runs — it is unset,
+      so Windows deep CI fails with `spawn pnpm ENOENT`. Resolving a program
+      name against PATH and PATHEXT is an OS executable namespace question, not
+      an ownership question about a project file, so it gets its own module and
+      its own narrow fs-authority exception; bounded-command consumes the
+      resolution and keeps importing no filesystem module. A `.cmd` shim is
+      launched through a dedicated launcher rather than a general shell, and an
+      unresolvable program fails closed.
+    requires_decision: false
+    depends_on:
+      - P89-T1C
+    reads:
+      - src/core/process/bounded-command.ts
+      - src/core/verify/classify.ts
+      - scripts/verification-scope.mjs
+      - tests/unit/core/windows-command-launch.test.ts
+      - tests/unit/core/bounded-command-argv.test.ts
+      - tests/unit/scripts/check-fs-authority.test.ts
+      - .github/workflows/ci-deep.yml
+    writes:
+      - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+      - src/core/process/executable-resolution.ts
+      - src/core/process/bounded-command.ts
+      - scripts/check-fs-authority.mjs
+      - tests/unit/core/executable-resolution.test.ts
+      - tests/unit/core/windows-command-launch.test.ts
+      - tests/unit/core/bounded-command-argv.test.ts
+      - .github/workflows/ci-deep.yml
+    acceptance_refs:
+      - tests/unit/core/executable-resolution.test.ts
+      - tests/unit/core/windows-command-launch.test.ts
+  - id: P89-T1E
+    type: bugfix
+    ambiguity: low
+    risk: high
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Make the Windows batch-shim boundary fail closed. P89-T1D claimed exact
+      argv across every platform, but the `.cmd` launcher escapes carets and
+      quotes while passing CR and LF through untouched — a newline terminates a
+      cmd command line, so the argument becomes a second command. No runtime
+      test ever put a hostile argument through a real shim; the literal-argv
+      evidence covered the pure resolver and the native launch only. Native and
+      JavaScript launches keep exact argv; a batch launch is permitted only for
+      a verified cmd-safe subset and refuses before spawning otherwise. Narrow
+      the resolver's filesystem authority from every raw operation in the module
+      to the two read-only existence probes it actually performs.
+    requires_decision: false
+    depends_on:
+      - P89-T1D
+    reads:
+      - src/core/process/executable-resolution.ts
+      - src/core/process/bounded-command.ts
+      - scripts/check-fs-authority.mjs
+      - tests/unit/core/executable-resolution.test.ts
+      - tests/unit/core/windows-command-launch.test.ts
+      - tests/unit/core/bounded-command-argv.test.ts
+      - tests/unit/scripts/check-fs-authority.test.ts
+      - .github/workflows/ci-deep.yml
+    writes:
+      - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+      - src/core/process/executable-resolution.ts
+      - src/core/process/bounded-command.ts
+      - scripts/check-fs-authority.mjs
+      - tests/unit/core/executable-resolution.test.ts
+      - tests/unit/core/windows-command-launch.test.ts
+      - tests/unit/core/bounded-command-argv.test.ts
+      - tests/unit/scripts/check-fs-authority.test.ts
+      - .github/workflows/ci-deep.yml
+    acceptance_refs:
+      - tests/unit/core/windows-command-launch.test.ts
+      - tests/unit/scripts/check-fs-authority.test.ts
   - id: P89-T2
     type: bugfix
     ambiguity: low
@@ -85,7 +299,7 @@ tasks:
       rerun.
     requires_decision: false
     depends_on:
-      - P89-T1
+      - P89-T1E
   - id: P89-T3
     type: bugfix
     ambiguity: low

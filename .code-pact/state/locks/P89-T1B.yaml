@@ -1,0 +1,65 @@
+schema_version: 1
+task_id: P89-T1B
+phase_id: P89
+phase_path: design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+base_ref: HEAD
+base_sha: 76a48a13ca6ea28659b44d80ad9cd41e2838fef8
+phase_blob_sha: aba419cfceaeaa2a733e727c5c5a4169d960581b
+contract_digest: 97f548b0e26002127d0bc49ef5b14a3cf1beab087648f0b5df68a026ec54cffd
+contract:
+  description: >
+    Execute verification-scope commands as their canonical flat argv without
+    reconstructing a shell command. P89-T1A validated the argv at the parse
+    boundary but the runner still rebuilt a shell line from it, and JSON quoting
+    is not shell escaping: a changed-file path or argument carrying shell syntax
+    was re-interpreted rather than passed through. Preserve timeout,
+    cancellation, bounded-output, and process-tree termination behavior, and
+    keep the rendered command string for manifests and diagnostics only.
+  reads:
+    - src/core/process/bounded-command.ts
+    - src/core/verify/classify.ts
+    - tests/integration/ci-parity.test.ts
+    - tests/integration/review-bundle.test.ts
+    - tests/unit/commands/verify-process.test.ts
+    - tests/unit/core/verify/classify.test.ts
+  writes:
+    - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+    - src/core/process/bounded-command.ts
+    - src/core/verify/classify.ts
+    - tests/unit/core/bounded-command-argv.test.ts
+    - tests/unit/core/verify/classify.test.ts
+  depends_on:
+    - P89-T1A
+  decision_refs: []
+  acceptance_refs:
+    - tests/unit/core/bounded-command-argv.test.ts
+    - tests/unit/core/verify/classify.test.ts
+  definition_of_done:
+    - Bounded-process tests do not depend on shared-runner wall-clock ceilings
+    - CI assertion failures identify the exact test and assertion
+    - Classifier commands execute as their canonical argv, so no argument or
+      changed-file path is re-interpreted by a shell
+    - Phase status mutation preserves every non-target source byte
+    - The verification command contract is validated at the producer-consumer
+      boundary, so review-bundle and ci-parity run the classifier commands the
+      scope script actually emits
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm exec vitest run
+      tests/unit/core/finalize/task-status-source-edit.test.ts
+      tests/unit/core/finalize/safe-write.test.ts
+      tests/unit/commands/task-finalize.test.ts
+      tests/unit/commands/phase-reconcile.test.ts
+      tests/unit/core/verify/classify.test.ts
+      tests/unit/core/review-bundle.test.ts
+      tests/unit/commands/review-bundle.test.ts
+      tests/unit/scripts/vitest-ci-reporter.test.ts
+      tests/unit/scripts/run-bounded-process.test.ts
+    - pnpm typecheck
+  base_sha: 76a48a13ca6ea28659b44d80ad9cd41e2838fef8
+  phase_blob_sha: aba419cfceaeaa2a733e727c5c5a4169d960581b
+at: 2026-07-27T03:25:55.223Z
+actor: agent
+author: Pocket

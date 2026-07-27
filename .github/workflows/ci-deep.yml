@@ -90,7 +90,10 @@ jobs:
 
       - run: pnpm build
 
-      - run: pnpm exec vitest run tests/unit/core/project-fs-authority-resolvers.test.ts tests/unit/commands/verify-process.test.ts
+      # bounded-command-argv covers the shell-free launch AND runs the real
+      # `pnpm` classifier command, which is a `.cmd` shim here and not on the
+      # Linux gate — this job is the only place that proves it starts.
+      - run: pnpm exec vitest run tests/unit/core/project-fs-authority-resolvers.test.ts tests/unit/commands/verify-process.test.ts tests/unit/core/bounded-command-argv.test.ts tests/unit/core/windows-command-launch.test.ts tests/unit/core/executable-resolution.test.ts tests/unit/core/verify/classify.test.ts
 
       - run: pnpm exec vitest run --config vitest.integration.config.ts tests/integration/verify-timeout-abort.test.ts
 

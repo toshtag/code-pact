@@ -1,5 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
+import {
+  resolveExecutable,
+  type ExecutableResolution,
+} from "./executable-resolution.ts";
 import { StringDecoder } from "node:string_decoder";
 
 export type ProcessTerminationResult = {
@@ -252,9 +256,95 @@ function cleanupChildHandles(proc: ChildProcess): void {
   proc.unref();
 }
 
+// ---------------------------------------------------------------------------
+// Launching a resolved executable
+//
+// `runBoundedArgv` promises that each argv element reaches the child unchanged.
+// WHICH image a program name starts is an OS question, answered by
+// `executable-resolution.ts` — that module owns the PATH/PATHEXT probe and is
+// the only place in src/ that touches the filesystem for it. This module takes
+// the resolution and starts it; it imports no filesystem module.
+//
+// Three shapes come back. A `direct` launch is `spawn(exe, args, {shell:false})`
+// and argv survives verbatim. A `windows-shim` is a `.cmd` / `.bat`, which only
+// cmd.exe can run — that goes through the dedicated launcher below, never a
+// general `shell: true`. An `unresolvable` program is refused before any spawn.
+// ---------------------------------------------------------------------------
+
+/**
+ * Wraps one ALREADY-VALIDATED batch argument in quotes.
+ *
+ * This is not an escaper, and must not be treated as one. `resolveExecutable`
+ * has already refused every character cmd.exe acts on — `%`, `!`, `^`, the
+ * operators, `"`, CR, LF — so nothing is left to escape and quoting only has to
+ * keep whitespace together. An earlier version escaped carets and quotes here
+ * and let CR/LF through, which is not a smaller bug: a newline ends a cmd
+ * command line, so the rest of the argument ran as a second command.
+ */
+function quoteValidatedBatchValue(value: string): string {
+  // One rule still applies: under the C runtime's argv parsing, backslashes
+  // immediately before the closing quote escape IT, so `"C:\dir\"` arrives as
+  // `C:\dir"`. Windows CI caught exactly that. Doubling the trailing run fixes
+  // it and is safe here because `\` is not a character cmd itself acts on.
+  return `"${value.replace(/(\\+)$/, "$1$1")}"`;
+}
+
+/**
+ * Builds the `cmd.exe` invocation for a batch shim whose path and arguments
+ * have already passed the cmd-safe contract.
+ *
+ * `/d` skips AutoRun commands from the registry, so a machine-local setting
+ * cannot inject work into a verification run. `/s` fixes how the outer quotes
+ * are stripped, and `windowsVerbatimArguments` stops Node from re-quoting the
+ * line we just built.
+ */
+function windowsShimSpawnArgs(
+  shimPath: string,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+): { executable: string; args: string[] } {
+  const line = [shimPath, ...args].map(quoteValidatedBatchValue).join(" ");
+  return {
+    executable: env.ComSpec ?? env.COMSPEC ?? "cmd.exe",
+    args: ["/d", "/s", "/c", `"${line}"`],
+  };
+}
+
+function refusedBeforeStart(stderr: string): BoundedCommandResult {
+  return {
+    exitCode: 1,
+    stdout: "",
+    stderr,
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    timedOut: false,
+    aborted: false,
+    elapsedMs: 0,
+  };
+}
+
+function abortedBeforeStart(): BoundedCommandResult {
+  return {
+    exitCode: null,
+    stdout: "",
+    stderr: "aborted before start",
+    stdoutTruncated: false,
+    stderrTruncated: false,
+    timedOut: false,
+    aborted: true,
+    elapsedMs: 0,
+  };
+}
+
 /**
  * Run a trusted project shell command with bounded output, timeout, external
  * cancellation, and descendant-tree termination diagnostics.
+ *
+ * The command string is handed to a shell, so every argument in it is subject
+ * to expansion. Callers that already hold the argv — the verification
+ * classifier does — must use {@link runBoundedArgv} instead: there is no
+ * portable way to render an argv into a shell line without changing its
+ * meaning.
  */
 export async function runBoundedCommand(
   command: string,
@@ -263,40 +353,102 @@ export async function runBoundedCommand(
   signal?: AbortSignal,
 ): Promise<BoundedCommandResult> {
   const shellCommand = command.trim();
-  if (!shellCommand) {
-    return {
-      exitCode: 1,
-      stdout: "",
-      stderr: "empty verification command",
-      stdoutTruncated: false,
-      stderrTruncated: false,
-      timedOut: false,
-      aborted: false,
-      elapsedMs: 0,
-    };
+  if (!shellCommand) return refusedBeforeStart("empty verification command");
+  return superviseBoundedProcess(
+    () =>
+      spawn(shellCommand, {
+        cwd,
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: true,
+        detached: process.platform !== "win32",
+      }),
+    timeoutMs,
+    signal,
+  );
+}
+
+/**
+ * Run a command from its canonical argv with the same bounded-output, timeout,
+ * cancellation, and process-tree guarantees as {@link runBoundedCommand}, but
+ * WITHOUT a shell.
+ *
+ * `spawn(program, args, { shell: false })` passes each element through as one
+ * argument, so a changed-file path or an argument containing `$(...)`, `;`,
+ * `*`, a quote, or whitespace reaches the child exactly as written. Rendering
+ * the same argv into a shell line and running that is not equivalent: JSON
+ * quoting is not shell quoting, and a double-quoted `$(...)` is still expanded.
+ *
+ * Which image `program` names is platform-dependent — see
+ * {@link resolveExecutable}. When nothing can start it with its argv intact,
+ * this refuses rather than falling back to a shell.
+ */
+export async function runBoundedArgv(
+  program: string,
+  args: readonly string[],
+  cwd: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<BoundedCommandResult> {
+  const resolution = resolveExecutable({
+    program,
+    args,
+    platform: process.platform,
+    env: process.env,
+    nodeExecPath: process.execPath,
+  });
+  return runResolvedExecutable(resolution, cwd, timeoutMs, signal);
+}
+
+/** Starts an already-resolved executable, or refuses an unresolvable one. */
+async function runResolvedExecutable(
+  resolution: ExecutableResolution,
+  cwd: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<BoundedCommandResult> {
+  if (resolution.kind === "unresolvable") {
+    return refusedBeforeStart(
+      `verification program could not be resolved safely: ${resolution.reason}`,
+    );
   }
-  if (signal?.aborted) {
-    return {
-      exitCode: null,
-      stdout: "",
-      stderr: "aborted before start",
-      stdoutTruncated: false,
-      stderrTruncated: false,
-      timedOut: false,
-      aborted: true,
-      elapsedMs: 0,
-    };
-  }
+  const spawned =
+    resolution.kind === "windows-shim"
+      ? windowsShimSpawnArgs(resolution.shimPath, resolution.args, process.env)
+      : { executable: resolution.executable, args: resolution.args };
+
+  return superviseBoundedProcess(
+    () =>
+      spawn(spawned.executable, spawned.args, {
+        cwd,
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: false,
+        detached: process.platform !== "win32",
+        ...(resolution.kind === "windows-shim"
+          ? { windowsVerbatimArguments: true }
+          : {}),
+      }),
+    timeoutMs,
+    signal,
+  );
+}
+
+/**
+ * Owns everything a bounded run needs once a child exists: output caps, the
+ * timeout and abort races, process-tree termination, and the close deadline.
+ * The caller supplies only how the child is spawned, so the shell and argv
+ * entry points cannot drift apart in any of those guarantees.
+ */
+async function superviseBoundedProcess(
+  spawnChild: () => ChildProcess,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<BoundedCommandResult> {
+  if (signal?.aborted) return abortedBeforeStart();
 
   const started = performance.now();
   const stdout = createOutputCapture();
   const stderr = createOutputCapture();
-  const proc = spawn(shellCommand, {
-    cwd,
-    stdio: ["ignore", "pipe", "pipe"],
-    shell: true,
-    detached: process.platform !== "win32",
-  });
+  const proc = spawnChild();
 
   proc.stdout?.on("data", (chunk: Buffer) => stdout.append(chunk));
   proc.stderr?.on("data", (chunk: Buffer) => stderr.append(chunk));

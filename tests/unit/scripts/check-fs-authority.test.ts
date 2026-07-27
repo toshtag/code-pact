@@ -6,6 +6,17 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
+// @ts-expect-error .mjs scripts are not included in tsconfig and are imported as untyped modules across the test suite.
+import { checkSourceText as checkSourceTextUntyped } from "../../../scripts/check-fs-authority.mjs";
+
+type FsAuthorityFinding = { line: number; fn: string; arg?: string };
+
+/** The checker's pure entry point: source text in, findings out, no fs. */
+const checkSourceText = checkSourceTextUntyped as (input: {
+  relPath: string;
+  sourceText: string;
+}) => FsAuthorityFinding[];
+
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const scriptPath = join(repoRoot, "scripts", "check-fs-authority.mjs");
@@ -1165,5 +1176,348 @@ describe("check-fs-authority", () => {
     ]);
 
     expect(result.ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `src/core/process/executable-resolution.ts` holds a NARROWER exception than
+// the raw-fs boundary modules: it may import node:fs, but only `existsSync` and
+// `statSync` are authorized inside it. The wide allowlist would have waved
+// through every filesystem sink in the file, so a `writeFileSync` added later
+// could have ridden in on the import permission with nobody noticing.
+//
+// The allowlist is keyed by the repo-relative path, so these drive the
+// checker's pure entry point with that path and synthetic source text. An
+// earlier version rewrote the real file on disk and restored it afterwards,
+// which made every other test in the run — and any watcher or typecheck
+// alongside it — race against a module that briefly was not itself. A proof
+// that corrupts the tree it is proving things about is not a proof.
+// ---------------------------------------------------------------------------
+
+describe("check-fs-authority — the executable resolver's narrow exception", () => {
+  const resolverPath = "src/core/process/executable-resolution.ts";
+
+  function checkResolverSource(lines: string[]): FsAuthorityFinding[] {
+    return checkSourceText({
+      relPath: resolverPath,
+      sourceText: lines.join("\n"),
+    });
+  }
+
+  it("passes the read-only probes it is allowed to make", () => {
+    const findings = checkResolverSource([
+      'import { existsSync, statSync } from "node:fs";',
+      "",
+      "export function probe(path: string): boolean {",
+      "  return existsSync(path) && statSync(path).isFile();",
+      "}",
+      "",
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
+  for (const [fn, call] of [
+    ["readFileSync", 'readFileSync(path, "utf8");'],
+    ["writeFileSync", 'writeFileSync(path, "x");'],
+    ["rmSync", "rmSync(path);"],
+    ["renameSync", "renameSync(path, path);"],
+  ] as const) {
+    it(`rejects ${fn}, which the import permission must not cover`, () => {
+      const findings = checkResolverSource([
+        `import { existsSync, ${fn} } from "node:fs";`,
+        "",
+        "export function probe(path: string): boolean {",
+        `  ${call}`,
+        "  return existsSync(path);",
+        "}",
+        "",
+      ]);
+
+      expect(findings.length).toBeGreaterThan(0);
+      expect(findings.map(f => f.fn).join(" ")).toContain(fn);
+    });
+  }
+
+  it("rejects a namespace import, which would hide every call site", () => {
+    const findings = checkResolverSource([
+      'import * as fs from "node:fs";',
+      "",
+      "export function probe(path: string): boolean {",
+      "  return fs.existsSync(path);",
+      "}",
+      "",
+    ]);
+
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings.map(f => f.fn).join(" ")).toContain("unbounded node:fs import");
+  });
+
+  it("rejects a dynamic import, which no static allowlist can bound", () => {
+    const findings = checkResolverSource([
+      "export async function probe(path: string): Promise<boolean> {",
+      '  const fs = await import("node:fs");',
+      "  return fs.existsSync(path);",
+      "}",
+      "",
+    ]);
+
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings.map(f => f.fn).join(" ")).toContain(
+      "raw node:fs specifier outside an authorized static import",
+    );
+  });
+
+  it("accepts an aliased named import, since the imported name is what is authorized", () => {
+    const findings = checkResolverSource([
+      'import { existsSync as probeExists, statSync as probeStat } from "node:fs";',
+      "",
+      "export function probe(path: string): boolean {",
+      "  return probeExists(path) && probeStat(path).isFile();",
+      "}",
+      "",
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
+  // Permitting a module to reach node:fs is only bounded if every WAY of
+  // reaching it is enumerated. Each of these passed the gate before the
+  // acquisition sweep existed; the computed-write one reached a real write API.
+  for (const [label, lines] of [
+    [
+      "a CommonJS require",
+      [
+        "export function probe(path: string): boolean {",
+        '  const fs = require("node:fs");',
+        "  return fs.existsSync(path);",
+        "}",
+      ],
+    ],
+    [
+      "a CommonJS require of the promises entrypoint",
+      [
+        "export async function probe(path: string): Promise<void> {",
+        '  const fs = require("node:fs/promises");',
+        "  await fs.rm(path);",
+        "}",
+      ],
+    ],
+    [
+      "a require reaching a write through a computed property",
+      [
+        "export function probe(path: string): void {",
+        '  const fs = require("node:fs");',
+        '  fs["writeFileSync"](path, "x");',
+        "}",
+      ],
+    ],
+    [
+      "module.require",
+      [
+        "export function probe(path: string): void {",
+        '  const fs = module.require("node:fs");',
+        '  fs["writeFileSync"](path, "x");',
+        "}",
+      ],
+    ],
+    [
+      "a TypeScript import-equals",
+      [
+        'import fs = require("node:fs");',
+        "",
+        "export function probe(path: string): boolean {",
+        "  return fs.existsSync(path);",
+        "}",
+      ],
+    ],
+  ] as const) {
+    it(`rejects ${label}`, () => {
+      const findings = checkResolverSource([...lines, ""]);
+
+      expect(findings.length).toBeGreaterThan(0);
+      // The ownership invariant reports the specifier itself, so a new
+      // spelling of the same acquisition needs no new case in the checker.
+      expect(findings.map(f => f.fn).join(" ")).toContain(
+        "raw node:fs specifier outside an authorized static import",
+      );
+    });
+  }
+
+  // This is an import-only authority, not a re-publishing one: handing the raw
+  // surface to consumers would move the exception wherever it is imported.
+  for (const [label, line] of [
+    ["a named re-export", 'export { existsSync } from "node:fs";'],
+    ["a namespace re-export", 'export * as fs from "node:fs";'],
+    ["a wildcard re-export", 'export * from "node:fs";'],
+  ] as const) {
+    it(`rejects ${label}, even of an authorized name`, () => {
+      const findings = checkResolverSource([line, ""]);
+
+      expect(findings.length).toBeGreaterThan(0);
+      expect(findings.map(f => f.fn).join(" ")).toContain(
+        "raw node:fs specifier outside an authorized static import",
+      );
+    });
+  }
+
+  it("leaves a non-filesystem import alone", () => {
+    const findings = checkResolverSource([
+      'import { win32 } from "node:path";',
+      "",
+      "export function probe(): string {",
+      "  return win32.delimiter;",
+      "}",
+      "",
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
+  it("accepts a type-only import, which is erased before anything runs", () => {
+    const findings = checkResolverSource([
+      'import type { Stats } from "node:fs";',
+      'import { statSync } from "node:fs";',
+      "",
+      "export function probe(path: string): Stats {",
+      "  return statSync(path);",
+      "}",
+      "",
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
+  // A loader in hand reaches node:fs with no specifier this checker can see,
+  // so holding one at all is refused — whatever it is nominally loading.
+  for (const [label, lines] of [
+    [
+      "a loader aliased to a local",
+      [
+        "export function probe(path: string): void {",
+        "  const load = require;",
+        '  const fs = load("node:fs");',
+        '  fs["writeFileSync"](path, "x");',
+        "}",
+      ],
+    ],
+    [
+      "a parenthesized loader",
+      [
+        "export function probe(path: string): boolean {",
+        '  const fs = (require)("node:fs");',
+        "  return fs.existsSync(path);",
+        "}",
+      ],
+    ],
+    [
+      "a loader read off module by element access",
+      [
+        "export function probe(path: string): void {",
+        '  const load = module["require"];',
+        '  const fs = load("node:fs");',
+        '  fs["writeFileSync"](path, "x");',
+        "}",
+      ],
+    ],
+    [
+      "a loader invoked through call",
+      [
+        "export function probe(path: string): boolean {",
+        '  const fs = require.call(null, "node:fs");',
+        "  return fs.existsSync(path);",
+        "}",
+      ],
+    ],
+    [
+      "a loader invoked through Reflect.apply",
+      [
+        "export function probe(path: string): boolean {",
+        '  const fs = Reflect.apply(require, null, ["node:fs"]);',
+        "  return fs.existsSync(path);",
+        "}",
+      ],
+    ],
+    [
+      "createRequire",
+      [
+        'import { createRequire } from "node:module";',
+        "",
+        "export function probe(path: string): void {",
+        "  const load = createRequire(import.meta.url);",
+        '  const fs = load("node:fs");',
+        '  fs["writeFileSync"](path, "x");',
+        "}",
+      ],
+    ],
+    [
+      "a loader whose specifier is not statically known",
+      [
+        "export function probe(specifier: string): unknown {",
+        "  return require(specifier);",
+        "}",
+      ],
+    ],
+    [
+      "a loader that is not loading node:fs today",
+      [
+        "export function probe(): string {",
+        '  const path = require("node:path");',
+        "  return path.sep;",
+        "}",
+      ],
+    ],
+  ] as const) {
+    it(`rejects ${label}`, () => {
+      const findings = checkResolverSource([...lines, ""]);
+
+      expect(findings.map(f => f.fn).join(" ")).toContain(
+        "commonjs loader in an import-only module",
+      );
+    });
+  }
+
+  it("rejects a specifier reached indirectly, with no loader in view", () => {
+    // The literal is what is owned, so hiding the call site does not help.
+    const findings = checkResolverSource([
+      "export function probe(",
+      "  load: (specifier: string) => { writeFileSync: (p: string, d: string) => void },",
+      "  path: string,",
+      "): void {",
+      '  const specifier = "node:fs";',
+      "  load(specifier).writeFileSync(path, \"x\");",
+      "}",
+      "",
+    ]);
+
+    expect(findings.map(f => f.fn).join(" ")).toContain(
+      "raw node:fs specifier outside an authorized static import",
+    );
+  });
+
+  it("rejects dynamic code generation, which a static contract cannot bound", () => {
+    const findings = checkResolverSource([
+      "export function probe(source: string): unknown {",
+      "  return eval(source);",
+      "}",
+      "",
+    ]);
+
+    expect(findings.map(f => f.fn).join(" ")).toContain(
+      "dynamic code generation",
+    );
+  });
+
+  it("still reports an unauthorized named import of an allowed-module function", () => {
+    const findings = checkResolverSource([
+      'import { existsSync, readdirSync } from "node:fs";',
+      "",
+      "export function probe(path: string): boolean {",
+      "  return existsSync(path);",
+      "}",
+      "",
+    ]);
+
+    expect(findings.map(f => f.arg)).toContain("readdirSync");
   });
 });
