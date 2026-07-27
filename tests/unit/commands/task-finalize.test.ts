@@ -285,6 +285,111 @@ describe("runTaskFinalize — --write", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Issue #560 — `--write` exited 0 while deleting the phase's entire top-level
+// `evidence:` list, because the writer serialized the parsed Phase model and
+// the model does not carry that key. The status flip is the only edit the
+// command is allowed to make.
+// ---------------------------------------------------------------------------
+
+const phasePath = "design/phases/P1-foundation.yaml";
+
+async function readPhaseSource(): Promise<string> {
+  return readFile(join(cwd, phasePath), "utf8");
+}
+
+/**
+ * Rewrites the fixture phase with the shape the issue reports: a top-level
+ * `evidence:` list, a key the Phase schema does not model, an inline comment,
+ * and a folded block scalar. Task statuses match `setupProject`'s so the
+ * derived state and the eligibility check are unchanged.
+ */
+async function overwritePhaseWithEvidence(): Promise<string> {
+  const source = `id: P1
+name: Foundation
+weight: 10
+confidence: medium
+risk: low
+status: in_progress
+objective: >
+  Establish the project foundation.
+x-custom:
+  nested: keep-me
+definition_of_done:
+  - All tasks done
+verification:
+  commands:
+    - node --version
+evidence:
+  - "P1-T2 done event recorded in .code-pact/state/events/one.yaml"
+  - "P1-T3 done event recorded in .code-pact/state/events/two.yaml"
+  - "P1-T4 done event recorded in .code-pact/state/events/three.yaml"
+tasks:
+  - id: P1-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: in_progress # closeout pending
+  - id: P1-T2
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+    expected_duration: short
+    status: done
+`;
+  await writeFile(join(cwd, phasePath), source, "utf8");
+  return source;
+}
+
+describe("runTaskFinalize — --write preserves the rest of the phase source", () => {
+  it("flips the status and leaves every other byte in place", async () => {
+    await setupProject({ taskState: "done", designStatus: "in_progress" });
+    const before = await overwritePhaseWithEvidence();
+
+    const result = await runTaskFinalize({ cwd, taskId: "P1-T1", write: true });
+    expect(result.kind).toBe("finalized");
+
+    expect(await readPhaseSource()).toBe(
+      before.replace(
+        "status: in_progress # closeout pending",
+        "status: done # closeout pending",
+      ),
+    );
+  });
+
+  it("keeps every top-level evidence entry", async () => {
+    await setupProject({ taskState: "done", designStatus: "in_progress" });
+    const before = await overwritePhaseWithEvidence();
+    const evidenceBefore = (parseYaml(before) as { evidence: string[] })
+      .evidence;
+
+    await runTaskFinalize({ cwd, taskId: "P1-T1", write: true });
+
+    const evidenceAfter = (
+      parseYaml(await readPhaseSource()) as { evidence: string[] }
+    ).evidence;
+    expect(evidenceAfter).toEqual(evidenceBefore);
+    expect(evidenceAfter).toHaveLength(3);
+  });
+
+  it("keeps a top-level key the Phase schema does not model", async () => {
+    await setupProject({ taskState: "done", designStatus: "in_progress" });
+    await overwritePhaseWithEvidence();
+    await runTaskFinalize({ cwd, taskId: "P1-T1", write: true });
+    const parsed = parseYaml(await readPhaseSource()) as {
+      "x-custom": { nested: string };
+    };
+    expect(parsed["x-custom"]).toEqual({ nested: "keep-me" });
+  });
+});
+
 describe("runTaskFinalize — already_finalized (idempotent)", () => {
   it("returns kind 'already_finalized' when design status is already done", async () => {
     await setupProject({ taskState: "done", designStatus: "done" });

@@ -371,3 +371,124 @@ describe("runPhaseReconcile — cancelled task terminality", () => {
     expect(phase.tasks?.find(t => t.id === "P1-T2")?.status).toBe("done");
   });
 });
+
+// ---------------------------------------------------------------------------
+// `phase reconcile --write` flips several tasks in one pass, so it is the
+// command that would compound the issue #560 loss: each flip used to
+// re-serialize the phase, and the phase-level `evidence:` list only had to be
+// dropped once. Every flip must be a status-scalar edit and nothing more.
+// ---------------------------------------------------------------------------
+
+const phasePath = "design/phases/P1-foundation.yaml";
+
+async function readPhaseSource(): Promise<string> {
+  return readFile(join(cwd, phasePath), "utf8");
+}
+
+/**
+ * Replaces the fixture phase with one that carries a top-level `evidence:`
+ * list, a key the Phase schema does not model, an inline comment, and a folded
+ * block scalar. Task ids and statuses match the `setupPhase` specs below, so
+ * the derived states and the reconcile verdicts are unchanged.
+ */
+async function overwritePhaseWithEvidence(): Promise<string> {
+  const source = `id: P1
+name: Foundation
+weight: 10
+confidence: medium
+risk: low
+status: in_progress
+objective: >
+  Establish the project foundation.
+x-custom:
+  nested: keep-me
+definition_of_done:
+  - All tasks done
+verification:
+  commands:
+    - node --version
+evidence:
+  - "P1-T0 done event recorded in .code-pact/state/events/zero.yaml"
+  - "P1-T0 focused verification passed"
+tasks:
+  - id: P1-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned # first closeout
+  - id: P1-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: 'planned'
+  - id: P1-T3
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+`;
+  await writeFile(join(cwd, phasePath), source, "utf8");
+  return source;
+}
+
+describe("runPhaseReconcile — --write preserves the rest of the phase source", () => {
+  /** P1-T1 and P1-T2 are eligible; P1-T3 has no done event and must not move. */
+  async function setupEligiblePair(): Promise<string> {
+    await setupPhase([
+      { id: "P1-T1", designStatus: "planned", derive: "done" },
+      { id: "P1-T2", designStatus: "planned", derive: "done" },
+      { id: "P1-T3", designStatus: "planned", derive: "none" },
+    ]);
+    return overwritePhaseWithEvidence();
+  }
+
+  it("flips both eligible tasks and changes no other byte", async () => {
+    const before = await setupEligiblePair();
+    const result = await runPhaseReconcile({ cwd, phaseId: "P1", write: true });
+    expect(result.kind).toBe("reconciled");
+
+    expect(await readPhaseSource()).toBe(
+      before
+        .replace("status: planned # first closeout", "status: done # first closeout")
+        .replace("status: 'planned'", "status: 'done'"),
+    );
+  });
+
+  it("keeps the top-level evidence entries across both flips", async () => {
+    const before = await setupEligiblePair();
+    const evidenceBefore = (parseYaml(before) as { evidence: string[] })
+      .evidence;
+
+    await runPhaseReconcile({ cwd, phaseId: "P1", write: true });
+
+    const evidenceAfter = (
+      parseYaml(await readPhaseSource()) as { evidence: string[] }
+    ).evidence;
+    expect(evidenceAfter).toEqual(evidenceBefore);
+  });
+
+  it("keeps the unmodelled top-level key and the ineligible task untouched", async () => {
+    await setupEligiblePair();
+    await runPhaseReconcile({ cwd, phaseId: "P1", write: true });
+
+    const source = await readPhaseSource();
+    expect(parseYaml(source)).toMatchObject({
+      "x-custom": { nested: "keep-me" },
+    });
+    const phase = await readPhase();
+    expect(phase.tasks?.find(t => t.id === "P1-T3")?.status).toBe("planned");
+    expect(phase.status).toBe("in_progress");
+  });
+});

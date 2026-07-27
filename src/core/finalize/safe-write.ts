@@ -3,17 +3,20 @@ import {
   resolvePhaseReadPath,
   resolvePhaseWritePath,
 } from "../project-fs/index.ts";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { atomicWriteText } from "../../io/atomic-text.ts";
+import { parse as parseYaml } from "yaml";
+import { atomicReplaceExistingText } from "../../io/atomic-text.ts";
 import { assertSafeRelativePath } from "../path-safety.ts";
 import { Phase, type PhaseStatus } from "../schemas/phase.ts";
 import { computeTaskStatusDiff, type TaskStatusDiff } from "./diff.ts";
+import { buildTaskStatusSourceEdit } from "./task-status-source-edit.ts";
 
 // ---------------------------------------------------------------------------
 // Safe-write contract for Finalization & Reconciliation
 //
-// Owns the load → mutate → atomic-write pattern that both `task
-// finalize` and `phase reconcile` need. Returns
+// Owns the load → source-edit → atomic-replace pattern that both `task
+// finalize` and `phase reconcile` need. The mutation itself is a single
+// scalar replacement in the original bytes (see task-status-source-edit.ts),
+// never a re-serialization of the parsed phase. Returns
 // structured refusals instead of throwing so the command layer can
 // map each refusal reason to its own public error code
 //
@@ -215,23 +218,26 @@ export async function classifyWriteRequest(
 }
 
 /**
- * Applies a previously classified planned write to disk via
- * `atomicWriteText`. Re-loads, re-parses, mutates in memory, serializes,
- * and writes. The re-load (rather than trusting the `phase` snapshot
- * from `classifyWriteRequest`) is deliberate: the file may have
- * changed between classify time and apply time, and `atomicWriteText`
- * already does not provide concurrency safety. The re-load at least
- * makes the mutation deterministic against the current on-disk state.
+ * Applies a previously classified planned write to disk as a **source edit**:
+ * the only bytes that change are the target task's `status` scalar. Everything
+ * else in the phase file — the top-level `evidence:` list, keys the Phase
+ * schema does not model, comments, key order, block-scalar wrapping — is left
+ * exactly as the maintainer wrote it (issue #560).
+ *
+ * The write re-reads the file rather than trusting the `phase` snapshot from
+ * `classifyWriteRequest`, and hands those same bytes to
+ * `atomicReplaceExistingText` as the expected current content. A concurrent
+ * writer that changed the file between the read and the rename loses the race
+ * and keeps its bytes: this candidate is built from a source that no longer
+ * exists, so writing it would silently revert that writer's edit.
  *
  * Throws when:
  *   - owned path resolution fails (path safety changed since classify).
  *   - The file has been deleted or become unreadable since classify.
- *   - The file no longer parses as a Phase.
- *   - The task id no longer exists in `phase.tasks[]`.
- *
- * In practice, none of these should happen in a single-process workflow,
- * which matches the single-process-owner contract. Concurrent writers
- * are out of scope.
+ *   - The file no longer parses as YAML or no longer validates as a Phase.
+ *   - The task id no longer exists, or exists more than once.
+ *   - The task's status is no longer `diff.before`.
+ *   - The file changed under us between the read and the rename.
  */
 export async function applyPlannedWrite(
   cwd: string,
@@ -239,21 +245,11 @@ export async function applyPlannedWrite(
 ): Promise<void> {
   const writePath = await resolvePhaseWritePath(cwd, diff.file);
   const raw = await readOwnedText(await resolvePhaseReadPath(cwd, diff.file));
-  const phase = Phase.parse(parseYaml(raw) as unknown);
-  const tasks = phase.tasks ?? [];
-  const idx = tasks.findIndex(t => t.id === diff.task_id);
-  if (idx === -1) {
-    throw new Error(
-      `task "${diff.task_id}" not found in "${diff.file}" at apply time`,
-    );
-  }
-  const updated: Phase = {
-    ...phase,
-    tasks: [
-      ...tasks.slice(0, idx),
-      { ...tasks[idx]!, status: diff.after },
-      ...tasks.slice(idx + 1),
-    ],
-  };
-  await atomicWriteText(writePath, stringifyYaml(updated));
+  const { candidate } = buildTaskStatusSourceEdit({
+    raw,
+    taskId: diff.task_id,
+    expectedBefore: diff.before,
+    targetAfter: diff.after,
+  });
+  await atomicReplaceExistingText(writePath, candidate, raw);
 }
