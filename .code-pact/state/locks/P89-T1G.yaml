@@ -1,0 +1,75 @@
+schema_version: 1
+task_id: P89-T1G
+phase_id: P89
+phase_path: design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+base_ref: HEAD
+base_sha: 780e2305c643d1978bd161e9fb3b20cbe483e422
+phase_blob_sha: efcda41d08952a80550c306156536ef2f1b84da6
+contract_digest: b2c3284a6202fa170c1f184cbc37c0d82009b9fc9efdc5051e4650933343096d
+contract:
+  description: >
+    Restore parity between the fs-authority checker's narrow raw-filesystem
+    import-only exceptions and the security-hardening exact import invariant.
+    Required Standard CI must execute filesystem containment and
+    security-hardening gates so main cannot remain release-red while required CI
+    is green. Avoid duplicate global fs-authority scans because the
+    security-hardening checker already executes that gate.
+  reads:
+    - .github/workflows/ci.yml
+    - scripts/check-fs-authority.mjs
+    - scripts/check-security-hardening-invariants.mjs
+    - scripts/check-supply-chain-invariants.mjs
+    - scripts/lib/fs-authority-checker.mjs
+    - tests/unit/scripts/check-fs-authority.test.ts
+    - tests/unit/scripts/check-supply-chain-invariants.test.ts
+    - tests/unit/workflows/ci-workflow.test.ts
+  writes:
+    - .github/workflows/ci.yml
+    - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+    - scripts/check-fs-authority.mjs
+    - scripts/check-security-hardening-invariants.mjs
+    - scripts/check-supply-chain-invariants.mjs
+    - scripts/lib/fs-authority-checker.mjs
+    - tests/unit/scripts/check-fs-authority.test.ts
+    - tests/unit/scripts/check-supply-chain-invariants.test.ts
+    - tests/unit/workflows/ci-workflow.test.ts
+  depends_on:
+    - P89-T1F
+  decision_refs: []
+  acceptance_refs:
+    - tests/unit/scripts/check-fs-authority.test.ts
+    - tests/unit/scripts/check-supply-chain-invariants.test.ts
+    - tests/unit/workflows/ci-workflow.test.ts
+  definition_of_done:
+    - Bounded-process tests do not depend on shared-runner wall-clock ceilings
+    - CI assertion failures identify the exact test and assertion
+    - Native executables and JavaScript entrypoints execute with canonical argv.
+      Windows batch shims accept only a verified cmd-safe subset and fail closed
+      before spawning for all other arguments or paths
+    - Phase status mutation preserves every non-target source byte
+    - The global fs-authority gate recognizes verification-ledger path
+      authorities through both their defining module and project-fs/index
+      re-export, while capability mismatches remain rejected
+    - The verification command contract is validated at the producer-consumer
+      boundary, so review-bundle and ci-parity run the classifier commands the
+      scope script actually emits
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm exec vitest run
+      tests/unit/core/finalize/task-status-source-edit.test.ts
+      tests/unit/core/finalize/safe-write.test.ts
+      tests/unit/commands/task-finalize.test.ts
+      tests/unit/commands/phase-reconcile.test.ts
+      tests/unit/core/verify/classify.test.ts
+      tests/unit/core/review-bundle.test.ts
+      tests/unit/commands/review-bundle.test.ts
+      tests/unit/scripts/vitest-ci-reporter.test.ts
+      tests/unit/scripts/run-bounded-process.test.ts
+    - pnpm typecheck
+  base_sha: 780e2305c643d1978bd161e9fb3b20cbe483e422
+  phase_blob_sha: efcda41d08952a80550c306156536ef2f1b84da6
+at: 2026-07-27T09:17:33.271Z
+actor: agent
+author: Pocket
