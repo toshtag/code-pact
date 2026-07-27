@@ -295,7 +295,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Restore parity between project-config filesystem authority exports and
       the fs-authority checker's trusted registry. The verification ledger
