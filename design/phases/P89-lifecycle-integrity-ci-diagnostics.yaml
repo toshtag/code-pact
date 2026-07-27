@@ -3,7 +3,7 @@ name: Lifecycle Integrity and CI Diagnostics
 weight: 1
 confidence: high
 risk: medium
-status: planned
+status: in_progress
 objective: >
   Eliminate silent lifecycle data loss and CI failure modes that cause
   unnecessary diagnosis, reruns, and agent repair rounds. Phase status mutation
@@ -40,7 +40,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Replace phase-model reserialization in finalize/reconcile writes with a
       lossless, CAS-guarded source edit that changes only the selected task
