@@ -1263,7 +1263,9 @@ describe("check-fs-authority — the executable resolver's narrow exception", ()
     ]);
 
     expect(findings.length).toBeGreaterThan(0);
-    expect(findings.map(f => f.fn).join(" ")).toContain("dynamic node:fs import");
+    expect(findings.map(f => f.fn).join(" ")).toContain(
+      "raw node:fs specifier outside an authorized static import",
+    );
   });
 
   it("accepts an aliased named import, since the imported name is what is authorized", () => {
@@ -1329,21 +1331,15 @@ describe("check-fs-authority — the executable resolver's narrow exception", ()
         "}",
       ],
     ],
-    [
-      "a require whose specifier is not statically known",
-      [
-        "export function probe(specifier: string): unknown {",
-        "  return require(specifier);",
-        "}",
-      ],
-    ],
   ] as const) {
     it(`rejects ${label}`, () => {
       const findings = checkResolverSource([...lines, ""]);
 
       expect(findings.length).toBeGreaterThan(0);
+      // The ownership invariant reports the specifier itself, so a new
+      // spelling of the same acquisition needs no new case in the checker.
       expect(findings.map(f => f.fn).join(" ")).toContain(
-        "unbounded node:fs acquisition",
+        "raw node:fs specifier outside an authorized static import",
       );
     });
   }
@@ -1360,23 +1356,156 @@ describe("check-fs-authority — the executable resolver's narrow exception", ()
 
       expect(findings.length).toBeGreaterThan(0);
       expect(findings.map(f => f.fn).join(" ")).toContain(
-        "raw node:fs re-export",
+        "raw node:fs specifier outside an authorized static import",
       );
     });
   }
 
-  it("leaves a non-filesystem module alone", () => {
+  it("leaves a non-filesystem import alone", () => {
     const findings = checkResolverSource([
       'import { win32 } from "node:path";',
       "",
       "export function probe(): string {",
-      '  const path = require("node:path");',
-      "  return win32.delimiter + path.sep;",
+      "  return win32.delimiter;",
       "}",
       "",
     ]);
 
     expect(findings).toEqual([]);
+  });
+
+  it("accepts a type-only import, which is erased before anything runs", () => {
+    const findings = checkResolverSource([
+      'import type { Stats } from "node:fs";',
+      'import { statSync } from "node:fs";',
+      "",
+      "export function probe(path: string): Stats {",
+      "  return statSync(path);",
+      "}",
+      "",
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
+  // A loader in hand reaches node:fs with no specifier this checker can see,
+  // so holding one at all is refused — whatever it is nominally loading.
+  for (const [label, lines] of [
+    [
+      "a loader aliased to a local",
+      [
+        "export function probe(path: string): void {",
+        "  const load = require;",
+        '  const fs = load("node:fs");',
+        '  fs["writeFileSync"](path, "x");',
+        "}",
+      ],
+    ],
+    [
+      "a parenthesized loader",
+      [
+        "export function probe(path: string): boolean {",
+        '  const fs = (require)("node:fs");',
+        "  return fs.existsSync(path);",
+        "}",
+      ],
+    ],
+    [
+      "a loader read off module by element access",
+      [
+        "export function probe(path: string): void {",
+        '  const load = module["require"];',
+        '  const fs = load("node:fs");',
+        '  fs["writeFileSync"](path, "x");',
+        "}",
+      ],
+    ],
+    [
+      "a loader invoked through call",
+      [
+        "export function probe(path: string): boolean {",
+        '  const fs = require.call(null, "node:fs");',
+        "  return fs.existsSync(path);",
+        "}",
+      ],
+    ],
+    [
+      "a loader invoked through Reflect.apply",
+      [
+        "export function probe(path: string): boolean {",
+        '  const fs = Reflect.apply(require, null, ["node:fs"]);',
+        "  return fs.existsSync(path);",
+        "}",
+      ],
+    ],
+    [
+      "createRequire",
+      [
+        'import { createRequire } from "node:module";',
+        "",
+        "export function probe(path: string): void {",
+        "  const load = createRequire(import.meta.url);",
+        '  const fs = load("node:fs");',
+        '  fs["writeFileSync"](path, "x");',
+        "}",
+      ],
+    ],
+    [
+      "a loader whose specifier is not statically known",
+      [
+        "export function probe(specifier: string): unknown {",
+        "  return require(specifier);",
+        "}",
+      ],
+    ],
+    [
+      "a loader that is not loading node:fs today",
+      [
+        "export function probe(): string {",
+        '  const path = require("node:path");',
+        "  return path.sep;",
+        "}",
+      ],
+    ],
+  ] as const) {
+    it(`rejects ${label}`, () => {
+      const findings = checkResolverSource([...lines, ""]);
+
+      expect(findings.map(f => f.fn).join(" ")).toContain(
+        "commonjs loader in an import-only module",
+      );
+    });
+  }
+
+  it("rejects a specifier reached indirectly, with no loader in view", () => {
+    // The literal is what is owned, so hiding the call site does not help.
+    const findings = checkResolverSource([
+      "export function probe(",
+      "  load: (specifier: string) => { writeFileSync: (p: string, d: string) => void },",
+      "  path: string,",
+      "): void {",
+      '  const specifier = "node:fs";',
+      "  load(specifier).writeFileSync(path, \"x\");",
+      "}",
+      "",
+    ]);
+
+    expect(findings.map(f => f.fn).join(" ")).toContain(
+      "raw node:fs specifier outside an authorized static import",
+    );
+  });
+
+  it("rejects dynamic code generation, which a static contract cannot bound", () => {
+    const findings = checkResolverSource([
+      "export function probe(source: string): unknown {",
+      "  return eval(source);",
+      "}",
+      "",
+    ]);
+
+    expect(findings.map(f => f.fn).join(" ")).toContain(
+      "dynamic code generation",
+    );
   });
 
   it("still reports an unauthorized named import of an allowed-module function", () => {

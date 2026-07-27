@@ -708,6 +708,49 @@ const RAW_FS_IMPORT_ALLOWLIST = new Set([
 // wide here — a `writeFileSync` added later would pass silently. These entries
 // permit the import and NOTHING else: each listed function name is authorized
 // individually, and any other raw operation in the file is still a finding.
+/** True when `node` is the NAME being declared, not a reference to something. */
+function isDeclarationName(node) {
+  const parent = node.parent;
+  if (parent === undefined) return false;
+  return (
+    (ts.isImportSpecifier(parent) && parent.name === node) ||
+    (ts.isImportClause(parent) && parent.name === node) ||
+    (ts.isNamespaceImport(parent) && parent.name === node) ||
+    (ts.isVariableDeclaration(parent) && parent.name === node) ||
+    (ts.isParameter(parent) && parent.name === node) ||
+    (ts.isFunctionDeclaration(parent) && parent.name === node) ||
+    (ts.isPropertyAccessExpression(parent) && parent.name === node)
+  );
+}
+
+/**
+ * The CommonJS loader this node hands over, or null.
+ *
+ * Covers the loader by any spelling — a bare `require`, `module.require`,
+ * `module["require"]`, and `createRequire` — because a loader in hand reaches
+ * node:fs without a specifier this checker can see.
+ */
+function loaderCapabilityName(node) {
+  if (ts.isIdentifier(node) && !isDeclarationName(node)) {
+    if (node.text === "require" || node.text === "createRequire") {
+      return node.text;
+    }
+    return null;
+  }
+  if (ts.isPropertyAccessExpression(node) && node.name.text === "require") {
+    return "require";
+  }
+  if (
+    ts.isElementAccessExpression(node) &&
+    node.argumentExpression !== undefined &&
+    ts.isStringLiteral(node.argumentExpression) &&
+    node.argumentExpression.text === "require"
+  ) {
+    return "require";
+  }
+  return null;
+}
+
 const RAW_FS_IMPORT_ONLY_ALLOWLIST = new Map([
   [
     join("src", "core", "process", "executable-resolution.ts"),
@@ -1470,14 +1513,27 @@ export function checkSourceText({
   }
 
   // An import-only exception permits NAMED imports of specific functions and
-  // nothing else. Permitting a module to reach node:fs at all is only bounded
-  // if EVERY way of reaching it is enumerated: a namespace import, a dynamic
-  // import, a CommonJS `require`, `module.require`, a TypeScript import-equals,
-  // or a re-export each hand over the whole surface behind an expression no
-  // static name check can follow. `require("node:fs")["writeFileSync"]` is not
-  // hypothetical — it reached a real write API through this exception before
-  // this sweep existed. Anything that is not a static named import of an
-  // authorized function is a finding.
+  // nothing else.
+  //
+  // Enumerating the FORBIDDEN ways to reach node:fs does not work — that is a
+  // blacklist, and it leaked three times: first `require`, then a re-export,
+  // then `const load = require; load("node:fs")`. Every round closed the shapes
+  // that had been named and left the next spelling open.
+  //
+  // So the invariant is ownership, not syntax. A raw-fs module specifier may
+  // appear in exactly one place: the authorized static named import (or a
+  // type-only construct, which is erased before anything runs). Every other
+  // occurrence of that string is a finding regardless of what surrounds it, so
+  // `require.call`, `Reflect.apply`, `module["require"]`, `createRequire`, and
+  // an indirect `const specifier = "node:fs"` all fall out of the same rule
+  // instead of needing their own case.
+  //
+  // Held alongside it: the module may not hold a CommonJS loader at all, which
+  // covers a loader reached without a literal in view.
+  //
+  // This is a static-source contract, not a runtime sandbox. It reasons about
+  // statically visible acquisition; dynamic code generation is refused rather
+  // than analysed.
   const importOnlyNames = RAW_FS_IMPORT_ONLY_ALLOWLIST.get(relFile);
   if (importOnlyNames) {
     const reportImport = (node, fn, arg) => {
@@ -1508,74 +1564,61 @@ export function checkSourceText({
         }
       }
     }
-    // `import fs = require("node:fs")` is neither an ImportDeclaration nor a
-    // call expression, so it needs its own case.
-    for (const stmt of sourceFile.statements) {
-      if (!ts.isImportEqualsDeclaration(stmt)) continue;
-      if (!ts.isExternalModuleReference(stmt.moduleReference)) continue;
-      const expr = stmt.moduleReference.expression;
-      if (!ts.isStringLiteral(expr) || RAW_FS_MODULES.has(expr.text)) {
-        reportImport(
-          stmt,
-          "unbounded node:fs acquisition",
-          ts.isStringLiteral(expr) ? expr.text : "?",
-        );
-      }
-    }
-
-    /** `require(x)` and `module.require(x)`, however the callee is spelled. */
-    const requireSpecifier = node => {
-      const callee = node.expression;
-      const isRequire =
-        (ts.isIdentifier(callee) && callee.text === "require") ||
-        (ts.isPropertyAccessExpression(callee) &&
-          callee.name.text === "require");
-      if (!isRequire) return null;
-      const [specifier] = node.arguments;
-      // A non-literal specifier cannot be proven safe, so it is refused.
-      if (specifier === undefined || !ts.isStringLiteral(specifier)) {
-        return "?";
-      }
-      return RAW_FS_MODULES.has(specifier.text) ? specifier.text : null;
-    };
-
-    const visitAcquisition = node => {
-      // A re-export hands the raw surface to every consumer of this module.
-      // This is an import-only authority, not a re-publishing one, so even a
-      // re-export of an authorized name is refused.
+    // Every string literal naming a raw-fs module must be the specifier of an
+    // authorized static import, or of a construct erased before runtime.
+    const authorizedSpecifiers = new Set();
+    const collectAuthorizedSpecifiers = node => {
+      // A static ImportDeclaration is the one place a raw-fs specifier may
+      // live. Whether THIS one is authorized — named bindings, authorized
+      // names, or type-only — was already decided above, so the specifier is
+      // accounted for either way and the same node is never reported twice.
       if (
-        ts.isExportDeclaration(node) &&
-        node.moduleSpecifier !== undefined &&
+        ts.isImportDeclaration(node) &&
         ts.isStringLiteral(node.moduleSpecifier) &&
         RAW_FS_MODULES.has(node.moduleSpecifier.text)
       ) {
-        reportImport(
-          node,
-          "raw node:fs re-export",
-          node.moduleSpecifier.text,
-        );
+        authorizedSpecifiers.add(node.moduleSpecifier);
       }
-      if (ts.isCallExpression(node)) {
-        if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-          const [specifier] = node.arguments;
-          if (
-            specifier === undefined ||
-            !ts.isStringLiteral(specifier) ||
-            RAW_FS_MODULES.has(specifier.text)
-          ) {
-            reportImport(
-              node,
-              "dynamic node:fs import",
-              specifier && ts.isStringLiteral(specifier) ? specifier.text : "?",
-            );
-          }
-        } else {
-          const acquired = requireSpecifier(node);
-          if (acquired !== null) {
-            reportImport(node, "unbounded node:fs acquisition", acquired);
-          }
+      // `type T = import("node:fs").Stats` is erased with the type.
+      if (ts.isImportTypeNode(node)) {
+        const arg = node.argument;
+        if (ts.isLiteralTypeNode(arg) && ts.isStringLiteral(arg.literal)) {
+          authorizedSpecifiers.add(arg.literal);
         }
       }
+      ts.forEachChild(node, collectAuthorizedSpecifiers);
+    };
+    collectAuthorizedSpecifiers(sourceFile);
+
+    const visitAcquisition = node => {
+      if (
+        ts.isStringLiteral(node) &&
+        RAW_FS_MODULES.has(node.text) &&
+        !authorizedSpecifiers.has(node)
+      ) {
+        reportImport(
+          node,
+          "raw node:fs specifier outside an authorized static import",
+          node.text,
+        );
+      }
+
+      // A CommonJS loader reaches node:fs with no specifier in view, so the
+      // capability itself is refused in an import-only authority module.
+      const loaderName = loaderCapabilityName(node);
+      if (loaderName !== null) {
+        reportImport(node, "commonjs loader in an import-only module", loaderName);
+      }
+
+      // Generated code is outside what a static contract can reason about.
+      if (
+        ts.isIdentifier(node) &&
+        (node.text === "eval" || node.text === "Function") &&
+        !isDeclarationName(node)
+      ) {
+        reportImport(node, "dynamic code generation", node.text);
+      }
+
       ts.forEachChild(node, visitAcquisition);
     };
     visitAcquisition(sourceFile);
