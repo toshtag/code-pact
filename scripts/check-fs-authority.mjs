@@ -1470,10 +1470,14 @@ export function checkSourceText({
   }
 
   // An import-only exception permits NAMED imports of specific functions and
-  // nothing else. A namespace import (`import * as fs`) or a dynamic
-  // `import("node:fs")` would hand the module the whole surface behind an
-  // expression no static name check can follow, so both are findings even
-  // though the file is allowed to reach node:fs at all.
+  // nothing else. Permitting a module to reach node:fs at all is only bounded
+  // if EVERY way of reaching it is enumerated: a namespace import, a dynamic
+  // import, a CommonJS `require`, `module.require`, a TypeScript import-equals,
+  // or a re-export each hand over the whole surface behind an expression no
+  // static name check can follow. `require("node:fs")["writeFileSync"]` is not
+  // hypothetical — it reached a real write API through this exception before
+  // this sweep existed. Anything that is not a static named import of an
+  // authorized function is a finding.
   const importOnlyNames = RAW_FS_IMPORT_ONLY_ALLOWLIST.get(relFile);
   if (importOnlyNames) {
     const reportImport = (node, fn, arg) => {
@@ -1504,27 +1508,77 @@ export function checkSourceText({
         }
       }
     }
-    const visitForDynamicImport = node => {
+    // `import fs = require("node:fs")` is neither an ImportDeclaration nor a
+    // call expression, so it needs its own case.
+    for (const stmt of sourceFile.statements) {
+      if (!ts.isImportEqualsDeclaration(stmt)) continue;
+      if (!ts.isExternalModuleReference(stmt.moduleReference)) continue;
+      const expr = stmt.moduleReference.expression;
+      if (!ts.isStringLiteral(expr) || RAW_FS_MODULES.has(expr.text)) {
+        reportImport(
+          stmt,
+          "unbounded node:fs acquisition",
+          ts.isStringLiteral(expr) ? expr.text : "?",
+        );
+      }
+    }
+
+    /** `require(x)` and `module.require(x)`, however the callee is spelled. */
+    const requireSpecifier = node => {
+      const callee = node.expression;
+      const isRequire =
+        (ts.isIdentifier(callee) && callee.text === "require") ||
+        (ts.isPropertyAccessExpression(callee) &&
+          callee.name.text === "require");
+      if (!isRequire) return null;
+      const [specifier] = node.arguments;
+      // A non-literal specifier cannot be proven safe, so it is refused.
+      if (specifier === undefined || !ts.isStringLiteral(specifier)) {
+        return "?";
+      }
+      return RAW_FS_MODULES.has(specifier.text) ? specifier.text : null;
+    };
+
+    const visitAcquisition = node => {
+      // A re-export hands the raw surface to every consumer of this module.
+      // This is an import-only authority, not a re-publishing one, so even a
+      // re-export of an authorized name is refused.
       if (
-        ts.isCallExpression(node) &&
-        node.expression.kind === ts.SyntaxKind.ImportKeyword
+        ts.isExportDeclaration(node) &&
+        node.moduleSpecifier !== undefined &&
+        ts.isStringLiteral(node.moduleSpecifier) &&
+        RAW_FS_MODULES.has(node.moduleSpecifier.text)
       ) {
-        const [specifier] = node.arguments;
-        if (
-          specifier === undefined ||
-          !ts.isStringLiteral(specifier) ||
-          RAW_FS_MODULES.has(specifier.text)
-        ) {
-          reportImport(
-            node,
-            "dynamic node:fs import",
-            specifier && ts.isStringLiteral(specifier) ? specifier.text : "?",
-          );
+        reportImport(
+          node,
+          "raw node:fs re-export",
+          node.moduleSpecifier.text,
+        );
+      }
+      if (ts.isCallExpression(node)) {
+        if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+          const [specifier] = node.arguments;
+          if (
+            specifier === undefined ||
+            !ts.isStringLiteral(specifier) ||
+            RAW_FS_MODULES.has(specifier.text)
+          ) {
+            reportImport(
+              node,
+              "dynamic node:fs import",
+              specifier && ts.isStringLiteral(specifier) ? specifier.text : "?",
+            );
+          }
+        } else {
+          const acquired = requireSpecifier(node);
+          if (acquired !== null) {
+            reportImport(node, "unbounded node:fs acquisition", acquired);
+          }
         }
       }
-      ts.forEachChild(node, visitForDynamicImport);
+      ts.forEachChild(node, visitAcquisition);
     };
-    visitForDynamicImport(sourceFile);
+    visitAcquisition(sourceFile);
   }
 
   // Non-boundary modules MUST NOT import from raw-internal.ts or

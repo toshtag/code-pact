@@ -1266,6 +1266,119 @@ describe("check-fs-authority — the executable resolver's narrow exception", ()
     expect(findings.map(f => f.fn).join(" ")).toContain("dynamic node:fs import");
   });
 
+  it("accepts an aliased named import, since the imported name is what is authorized", () => {
+    const findings = checkResolverSource([
+      'import { existsSync as probeExists, statSync as probeStat } from "node:fs";',
+      "",
+      "export function probe(path: string): boolean {",
+      "  return probeExists(path) && probeStat(path).isFile();",
+      "}",
+      "",
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
+  // Permitting a module to reach node:fs is only bounded if every WAY of
+  // reaching it is enumerated. Each of these passed the gate before the
+  // acquisition sweep existed; the computed-write one reached a real write API.
+  for (const [label, lines] of [
+    [
+      "a CommonJS require",
+      [
+        "export function probe(path: string): boolean {",
+        '  const fs = require("node:fs");',
+        "  return fs.existsSync(path);",
+        "}",
+      ],
+    ],
+    [
+      "a CommonJS require of the promises entrypoint",
+      [
+        "export async function probe(path: string): Promise<void> {",
+        '  const fs = require("node:fs/promises");',
+        "  await fs.rm(path);",
+        "}",
+      ],
+    ],
+    [
+      "a require reaching a write through a computed property",
+      [
+        "export function probe(path: string): void {",
+        '  const fs = require("node:fs");',
+        '  fs["writeFileSync"](path, "x");',
+        "}",
+      ],
+    ],
+    [
+      "module.require",
+      [
+        "export function probe(path: string): void {",
+        '  const fs = module.require("node:fs");',
+        '  fs["writeFileSync"](path, "x");',
+        "}",
+      ],
+    ],
+    [
+      "a TypeScript import-equals",
+      [
+        'import fs = require("node:fs");',
+        "",
+        "export function probe(path: string): boolean {",
+        "  return fs.existsSync(path);",
+        "}",
+      ],
+    ],
+    [
+      "a require whose specifier is not statically known",
+      [
+        "export function probe(specifier: string): unknown {",
+        "  return require(specifier);",
+        "}",
+      ],
+    ],
+  ] as const) {
+    it(`rejects ${label}`, () => {
+      const findings = checkResolverSource([...lines, ""]);
+
+      expect(findings.length).toBeGreaterThan(0);
+      expect(findings.map(f => f.fn).join(" ")).toContain(
+        "unbounded node:fs acquisition",
+      );
+    });
+  }
+
+  // This is an import-only authority, not a re-publishing one: handing the raw
+  // surface to consumers would move the exception wherever it is imported.
+  for (const [label, line] of [
+    ["a named re-export", 'export { existsSync } from "node:fs";'],
+    ["a namespace re-export", 'export * as fs from "node:fs";'],
+    ["a wildcard re-export", 'export * from "node:fs";'],
+  ] as const) {
+    it(`rejects ${label}, even of an authorized name`, () => {
+      const findings = checkResolverSource([line, ""]);
+
+      expect(findings.length).toBeGreaterThan(0);
+      expect(findings.map(f => f.fn).join(" ")).toContain(
+        "raw node:fs re-export",
+      );
+    });
+  }
+
+  it("leaves a non-filesystem module alone", () => {
+    const findings = checkResolverSource([
+      'import { win32 } from "node:path";',
+      "",
+      "export function probe(): string {",
+      '  const path = require("node:path");',
+      "  return win32.delimiter + path.sep;",
+      "}",
+      "",
+    ]);
+
+    expect(findings).toEqual([]);
+  });
+
   it("still reports an unauthorized named import of an allowed-module function", () => {
     const findings = checkResolverSource([
       'import { existsSync, readdirSync } from "node:fs";',
