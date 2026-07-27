@@ -1,0 +1,74 @@
+schema_version: 1
+task_id: P89-T1D
+phase_id: P89
+phase_path: design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+base_ref: HEAD
+base_sha: e8404b5500939889ab6be8fc3c96ae15d815bcfa
+phase_blob_sha: 24d1e00d5e3bc8ba309dcc898fe66efd4790a12f
+contract_digest: 849b9f8ea5d913027c7937cfa123017cf83ca6d657d835b0c9e0bd050ece4a9d
+contract:
+  description: >
+    Separate OS executable resolution from project filesystem authority. P89-T1C
+    assumed `npm_execpath` identifies the package manager, but that variable is
+    a `pnpm run` lifecycle value: under `pnpm exec` and under a plain `node
+    dist/cli.js` — the way the CLI actually runs — it is unset, so Windows deep
+    CI fails with `spawn pnpm ENOENT`. Resolving a program name against PATH and
+    PATHEXT is an OS executable namespace question, not an ownership question
+    about a project file, so it gets its own module and its own narrow
+    fs-authority exception; bounded-command consumes the resolution and keeps
+    importing no filesystem module. A `.cmd` shim is launched through a
+    dedicated launcher rather than a general shell, and an unresolvable program
+    fails closed.
+  reads:
+    - .github/workflows/ci-deep.yml
+    - scripts/verification-scope.mjs
+    - src/core/process/bounded-command.ts
+    - src/core/verify/classify.ts
+    - tests/unit/core/bounded-command-argv.test.ts
+    - tests/unit/core/windows-command-launch.test.ts
+    - tests/unit/scripts/check-fs-authority.test.ts
+  writes:
+    - .github/workflows/ci-deep.yml
+    - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+    - scripts/check-fs-authority.mjs
+    - src/core/process/bounded-command.ts
+    - src/core/process/executable-resolution.ts
+    - tests/unit/core/bounded-command-argv.test.ts
+    - tests/unit/core/executable-resolution.test.ts
+    - tests/unit/core/windows-command-launch.test.ts
+  depends_on:
+    - P89-T1C
+  decision_refs: []
+  acceptance_refs:
+    - tests/unit/core/executable-resolution.test.ts
+    - tests/unit/core/windows-command-launch.test.ts
+  definition_of_done:
+    - Bounded-process tests do not depend on shared-runner wall-clock ceilings
+    - CI assertion failures identify the exact test and assertion
+    - Classifier commands execute as their canonical argv, so no argument or
+      changed-file path is re-interpreted by a shell, on every supported
+      platform
+    - Phase status mutation preserves every non-target source byte
+    - The verification command contract is validated at the producer-consumer
+      boundary, so review-bundle and ci-parity run the classifier commands the
+      scope script actually emits
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm exec vitest run
+      tests/unit/core/finalize/task-status-source-edit.test.ts
+      tests/unit/core/finalize/safe-write.test.ts
+      tests/unit/commands/task-finalize.test.ts
+      tests/unit/commands/phase-reconcile.test.ts
+      tests/unit/core/verify/classify.test.ts
+      tests/unit/core/review-bundle.test.ts
+      tests/unit/commands/review-bundle.test.ts
+      tests/unit/scripts/vitest-ci-reporter.test.ts
+      tests/unit/scripts/run-bounded-process.test.ts
+    - pnpm typecheck
+  base_sha: e8404b5500939889ab6be8fc3c96ae15d815bcfa
+  phase_blob_sha: 24d1e00d5e3bc8ba309dcc898fe66efd4790a12f
+at: 2026-07-27T04:50:24.192Z
+actor: agent
+author: Pocket
