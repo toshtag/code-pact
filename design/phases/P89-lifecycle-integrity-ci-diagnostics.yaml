@@ -84,7 +84,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Make the verification command contract one shape end to end. The scope
       script emits a flat, non-empty argv array per command; the classifier
