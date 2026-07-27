@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { z } from "zod";
 import { runBoundedCommand } from "../process/bounded-command.ts";
 import { DEFAULT_COMMAND_TIMEOUT_MS } from "../../commands/verify.ts";
 
@@ -15,7 +16,36 @@ export type VerificationScope = {
   reason: string;
 };
 
-export type VerificationCommand = [string, string[]];
+// ---------------------------------------------------------------------------
+// The verification command contract
+//
+// `scripts/verification-scope.mjs --commands --format json` emits one FLAT,
+// non-empty argv array per command — `["pnpm", "exec", "vitest", "run"]` — the
+// same shape the script destructures internally (`let [program, ...args] =
+// step.command`). This module used to declare the nested pair
+// `[string, string[]]` and destructure `[program, args]`, so `args` was the
+// string `"exec"` and spreading it produced `"pnpm" "e" "x" "e" "c"`. Every
+// classifier command was unrunnable, and `task review-bundle` / `ci-parity`
+// refused with a VERIFICATION_FAILED that named a command nobody wrote.
+//
+// The script's flat argv is canonical. The consumer no longer trusts the JSON
+// through an unchecked cast: `VerificationScopeOutput` validates it, so a
+// producer that ever goes back to the nested shape fails at the boundary with
+// a parse error instead of silently emitting shell nonsense.
+// ---------------------------------------------------------------------------
+
+/** One command as `[program, ...args]`. Non-empty; every element a string. */
+export const VerificationCommand = z.tuple([z.string()]).rest(z.string());
+export type VerificationCommand = z.infer<typeof VerificationCommand>;
+
+export const VerificationScopeOutput = z.object({
+  scope: z.looseObject({
+    mergeBase: z.string().nullable(),
+    failSafe: z.boolean().optional(),
+  }),
+  commands: z.array(VerificationCommand),
+  failSafe: z.boolean().optional(),
+});
 
 export type ClassifiedVerification = {
   scope: VerificationScope & { mergeBase: string | null; failSafe: boolean };
@@ -45,8 +75,9 @@ function excerpt(text: string): string {
   return `${text.slice(0, cut)}\n[code-pact: excerpt truncated]\n`;
 }
 
-function shellJoin(program: string, args: string[]): string {
-  return [program, ...args].map(arg => JSON.stringify(arg)).join(" ");
+/** Renders `[program, ...args]` as a quoted shell line for the bounded runner. */
+function shellJoin(command: VerificationCommand): string {
+  return command.map(arg => JSON.stringify(arg)).join(" ");
 }
 
 export async function classifyVerification(
@@ -58,16 +89,15 @@ export async function classifyVerification(
     [SCRIPT, "--base", baseRef, "--commands", "--format", "json"],
     { cwd, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 },
   );
-  const parsed = JSON.parse(stdout) as {
-    scope: VerificationScope & { mergeBase: string | null; failSafe: boolean };
-    commands: VerificationCommand[];
-    failSafe: boolean;
-  };
-  if (!Array.isArray(parsed.commands)) {
-    throw new Error("verification-scope did not return commands");
+  const result = VerificationScopeOutput.safeParse(JSON.parse(stdout));
+  if (!result.success) {
+    throw new Error(
+      `verification-scope returned commands that do not match the [program, ...args] contract: ${result.error.message}`,
+    );
   }
+  const parsed = result.data;
   return {
-    scope: parsed.scope,
+    scope: parsed.scope as ClassifiedVerification["scope"],
     commands: parsed.commands,
     failSafe: parsed.failSafe ?? false,
   };
@@ -79,8 +109,8 @@ export async function runVerificationCommands(
   timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS,
 ): Promise<{ ok: boolean; results: LocalVerificationResult[] }> {
   const results: LocalVerificationResult[] = [];
-  for (const [program, args] of commands) {
-    const command = shellJoin(program, args);
+  for (const argv of commands) {
+    const command = shellJoin(argv);
     const outcome = await runBoundedCommand(command, cwd, timeoutMs);
     results.push({
       command,

@@ -82,7 +82,7 @@ const { values } = parseArgs({
 if (values.commands && values.format === "json") {
   process.stdout.write(JSON.stringify({
     scope: { changed: [], added: [], removed: [], mergeBase: values.base ?? null, failSafe: false },
-    commands: [["echo", ["ok"]]],
+    commands: [["git", "--version"]],
     failSafe: false,
   }));
 } else {
@@ -190,5 +190,30 @@ describe("runReviewBundle audit base", () => {
     const manifest = await readReviewManifest(cwd, "P1-T1");
     expect(manifest).not.toBeNull();
     expect(manifest?.write_audit.base_ref).toBe(lockBase);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The classifier emits `[program, ...args]`. A consumer that read the second
+// element as an argument LIST spread the string "--version" one character at a
+// time, so every classifier command was unrunnable and the bundle refused with
+// a VERIFICATION_FAILED naming a command nobody wrote. The fixture command
+// above exits non-zero when split, so a regression fails the run, not just
+// this assertion.
+// ---------------------------------------------------------------------------
+
+describe("runReviewBundle classifier verification", () => {
+  it("records the classifier command as argv, not as its characters", async () => {
+    await setupDoneTaskProject();
+
+    await runReviewBundle({ cwd, taskId: "P1-T1" });
+
+    const manifest = await readReviewManifest(cwd, "P1-T1");
+    expect(manifest?.classifier_verification.map(e => e.command)).toEqual([
+      '"git" "--version"',
+    ]);
+    expect(manifest?.classifier_verification.every(e => e.exit_code === 0)).toBe(
+      true,
+    );
   });
 });

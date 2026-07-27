@@ -39,7 +39,7 @@ const { values } = parseArgs({
 if (values.commands && values.format === "json") {
   process.stdout.write(JSON.stringify({
     scope: { changed: [], added: [], removed: [], mergeBase: values.base ?? null, failSafe: false },
-    commands: [["echo", ["ok"]]],
+    commands: [["git", "--version"]],
     failSafe: false,
   }));
 } else {
