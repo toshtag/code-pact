@@ -247,7 +247,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Make the Windows batch-shim boundary fail closed. P89-T1D claimed exact
       argv across every platform, but the `.cmd` launcher escapes carets and
