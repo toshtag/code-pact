@@ -17,6 +17,9 @@ non_goals:
   - Clean ignored files or retire historical task specs
 definition_of_done:
   - Phase status mutation preserves every non-target source byte
+  - The verification command contract is validated at the producer-consumer
+    boundary, so review-bundle and ci-parity run the classifier commands the
+    scope script actually emits
   - CI assertion failures identify the exact test and assertion
   - Bounded-process tests do not depend on shared-runner wall-clock ceilings
 verification:
@@ -26,6 +29,9 @@ verification:
       tests/unit/core/finalize/safe-write.test.ts
       tests/unit/commands/task-finalize.test.ts
       tests/unit/commands/phase-reconcile.test.ts
+      tests/unit/core/verify/classify.test.ts
+      tests/unit/core/review-bundle.test.ts
+      tests/unit/commands/review-bundle.test.ts
       tests/unit/scripts/vitest-ci-reporter.test.ts
       tests/unit/scripts/run-bounded-process.test.ts
     - pnpm build
@@ -70,6 +76,48 @@ tasks:
     acceptance_refs:
       - tests/unit/core/finalize/task-status-source-edit.test.ts
       - tests/unit/core/finalize/safe-write.test.ts
+  - id: P89-T1A
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: >
+      Make the verification command contract one shape end to end. The scope
+      script emits a flat, non-empty argv array per command; the classifier
+      consumer declares a nested pair and spreads the second element character
+      by character, so every classifier command becomes unrunnable and both
+      `task review-bundle` and `ci-parity` refuse with a false
+      VERIFICATION_FAILED. Adopt the producer's flat argv as canonical,
+      validate the script output at the parse boundary instead of trusting an
+      unchecked cast, and correct the fake classifiers in the review-bundle and
+      ci-parity fixtures that encode the nested shape.
+    requires_decision: false
+    depends_on:
+      - P89-T1
+    reads:
+      - scripts/verification-scope.mjs
+      - src/core/verify/classify.ts
+      - src/core/review-bundle.ts
+      - src/commands/ci-parity.ts
+      - src/core/process/bounded-command.ts
+      - tests/unit/core/review-bundle.test.ts
+      - tests/unit/commands/review-bundle.test.ts
+      - tests/integration/review-bundle.test.ts
+      - tests/integration/ci-parity.test.ts
+    writes:
+      - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+      - src/core/verify/classify.ts
+      - tests/unit/core/verify/classify.test.ts
+      - tests/unit/core/review-bundle.test.ts
+      - tests/unit/commands/review-bundle.test.ts
+      - tests/integration/review-bundle.test.ts
+      - tests/integration/ci-parity.test.ts
+    acceptance_refs:
+      - tests/unit/core/verify/classify.test.ts
   - id: P89-T2
     type: bugfix
     ambiguity: low
@@ -85,7 +133,7 @@ tasks:
       rerun.
     requires_decision: false
     depends_on:
-      - P89-T1
+      - P89-T1A
   - id: P89-T3
     type: bugfix
     ambiguity: low
