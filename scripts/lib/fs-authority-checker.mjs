@@ -1,1 +1,4 @@
-export { checkSourceText } from "../check-fs-authority.mjs";
+export {
+  checkSourceText,
+  registeredRawFsImportOnlyModules,
+} from "../check-fs-authority.mjs";

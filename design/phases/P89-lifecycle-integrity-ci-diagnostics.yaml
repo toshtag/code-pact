@@ -321,6 +321,48 @@ tasks:
       - tests/unit/scripts/check-fs-authority.test.ts
     acceptance_refs:
       - tests/unit/scripts/check-fs-authority.test.ts
+  - id: P89-T1G
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Restore parity between the fs-authority checker's narrow raw-filesystem
+      import-only exceptions and the security-hardening exact import invariant.
+      Required Standard CI must execute filesystem containment and
+      security-hardening gates so main cannot remain release-red while required
+      CI is green. Avoid duplicate global fs-authority scans because the
+      security-hardening checker already executes that gate.
+    requires_decision: false
+    depends_on:
+      - P89-T1F
+    reads:
+      - scripts/check-fs-authority.mjs
+      - scripts/lib/fs-authority-checker.mjs
+      - scripts/check-security-hardening-invariants.mjs
+      - scripts/check-supply-chain-invariants.mjs
+      - .github/workflows/ci.yml
+      - tests/unit/scripts/check-fs-authority.test.ts
+      - tests/unit/scripts/check-supply-chain-invariants.test.ts
+      - tests/unit/workflows/ci-workflow.test.ts
+    writes:
+      - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+      - scripts/check-fs-authority.mjs
+      - scripts/lib/fs-authority-checker.mjs
+      - scripts/check-security-hardening-invariants.mjs
+      - scripts/check-supply-chain-invariants.mjs
+      - .github/workflows/ci.yml
+      - tests/unit/scripts/check-fs-authority.test.ts
+      - tests/unit/scripts/check-supply-chain-invariants.test.ts
+      - tests/unit/workflows/ci-workflow.test.ts
+    acceptance_refs:
+      - tests/unit/scripts/check-fs-authority.test.ts
+      - tests/unit/scripts/check-supply-chain-invariants.test.ts
+      - tests/unit/workflows/ci-workflow.test.ts
   - id: P89-T2
     type: bugfix
     ambiguity: low
@@ -336,7 +378,7 @@ tasks:
       rerun.
     requires_decision: false
     depends_on:
-      - P89-T1F
+      - P89-T1G
   - id: P89-T3
     type: bugfix
     ambiguity: low

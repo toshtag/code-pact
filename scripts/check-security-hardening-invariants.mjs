@@ -3,7 +3,10 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkSourceText } from "./lib/fs-authority-checker.mjs";
+import {
+  checkSourceText,
+  registeredRawFsImportOnlyModules,
+} from "./lib/fs-authority-checker.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let failures = 0;
@@ -68,6 +71,24 @@ const BRAND_IMPORT_EXPECTED = [
   "src/core/project-fs/authorities/temporary-sandbox-authority.ts",
   "src/core/project-fs/authority-resolvers.ts",
 ].sort();
+
+// The filesystem authority primitives themselves: modules reviewed once, as a
+// boundary, and listed here by hand so adding one is a deliberate edit to this
+// invariant rather than a side effect of a change elsewhere.
+//
+// Modules holding the fs-authority checker's NARROW import-only exception are
+// not listed here. They are a different, individually authorized exception, and
+// they come from the checker so the two gates cannot disagree about which
+// modules may import raw fs.
+const RAW_FS_BOUNDARY_BASE_EXPECTED = [
+  "src/core/path-safety.ts",
+  "src/core/project-fs/authorities/temporary-sandbox-authority.ts",
+  "src/core/project-fs/authority-resolvers.ts",
+  "src/core/project-fs/operations.ts",
+  "src/core/project-fs/raw-internal.ts",
+  "src/io/atomic-text.ts",
+  "src/lib/package-version.ts",
+];
 
 const FORBIDDEN_API_NAMES = [
   `resolveInit${"Read"}Path`,
@@ -178,14 +199,11 @@ console.log("\n=== 2. Brand Constructor Provenance ===");
 console.log("\n=== 3. Raw FS Boundary ===");
 {
   const expected = [
-    "src/core/path-safety.ts",
-    "src/core/project-fs/authorities/temporary-sandbox-authority.ts",
-    "src/core/project-fs/authority-resolvers.ts",
-    "src/core/project-fs/operations.ts",
-    "src/core/project-fs/raw-internal.ts",
-    "src/io/atomic-text.ts",
-    "src/lib/package-version.ts",
-  ];
+    ...new Set([
+      ...RAW_FS_BOUNDARY_BASE_EXPECTED,
+      ...registeredRawFsImportOnlyModules(),
+    ]),
+  ].sort();
   const actual = actualRawImportFiles();
   check(
     "raw fs import file set matches exact allowlist",

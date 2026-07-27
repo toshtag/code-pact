@@ -460,6 +460,8 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          cache: pnpm",
     "      - run: pnpm install --frozen-lockfile",
     "      - run: pnpm test:ci",
+    "      - run: pnpm check:fs-containment",
+    "      - run: pnpm check:security-hardening",
     "",
     "  ci-status:",
     "    name: CI status",
@@ -782,6 +784,61 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     root = await buildTree();
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBe(0);
+    await cleanup();
+  });
+
+  it("fails when the standard job omits the filesystem containment gate", async () => {
+    root = await buildTree({
+      ciContent: wellFormedCi.replace(
+        "      - run: pnpm check:fs-containment\n",
+        "",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when the standard job omits the security hardening gate", async () => {
+    root = await buildTree({
+      ciContent: wellFormedCi.replace(
+        "      - run: pnpm check:security-hardening\n",
+        "",
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when the standard job repeats a filesystem security gate", async () => {
+    root = await buildTree({
+      ciContent: wellFormedCi.replace(
+        "      - run: pnpm check:security-hardening",
+        [
+          "      - run: pnpm check:security-hardening",
+          "      - run: pnpm check:security-hardening",
+        ].join("\n"),
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when the standard job adds a standalone fs-authority scan", async () => {
+    // check:security-hardening already runs that gate internally.
+    root = await buildTree({
+      ciContent: wellFormedCi.replace(
+        "      - run: pnpm check:fs-containment",
+        [
+          "      - run: pnpm check:fs-containment",
+          "      - run: pnpm check:fs-authority",
+        ].join("\n"),
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
     await cleanup();
   });
 

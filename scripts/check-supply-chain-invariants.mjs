@@ -795,11 +795,31 @@ function checkFastCiWorkflow(ciDoc, ciContent) {
       );
     }
 
+    // The filesystem security invariants are fixed Standard steps rather than
+    // plan-selected ones. A change the classifier scopes narrowly still merges
+    // into a main whose release gate is red, so required CI has to run them
+    // whatever the diff touched.
+    //
+    // Exactly once each: check:security-hardening already runs the global
+    // fs-authority gate internally, and a second full scan buys nothing. That
+    // is also why check:fs-authority stays in the forbidden set below.
+    const standardScriptText = standardScripts.join("\n");
+    const requiredStandardInvariants = [
+      ["pnpm check:fs-containment", /pnpm\s+check:fs-containment\b/g],
+      ["pnpm check:security-hardening", /pnpm\s+check:security-hardening\b/g],
+    ];
+    for (const [command, pattern] of requiredStandardInvariants) {
+      const found = standardScriptText.match(pattern)?.length ?? 0;
+      if (found !== 1) {
+        violations.push(
+          `ci.yml: standard job must run ${command} exactly once (found ${found})`,
+        );
+      }
+    }
+
     const forbiddenStandardPatterns = [
       ["docs checks", /pnpm\s+check:docs/],
-      ["filesystem containment checks", /pnpm\s+check:fs-containment/],
       ["filesystem authority checks", /pnpm\s+check:fs-authority/],
-      ["security hardening checks", /pnpm\s+check:security-hardening/],
       [
         "full integration",
         /vitest\s+run\s+--config\s+vitest\.integration\.config\.ts|test:integration:full|pnpm\s+test:integration(?!:smoke)/,

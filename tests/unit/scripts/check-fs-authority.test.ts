@@ -12,6 +12,8 @@ import { checkSourceText as checkSourceTextUntyped } from "../../../scripts/chec
 // @ts-expect-error .mjs scripts are not included in tsconfig and are imported as untyped modules across the test suite.
 import { registeredAuthorityExportsFor as registeredAuthorityExportsForUntyped } from "../../../scripts/check-fs-authority.mjs";
 // @ts-expect-error .mjs scripts are not included in tsconfig and are imported as untyped modules across the test suite.
+import { registeredRawFsImportOnlyModules as registeredRawFsImportOnlyModulesUntyped } from "../../../scripts/check-fs-authority.mjs";
+// @ts-expect-error .mjs scripts are not included in tsconfig and are imported as untyped modules across the test suite.
 import tsCompilerApi from "../../../scripts/lib/typescript-compiler-api.mjs";
 
 type FsAuthorityFinding = { line: number; fn: string; arg?: string };
@@ -27,6 +29,10 @@ const registeredAuthorityExportsFor =
   registeredAuthorityExportsForUntyped as (
     relPath: string,
   ) => Map<string, string>;
+
+/** Modules holding a narrow raw-fs import-only exception, as POSIX paths. */
+const registeredRawFsImportOnlyModules =
+  registeredRawFsImportOnlyModulesUntyped as () => string[];
 
 // The same pinned compiler API the checker parses with, so the parity test
 // reads the module exactly as the gate does.
@@ -1534,6 +1540,49 @@ describe("check-fs-authority — the executable resolver's narrow exception", ()
     ]);
 
     expect(findings.map(f => f.arg)).toContain("readdirSync");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The narrow import-only registry, published for the security-hardening gate.
+//
+// That gate asserts the exact set of modules under src/ that import raw fs. It
+// used to keep its own hand-written copy of that set, so registering a narrow
+// exception here left the two lists disagreeing: the fs-authority gate passed,
+// the security gate failed, and release:check went red while required CI stayed
+// green. The set now has one owner and the security gate reads it from here.
+//
+// The diagnostic publishes paths only. Which functions a module may call is the
+// narrow exception's whole point and stays private to the checker, so nothing
+// downstream can widen a module's authority by reading this.
+// ---------------------------------------------------------------------------
+
+describe("check-fs-authority — the narrow import-only module registry", () => {
+  it("publishes the executable resolver, which holds the narrow exception", () => {
+    expect(registeredRawFsImportOnlyModules()).toContain(
+      "src/core/process/executable-resolution.ts",
+    );
+  });
+
+  it("omits broad raw-fs boundary modules, which are a separate exception", () => {
+    const modules = registeredRawFsImportOnlyModules();
+
+    expect(modules).not.toContain("src/core/project-fs/raw-internal.ts");
+    expect(modules).not.toContain("src/core/project-fs/operations.ts");
+  });
+
+  it("returns sorted repository-relative POSIX paths on every platform", () => {
+    const modules = registeredRawFsImportOnlyModules();
+
+    expect(modules).toEqual([...modules].sort());
+    expect(modules.every(path => !path.includes("\\"))).toBe(true);
+  });
+
+  it("hands back a copy, so a caller cannot widen what the gate trusts", () => {
+    const first = registeredRawFsImportOnlyModules();
+    first.push("src/forged.ts");
+
+    expect(registeredRawFsImportOnlyModules()).not.toContain("src/forged.ts");
   });
 });
 

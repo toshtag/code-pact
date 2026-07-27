@@ -161,6 +161,13 @@ jobs:
             node --version
           fi
 
+      - name: Run filesystem security invariants
+        run: |
+          pnpm check:fs-containment
+          # check:security-hardening internally executes the global
+          # check:fs-authority gate; do not run it twice here.
+          pnpm check:security-hardening
+
   ci-status:
     name: CI status
     runs-on: ubuntu-latest
