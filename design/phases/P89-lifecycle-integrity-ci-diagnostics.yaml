@@ -375,7 +375,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Make the CI Vitest reporter emit the failed test-case name and bounded
       assertion diagnostics so CI failures do not require a speculative local
