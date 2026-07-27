@@ -364,6 +364,73 @@ function isSinkAuthorized(kind, fnName) {
   return false;
 }
 
+// project-config-authority.ts is the single defining module for the
+// project-config path authorities. Both the direct-import registry and the
+// project-fs/index.ts re-export registry below are derived from this one map,
+// so a resolver cannot be trusted through one import path while staying
+// unknown through the other.
+const PROJECT_CONFIG_AUTHORITY_EXPORTS = new Map([
+  ["resolveProjectTreeListPath", "project_tree_list"],
+  ["resolveProjectScaffoldReadPath", "owned_read"],
+  ["resolveProjectPresenceReadPath", "owned_read"],
+  ["resolveProjectScaffoldWritePath", "owned_write"],
+  ["resolveProjectRuntimeLockReadPath", "owned_read"],
+  ["resolveProjectRuntimeLockWritePath", "owned_write"],
+  ["resolveProjectRuntimeLockDeletePath", "owned_delete"],
+  ["resolveProjectRuntimeLockDirWritePath", "owned_write"],
+  ["resolveProgressEventsDirWritePath", "owned_write"],
+  ["resolveProgressEventsDirListPath", "owned_read"],
+  ["resolveProgressEventReadPath", "owned_read"],
+  ["resolveProgressEventWritePath", "owned_write"],
+  ["resolveProgressEventDeletePath", "owned_delete"],
+  ["resolveContractLockDirWritePath", "owned_write"],
+  ["resolveContractLockReadPath", "owned_read"],
+  ["resolveContractLockWritePath", "owned_write"],
+  ["resolveReviewCacheDirWritePath", "owned_write"],
+  ["resolveReviewManifestReadPath", "owned_read"],
+  ["resolveReviewManifestWritePath", "owned_write"],
+  ["resolveVerificationRunsDirWritePath", "owned_write"],
+  ["resolveVerificationLedgerReadPath", "owned_read"],
+  ["resolveVerificationLedgerWritePath", "owned_write"],
+  ["resolveVerificationStateReadPath", "owned_read"],
+  ["resolveProjectProbeReadPath", "project_presence"],
+  ["resolveStandaloneProjectProbeReadPath", "project_presence"],
+  ["resolveProjectProbeReadPathSync", "project_presence"],
+]);
+
+// index.ts re-exports only part of project-config-authority.ts. The index
+// registry must mirror exactly that subset: registering a name index.ts does
+// not re-export would trust an import that cannot exist, and omitting one
+// rejects a correctly branded path.
+const PROJECT_CONFIG_EXPORTS_REEXPORTED_BY_INDEX = [
+  "resolveProjectScaffoldReadPath",
+  "resolveProjectScaffoldWritePath",
+  "resolveContractLockDirWritePath",
+  "resolveContractLockReadPath",
+  "resolveContractLockWritePath",
+  "resolveReviewCacheDirWritePath",
+  "resolveReviewManifestReadPath",
+  "resolveReviewManifestWritePath",
+  "resolveVerificationLedgerReadPath",
+  "resolveVerificationLedgerWritePath",
+  "resolveVerificationRunsDirWritePath",
+  "resolveVerificationStateReadPath",
+];
+
+// Resolve re-exported names against the defining-module map so the authority
+// kind has exactly one source. Fails closed at load time on an unknown name.
+function projectConfigAuthorityEntries(names) {
+  return names.map(name => {
+    const kind = PROJECT_CONFIG_AUTHORITY_EXPORTS.get(name);
+    if (kind === undefined) {
+      throw new Error(
+        `project-config authority registry has no kind for re-exported name "${name}"`,
+      );
+    }
+    return [name, kind];
+  });
+}
+
 // Authority exports: only helpers that return a path (string) or a branded
 // path object with .absPath. Helpers that return content, boolean, manifest
 // object, or write results are NOT path authority sources.
@@ -468,14 +535,11 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolvePhaseDeletePath", "owned_delete"],
       ["resolveProgressDeletePath", "owned_delete"],
       ["resolveLoopMemoryEpisodeDeletePath", "owned_delete"],
-      ["resolveProjectScaffoldReadPath", "owned_read"],
-      ["resolveProjectScaffoldWritePath", "owned_write"],
-      ["resolveContractLockDirWritePath", "owned_write"],
-      ["resolveContractLockReadPath", "owned_read"],
-      ["resolveContractLockWritePath", "owned_write"],
-      ["resolveReviewCacheDirWritePath", "owned_write"],
-      ["resolveReviewManifestReadPath", "owned_read"],
-      ["resolveReviewManifestWritePath", "owned_write"],
+      // project-config-authority.ts re-exports — kinds come from the single
+      // defining-module map, never restated here.
+      ...projectConfigAuthorityEntries(
+        PROJECT_CONFIG_EXPORTS_REEXPORTED_BY_INDEX,
+      ),
     ]),
   ],
   [
@@ -486,24 +550,7 @@ const AUTHORITY_EXPORTS = new Map([
       "authorities",
       "project-config-authority.ts",
     ),
-    new Map([
-      ["resolveProjectTreeListPath", "project_tree_list"],
-      ["resolveProjectScaffoldReadPath", "owned_read"],
-      ["resolveProjectScaffoldWritePath", "owned_write"],
-      ["resolveProjectPresenceReadPath", "owned_read"],
-      ["resolveProjectRuntimeLockReadPath", "owned_read"],
-      ["resolveProjectRuntimeLockWritePath", "owned_write"],
-      ["resolveProjectRuntimeLockDeletePath", "owned_delete"],
-      ["resolveProjectRuntimeLockDirWritePath", "owned_write"],
-      ["resolveProgressEventsDirWritePath", "owned_write"],
-      ["resolveProgressEventsDirListPath", "owned_read"],
-      ["resolveProgressEventReadPath", "owned_read"],
-      ["resolveProgressEventWritePath", "owned_write"],
-      ["resolveProgressEventDeletePath", "owned_delete"],
-      ["resolveProjectProbeReadPath", "project_presence"],
-      ["resolveStandaloneProjectProbeReadPath", "project_presence"],
-      ["resolveProjectProbeReadPathSync", "project_presence"],
-    ]),
+    PROJECT_CONFIG_AUTHORITY_EXPORTS,
   ],
   [
     join("src", "core", "project-fs", "authorities", "normalize-authority.ts"),
@@ -676,6 +723,19 @@ const AUTHORITY_EXPORTS = new Map([
     ]),
   ],
 ]);
+
+/**
+ * Diagnostic view of the trusted authority registry for one module, as a
+ * copy so a caller cannot mutate what the gate trusts. Tests use this to hold
+ * the registry to the module's real export surface; it is not part of the
+ * production CLI contract.
+ *
+ * @param {string} relPath Repository-relative module path, platform separators.
+ * @returns {Map<string, string>} Export name to authority kind.
+ */
+export function registeredAuthorityExportsFor(relPath) {
+  return new Map(AUTHORITY_EXPORTS.get(relPath) ?? []);
+}
 
 const RAW_FS_IMPORT_ALLOWLIST = new Set([
   // — Core primitives (raw fs I/O wrappers, brand types, path safety) —

@@ -23,6 +23,9 @@ definition_of_done:
   - Native executables and JavaScript entrypoints execute with canonical argv.
     Windows batch shims accept only a verified cmd-safe subset and fail closed
     before spawning for all other arguments or paths
+  - The global fs-authority gate recognizes verification-ledger path
+    authorities through both their defining module and project-fs/index
+    re-export, while capability mismatches remain rejected
   - CI assertion failures identify the exact test and assertion
   - Bounded-process tests do not depend on shared-runner wall-clock ceilings
 verification:
@@ -284,6 +287,40 @@ tasks:
     acceptance_refs:
       - tests/unit/core/windows-command-launch.test.ts
       - tests/unit/scripts/check-fs-authority.test.ts
+  - id: P89-T1F
+    type: bugfix
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Restore parity between project-config filesystem authority exports and
+      the fs-authority checker's trusted registry. The verification ledger
+      already resolves its read and write paths through narrow branded
+      authorities, but the registry omits those resolver exports and therefore
+      reports four false authority findings. Register the direct authority
+      exports and their project-fs/index re-exports from one shared map, verify
+      read/write capability matching, and make the global fs-authority and
+      release gates pass without changing the ledger or broadening an
+      allowlist.
+    requires_decision: false
+    depends_on:
+      - P89-T1E
+    reads:
+      - src/core/verification-ledger.ts
+      - src/core/project-fs/index.ts
+      - src/core/project-fs/authorities/project-config-authority.ts
+      - scripts/check-fs-authority.mjs
+      - tests/unit/scripts/check-fs-authority.test.ts
+    writes:
+      - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+      - scripts/check-fs-authority.mjs
+      - tests/unit/scripts/check-fs-authority.test.ts
+    acceptance_refs:
+      - tests/unit/scripts/check-fs-authority.test.ts
   - id: P89-T2
     type: bugfix
     ambiguity: low
@@ -299,7 +336,7 @@ tasks:
       rerun.
     requires_decision: false
     depends_on:
-      - P89-T1E
+      - P89-T1F
   - id: P89-T3
     type: bugfix
     ambiguity: low
