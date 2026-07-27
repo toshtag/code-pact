@@ -20,8 +20,9 @@ definition_of_done:
   - The verification command contract is validated at the producer-consumer
     boundary, so review-bundle and ci-parity run the classifier commands the
     scope script actually emits
-  - Classifier commands execute as their canonical argv, so no argument or
-    changed-file path is re-interpreted by a shell, on every supported platform
+  - Native executables and JavaScript entrypoints execute with canonical argv.
+    Windows batch shims accept only a verified cmd-safe subset and fail closed
+    before spawning for all other arguments or paths
   - CI assertion failures identify the exact test and assertion
   - Bounded-process tests do not depend on shared-runner wall-clock ceilings
 verification:
@@ -238,6 +239,51 @@ tasks:
     acceptance_refs:
       - tests/unit/core/executable-resolution.test.ts
       - tests/unit/core/windows-command-launch.test.ts
+  - id: P89-T1E
+    type: bugfix
+    ambiguity: low
+    risk: high
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: >
+      Make the Windows batch-shim boundary fail closed. P89-T1D claimed exact
+      argv across every platform, but the `.cmd` launcher escapes carets and
+      quotes while passing CR and LF through untouched — a newline terminates a
+      cmd command line, so the argument becomes a second command. No runtime
+      test ever put a hostile argument through a real shim; the literal-argv
+      evidence covered the pure resolver and the native launch only. Native and
+      JavaScript launches keep exact argv; a batch launch is permitted only for
+      a verified cmd-safe subset and refuses before spawning otherwise. Narrow
+      the resolver's filesystem authority from every raw operation in the module
+      to the two read-only existence probes it actually performs.
+    requires_decision: false
+    depends_on:
+      - P89-T1D
+    reads:
+      - src/core/process/executable-resolution.ts
+      - src/core/process/bounded-command.ts
+      - scripts/check-fs-authority.mjs
+      - tests/unit/core/executable-resolution.test.ts
+      - tests/unit/core/windows-command-launch.test.ts
+      - tests/unit/core/bounded-command-argv.test.ts
+      - tests/unit/scripts/check-fs-authority.test.ts
+      - .github/workflows/ci-deep.yml
+    writes:
+      - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+      - src/core/process/executable-resolution.ts
+      - src/core/process/bounded-command.ts
+      - scripts/check-fs-authority.mjs
+      - tests/unit/core/executable-resolution.test.ts
+      - tests/unit/core/windows-command-launch.test.ts
+      - tests/unit/core/bounded-command-argv.test.ts
+      - tests/unit/scripts/check-fs-authority.test.ts
+      - .github/workflows/ci-deep.yml
+    acceptance_refs:
+      - tests/unit/core/windows-command-launch.test.ts
+      - tests/unit/scripts/check-fs-authority.test.ts
   - id: P89-T2
     type: bugfix
     ambiguity: low
@@ -253,7 +299,7 @@ tasks:
       rerun.
     requires_decision: false
     depends_on:
-      - P89-T1D
+      - P89-T1E
   - id: P89-T3
     type: bugfix
     ambiguity: low
