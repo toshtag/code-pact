@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   executableExists,
+  resolveExecutable,
   windowsPathCandidates,
 } from "../../../src/core/process/executable-resolution.ts";
 
@@ -150,4 +151,78 @@ describe("windowsPathCandidates — the search", () => {
 
     expect(candidates).toEqual(["C:\\tools\\pnpm.exe", "D:\\other\\pnpm.exe"]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Which characters may cross the batch boundary is a property of this module,
+// so it is pinned here rather than among the launch-decision tests. The list is
+// an allowlist, not an escaper: cmd.exe expands `%VAR%` and treats CR/LF as
+// command separators while parsing, and neither can be suppressed by the
+// caller. Anything not proven to survive a real shim is refused before a
+// process exists — Windows CI runs that proof.
+// ---------------------------------------------------------------------------
+
+describe("the batch-shim character contract", () => {
+  const SHIM = "C:\\pnpm\\pnpm.cmd";
+
+  function batchLaunch(arg: string) {
+    return resolveExecutable({
+      program: "pnpm",
+      args: [arg],
+      platform: "win32",
+      env: { PATH: "C:\\pnpm", PATHEXT: ".CMD" },
+      nodeExecPath: "C:\\node.exe",
+      fileExists: candidate => candidate === SHIM,
+    });
+  }
+
+  const permitted = [
+    ["an empty argument", ""],
+    ["a space", "a b"],
+    ["non-ASCII text", "日本語"],
+    ["a flag", "--config"],
+    ["a POSIX-style path", "tests/unit/example.test.ts"],
+    ["a Windows-style path", "tests\\unit\\example.test.ts"],
+    ["a trailing backslash", "C:\\dir\\"],
+    ["a dollar sign", "$HOME"],
+    ["a semicolon", "semi;colon"],
+    ["a glob star", "star*"],
+    ["a glob question mark", "question?"],
+    ["an apostrophe", "apostrophe'value"],
+    ["a version range", "vitest@^4.1.0".replace("^", "")],
+    ["an equals sign", "--reporter=scripts/vitest-ci-reporter.mjs"],
+  ] as const;
+
+  for (const [label, arg] of permitted) {
+    it(`permits ${label}`, () => {
+      expect(batchLaunch(arg).kind).toBe("windows-shim");
+    });
+  }
+
+  const refused = [
+    ["a percent expansion", "%PATH%"],
+    ["a delayed expansion", "!VALUE!"],
+    ["a caret escape", "^"],
+    ["an ampersand", "&"],
+    ["a pipe", "|"],
+    ["an input redirect", "<"],
+    ["an output redirect", ">"],
+    ["an opening parenthesis", "("],
+    ["a closing parenthesis", ")"],
+    ["a double quote", 'quote"value'],
+    ["a line feed", "line\nbreak"],
+    ["a carriage return", "line\rbreak"],
+    ["a NUL byte", "nul\0byte"],
+    ["a tab", "tab\tvalue"],
+    ["a backtick", "back`tick"],
+  ] as const;
+
+  for (const [label, arg] of refused) {
+    it(`refuses ${label}`, () => {
+      const result = batchLaunch(arg);
+      expect(result.kind).toBe("unresolvable");
+      if (result.kind !== "unresolvable") return;
+      expect(result.reason).toContain("argument 1");
+    });
+  }
 });
