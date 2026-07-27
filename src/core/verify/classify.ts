@@ -6,18 +6,8 @@ import { DEFAULT_COMMAND_TIMEOUT_MS } from "../../commands/verify.ts";
 
 const execFileAsync = promisify(execFile);
 
-export type VerificationScope = {
-  changedFiles: string[];
-  docs: boolean;
-  standard: boolean;
-  toolchain: boolean;
-  processControl: boolean;
-  generic: boolean;
-  reason: string;
-};
-
 // ---------------------------------------------------------------------------
-// The verification command contract
+// The verification-scope envelope contract
 //
 // `scripts/verification-scope.mjs --commands --format json` emits one FLAT,
 // non-empty argv array per command — `["pnpm", "exec", "vitest", "run"]` — the
@@ -28,27 +18,54 @@ export type VerificationScope = {
 // classifier command was unrunnable, and `task review-bundle` / `ci-parity`
 // refused with a VERIFICATION_FAILED that named a command nobody wrote.
 //
-// The script's flat argv is canonical. The consumer no longer trusts the JSON
-// through an unchecked cast: `VerificationScopeOutput` validates it, so a
-// producer that ever goes back to the nested shape fails at the boundary with
-// a parse error instead of silently emitting shell nonsense.
+// The script's shape is canonical, and the WHOLE envelope is validated here —
+// not just `commands`. Nothing crosses this boundary through a cast, and no
+// field is defaulted on absence: a producer that stops emitting `failSafe`
+// must fail loudly rather than be read as "not fail-safe", which would silently
+// narrow verification. Unknown keys are allowed through so the producer can
+// grow fields without a lockstep release.
 // ---------------------------------------------------------------------------
 
-/** One command as `[program, ...args]`. Non-empty; every element a string. */
-export const VerificationCommand = z.tuple([z.string()]).rest(z.string());
+/**
+ * One command as `[program, ...args]`.
+ *
+ * The program must be a non-empty string. Arguments may be empty strings —
+ * `["grep", ""]` is a legitimate argv — so the rest element carries no
+ * minimum.
+ */
+export const VerificationCommand = z
+  .tuple([z.string().min(1)])
+  .rest(z.string());
 export type VerificationCommand = z.infer<typeof VerificationCommand>;
 
+export const VerificationScopeSchema = z.object({
+  changedFiles: z.array(z.string()),
+  docs: z.boolean(),
+  standard: z.boolean(),
+  toolchain: z.boolean(),
+  processControl: z.boolean(),
+  generic: z.boolean(),
+  workflow: z.boolean(),
+  releaseScript: z.boolean(),
+  sharedTestInfra: z.boolean(),
+  unknown: z.boolean(),
+  highRisk: z.boolean(),
+  fallbackFull: z.boolean(),
+  fallbackReason: z.string().nullable(),
+  mode: z.enum(["focused", "full"]),
+  reason: z.string(),
+  mergeBase: z.string().nullable(),
+});
+export type VerificationScope = z.infer<typeof VerificationScopeSchema>;
+
 export const VerificationScopeOutput = z.object({
-  scope: z.looseObject({
-    mergeBase: z.string().nullable(),
-    failSafe: z.boolean().optional(),
-  }),
+  scope: VerificationScopeSchema,
   commands: z.array(VerificationCommand),
-  failSafe: z.boolean().optional(),
+  failSafe: z.boolean(),
 });
 
 export type ClassifiedVerification = {
-  scope: VerificationScope & { mergeBase: string | null; failSafe: boolean };
+  scope: VerificationScope & { failSafe: boolean };
   commands: VerificationCommand[];
   failSafe: boolean;
 };
@@ -92,14 +109,14 @@ export async function classifyVerification(
   const result = VerificationScopeOutput.safeParse(JSON.parse(stdout));
   if (!result.success) {
     throw new Error(
-      `verification-scope returned commands that do not match the [program, ...args] contract: ${result.error.message}`,
+      `verification-scope output does not match the classifier envelope contract: ${result.error.message}`,
     );
   }
   const parsed = result.data;
   return {
-    scope: parsed.scope as ClassifiedVerification["scope"],
+    scope: { ...parsed.scope, failSafe: parsed.failSafe },
     commands: parsed.commands,
-    failSafe: parsed.failSafe ?? false,
+    failSafe: parsed.failSafe,
   };
 }
 

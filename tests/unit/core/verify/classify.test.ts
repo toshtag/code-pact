@@ -33,8 +33,22 @@ describe("VerificationCommand — the [program, ...args] contract", () => {
     expect(VerificationCommand.parse(["pnpm"])).toEqual(["pnpm"]);
   });
 
+  it("accepts a single-character argument", () => {
+    // `["node", "-e", "1"]` is a legitimate argv. The bug was multi-character
+    // arguments being SPLIT, not short arguments existing.
+    expect(VerificationCommand.parse(["node", "-e", "1"])).toEqual([
+      "node",
+      "-e",
+      "1",
+    ]);
+  });
+
   it("rejects an empty command", () => {
     expect(VerificationCommand.safeParse([]).success).toBe(false);
+  });
+
+  it("rejects an empty program", () => {
+    expect(VerificationCommand.safeParse([""]).success).toBe(false);
   });
 
   it("rejects the legacy nested pair that produced the split argv", () => {
@@ -49,7 +63,25 @@ describe("VerificationCommand — the [program, ...args] contract", () => {
 });
 
 describe("VerificationScopeOutput — the parse boundary", () => {
-  const scope = { mergeBase: null, failSafe: false };
+  /** The scope the real script emits, field for field. */
+  const scope = {
+    changedFiles: ["src/core/verify/classify.ts"],
+    docs: false,
+    standard: true,
+    toolchain: false,
+    processControl: false,
+    generic: true,
+    workflow: false,
+    releaseScript: false,
+    sharedTestInfra: false,
+    unknown: false,
+    highRisk: false,
+    fallbackFull: false,
+    fallbackReason: null,
+    mode: "focused",
+    reason: "standard",
+    mergeBase: "fc783aba1d01d050aff88d83e13ba4dc426fec9e",
+  };
 
   it("accepts the shape the scope script emits", () => {
     const parsed = VerificationScopeOutput.parse({
@@ -61,6 +93,17 @@ describe("VerificationScopeOutput — the parse boundary", () => {
       ["pnpm", "typecheck"],
       ["pnpm", "check:docs"],
     ]);
+    expect(parsed.scope.mode).toBe("focused");
+  });
+
+  it("accepts a scope carrying a field the consumer does not model", () => {
+    // The producer must be able to grow without a lockstep consumer release.
+    const parsed = VerificationScopeOutput.parse({
+      scope: { ...scope, someFutureFlag: true },
+      commands: [["pnpm", "typecheck"]],
+      failSafe: false,
+    });
+    expect(parsed.scope.reason).toBe("standard");
   });
 
   it("refuses output that carries a legacy nested command", () => {
@@ -77,6 +120,53 @@ describe("VerificationScopeOutput — the parse boundary", () => {
       scope,
       commands: "pnpm typecheck",
       failSafe: false,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("refuses a scope whose changedFiles is not an array", () => {
+    const result = VerificationScopeOutput.safeParse({
+      scope: { ...scope, changedFiles: 123 },
+      commands: [["pnpm", "typecheck"]],
+      failSafe: false,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("refuses a scope whose docs flag is not a boolean", () => {
+    const result = VerificationScopeOutput.safeParse({
+      scope: { ...scope, docs: "yes" },
+      commands: [["pnpm", "typecheck"]],
+      failSafe: false,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("refuses a scope that is missing reason", () => {
+    const { reason: _dropped, ...withoutReason } = scope;
+    const result = VerificationScopeOutput.safeParse({
+      scope: withoutReason,
+      commands: [["pnpm", "typecheck"]],
+      failSafe: false,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("refuses a scope whose mode is not focused or full", () => {
+    const result = VerificationScopeOutput.safeParse({
+      scope: { ...scope, mode: "partial" },
+      commands: [["pnpm", "typecheck"]],
+      failSafe: false,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("requires the producer failSafe flag rather than defaulting it", () => {
+    // Defaulting a missing failSafe to false would silently narrow
+    // verification on a producer that stopped emitting it.
+    const result = VerificationScopeOutput.safeParse({
+      scope,
+      commands: [["pnpm", "typecheck"]],
     });
     expect(result.success).toBe(false);
   });
@@ -108,12 +198,12 @@ describe("scripts/verification-scope.mjs — real output honours the contract", 
       ],
       { cwd: process.cwd(), encoding: "utf8", maxBuffer: 10 * 1024 * 1024 },
     );
+    // Parsing is the assertion: the envelope schema is fail-closed, so a
+    // producer that drops failSafe or changes a scope field throws here.
     const parsed = VerificationScopeOutput.parse(JSON.parse(stdout));
+    expect(parsed.failSafe).toBe(true);
+    expect(parsed.scope.mode).toBe("full");
     expect(parsed.commands.length).toBeGreaterThan(0);
-    for (const command of parsed.commands) {
-      expect(command.length).toBeGreaterThan(0);
-      for (const arg of command) expect(typeof arg).toBe("string");
-    }
   }, 60_000);
 
   it("classifyVerification returns runnable commands for the real script", async () => {
@@ -122,14 +212,19 @@ describe("scripts/verification-scope.mjs — real output honours the contract", 
       UNRESOLVABLE_BASE,
     );
     expect(classification.commands.length).toBeGreaterThan(0);
-    // The break was multi-character arguments arriving as separate argv
-    // entries. Any command that starts a subcommand must still carry it whole.
-    for (const [program, ...args] of classification.commands) {
-      expect(program.length).toBeGreaterThan(1);
-      for (const arg of args) {
-        expect(arg).not.toMatch(/^.$/);
-      }
-    }
+    // The break was a multi-character argument arriving as separate argv
+    // entries, so pin a known multi-token command from the real producer. A
+    // blanket "no single-character argument" rule would be wrong: `-e` and `1`
+    // are legitimate argv entries.
+    expect(
+      classification.commands.some(
+        ([program, subcommand, tool, action]) =>
+          program === "pnpm" &&
+          subcommand === "exec" &&
+          tool === "vitest" &&
+          action === "run",
+      ),
+    ).toBe(true);
   }, 60_000);
 });
 
