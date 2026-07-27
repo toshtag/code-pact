@@ -202,7 +202,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Separate OS executable resolution from project filesystem authority.
       P89-T1C assumed `npm_execpath` identifies the package manager, but that
