@@ -413,7 +413,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Replace shared-runner timing assertions in the bounded-process tests with
       deterministic observable handshakes. A silent child exits only after
