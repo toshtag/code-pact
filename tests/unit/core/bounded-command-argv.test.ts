@@ -170,6 +170,23 @@ describe("the package manager launches on this platform", () => {
     expect(ok, detail).toBe(true);
   }, 60_000);
 
+  it("runs a multi-argument pnpm command, as the classifier emits", async () => {
+    // `pnpm --version` is a single argument; a real classifier command carries
+    // a subcommand and flags, which is where a shim launcher would go wrong.
+    const { ok, results } = await runVerificationCommands(process.cwd(), [
+      ["pnpm", "exec", "vitest", "--version"],
+    ]);
+
+    const detail = [
+      `platform=${process.platform}`,
+      `exit=${results[0]?.exit_code}`,
+      `stderr=${results[0]?.stderr_excerpt ?? ""}`,
+    ].join(" | ");
+
+    expect(results[0]?.exit_code, detail).toBe(0);
+    expect(ok, detail).toBe(true);
+  }, 120_000);
+
   it("keeps a hostile argument literal through the classifier path", async () => {
     const marker = join(dir, "classifier-must-not-exist");
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
@@ -1165,5 +1165,116 @@ describe("check-fs-authority", () => {
     ]);
 
     expect(result.ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `src/core/process/executable-resolution.ts` holds a NARROWER exception than
+// the raw-fs boundary modules: it may import node:fs, but only `existsSync` and
+// `statSync` are authorized inside it. The wide allowlist would have waved
+// through every filesystem sink in the file, so a `writeFileSync` added later
+// could have ridden in on the import permission with nobody noticing.
+//
+// The allowlist is keyed by the real repo-relative path, so proving this needs
+// the real file: each case rewrites it, runs the gate, and restores it.
+// ---------------------------------------------------------------------------
+
+describe("check-fs-authority — the executable resolver's narrow exception", () => {
+  const resolverPath = join(
+    repoRoot,
+    "src",
+    "core",
+    "process",
+    "executable-resolution.ts",
+  );
+
+  async function runWithResolverSource(
+    source: string,
+  ): Promise<{ ok: boolean; output: string }> {
+    const original = await readFile(resolverPath, "utf8");
+    try {
+      await writeFile(resolverPath, source, "utf8");
+      await execFileAsync("node", [scriptPath, resolverPath], { cwd: repoRoot });
+      return { ok: true, output: "" };
+    } catch (err) {
+      return {
+        ok: false,
+        output: `${(err as { stdout?: string }).stdout ?? ""}\n${
+          (err as { stderr?: string }).stderr ?? ""
+        }`,
+      };
+    } finally {
+      await writeFile(resolverPath, original, "utf8");
+    }
+  }
+
+  it("passes the read-only probes it is allowed to make", async () => {
+    const result = await runWithResolverSource(
+      [
+        'import { existsSync, statSync } from "node:fs";',
+        "",
+        "export function probe(path: string): boolean {",
+        "  return existsSync(path) && statSync(path).isFile();",
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    expect(result.output).toBe("");
+    expect(result.ok).toBe(true);
+  });
+
+  for (const [label, call] of [
+    ["readFileSync", 'readFileSync(path, "utf8");'],
+    ["writeFileSync", 'writeFileSync(path, "x");'],
+    ["rmSync", "rmSync(path);"],
+    ["renameSync", "renameSync(path, path);"],
+  ] as const) {
+    it(`rejects ${label}, which the import permission must not cover`, async () => {
+      const fn = call.slice(0, call.indexOf("("));
+      const result = await runWithResolverSource(
+        [
+          `import { existsSync, ${fn} } from "node:fs";`,
+          "",
+          "export function probe(path: string): boolean {",
+          `  ${call}`,
+          "  return existsSync(path);",
+          "}",
+          "",
+        ].join("\n"),
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.output).toContain(fn);
+    });
+  }
+
+  it("rejects a namespace import, which would hide every call site", async () => {
+    const result = await runWithResolverSource(
+      [
+        'import * as fs from "node:fs";',
+        "",
+        "export function probe(path: string): boolean {",
+        "  return fs.existsSync(path);",
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects a dynamic import, which no static allowlist can bound", async () => {
+    const result = await runWithResolverSource(
+      [
+        "export async function probe(path: string): Promise<boolean> {",
+        '  const fs = await import("node:fs");',
+        "  return fs.existsSync(path);",
+        "}",
+        "",
+      ].join("\n"),
+    );
+
+    expect(result.ok).toBe(false);
   });
 });

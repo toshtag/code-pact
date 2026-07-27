@@ -73,6 +73,58 @@ export function executableExists(path: string): boolean {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The batch-shim argument contract
+//
+// A `.cmd` / `.bat` runs under cmd.exe, which parses the command line again
+// before the batch file sees it. That parse is not something a caller can fully
+// neutralise: `%VAR%` is expanded while parsing, and a CR or LF simply ENDS the
+// command — everything after it is a second command. Quoting and caret escapes
+// do not close either hole, which is why Node refuses to spawn a `.cmd` without
+// a shell at all (the CVE-2024-27980 mitigation).
+//
+// So this boundary is an allowlist, not an escaper. Only characters proven to
+// survive a real shim — by the Windows runtime test in
+// tests/unit/core/windows-command-launch.test.ts — are permitted, and anything
+// else is refused BEFORE a process exists. Refusing a legal-but-unrepresentable
+// filename is the correct trade: the alternative is running an argument as a
+// command.
+//
+// Native executables and JavaScript entrypoints are unaffected. They take argv
+// as an array and keep it byte for byte, so nothing is restricted there.
+// ---------------------------------------------------------------------------
+
+/**
+ * Characters a batch argument may contain. Deliberately conservative: the set
+ * covers what a verification command needs — paths, flags, globs, versions —
+ * and nothing cmd.exe acts on.
+ *
+ * Excluded on purpose, each because cmd would reinterpret it: `%` (expansion),
+ * `!` (delayed expansion), `^` (escape), `&` `|` `<` `>` `(` `)` (operators),
+ * `"` (quoting), CR and LF (command separators), and every other control
+ * character.
+ */
+const CMD_SAFE_ARGUMENT = /^[\p{L}\p{N}\p{M} _\-.,;:=@$'*?/\\+~#[\]{}]*$/u;
+
+/**
+ * Returns why `shimPath` or one of `args` cannot be passed to a batch shim, or
+ * null when every value is safe.
+ */
+function firstUnsafeBatchValue(
+  shimPath: string,
+  args: readonly string[],
+): string | null {
+  if (!CMD_SAFE_ARGUMENT.test(shimPath)) {
+    return `the batch shim path "${shimPath}" contains a character cmd.exe would reinterpret`;
+  }
+  for (const [index, arg] of args.entries()) {
+    if (!CMD_SAFE_ARGUMENT.test(arg)) {
+      return `Windows batch shim cannot safely represent verification argument ${index + 1}: it contains a cmd.exe control character`;
+    }
+  }
+  return null;
+}
+
 /** `C:\\pnpm\\bin\\pnpm.cjs` and `pnpm` both reduce to `pnpm`. */
 function commandIdentity(pathOrName: string): string {
   return winPath
@@ -168,8 +220,13 @@ export function resolveExecutable(
     return { kind: "direct", executable: resolved, args };
   }
 
-  // 3. A batch shim needs cmd.exe. The caller uses the dedicated launcher.
+  // 3. A batch shim needs cmd.exe, which re-reads the command line. Only a
+  //    verified subset can survive that; anything else is refused here.
   if (WINDOWS_SHIM_EXTENSIONS.has(extension)) {
+    const rejection = firstUnsafeBatchValue(resolved, args);
+    if (rejection !== null) {
+      return { kind: "unresolvable", reason: rejection };
+    }
     return { kind: "windows-shim", shimPath: resolved, args };
   }
 

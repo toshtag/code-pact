@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { resolveExecutable } from "../../../src/core/process/executable-resolution.ts";
+import { runBoundedArgv } from "../../../src/core/process/bounded-command.ts";
 
 // ---------------------------------------------------------------------------
 // The verification classifier emits `["pnpm", ...]`. On Windows a `pnpm` on
@@ -178,6 +183,30 @@ describe("resolveExecutable — Windows PATH resolution", () => {
     });
   });
 
+  it("refuses a batch launch whose argument cmd.exe would reinterpret", () => {
+    const result = resolve({
+      args: ["exec", "%PATH%"],
+      fileExists: only("C:\\pnpm\\pnpm.cmd"),
+    });
+
+    expect(result.kind).toBe("unresolvable");
+    if (result.kind !== "unresolvable") return;
+    expect(result.reason).toContain("argument 2");
+    expect(result.reason).toContain("cmd.exe control character");
+  });
+
+  it("refuses a batch launch whose shim path is unrepresentable", () => {
+    const shim = "C:\\pnpm & evil\\pnpm.cmd";
+    const result = resolve({
+      program: "C:\\pnpm & evil\\pnpm",
+      fileExists: only(shim),
+    });
+
+    expect(result.kind).toBe("unresolvable");
+    if (result.kind !== "unresolvable") return;
+    expect(result.reason).toContain("batch shim path");
+  });
+
   it("honours PATHEXT order, so a .exe wins over a .cmd beside it", () => {
     const result = resolve({
       fileExists: only("C:\\pnpm\\pnpm.exe", "C:\\pnpm\\pnpm.cmd"),
@@ -344,13 +373,40 @@ describe("resolveExecutable — argv is never rewritten", () => {
     expect(result).toMatchObject({ args: hostile });
   });
 
-  it("hands the shim launcher the caller's argv verbatim", () => {
+  it("refuses the batch launcher for argv a shim cannot represent", () => {
+    // The native and entrypoint launches above keep these bytes exactly. A
+    // batch shim cannot, so it fails closed instead of pretending otherwise.
     const result = resolve({
       args: hostile,
       fileExists: only("C:\\pnpm\\pnpm.cmd"),
     });
 
-    expect(result).toMatchObject({ kind: "windows-shim", args: hostile });
+    expect(result.kind).toBe("unresolvable");
+  });
+
+  it("hands the shim launcher the argv a shim CAN represent, verbatim", () => {
+    const representable = [
+      "",
+      "a b",
+      "日本語",
+      "--config",
+      "tests/unit/example.test.ts",
+      "$HOME",
+      "semi;colon",
+      "star*",
+      "question?",
+      "apostrophe'value",
+      "trailing\\",
+    ];
+    const result = resolve({
+      args: representable,
+      fileExists: only("C:\\pnpm\\pnpm.cmd"),
+    });
+
+    expect(result).toMatchObject({
+      kind: "windows-shim",
+      args: representable,
+    });
   });
 
   it("does not mutate the caller's argument array", () => {
@@ -363,4 +419,93 @@ describe("resolveExecutable — argv is never rewritten", () => {
 
     expect(args).toEqual(["exec", "vitest"]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// The tests above resolve; these LAUNCH. Until now the only evidence that a
+// batch shim preserves anything came from the pure resolver and from native
+// executables, which never touch cmd.exe. These build a real `.cmd`, run it
+// through `runBoundedArgv`, and compare the argv the child actually received.
+//
+// They only run on Windows, where a `.cmd` is a real launch path. Windows deep
+// CI is the gate that executes them.
+// ---------------------------------------------------------------------------
+
+const onWindows = it.runIf(process.platform === "win32");
+
+describe("a real Windows batch shim", () => {
+  let shimDir: string;
+  let shimPath: string;
+  let markerPath: string;
+
+  beforeEach(async () => {
+    shimDir = await mkdtemp(join(tmpdir(), "code-pact-cmd-shim-"));
+    markerPath = join(shimDir, "injected-marker");
+    // The shim forwards its arguments to a Node script that prints them back,
+    // so the comparison is against what the child truly received.
+    const echoScript = join(shimDir, "echo-argv.cjs");
+    await writeFile(
+      echoScript,
+      "process.stdout.write(JSON.stringify(process.argv.slice(2)));\n",
+      "utf8",
+    );
+    shimPath = join(shimDir, "echo.cmd");
+    await writeFile(
+      shimPath,
+      `@echo off\r\n"${process.execPath}" "${echoScript}" %*\r\n`,
+      "utf8",
+    );
+  });
+
+  afterEach(async () => {
+    if (shimDir) await rm(shimDir, { recursive: true, force: true });
+  });
+
+  onWindows("passes every representable argument through unchanged", async () => {
+    const args = [
+      "a b",
+      "日本語",
+      "--config",
+      "tests/unit/example.test.ts",
+      "$HOME",
+      "semi;colon",
+      "star*",
+      "question?",
+      "apostrophe'value",
+      "trailing\\",
+    ];
+
+    const result = await runBoundedArgv(shimPath, args, shimDir, 60_000);
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual(args);
+  }, 60_000);
+
+  for (const [label, hostile] of [
+    ["a percent expansion", "%PATH%"],
+    ["a delayed expansion", "!VALUE!"],
+    ["a caret", "^"],
+    ["an ampersand", "&"],
+    ["a pipe", "|"],
+    ["a redirect", ">"],
+    ["a parenthesis", "("],
+    ["an embedded quote", 'quote"value'],
+    ["a newline", "line\nbreak"],
+    ["a carriage return", "line\r\nbreak"],
+  ] as const) {
+    onWindows(`refuses ${label} before spawning anything`, async () => {
+      const result = await runBoundedArgv(
+        shimPath,
+        // The injection an unescaped separator would enable, if it ran.
+        [`${hostile}`, `& echo x > "${markerPath}"`],
+        shimDir,
+        60_000,
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("could not be resolved safely");
+      expect(result.elapsedMs).toBe(0);
+      expect(existsSync(markerPath)).toBe(false);
+    }, 60_000);
+  }
 });

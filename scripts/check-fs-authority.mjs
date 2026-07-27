@@ -693,15 +693,27 @@ const RAW_FS_IMPORT_ALLOWLIST = new Set([
   join("src", "core", "path-safety.ts"),
   join("src", "io", "atomic-text.ts"),
   join("src", "lib", "package-version.ts"),
-  // — OS executable namespace (NOT project filesystem authority) —
-  // Resolving a program name against PATH + PATHEXT answers "what image would
-  // the OS start", not "does the project own this path". PATH entries are
-  // system directories no project authority owns, so the authority helpers
-  // cannot express the question. The exception is deliberately one module wide
-  // and read-only: existence probes of launch candidates, never file content,
-  // never a write. `bounded-command.ts` consumes the resolution and imports no
-  // filesystem module itself.
-  join("src", "core", "process", "executable-resolution.ts"),
+]);
+
+// — OS executable namespace (NOT project filesystem authority) —
+//
+// Resolving a program name against PATH + PATHEXT answers "what image would the
+// OS start", not "does the project own this path". PATH entries are system
+// directories no project authority owns, so the authority helpers cannot
+// express the question.
+//
+// This is a DIFFERENT, narrower exception than RAW_FS_IMPORT_ALLOWLIST above.
+// That set permits the raw import AND waves through every filesystem sink in
+// the file, which is right for the authority primitives themselves and far too
+// wide here — a `writeFileSync` added later would pass silently. These entries
+// permit the import and NOTHING else: each listed function name is authorized
+// individually, and any other raw operation in the file is still a finding.
+const RAW_FS_IMPORT_ONLY_ALLOWLIST = new Map([
+  [
+    join("src", "core", "process", "executable-resolution.ts"),
+    // Read-only existence probes of launch candidates. No content, no writes.
+    new Set(["existsSync", "statSync"]),
+  ],
 ]);
 
 // Result properties that extract a path from an authority result object.
@@ -1457,9 +1469,70 @@ export function checkSourceText({
     });
   }
 
+  // An import-only exception permits NAMED imports of specific functions and
+  // nothing else. A namespace import (`import * as fs`) or a dynamic
+  // `import("node:fs")` would hand the module the whole surface behind an
+  // expression no static name check can follow, so both are findings even
+  // though the file is allowed to reach node:fs at all.
+  const importOnlyNames = RAW_FS_IMPORT_ONLY_ALLOWLIST.get(relFile);
+  if (importOnlyNames) {
+    const reportImport = (node, fn, arg) => {
+      const line =
+        sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+      findings.push({
+        line,
+        fn,
+        key: `${relFile}#*`,
+        arg,
+        text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
+      });
+    };
+    for (const stmt of sourceFile.statements) {
+      if (!ts.isImportDeclaration(stmt)) continue;
+      if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+      if (stmt.importClause?.isTypeOnly) continue;
+      if (!RAW_FS_MODULES.has(stmt.moduleSpecifier.text)) continue;
+      const bindings = stmt.importClause?.namedBindings;
+      if (!bindings || !ts.isNamedImports(bindings)) {
+        reportImport(stmt, "unbounded node:fs import", stmt.moduleSpecifier.text);
+        continue;
+      }
+      for (const element of bindings.elements) {
+        const imported = (element.propertyName ?? element.name).text;
+        if (!importOnlyNames.has(imported)) {
+          reportImport(element, "unauthorized node:fs import", imported);
+        }
+      }
+    }
+    const visitForDynamicImport = node => {
+      if (
+        ts.isCallExpression(node) &&
+        node.expression.kind === ts.SyntaxKind.ImportKeyword
+      ) {
+        const [specifier] = node.arguments;
+        if (
+          specifier === undefined ||
+          !ts.isStringLiteral(specifier) ||
+          RAW_FS_MODULES.has(specifier.text)
+        ) {
+          reportImport(
+            node,
+            "dynamic node:fs import",
+            specifier && ts.isStringLiteral(specifier) ? specifier.text : "?",
+          );
+        }
+      }
+      ts.forEachChild(node, visitForDynamicImport);
+    };
+    visitForDynamicImport(sourceFile);
+  }
+
   // Non-boundary modules MUST NOT import from raw-internal.ts or
   // node:fs/node:fs/promises directly.
-  if (!RAW_FS_IMPORT_ALLOWLIST.has(relFile)) {
+  if (
+    !RAW_FS_IMPORT_ALLOWLIST.has(relFile) &&
+    !RAW_FS_IMPORT_ONLY_ALLOWLIST.has(relFile)
+  ) {
     for (const stmt of sourceFile.statements) {
       if (!ts.isImportDeclaration(stmt)) continue;
       if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
@@ -1959,7 +2032,16 @@ export function checkSourceText({
         ts.forEachChild(node, child => visit(child, scope));
         return;
       }
-      if (
+      // Import-only exception: authorize the named read-only probes and
+      // nothing else. Every other raw operation in the file still reports,
+      // so a later `writeFileSync` cannot ride in on the import permission.
+      const importOnlyFunctions = RAW_FS_IMPORT_ONLY_ALLOWLIST.get(relFile);
+      if (importOnlyFunctions) {
+        if (fnName && importOnlyFunctions.has(fnName)) {
+          ts.forEachChild(node, child => visit(child, scope));
+          return;
+        }
+      } else if (
         RAW_FS_IMPORT_ALLOWLIST.has(relFile) &&
         (sinkInfo || (fnName && FS_FUNCTIONS.has(fnName)))
       ) {

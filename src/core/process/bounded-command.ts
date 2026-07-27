@@ -272,19 +272,22 @@ function cleanupChildHandles(proc: ChildProcess): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Quotes one argument for a `cmd.exe /c` command line.
+ * Wraps one ALREADY-VALIDATED batch argument in quotes.
  *
- * Two layers, in order: the C runtime's argv rules so the child parses the
- * argument back out whole, then a caret escape of every character cmd itself
- * acts on, so cmd hands that quoted form through instead of interpreting it.
+ * This is not an escaper, and must not be treated as one. `resolveExecutable`
+ * has already refused every character cmd.exe acts on — `%`, `!`, `^`, the
+ * operators, `"`, CR, LF — so nothing is left to escape and quoting only has to
+ * keep whitespace together. An earlier version escaped carets and quotes here
+ * and let CR/LF through, which is not a smaller bug: a newline ends a cmd
+ * command line, so the rest of the argument ran as a second command.
  */
-function escapeForCmd(arg: string): string {
-  const quoted = `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, "$1$1")}"`;
-  return quoted.replace(/([()\][%!^"`<>&|;, *?])/g, "^$1");
+function quoteValidatedBatchValue(value: string): string {
+  return `"${value}"`;
 }
 
 /**
- * Builds the `cmd.exe` invocation for a batch shim.
+ * Builds the `cmd.exe` invocation for a batch shim whose path and arguments
+ * have already passed the cmd-safe contract.
  *
  * `/d` skips AutoRun commands from the registry, so a machine-local setting
  * cannot inject work into a verification run. `/s` fixes how the outer quotes
@@ -296,7 +299,7 @@ function windowsShimSpawnArgs(
   args: readonly string[],
   env: NodeJS.ProcessEnv,
 ): { executable: string; args: string[] } {
-  const line = [shimPath, ...args].map(escapeForCmd).join(" ");
+  const line = [shimPath, ...args].map(quoteValidatedBatchValue).join(" ");
   return {
     executable: env.ComSpec ?? env.COMSPEC ?? "cmd.exe",
     args: ["/d", "/s", "/c", `"${line}"`],
