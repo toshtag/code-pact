@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
+import { extname } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
 export type ProcessTerminationResult = {
@@ -252,6 +253,100 @@ function cleanupChildHandles(proc: ChildProcess): void {
   proc.unref();
 }
 
+// ---------------------------------------------------------------------------
+// Platform launch resolution
+//
+// `runBoundedArgv` promises that each argv element reaches the child unchanged.
+// On POSIX that is exactly what `spawn(program, args, { shell: false })` does.
+//
+// Windows is different in a way that matters here: the verification classifier
+// emits `["pnpm", ...]`, and a Windows `pnpm` is normally the batch shim
+// `pnpm.cmd`. A `.cmd` is not an executable image — it needs `cmd.exe` — and
+// Node refuses to spawn one without a shell (the CVE-2024-27980 mitigation).
+// So the argv path would simply not launch there.
+//
+// Routing it through `cmd.exe` is NOT a fix. When cmd parses a command line for
+// a batch file it expands `%VAR%` during parsing, and the caller cannot escape
+// that away — `windowsVerbatimArguments` does not help. A shim launcher would
+// have to either corrupt arguments containing `%` or reject them, and a `%` is
+// legal in a changed-file path. Both outcomes break the contract this module
+// exists to keep, so a bare shim FAILS CLOSED with a message the caller can act
+// on, rather than silently changing what runs.
+//
+// What is safe, and what covers every command the classifier actually emits:
+// launch the package manager's JavaScript entrypoint with the Node binary. That
+// is a native image and plain argv, so the guarantee holds. It is also exactly
+// what `scripts/verification-scope.mjs` already does for its own steps.
+//
+// Nothing here touches the filesystem — src/ reaches the filesystem only
+// through the project-fs authorities, and a PATH probe would be outside any
+// project authority. Resolution is therefore syntactic: when it cannot produce
+// a launch that keeps argv intact, the spawn itself refuses (Node will not run
+// a `.cmd` without a shell) and the caller gets the reason. A wrong guess fails
+// loudly; it never silently runs something else.
+//
+// Platform, environment, and the Node binary are injected, so the Windows
+// branches are testable from any host.
+// ---------------------------------------------------------------------------
+
+export type ProcessLaunch = {
+  executable: string;
+  args: string[];
+  /**
+   * Appended to stderr when the spawn itself fails, so an operator sees why a
+   * platform could not start the program rather than a bare errno.
+   */
+  spawnFailureHint?: string;
+};
+
+export type ResolveProcessLaunchInput = {
+  program: string;
+  args: readonly string[];
+  platform: NodeJS.Platform;
+  env: NodeJS.ProcessEnv;
+  /** The Node binary used to run a JavaScript entrypoint. */
+  nodeExecPath: string;
+};
+
+const JAVASCRIPT_EXTENSIONS = new Set([".js", ".cjs", ".mjs"]);
+
+const WINDOWS_SHIM_HINT =
+  "on Windows a package-manager command is usually a .cmd shim, which only cmd.exe can run; cmd expands %VAR% while parsing, so this runner will not route arguments through it. Run the command through its package manager (which sets npm_execpath) or name a native executable.";
+
+/**
+ * Decides how to start `program` so that every element of `args` reaches the
+ * child unchanged. Never produces a shell command.
+ */
+export function resolveProcessLaunch(
+  input: ResolveProcessLaunchInput,
+): ProcessLaunch {
+  const { program, platform, env, nodeExecPath } = input;
+  const args = [...input.args];
+
+  if (platform !== "win32") {
+    return { executable: program, args };
+  }
+
+  // The package manager's own JavaScript entrypoint, when the environment
+  // points at one. Preferred over the bare name so the `.cmd` shim that a
+  // Windows PATH lookup would find is never reached.
+  const execPath = env.npm_execpath;
+  if (
+    execPath !== undefined &&
+    JAVASCRIPT_EXTENSIONS.has(extname(execPath).toLowerCase())
+  ) {
+    return { executable: nodeExecPath, args: [execPath, ...args] };
+  }
+
+  // A named executable still launches directly. If it turns out to be a shim,
+  // Node refuses the spawn and the hint explains the refusal.
+  return {
+    executable: program,
+    args,
+    ...(extname(program) === "" ? { spawnFailureHint: WINDOWS_SHIM_HINT } : {}),
+  };
+}
+
 function refusedBeforeStart(stderr: string): BoundedCommandResult {
   return {
     exitCode: 1,
@@ -319,6 +414,10 @@ export async function runBoundedCommand(
  * `*`, a quote, or whitespace reaches the child exactly as written. Rendering
  * the same argv into a shell line and running that is not equivalent: JSON
  * quoting is not shell quoting, and a double-quoted `$(...)` is still expanded.
+ *
+ * How `program` becomes a process image is platform-dependent — see
+ * {@link resolveProcessLaunch}. When no launch can preserve the argv, this
+ * refuses rather than falling back to a shell.
  */
 export async function runBoundedArgv(
   program: string,
@@ -328,9 +427,16 @@ export async function runBoundedArgv(
   signal?: AbortSignal,
 ): Promise<BoundedCommandResult> {
   if (!program) return refusedBeforeStart("empty verification command program");
+  const launch = resolveProcessLaunch({
+    program,
+    args,
+    platform: process.platform,
+    env: process.env,
+    nodeExecPath: process.execPath,
+  });
   return superviseBoundedProcess(
     () =>
-      spawn(program, [...args], {
+      spawn(launch.executable, launch.args, {
         cwd,
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
@@ -338,6 +444,7 @@ export async function runBoundedArgv(
       }),
     timeoutMs,
     signal,
+    launch.spawnFailureHint,
   );
 }
 
@@ -351,6 +458,7 @@ async function superviseBoundedProcess(
   spawnChild: () => ChildProcess,
   timeoutMs: number,
   signal?: AbortSignal,
+  spawnFailureHint?: string,
 ): Promise<BoundedCommandResult> {
   if (signal?.aborted) return abortedBeforeStart();
 
@@ -375,6 +483,9 @@ async function superviseBoundedProcess(
   proc.once("close", code => settleClose({ exitCode: code }));
   proc.once("error", error => {
     stderr.append(Buffer.from(error.message));
+    if (spawnFailureHint) {
+      stderr.append(Buffer.from(`\n[code-pact: ${spawnFailureHint}]\n`));
+    }
     settleClose({ exitCode: null });
   });
 

@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runBoundedArgv } from "../../../src/core/process/bounded-command.ts";
+import { runVerificationCommands } from "../../../src/core/verify/classify.ts";
 
 // ---------------------------------------------------------------------------
 // The verification classifier holds a validated argv and used to run it by
@@ -138,4 +139,52 @@ describe("runBoundedArgv — bounded guarantees", () => {
     expect(result.exitCode).toBe(3);
     expect(result.stderr).toContain("boom");
   });
+});
+
+// ---------------------------------------------------------------------------
+// Every command the classifier emits starts with `pnpm`. On POSIX that is an
+// executable; on Windows it is normally the batch shim `pnpm.cmd`, which a
+// shell-free spawn cannot start at all. These run the real launch path on
+// whatever host executes them, so Windows CI proves the Windows branch rather
+// than a Linux run standing in for it.
+// ---------------------------------------------------------------------------
+
+describe("the package manager launches on this platform", () => {
+  it("runs pnpm through the classifier path", async () => {
+    const { ok, results } = await runVerificationCommands(process.cwd(), [
+      ["pnpm", "--version"],
+    ]);
+
+    expect(results[0]?.stderr_excerpt ?? "").not.toContain(
+      "could not be resolved safely",
+    );
+    expect(results[0]?.exit_code).toBe(0);
+    expect(results[0]?.stdout_excerpt.trim()).toMatch(/^\d+\.\d+\.\d+/);
+    expect(ok).toBe(true);
+  }, 60_000);
+
+  it("keeps a hostile argument literal through the classifier path", async () => {
+    const marker = join(dir, "classifier-must-not-exist");
+
+    const { results } = await runVerificationCommands(process.cwd(), [
+      [
+        process.execPath,
+        "-e",
+        ECHO_ARGV,
+        `$(touch ${marker})`,
+        "%PATH%",
+        "!VALUE!",
+        "a b",
+      ],
+    ]);
+
+    expect(results[0]?.exit_code).toBe(0);
+    expect(JSON.parse(results[0]!.stdout_excerpt)).toEqual([
+      `$(touch ${marker})`,
+      "%PATH%",
+      "!VALUE!",
+      "a b",
+    ]);
+    expect(existsSync(marker)).toBe(false);
+  }, 60_000);
 });
