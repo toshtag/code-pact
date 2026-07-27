@@ -282,7 +282,11 @@ function cleanupChildHandles(proc: ChildProcess): void {
  * command line, so the rest of the argument ran as a second command.
  */
 function quoteValidatedBatchValue(value: string): string {
-  return `"${value}"`;
+  // One rule still applies: under the C runtime's argv parsing, backslashes
+  // immediately before the closing quote escape IT, so `"C:\dir\"` arrives as
+  // `C:\dir"`. Windows CI caught exactly that. Doubling the trailing run fixes
+  // it and is safe here because `\` is not a character cmd itself acts on.
+  return `"${value.replace(/(\\+)$/, "$1$1")}"`;
 }
 
 /**
