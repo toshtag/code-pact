@@ -415,9 +415,19 @@ tasks:
     expected_duration: short
     status: planned
     description: >
-      Remove shared-runner wall-clock ceilings from run-bounded-process tests
-      and assert observable heartbeat and process-tree properties
-      deterministically.
+      Replace shared-runner timing assertions in the bounded-process tests with
+      deterministic observable handshakes. A silent child exits only after
+      multiple heartbeat callbacks release it; timeout reporting is asserted
+      without elapsed-time ceilings; process-tree termination is triggered
+      independently of child-startup timing and checked with a bounded eventual
+      liveness probe rather than an immediate PID check.
     requires_decision: false
     depends_on:
       - P89-T2
+    reads:
+      - scripts/lib/run-bounded-process.mjs
+      - tests/unit/scripts/run-bounded-process.test.ts
+    writes:
+      - tests/unit/scripts/run-bounded-process.test.ts
+    acceptance_refs:
+      - tests/unit/scripts/run-bounded-process.test.ts
