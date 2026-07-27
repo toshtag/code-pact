@@ -194,6 +194,50 @@ tasks:
     acceptance_refs:
       - tests/unit/core/bounded-command-argv.test.ts
       - tests/unit/core/windows-command-launch.test.ts
+  - id: P89-T1D
+    type: bugfix
+    ambiguity: low
+    risk: medium
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: >
+      Separate OS executable resolution from project filesystem authority.
+      P89-T1C assumed `npm_execpath` identifies the package manager, but that
+      variable is a `pnpm run` lifecycle value: under `pnpm exec` and under a
+      plain `node dist/cli.js` — the way the CLI actually runs — it is unset,
+      so Windows deep CI fails with `spawn pnpm ENOENT`. Resolving a program
+      name against PATH and PATHEXT is an OS executable namespace question, not
+      an ownership question about a project file, so it gets its own module and
+      its own narrow fs-authority exception; bounded-command consumes the
+      resolution and keeps importing no filesystem module. A `.cmd` shim is
+      launched through a dedicated launcher rather than a general shell, and an
+      unresolvable program fails closed.
+    requires_decision: false
+    depends_on:
+      - P89-T1C
+    reads:
+      - src/core/process/bounded-command.ts
+      - src/core/verify/classify.ts
+      - scripts/verification-scope.mjs
+      - tests/unit/core/windows-command-launch.test.ts
+      - tests/unit/core/bounded-command-argv.test.ts
+      - tests/unit/scripts/check-fs-authority.test.ts
+      - .github/workflows/ci-deep.yml
+    writes:
+      - design/phases/P89-lifecycle-integrity-ci-diagnostics.yaml
+      - src/core/process/executable-resolution.ts
+      - src/core/process/bounded-command.ts
+      - scripts/check-fs-authority.mjs
+      - tests/unit/core/executable-resolution.test.ts
+      - tests/unit/core/windows-command-launch.test.ts
+      - tests/unit/core/bounded-command-argv.test.ts
+      - .github/workflows/ci-deep.yml
+    acceptance_refs:
+      - tests/unit/core/executable-resolution.test.ts
+      - tests/unit/core/windows-command-launch.test.ts
   - id: P89-T2
     type: bugfix
     ambiguity: low
@@ -209,7 +253,7 @@ tasks:
       rerun.
     requires_decision: false
     depends_on:
-      - P89-T1C
+      - P89-T1D
   - id: P89-T3
     type: bugfix
     ambiguity: low
