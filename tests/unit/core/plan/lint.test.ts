@@ -27,7 +27,56 @@ type PhaseOptions = {
   weakDod?: boolean;
   placeholderVerification?: boolean;
   badTaskId?: boolean;
+  /** Omit the review contract to exercise the missing-contract advisory. */
+  reviewContract?: false;
 };
+
+/**
+ * A complete boundary review contract for the shared fixture task. The task is a
+ * `feature`, so minimal mode is unavailable; every ref points at the task's one
+ * declared write so the ref-coverage rule is satisfied without touching disk.
+ */
+const REVIEW_CONTRACT = `    review_contract:
+      version: 1
+      mode: boundary
+      stages:
+        - stage: producer
+          disposition: in_scope
+          claim: The producer emits a stable envelope.
+          refs:
+            - src/example.ts
+        - stage: consumer
+          disposition: in_scope
+          claim: The consumer validates the envelope.
+          refs:
+            - src/example.ts
+        - stage: runner
+          disposition: not_applicable
+          rationale: No process is launched.
+        - stage: os
+          disposition: not_applicable
+          rationale: No OS-specific behavior changes.
+        - stage: security
+          disposition: not_applicable
+          rationale: No authority boundary is touched.
+      platforms:
+        - platform: linux
+          disposition: required
+          level: integration
+          refs:
+            - src/example.ts
+        - platform: macos
+          disposition: not_required
+          rationale: No macOS-specific behavior changes.
+        - platform: windows
+          disposition: not_required
+          rationale: No Windows-specific behavior changes.
+      evidence:
+        - id: envelope-contract
+          claim: Producer and consumer agree on the envelope.
+          level: integration
+          refs:
+            - src/example.ts`;
 
 function phaseYaml(
   id: string,
@@ -40,6 +89,8 @@ function phaseYaml(
   const verify = options.placeholderVerification
     ? ["echo placeholder"]
     : ["pnpm test"];
+  const reviewContract =
+    options.reviewContract === false ? "" : `\n${REVIEW_CONTRACT}`;
   return `id: ${id}
 name: ${id}
 weight: 10
@@ -63,7 +114,9 @@ ${taskIds
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned`,
+    status: planned
+    writes:
+      - src/example.ts${reviewContract}`,
   )
   .join("\n")}
 `;
@@ -1105,5 +1158,143 @@ tasks:
     expect(
       p50.some((i) => i.code === "TASK_DECLARED_DECISION_LARGE"),
     ).toBe(true);
+  });
+});
+
+describe("runLint — review contract diagnostics", () => {
+  async function runWithPhase(content: string) {
+    await writeRoadmap(
+      `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`,
+    );
+    await writePhase("P1.yaml", content);
+    return runLint({ cwd });
+  }
+
+  function reviewIssues(result: Awaited<ReturnType<typeof runLint>>) {
+    return result.issues.filter((i) => i.code.startsWith("TASK_REVIEW_CONTRACT"));
+  }
+
+  function withTaskStatus(content: string, status: string): string {
+    return content.replace("    status: planned", `    status: ${status}`);
+  }
+
+  it("reports no review-contract issue for a valid contract", async () => {
+    const result = await runWithPhase(phaseYaml("P1", ["P1-T1"]));
+    expect(reviewIssues(result)).toEqual([]);
+  });
+
+  it("emits a non-exit advisory when a planned task declares no contract", async () => {
+    const result = await runWithPhase(
+      phaseYaml("P1", ["P1-T1"], { reviewContract: false }),
+    );
+    const issues = reviewIssues(result);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_REVIEW_CONTRACT_MISSING");
+    expect(issues[0]?.severity).toBe("warning");
+    expect(issues[0]?.affects_exit).toBe(false);
+  });
+
+  it("emits the advisory for an in_progress task too", async () => {
+    const result = await runWithPhase(
+      withTaskStatus(
+        phaseYaml("P1", ["P1-T1"], { reviewContract: false }),
+        "in_progress",
+      ),
+    );
+    expect(reviewIssues(result).map((i) => i.code)).toEqual([
+      "TASK_REVIEW_CONTRACT_MISSING",
+    ]);
+  });
+
+  it("stays silent for a done task with no contract", async () => {
+    const result = await runWithPhase(
+      withTaskStatus(
+        phaseYaml("P1", ["P1-T1"], { reviewContract: false }),
+        "done",
+      ),
+    );
+    expect(reviewIssues(result)).toEqual([]);
+  });
+
+  it("stays silent for a cancelled task with no contract", async () => {
+    const result = await runWithPhase(
+      withTaskStatus(
+        phaseYaml("P1", ["P1-T1"], { reviewContract: false }),
+        "cancelled",
+      ),
+    );
+    expect(reviewIssues(result)).toEqual([]);
+  });
+
+  it("reports an error when minimal mode is used by a feature task", async () => {
+    const minimal = phaseYaml("P1", ["P1-T1"], { reviewContract: false }).replace(
+      "    writes:\n      - src/example.ts",
+      [
+        "    writes:",
+        "      - src/example.ts",
+        "    review_contract:",
+        "      version: 1",
+        "      mode: minimal",
+        "      rationale: Looks small enough.",
+      ].join("\n"),
+    );
+    const result = await runWithPhase(minimal);
+    const issues = reviewIssues(result);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_REVIEW_CONTRACT_INVALID");
+    expect(issues[0]?.severity).toBe("error");
+    expect(issues[0]?.details?.reason).toBe("minimal_mode_not_allowed");
+  });
+
+  it("reports an error when a boundary stage is missing", async () => {
+    const result = await runWithPhase(
+      phaseYaml("P1", ["P1-T1"]).replace(
+        [
+          "        - stage: security",
+          "          disposition: not_applicable",
+          "          rationale: No authority boundary is touched.",
+        ].join("\n"),
+        "",
+      ),
+    );
+    const issues = reviewIssues(result);
+    expect(issues.map((i) => i.code)).toEqual(["TASK_REVIEW_CONTRACT_INVALID"]);
+    expect(issues[0]?.details?.reason).toBe("boundary_stage_missing");
+  });
+
+  it("reports an error when a stage ref is outside the task scope", async () => {
+    const result = await runWithPhase(
+      phaseYaml("P1", ["P1-T1"]).replace(
+        "          claim: The producer emits a stable envelope.\n          refs:\n            - src/example.ts",
+        "          claim: The producer emits a stable envelope.\n          refs:\n            - src/unrelated.ts",
+      ),
+    );
+    const issues = reviewIssues(result);
+    expect(issues.map((i) => i.details?.reason)).toContain(
+      "ref_outside_task_scope",
+    );
+    expect(issues[0]?.severity).toBe("error");
+  });
+
+  it("reports an error when an os stage has no actual-platform requirement", async () => {
+    const result = await runWithPhase(
+      phaseYaml("P1", ["P1-T1"]).replace(
+        [
+          "        - stage: os",
+          "          disposition: not_applicable",
+          "          rationale: No OS-specific behavior changes.",
+        ].join("\n"),
+        [
+          "        - stage: os",
+          "          disposition: in_scope",
+          "          claim: Windows launch semantics change.",
+          "          refs:",
+          "            - src/example.ts",
+        ].join("\n"),
+      ),
+    );
+    expect(reviewIssues(result).map((i) => i.details?.reason)).toContain(
+      "os_stage_requires_actual_platform",
+    );
   });
 });

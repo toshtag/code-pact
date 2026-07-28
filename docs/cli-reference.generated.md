@@ -142,11 +142,13 @@ is required. For bulk creation from a draft, use `phase import` instead.
 | `--verification-strength` | `<level>` | Optional sizing/readiness field; see the task schema for allowed values. |
 | `--expected-duration` | `<dur>` | Optional sizing/readiness field; see the task schema for allowed values. |
 | `--spec-file` | `<path>` | Register from a strict task-registration spec file. Mutually exclusive with all task-field flags. |
+| `--review-contract-file` | `<path>` | Read the task's review_contract from a YAML or JSON fragment. Mutually exclusive with --spec-file, which carries its own. |
 | `--json` | — | Emit JSON. Valid in both paths. |
 
 ```sh
 code-pact task add P1                         # interactive wizard (TTY)
 code-pact task add P1 --description "Add X" --type feature --json
+code-pact task add P90 --description "Add X" --type feature --review-contract-file contract.yaml --json
 code-pact task add P83 --spec-file design/specs/P83-T1-task-spec.yaml --json
 ```
 

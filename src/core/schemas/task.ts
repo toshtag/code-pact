@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { PlanId } from "./plan-id.ts";
 import { DecisionRefPath } from "./decision-ref.ts";
+import { ReviewContract } from "./review-contract.ts";
 
 export const TaskType = z.enum([
   "architecture",
@@ -51,5 +52,26 @@ export const Task = z.object({
   reads: z.array(z.string().min(1)).optional(),
   writes: z.array(z.string().min(1)).optional(),
   acceptance_refs: z.array(z.string().min(1)).optional(),
+  // Review Contract (P90). OPTIONAL, and it stays optional through the advisory
+  // rollout:
+  //
+  //   - A SUPPLIED contract that contradicts its task is refused now, by
+  //     `task add`, `task lock`, and `task start`.
+  //   - A MISSING contract is an advisory only — plan lint reports
+  //     `TASK_REVIEW_CONTRACT_MISSING` (`affects_exit: false`) and the task
+  //     still locks. P90-T0B adds the project-level policy that turns absence
+  //     into a refusal.
+  //
+  // Optional here also keeps historical `done` tasks, archived phase snapshots,
+  // and P90-T0A's own bootstrap lock (created by a binary that predated the
+  // field) readable.
+  //
+  // Like `decision_refs`, the SHAPE is enforced at parse time (unknown keys
+  // rejected, so a mistyped key cannot be silently stripped). Everything that
+  // depends on the surrounding task — minimal-mode eligibility, the exact
+  // stage/platform sets, ref coverage — lives in `src/core/review-contract.ts`,
+  // shared by plan lint, `task add`, and the lock path so the verdict on a
+  // supplied contract cannot diverge between them.
+  review_contract: ReviewContract.optional(),
 });
 export type Task = z.infer<typeof Task>;

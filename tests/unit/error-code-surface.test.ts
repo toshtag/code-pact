@@ -240,6 +240,13 @@ const KNOWN_CODES: Record<
   TASK_READS_MATCH_TOO_MANY: "plan",
   // P57 — active bugfix tasks should declare static regression evidence.
   TASK_REGRESSION_EVIDENCE_MISSING: "plan",
+  // P90 — review contracts. MISSING is a plan-lint advisory only. INVALID is
+  // dual-surface: a plan-lint error AND a top-level code from `task add`,
+  // `task lock`, and `task start` when a SUPPLIED contract contradicts its task.
+  // `TASK_REVIEW_CONTRACT_REQUIRED` is intentionally absent — the
+  // missing-contract refusal ships with the enforcement stage, not this one.
+  TASK_REVIEW_CONTRACT_MISSING: "plan",
+  TASK_REVIEW_CONTRACT_INVALID: "plan",
 
   // Plan diagnostics added in P10 — Task Readiness Schema. All emitted
   // by `plan lint` against the new optional task fields declared in

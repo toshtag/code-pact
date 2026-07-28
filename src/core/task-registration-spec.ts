@@ -22,6 +22,22 @@ function arraysEqual(
   return true;
 }
 
+/**
+ * Deep, order-stable comparison for the structured `review_contract` (P90-T0).
+ *
+ * `canonicalJson` sorts object keys and drops `undefined`, so two contracts that
+ * differ only in YAML key order compare equal, while a reordered `stages` /
+ * `platforms` / `evidence` ARRAY correctly compares different — array order is
+ * part of the declaration. Never use `JSON.stringify` here: its key order is
+ * whatever the parser happened to produce, which would make drift detection
+ * depend on how the YAML was written.
+ */
+function reviewContractsEqual(a: unknown, b: unknown): boolean {
+  if (a === undefined && b === undefined) return true;
+  if (a === undefined || b === undefined) return false;
+  return canonicalJson(a) === canonicalJson(b);
+}
+
 type FieldDiffOptions = {
   includeStatus: boolean;
 };
@@ -57,6 +73,8 @@ function registrationFieldDiffs(
   if (!arraysEqual(expected.writes, actual.writes)) fields.push("writes");
   if (!arraysEqual(expected.acceptance_refs, actual.acceptance_refs))
     fields.push("acceptance_refs");
+  if (!reviewContractsEqual(expected.review_contract, actual.review_contract))
+    fields.push("review_contract");
   return fields;
 }
 
@@ -102,6 +120,9 @@ export function postLockRegistrationChangedFields(
  *   `false` (explicitly false) produce different canonical forms.
  * - Explicit empty arrays are kept; missing optional arrays are omitted,
  *   so "empty array" and "field omitted" produce different digests.
+ * - `review_contract` is included whole; `canonicalJson` sorts its object keys
+ *   but preserves array order, so a reordered stage or platform list is a
+ *   different digest while a reformatted YAML key order is not.
  * - `undefined` values are filtered out by `canonicalJson`.
  */
 export function canonicalTaskRegistration(phaseId: string, task: Task): string {
@@ -129,6 +150,7 @@ export function canonicalTaskRegistration(phaseId: string, task: Task): string {
       reads: task.reads,
       writes: task.writes,
       acceptance_refs: task.acceptance_refs,
+      review_contract: task.review_contract,
     },
   };
   return canonicalJson(registration);

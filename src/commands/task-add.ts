@@ -20,6 +20,7 @@ import type {
 import { Phase } from "../core/schemas/phase.ts";
 import { TaskType, type Task } from "../core/schemas/task.ts";
 import { assertSafePlanId } from "../core/schemas/plan-id.ts";
+import { assertSuppliedReviewContractValid } from "../core/review-contract.ts";
 import {
   parseTaskRegistrationSpec,
   taskRegistrationDigest,
@@ -77,6 +78,8 @@ export type TaskAddNonInteractiveSpec = {
   reads?: string[];
   writes?: string[];
   acceptance_refs?: string[];
+  /** Parsed `--review-contract-file` fragment. Shape already validated. */
+  review_contract?: Task["review_contract"];
 };
 
 export type TaskAddOptions = {
@@ -165,6 +168,9 @@ function buildNonInteractiveTask(
     ...(spec.writes && spec.writes.length > 0 ? { writes: spec.writes } : {}),
     ...(spec.acceptance_refs && spec.acceptance_refs.length > 0
       ? { acceptance_refs: spec.acceptance_refs }
+      : {}),
+    ...(spec.review_contract !== undefined
+      ? { review_contract: spec.review_contract }
       : {}),
   };
 }
@@ -381,6 +387,14 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
         };
       }
     }
+
+    // One check for all three authoring paths (spec file, flags, wizard): a
+    // supplied `review_contract` must hold against the task it is attached to.
+    // Only the finished task carries the type, risk, and declared scope the
+    // rules depend on, so this is the earliest honest place to run it — and it
+    // runs before the phase YAML is touched. A task with no contract passes;
+    // the missing-contract refusal belongs to the enforcement stage.
+    assertSuppliedReviewContractValid(newTask);
 
     if (existingTasks.some(t => t.id === taskId)) {
       const err = new Error(

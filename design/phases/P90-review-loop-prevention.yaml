@@ -1,0 +1,155 @@
+id: P90
+name: Review Loop Prevention
+weight: 1
+confidence: high
+risk: medium
+status: in_progress
+objective: >
+  Reduce review and repair rounds by making each task declare its end-to-end
+  boundary, required platforms, and evidence expectations before lock. The
+  bootstrap rolls out in two stages: express and author the contract first, then
+  migrate existing work and activate enforcement. Later tasks will enforce
+  external-CI completion, finalized-source staleness, correction-round
+  escalation, evidence-backed claims, and lifecycle-owned status writes.
+non_goals:
+  - Implement model-specific lifecycle semantics
+  - Replace code review with schema validation
+  - Treat static declarations as proof that runtime evidence passed
+  - Make every existing planned task unlockable the moment the field ships
+  - Fix unrelated cleanup races or adapter drift
+definition_of_done:
+  - Review contracts distinguish minimal and boundary-scoped work
+  - Boundary contracts cover producer, consumer, runner, OS, and security
+  - A review contract can be authored without hand-editing phase YAML
+  - Shipped sample phases generate valid review contracts
+  - Declared contracts are immutable after lock
+  - New task locks require a valid review contract once the project opts in
+  - Existing projects keep working across the upgrade
+  - Finalization waits for required external CI
+  - Finalized work becomes stale after source changes
+  - More than two correction rounds require contract-level replanning
+  - PR claims are checked against recorded evidence
+  - Lifecycle-owned status changes do not require implementation write claims
+  - A low-capability dogfood run demonstrates fewer correction rounds
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm exec vitest run tests/unit/core/review-contract.test.ts
+      tests/unit/core/contract-lock.test.ts
+      tests/unit/core/task-registration-spec.test.ts
+      tests/unit/core/plan/lint.test.ts
+      tests/unit/commands/plan-lint.test.ts
+      tests/unit/commands/task-add.test.ts
+      tests/unit/commands/task-lock.test.ts
+      tests/unit/commands/tutorial.test.ts
+      tests/unit/cli/review-contract-errors.test.ts
+      tests/unit/cli/spec-render.test.ts
+      tests/unit/error-code-surface.test.ts
+    - pnpm build
+    - pnpm check:docs
+    - git diff --check
+tasks:
+  - id: P90-T0A
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: >
+      Introduce a versioned task-level review contract without activating the
+      missing-contract lock refusal yet. Parse and validate supplied contracts,
+      include them in task registration and immutable contract locks when
+      present, detect post-lock drift, emit plan-lint diagnostics, provide an
+      explicit task-authoring path, and generate valid contracts in shipped
+      sample phases. Existing projects, historical tasks, historical locks, and
+      existing test fixtures remain operational until P90-T0B performs migration
+      and activates enforcement.
+    requires_decision: false
+    depends_on:
+      - P89-T3
+    reads:
+      - src/core/schemas/task.ts
+      - src/core/schemas/task-registration-spec.ts
+      - src/core/task-registration-spec.ts
+      - src/core/contract-lock.ts
+      - src/core/glob.ts
+      - src/core/path-safety.ts
+      - src/core/services/createPhase.ts
+      - src/core/plan/lint.ts
+      - src/core/plan/checks.ts
+      - src/commands/task-add.ts
+      - src/commands/task-lock.ts
+      - src/commands/init.ts
+      - src/cli/spec/task.ts
+      - src/cli/commands/task.ts
+      - src/cli/commands/task-lock.ts
+      - src/cli/util.ts
+      - tests/unit/core/contract-lock.test.ts
+      - tests/unit/core/task-registration-spec.test.ts
+      - tests/unit/core/plan/lint.test.ts
+      - tests/unit/commands/plan-lint.test.ts
+      - tests/unit/commands/task-add.test.ts
+      - tests/unit/commands/task-lock.test.ts
+      - tests/unit/commands/tutorial.test.ts
+      - tests/unit/cli/spec-render.test.ts
+      - tests/unit/error-code-surface.test.ts
+      - tests/integration/plan-lint.test.ts
+      - docs/cli-contract.md
+    writes:
+      - src/core/schemas/review-contract.ts
+      - src/core/schemas/task.ts
+      - src/core/schemas/task-registration-spec.ts
+      - src/core/review-contract.ts
+      - src/core/task-registration-spec.ts
+      - src/core/contract-lock.ts
+      - src/core/plan/checks/review-contract.ts
+      - src/core/plan/checks.ts
+      - src/core/plan/lint.ts
+      - src/commands/task-add.ts
+      - src/commands/init.ts
+      - src/cli/spec/task.ts
+      - src/cli/commands/task.ts
+      - src/cli/commands/task-lock.ts
+      - tests/unit/core/review-contract.test.ts
+      - tests/unit/core/contract-lock.test.ts
+      - tests/unit/core/task-registration-spec.test.ts
+      - tests/unit/core/plan/lint.test.ts
+      - tests/unit/commands/plan-lint.test.ts
+      - tests/unit/commands/task-add.test.ts
+      - tests/unit/commands/task-lock.test.ts
+      - tests/unit/commands/tutorial.test.ts
+      - tests/unit/cli/review-contract-errors.test.ts
+      - tests/unit/cli/spec-render.test.ts
+      - tests/unit/error-code-surface.test.ts
+      - tests/integration/plan-lint.test.ts
+      - docs/review-contract.md
+      - docs/cli-contract.md
+      - docs/cli-reference.generated.md
+    acceptance_refs:
+      - tests/unit/commands/task-lock.test.ts
+      - tests/unit/core/contract-lock.test.ts
+      - tests/unit/commands/task-add.test.ts
+  - id: P90-T0B
+    type: feature
+    ambiguity: medium
+    risk: high
+    context_size: large
+    write_surface: high
+    verification_strength: strong
+    expected_duration: long
+    status: planned
+    description: >
+      Migrate the repository's own task fixtures behind a single test-only
+      review-contract helper, add a project-level review_contract_policy of
+      advisory or required so an existing plan is not made unlockable by the
+      upgrade, and activate the missing-contract refusal in task lock and in the
+      task start auto-lock. Publish TASK_REVIEW_CONTRACT_REQUIRED with structured
+      JSON and human-readable CLI output, and switch this repository to
+      required. The declared read/write scope and this task's own review contract
+      are settled at its planning commit, before it is locked.
+    requires_decision: false
+    depends_on:
+      - P90-T0A

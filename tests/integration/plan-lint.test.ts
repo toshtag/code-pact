@@ -31,6 +31,53 @@ async function writePhase(filename: string, yaml: string): Promise<void> {
   await writeFile(join(tmpDir, "design", "phases", filename), yaml, "utf8");
 }
 
+// A valid boundary contract for the fixture task. The task is a `feature`, so
+// the restricted `minimal` form is unavailable to it, and every ref points at
+// the task's one declared write so the ref-coverage rule holds. Without this the
+// fixture would draw a `TASK_REVIEW_CONTRACT_MISSING` advisory and stop being a
+// "clean project".
+const REVIEW_CONTRACT = `    review_contract:
+      version: 1
+      mode: boundary
+      stages:
+        - stage: producer
+          disposition: in_scope
+          claim: The producer emits a stable envelope.
+          refs:
+            - src/example.ts
+        - stage: consumer
+          disposition: in_scope
+          claim: The consumer validates the envelope.
+          refs:
+            - src/example.ts
+        - stage: runner
+          disposition: not_applicable
+          rationale: No process is launched.
+        - stage: os
+          disposition: not_applicable
+          rationale: No OS-specific behavior changes.
+        - stage: security
+          disposition: not_applicable
+          rationale: No authority boundary is touched.
+      platforms:
+        - platform: linux
+          disposition: required
+          level: integration
+          refs:
+            - src/example.ts
+        - platform: macos
+          disposition: not_required
+          rationale: No macOS-specific behavior changes.
+        - platform: windows
+          disposition: not_required
+          rationale: No Windows-specific behavior changes.
+      evidence:
+        - id: envelope-contract
+          claim: Producer and consumer agree on the envelope.
+          level: integration
+          refs:
+            - src/example.ts`;
+
 const phaseYaml = (
   id: string,
   taskIds: string[],
@@ -60,7 +107,10 @@ ${taskIds
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned`,
+    status: planned
+    writes:
+      - src/example.ts
+${REVIEW_CONTRACT}`,
   )
   .join("\n")}
 `;
@@ -317,7 +367,15 @@ ${taskLines.map((line) => `    ${line}`).join("\n")}
 
     expect(res.code).toBe(0);
     expect(parsed.ok).toBe(true);
-    expect(parsed.data?.advisories).toBe(1);
+    // "Never promotes to failure" is the invariant, so assert it directly on
+    // every advisory rather than pinning a total count. The fixture task is a
+    // bugfix with no review contract, so it legitimately draws a second
+    // advisory; a raw count would couple this test to unrelated diagnostics.
+    expect(parsed.data?.errors).toBe(0);
+    expect(parsed.data?.warnings).toBe(0);
+    expect(
+      parsed.data?.issues.every((i) => i.affects_exit === false),
+    ).toBe(true);
     expect(issue).toMatchObject({
       severity: "warning",
       affects_exit: false,

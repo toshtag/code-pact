@@ -103,3 +103,46 @@ describe("runTutorial", () => {
     expect(out).toContain("何も書き込んでいません");
   });
 });
+
+describe("sample phase review contracts", () => {
+  it("generates a valid contract for each tutorial task, in both modes", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const { parse } = await import("yaml");
+    const { Phase } = await import("../../../src/core/schemas/phase.ts");
+    const { validateReviewContractForTask } = await import(
+      "../../../src/core/review-contract.ts"
+    );
+
+    const result = await runTutorial({
+      locale: "en-US",
+      sandboxParent: parent,
+      keep: true,
+      write: () => {},
+    });
+
+    // Parsed through the real Phase schema, so an unknown key or a bad enum in
+    // the generated contract fails here rather than reaching a user's project.
+    const phase = Phase.parse(
+      parse(
+        await readFile(
+          join(result.sandbox, "design", "phases", "TUTORIAL-walkthrough.yaml"),
+          "utf8",
+        ),
+      ),
+    );
+
+    const t1 = phase.tasks?.find((t) => t.id === "TUTORIAL-T1");
+    const t2 = phase.tasks?.find((t) => t.id === "TUTORIAL-T2");
+
+    // The sample is the worked example of both modes: a `feature` task cannot
+    // use `minimal`, and a low-risk `docs` task is exactly what can.
+    expect(t1?.review_contract?.mode).toBe("boundary");
+    expect(t2?.review_contract?.mode).toBe("minimal");
+
+    // Valid against the same rules `task add` and `task lock` apply.
+    expect(validateReviewContractForTask(t1!)).toEqual([]);
+    expect(validateReviewContractForTask(t2!)).toEqual([]);
+
+    await rm(result.sandbox, { recursive: true, force: true });
+  });
+});
