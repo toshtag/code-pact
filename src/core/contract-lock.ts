@@ -21,6 +21,11 @@ import { assertTaskLifecycleNotCancelled } from "./task-cancellation.ts";
 import { ReviewContract } from "./schemas/review-contract.ts";
 import { assertSuppliedReviewContractValid } from "./review-contract.ts";
 import {
+  assertReviewContractPolicySatisfied,
+  effectiveReviewContractPolicy,
+} from "./review-contract-policy.ts";
+import { loadProject } from "./project.ts";
+import {
   readOwnedText,
   readExplicitUserText,
   mkdirOwned,
@@ -319,13 +324,25 @@ export async function createTaskContractLock(
     throw err;
   }
 
-  // A SUPPLIED review contract that contradicts its task is refused before any
-  // git work and before the lock file is written, so an incoherent contract
-  // never reaches the immutable lock or the registration digest. A task that
-  // declares NO contract still locks: the missing-contract refusal ships with
-  // the migration, together with the rollout policy that keeps existing
-  // projects working. Plan lint's advisory is what surfaces the gap today.
+  // Review contracts, in the only order that gives each failure its own code.
+  //
+  // A SUPPLIED contract that contradicts its task is refused first, so a
+  // present-but-wrong contract keeps `TASK_REVIEW_CONTRACT_INVALID` under
+  // either policy rather than being reported as "missing". A task that declares
+  // NO contract is then refused only when the PROJECT opted in
+  // (`review_contract_policy: required`); an existing project that never
+  // carried the field reads as `advisory` and keeps locking, with plan lint's
+  // advisory surfacing the gap.
+  //
+  // Both run before any git work and before the lock file is written. That is
+  // what makes the refusal fail-closed on every path into it: explicit
+  // `task lock` and the `task start` auto-lock share this one point, and
+  // neither leaves a lock file or a progress event behind when it refuses.
   assertSuppliedReviewContractValid(task);
+  assertReviewContractPolicySatisfied(
+    task,
+    effectiveReviewContractPolicy(await loadProject(cwd)),
+  );
 
   await assertWorktreeClean(cwd);
 

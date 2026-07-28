@@ -243,10 +243,12 @@ const KNOWN_CODES: Record<
   // P90 — review contracts. MISSING is a plan-lint advisory only. INVALID is
   // dual-surface: a plan-lint error AND a top-level code from `task add`,
   // `task lock`, and `task start` when a SUPPLIED contract contradicts its task.
-  // `TASK_REVIEW_CONTRACT_REQUIRED` is intentionally absent — the
-  // missing-contract refusal ships with the enforcement stage, not this one.
+  // REQUIRED is a top-level code only — the refusal a project opts into with
+  // `review_contract_policy: required`, raised by `task lock` and by the
+  // `task start` auto-lock when a task declares no contract at all.
   TASK_REVIEW_CONTRACT_MISSING: "plan",
   TASK_REVIEW_CONTRACT_INVALID: "plan",
+  TASK_REVIEW_CONTRACT_REQUIRED: "public",
 
   // Plan diagnostics added in P10 — Task Readiness Schema. All emitted
   // by `plan lint` against the new optional task fields declared in

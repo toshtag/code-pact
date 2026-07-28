@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { cmdTaskLock } from "../../../src/cli/commands/task-lock.ts";
 import { cmdTask } from "../../../src/cli/commands/task.ts";
+import { renderValidReviewContractYaml } from "../../helpers/review-contract.ts";
 
 // The review-contract checks throw from the core. These tests pin the CLI EDGE:
 // every command that can reach them must turn the refusal into the project's
@@ -48,49 +49,16 @@ function git(args: string[]): void {
 }
 
 /** A complete, valid boundary contract; every ref is the task's declared write. */
-const VALID_CONTRACT: string[] = [
-  "    review_contract:",
-  "      version: 1",
-  "      mode: boundary",
-  "      stages:",
-  "        - stage: producer",
-  "          disposition: in_scope",
-  "          claim: The producer emits a stable envelope.",
-  "          refs:",
-  "            - src/example.ts",
-  "        - stage: consumer",
-  "          disposition: in_scope",
-  "          claim: The consumer validates the envelope.",
-  "          refs:",
-  "            - src/example.ts",
-  "        - stage: runner",
-  "          disposition: not_applicable",
-  "          rationale: No process is launched.",
-  "        - stage: os",
-  "          disposition: not_applicable",
-  "          rationale: No OS-specific behavior changes.",
-  "        - stage: security",
-  "          disposition: not_applicable",
-  "          rationale: No authority boundary is touched.",
-  "      platforms:",
-  "        - platform: linux",
-  "          disposition: required",
-  "          level: integration",
-  "          refs:",
-  "            - src/example.ts",
-  "        - platform: macos",
-  "          disposition: not_required",
-  "          rationale: No macOS-specific behavior changes.",
-  "        - platform: windows",
-  "          disposition: not_required",
-  "          rationale: No Windows-specific behavior changes.",
-  "      evidence:",
-  "        - id: envelope-contract",
-  "          claim: Producer and consumer agree on the envelope.",
-  "          level: integration",
-  "          refs:",
-  "            - src/example.ts",
-];
+const VALID_CONTRACT: string[] = renderValidReviewContractYaml({
+  id: "P1-T1",
+  type: "feature",
+  ambiguity: "low",
+  risk: "low",
+  write_surface: "low",
+  writes: ["src/example.ts"],
+})
+  .trimEnd()
+  .split("\n");
 
 /** `minimal` on a `feature` task — parses, but the semantics do not hold. */
 const INVALID_CONTRACT: string[] = [
@@ -102,6 +70,7 @@ const INVALID_CONTRACT: string[] = [
 
 async function setupProject(
   contract: "valid" | "invalid" | "none",
+  reviewContractPolicy?: "advisory" | "required",
 ): Promise<void> {
   await mkdir(join(cwd, "design", "phases"), { recursive: true });
   await mkdir(join(cwd, ".code-pact", "state"), { recursive: true });
@@ -118,6 +87,9 @@ async function setupProject(
       "  - name: claude-code",
       "    profile: agent-profiles/claude-code.yaml",
       "    enabled: true",
+      ...(reviewContractPolicy
+        ? [`review_contract_policy: ${reviewContractPolicy}`]
+        : []),
       "",
     ].join("\n"),
     "utf8",
@@ -197,7 +169,11 @@ async function setupProject(
 function envelope(): {
   ok: boolean;
   error?: { code: string; message: string };
-  data?: { task_id?: string; issues?: { details?: { reason?: string } }[] };
+  data?: {
+    task_id?: string;
+    review_contract_policy?: string;
+    issues?: { details?: { reason?: string } }[];
+  };
 } {
   const line = stdout.find(chunk => chunk.trimStart().startsWith("{"));
   expect(line, "expected a JSON envelope on stdout").toBeDefined();
@@ -272,6 +248,111 @@ describe("task start — review contract CLI errors on the auto-lock path", () =
 
     expect(code).toBe(0);
     expect(envelope().ok).toBe(true);
+  });
+});
+
+describe("review_contract_policy — the missing-contract refusal", () => {
+  async function lockExists(): Promise<boolean> {
+    try {
+      await access(join(cwd, ".code-pact", "state", "locks", "P1-T1.yaml"));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function eventCount(): Promise<number> {
+    try {
+      return (await readdir(join(cwd, ".code-pact", "state", "events"))).length;
+    } catch {
+      return 0;
+    }
+  }
+
+  it("task lock refuses a contract-less task and writes nothing", async () => {
+    await setupProject("none", "required");
+    const code = await cmdTaskLock(["P1-T1", "--json"], "en-US", false);
+
+    expect(code).toBe(2);
+    const out = envelope();
+    expect(out.ok).toBe(false);
+    expect(out.error?.code).toBe("TASK_REVIEW_CONTRACT_REQUIRED");
+    expect(out.data?.task_id).toBe("P1-T1");
+    expect(out.data?.review_contract_policy).toBe("required");
+    expect(await lockExists()).toBe(false);
+  });
+
+  it("task lock keeps the human-readable path structured too", async () => {
+    await setupProject("none", "required");
+    const code = await cmdTaskLock(["P1-T1"], "en-US", false);
+
+    expect(code).toBe(2);
+    expect(stdout.some(chunk => chunk.trimStart().startsWith("{"))).toBe(false);
+    const output = [...stdout, ...stderr].join("");
+    expect(output).toContain("review_contract");
+    expect(output).toContain("P1-T1");
+    expect(output).not.toContain("internal error");
+  });
+
+  it("task start refuses on the auto-lock path with the same envelope", async () => {
+    await setupProject("none", "required");
+    const code = await cmdTask(["start", "P1-T1", "--json"], "en-US", false);
+
+    expect(code).toBe(2);
+    const out = envelope();
+    expect(out.error?.code).toBe("TASK_REVIEW_CONTRACT_REQUIRED");
+    expect(out.data?.task_id).toBe("P1-T1");
+    expect(out.data?.review_contract_policy).toBe("required");
+  });
+
+  it("task start writes neither a lock nor a started event when it refuses", async () => {
+    // The auto-lock runs before the progress write, so a refusal must leave the
+    // task exactly as it was — not started, and not half-locked.
+    await setupProject("none", "required");
+    await cmdTask(["start", "P1-T1", "--json"], "en-US", false);
+
+    expect(await lockExists()).toBe(false);
+    expect(await eventCount()).toBe(0);
+  });
+
+  it("task start keeps the human-readable path structured too", async () => {
+    await setupProject("none", "required");
+    const code = await cmdTask(["start", "P1-T1"], "en-US", false);
+
+    expect(code).toBe(2);
+    expect([...stdout, ...stderr].join("")).not.toContain("internal error");
+  });
+
+  it("locks and starts normally when the contract is present", async () => {
+    await setupProject("valid", "required");
+
+    expect(await cmdTask(["start", "P1-T1", "--json"], "en-US", false)).toBe(0);
+    expect(envelope().ok).toBe(true);
+    expect(await lockExists()).toBe(true);
+  });
+
+  it("keeps the invalid-contract code under required", async () => {
+    await setupProject("invalid", "required");
+    const code = await cmdTaskLock(["P1-T1", "--json"], "en-US", false);
+
+    expect(code).toBe(2);
+    expect(envelope().error?.code).toBe("TASK_REVIEW_CONTRACT_INVALID");
+  });
+
+  it("still locks a contract-less task under advisory", async () => {
+    await setupProject("none", "advisory");
+    const code = await cmdTaskLock(["P1-T1", "--json"], "en-US", false);
+
+    expect(code).toBe(0);
+    expect(envelope().ok).toBe(true);
+  });
+
+  it("reports the refusal in ja-JP without falling back to an internal error", async () => {
+    await setupProject("none", "required");
+    const code = await cmdTaskLock(["P1-T1", "--json"], "ja-JP", false);
+
+    expect(code).toBe(2);
+    expect(envelope().error?.code).toBe("TASK_REVIEW_CONTRACT_REQUIRED");
   });
 });
 
