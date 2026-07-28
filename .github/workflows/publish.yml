@@ -41,16 +41,35 @@ jobs:
           node --version
           npm --version
           NPM_VERSION="$(npm --version)" node <<'NODE'
-          const [major, minor, patch] =
-            process.env.NPM_VERSION
-              .split(".")
-              .map(Number);
+          // Bounded on both sides. The lower bound is Trusted Publishing; the
+          // upper bound is `npm pack --json`, whose container shape changed
+          // between npm 11 and npm 12. scripts/npm-pack-json.mjs reads exactly
+          // those two measured shapes, so admitting an unmeasured major would
+          // put this job back where it was: a gate wider than its parser,
+          // failing after the tag is already pushed. A new major is unlocked by
+          // a PR that measures its payload and covers it there.
+          const raw = process.env.NPM_VERSION ?? "";
+          const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(raw);
 
-          if (
-            major < 11 ||
-            (major === 11 && (minor < 5 || (minor === 5 && patch < 1)))
-          ) {
-            console.error("npm >= 11.5.1 is required for Trusted Publishing");
+          if (!match) {
+            console.error(
+              `npm version must be a stable x.y.z value, got ${JSON.stringify(raw)}`,
+            );
+            process.exit(1);
+          }
+
+          const major = Number(match[1]);
+          const minor = Number(match[2]);
+          const patch = Number(match[3]);
+
+          const supported =
+            (major === 11 && (minor > 5 || (minor === 5 && patch >= 1))) ||
+            major === 12;
+
+          if (!supported) {
+            console.error(
+              `npm >= 11.5.1 and < 13 is required for Trusted Publishing; got ${raw}`,
+            );
             process.exit(1);
           }
           NODE
@@ -93,7 +112,7 @@ jobs:
           tarball="$(node -p 'require("./checked-pack.json").filename')"
 
           mkdir -p release-artifact
-          mv "$tarball" release-artifact/package.tgz
+          mv -- "$tarball" release-artifact/package.tgz
 
           version="$(node -p 'require("./package.json").version')"
           sha256="$(sha256sum release-artifact/package.tgz | cut -d' ' -f1)"

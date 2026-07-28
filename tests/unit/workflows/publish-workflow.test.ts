@@ -105,26 +105,46 @@ describe("publish-workflow inline scripts", () => {
       expect(versionCheckScript).toBeDefined();
     });
 
-    it("passes with npm 11.5.1", () => {
-      const nodeScript = extractNodeScript(versionCheckScript!);
-      expect(nodeScript).toBeDefined();
-      runNodeScript(nodeScript!, { env: { NPM_VERSION: "11.5.1" } });
-    });
+    // The range is bounded on both sides. Below 11.5.1 there is no Trusted
+    // Publishing; at 13 and above there is no measured `npm pack --json`
+    // payload shape, and scripts/npm-pack-json.mjs reads only the two that
+    // were measured. Widening either end belongs in a change that moves the
+    // parser with it.
+    for (const version of ["11.5.1", "11.16.0", "12.0.0", "12.99.99"]) {
+      it(`passes with npm ${version}`, () => {
+        const nodeScript = extractNodeScript(versionCheckScript!);
+        expect(nodeScript).toBeDefined();
+        runNodeScript(nodeScript!, { env: { NPM_VERSION: version } });
+      });
+    }
 
-    it("passes with npm 12.0.0", () => {
-      const nodeScript = extractNodeScript(versionCheckScript!);
-      runNodeScript(nodeScript!, { env: { NPM_VERSION: "12.0.0" } });
-    });
+    for (const version of ["10.0.0", "10.99.99", "11.5.0", "11.4.99"]) {
+      it(`fails below the Trusted Publishing floor: npm ${version}`, () => {
+        const nodeScript = extractNodeScript(versionCheckScript!);
+        runNodeScriptThrows(nodeScript!, { env: { NPM_VERSION: version } });
+      });
+    }
 
-    it("fails with npm 11.5.0", () => {
-      const nodeScript = extractNodeScript(versionCheckScript!);
-      runNodeScriptThrows(nodeScript!, { env: { NPM_VERSION: "11.5.0" } });
-    });
+    for (const version of ["13.0.0", "99.0.0"]) {
+      it(`fails closed on npm ${version} until its payload is measured`, () => {
+        const nodeScript = extractNodeScript(versionCheckScript!);
+        runNodeScriptThrows(nodeScript!, { env: { NPM_VERSION: version } });
+      });
+    }
 
-    it("fails with npm 10.0.0", () => {
-      const nodeScript = extractNodeScript(versionCheckScript!);
-      runNodeScriptThrows(nodeScript!, { env: { NPM_VERSION: "10.0.0" } });
-    });
+    for (const version of ["garbage", "12.x.0", "v12.0.0", "12.0.0-rc.1"]) {
+      it(`fails closed on a malformed npm version: ${JSON.stringify(version)}`, () => {
+        const nodeScript = extractNodeScript(versionCheckScript!);
+        runNodeScriptThrows(nodeScript!, { env: { NPM_VERSION: version } });
+      });
+    }
+
+    for (const version of ["12.0", "12", ""]) {
+      it(`fails closed on an incomplete npm version: ${JSON.stringify(version)}`, () => {
+        const nodeScript = extractNodeScript(versionCheckScript!);
+        runNodeScriptThrows(nodeScript!, { env: { NPM_VERSION: version } });
+      });
+    }
   });
 
   describe("prepare job: pack metadata", () => {
@@ -148,9 +168,17 @@ describe("publish-workflow inline scripts", () => {
 
     it("moves the tarball only after the inspection step", () => {
       const inspectAt = packScript!.indexOf("check-package-tarball");
-      const moveAt = packScript!.indexOf('mv "$tarball"');
+      const moveAt = packScript!.indexOf('mv -- "$tarball"');
       expect(inspectAt).toBeGreaterThanOrEqual(0);
       expect(moveAt).toBeGreaterThan(inspectAt);
+    });
+
+    // The parser refuses a leading `-`, and `mv` gets `--` as well. Quoting
+    // stops word splitting, not option parsing, so neither half alone closes
+    // the boundary this PR claims to verify.
+    it("ends mv option parsing before the filename", () => {
+      expect(packScript).toContain('mv -- "$tarball" release-artifact/package.tgz');
+      expect(packScript).not.toMatch(/mv "\$tarball"/);
     });
 
     // The npm prerequisite admits npm 12, whose `npm pack --json` payload is an
