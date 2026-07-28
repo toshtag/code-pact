@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { run, expectJsonOk } from "../../helpers/cli.ts";
+import { renderValidReviewContractYaml } from "../../helpers/review-contract.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 export const fixtureDir = join(
@@ -32,10 +33,15 @@ export async function setupCodePactProject(
   cwd: string,
   verificationCommand: string,
 ): Promise<void> {
+  // The shared fixture opts INTO the strict policy. It is the boundary the most
+  // integration tests run through, so if the enforcement path ever regressed
+  // into silently accepting a contract-less task, the whole suite would still
+  // pass on a permissive fixture and no one would notice.
   const projectYaml = `name: test
 version: "0.0.1"
 locale: en-US
 default_agent: claude-code
+review_contract_policy: required
 agents:
   - name: claude-code
     profile: agent-profiles/claude-code.yaml
@@ -72,6 +78,15 @@ tasks:
       - src/example.ts
     writes:
       - src/example.ts
+${renderValidReviewContractYaml({
+  id: "P78-T1",
+  type: "feature",
+  ambiguity: "low",
+  risk: "low",
+  write_surface: "low",
+  reads: ["src/example.ts"],
+  writes: ["src/example.ts"],
+}).trimEnd()}
 `;
   const sourceContent = "hello world";
 

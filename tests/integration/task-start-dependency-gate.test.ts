@@ -14,6 +14,10 @@ import {
   expectJsonErr,
   expectJsonOk,
 } from "../helpers/cli.ts";
+import {
+  renderValidReviewContractYaml,
+  withValidReviewContract,
+} from "../helpers/review-contract.ts";
 
 type Project = Awaited<ReturnType<typeof createTempProject>>;
 
@@ -65,18 +69,22 @@ async function projectWithDependentTask(prefix: string): Promise<Project> {
     expected_duration: "short",
     status: "planned",
   };
+  // The sample phase is scaffolded by `init`, which sets the gate to required,
+  // so the tasks replacing it declare a scope and a contract like real ones.
   (doc as { tasks: unknown[] }).tasks = [
-    {
+    withValidReviewContract({
       id: "P1-T1",
       ...baseTask,
       description: "dependency task",
-    },
-    {
+      writes: ["src/dependency.ts"],
+    }),
+    withValidReviewContract({
       id: "P1-T2",
       ...baseTask,
       description: "dependent task",
       depends_on: ["P1-T1"],
-    },
+      writes: ["src/dependent.ts"],
+    }),
   ];
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
 
@@ -288,28 +296,32 @@ describe("task start dependency gate", () => {
       status: "planned",
     };
     (doc as { tasks: unknown[] }).tasks = [
-      {
+      withValidReviewContract({
         id: "P1-T1",
         ...baseTask,
         description: "done dependency",
         status: "planned",
-      },
-      {
+        writes: ["src/done-dependency.ts"],
+      }),
+      withValidReviewContract({
         id: "P1-T2",
         ...baseTask,
         description: "started dependency",
-      },
-      {
+        writes: ["src/started-dependency.ts"],
+      }),
+      withValidReviewContract({
         id: "P1-T3",
         ...baseTask,
         description: "planned dependency",
-      },
-      {
+        writes: ["src/planned-dependency.ts"],
+      }),
+      withValidReviewContract({
         id: "P1-T4",
         ...baseTask,
         description: "dependent task",
         depends_on: ["P1-T1", "P1-T2", "P1-T3"],
-      },
+        writes: ["src/dependent.ts"],
+      }),
     ];
     await writeFile(phasePath, stringifyYaml(doc), "utf8");
     execSync("git add .", { cwd: p.dir, stdio: "ignore" });
@@ -417,6 +429,16 @@ tasks:
     expected_duration: short
     status: planned
     description: cross-phase dependency
+    writes:
+      - src/cross-phase-dependency.ts
+${renderValidReviewContractYaml({
+  id: "P1-T1",
+  type: "feature",
+  ambiguity: "low",
+  risk: "low",
+  write_surface: "low",
+  writes: ["src/cross-phase-dependency.ts"],
+}).trimEnd()}
 `;
     const phase2 = `id: P2
 name: Extension
@@ -443,6 +465,16 @@ tasks:
     depends_on:
       - P1-T1
     description: cross-phase dependent
+    writes:
+      - src/cross-phase-dependent.ts
+${renderValidReviewContractYaml({
+  id: "P2-T1",
+  type: "feature",
+  ambiguity: "low",
+  risk: "low",
+  write_surface: "low",
+  writes: ["src/cross-phase-dependent.ts"],
+}).trimEnd()}
 `;
     const phasesDir = join(p.dir, "design", "phases");
     await rm(join(phasesDir, "TUTORIAL-walkthrough.yaml"), { force: true });

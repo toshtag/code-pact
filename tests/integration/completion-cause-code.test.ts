@@ -24,6 +24,7 @@ import {
   ensureCliBuilt,
   type RunResult,
 } from "../helpers/cli.ts";
+import { setReviewContractPolicy } from "../helpers/review-contract.ts";
 
 let tmpDir: string;
 
@@ -107,6 +108,11 @@ async function setupTask(
   patch(task);
   doc.tasks = [task];
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+  // These tests are about `task complete` cause codes, and their task declares
+  // no reads or writes — there is no scope a boundary contract could honestly
+  // point at. The fixture project says so: it has not opted into the gate.
+  await setReviewContractPolicy(tmpDir, "advisory");
 
   execSync("git init", { cwd: tmpDir, stdio: "ignore" });
   execSync("git config user.email test@example.com", {

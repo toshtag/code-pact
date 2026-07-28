@@ -45,6 +45,7 @@ import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import { createTempProject, ensureCliBuilt } from "../helpers/cli.ts";
+import { setReviewContractPolicy } from "../helpers/review-contract.ts";
 
 type Project = Awaited<ReturnType<typeof createTempProject>>;
 
@@ -260,6 +261,11 @@ describe("migration: v0.8-era project (mixed events + historical tasks)", () => 
         description: "historical task — design says done, no events ever fired",
       },
     ]);
+    // A v0.8-era project predates review contracts entirely, so its config
+    // carries no policy and reads as advisory. That is the whole point of the
+    // compatibility reading, and this fixture is what it exists for.
+    await setReviewContractPolicy(p.dir, "advisory");
+
     // Commit fixtures so task start can create a contract lock on a clean worktree.
     execSync("git init", { cwd: p.dir, stdio: "ignore" });
     execSync("git config user.email test@example.com", {

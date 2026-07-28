@@ -22,6 +22,7 @@ import {
   ensureCliBuilt,
   type JsonEnvelope,
 } from "../helpers/cli.ts";
+import { setReviewContractPolicy } from "../helpers/review-contract.ts";
 
 type Project = Awaited<ReturnType<typeof createTempProject>>;
 
@@ -106,6 +107,12 @@ async function projectWithFinalizableTask(
     },
   ];
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+  // These fixtures vary `declaredWrites` on purpose, including the case where
+  // the task declares none — there is then no scope a boundary contract could
+  // point at. The write audit is what is under test, so the fixture project
+  // states plainly that it has not opted into the review-contract gate.
+  await setReviewContractPolicy(p.dir, "advisory");
 
   // Contract lock gates require a committed git tree. Initialize before
   // start/complete so task start can create the lock on a clean worktree.
