@@ -7,15 +7,15 @@ import { cmdTaskLock } from "../../../src/cli/commands/task-lock.ts";
 import { cmdTask } from "../../../src/cli/commands/task.ts";
 import { renderValidReviewContractYaml } from "../../helpers/review-contract.ts";
 
-// The review-contract checks throw from the core. These tests pin the CLI EDGE:
-// every command that can reach them must turn the refusal into the project's
-// structured error envelope with exit 2, in JSON and human-readable mode alike.
-// Without the mapping the error escapes to the top-level handler in `src/cli.ts`,
-// which prints `internal error: ...` and exits 3 with no envelope — a
-// machine-unreadable failure for exactly the agents this contract exists to help.
+// The review-contract checks throw from the core. These tests pin the CLI edge
+// for every command that can reach them. JSON mode must return the registered
+// error envelope at exit 2; human mode must return the same actionable refusal
+// as a plain stderr message, without falling through to the top-level
+// `internal error` handler.
 //
-// A MISSING contract is deliberately not an error at this stage; the tests below
-// assert that it still succeeds, so the deferral is pinned rather than assumed.
+// A missing contract is policy-dependent: projects with no policy field or an
+// explicit `advisory` policy keep the backward-compatible success path, while
+// `required` refuses both explicit lock and task-start auto-lock.
 
 let cwd: string;
 let originalCwd: string;
