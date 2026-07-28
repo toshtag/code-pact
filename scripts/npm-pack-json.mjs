@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 // Canonical reader for `npm pack --json` metadata.
 //
-// npm changed this payload's shape across a major version, and the publish
-// workflow accepts both majors (`npm >= 11.5.1`), so both shapes reach the
-// release pipeline. Measured against this package on 2026-07-28:
+// npm changed this payload's container between majors. Measured against this
+// package on 2026-07-28:
 //
 //   npm 11.16.0 -> [ { id, name, version, filename, files, ... } ]
 //   npm 12.0.0  -> { "code-pact": { id, name, version, filename, ... } }
 //
-// The record itself is identical; only the container differs. Every consumer
-// reads it through `extractPackRecord` so the accepted npm range and the
-// parser cannot drift apart again — a version gate that admits an npm whose
-// output nothing can parse is a release-integrity defect, not a local
-// toolchain quirk.
+// The record itself is identical; only the container differs. These are the
+// only two shapes this reader has measured, and the publish workflow admits
+// only the npm majors covered here (`11.5.1 <= npm < 13`). Nothing is claimed
+// about npm 13's payload: unlocking a new major means measuring it, covering
+// it here, and widening that gate in the same change. A version gate wider
+// than its parser is a release-integrity defect — it fails inside the publish
+// job, after the tag is already pushed.
 //
 // The reader is fail-closed. An unrecognized container, an ambiguous record
 // count, a package that is not the one being released, or a filename that is
@@ -33,7 +34,7 @@ const WINDOWS_DRIVE_PREFIX = /^[A-Za-z]:/;
 function selectRecord(payload, expectedName) {
   if (payload === null || typeof payload !== "object") {
     throw new Error(
-      `pack JSON must be an array (npm <= 11) or an object keyed by package name (npm >= 12), got ${payload === null ? "null" : typeof payload}`,
+      `pack JSON must use the supported npm 11 array shape or npm 12 package-keyed object shape, got ${payload === null ? "null" : typeof payload}`,
     );
   }
 
@@ -64,14 +65,22 @@ function selectRecord(payload, expectedName) {
  * Reject anything that is not a bare `<name>.tgz` basename.
  *
  * The value is interpolated into a shell `mv` by the publish workflow, so an
- * absolute path, a traversal segment, or a nested path is refused here rather
- * than trusted downstream.
+ * absolute path, a traversal segment, a nested path, or a leading `-` is
+ * refused here rather than trusted downstream. Quoting stops word splitting
+ * but not option parsing, so `--help.tgz` would otherwise reach `mv` as a
+ * flag; the workflow passes `--` as well, and both halves of that boundary
+ * are deliberate.
  *
  * @param {string} filename
  */
 function assertSafeTarballName(filename) {
   if (filename.includes("\0")) {
     throw new Error("pack JSON filename contains a NUL byte");
+  }
+  if (filename.startsWith("-")) {
+    throw new Error(
+      `pack JSON filename "${filename}" starts with an option prefix`,
+    );
   }
   if (isAbsolute(filename) || WINDOWS_DRIVE_PREFIX.test(filename)) {
     throw new Error(

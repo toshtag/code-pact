@@ -759,7 +759,7 @@ describe("inspectPackedTarball", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("writes no metadata when the inspection fails", async () => {
+  it("does not call the metadata writer when inspection fails", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "tarball-inspect-"));
     const metadataOut = join(tempDir, "checked-pack.json");
     const metadataWriter = vi.fn();

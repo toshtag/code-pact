@@ -9,5 +9,5 @@ export interface PackRecord {
 
 export function extractPackRecord(
   payload: unknown,
-  expected: { expectedName?: string; expectedVersion?: string },
+  expected: { expectedName: string; expectedVersion: string },
 ): PackRecord;

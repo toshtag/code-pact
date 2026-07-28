@@ -15,7 +15,8 @@
 // --tarball-dir locates the tarball when `npm pack --pack-destination` put it
 // somewhere other than the repository root. --metadata-out writes the verified
 // name/version/filename, and is written only after the tarball passes, so a
-// consumer reading it never has to re-parse the raw npm payload itself.
+// consumer reading it never has to re-parse the raw npm payload itself. On a
+// failed inspection nothing is written and the exit code is non-zero.
 
 import { readFile, mkdtemp, rm, writeFile, rename } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -345,8 +346,10 @@ export async function writePackMetadata(targetPath, record) {
  * Read the pack record, inspect the tarball it names, and — only when the
  * inspection passes — publish the canonical metadata.
  *
- * Separated from `main` for testability; the ordering is the point, so a
- * failed inspection can never leave metadata behind for a consumer to trust.
+ * Separated from `main` for testability; the ordering is the point. A failed
+ * inspection publishes no new verified metadata and does not replace an
+ * existing file — it does not delete one either, and it does not need to: the
+ * checker exits non-zero and the workflow stops before any consumer reads it.
  *
  * @param {object} opts
  * @param {unknown} opts.payload - parsed `npm pack --json` output

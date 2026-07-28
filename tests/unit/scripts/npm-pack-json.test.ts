@@ -23,12 +23,12 @@ function record(overrides: Record<string, unknown> = {}) {
   };
 }
 
-/** npm <= 11: an array of one record per packed package. */
+/** npm 11: an array of one record per packed package. */
 function npm11Payload(overrides?: Record<string, unknown>) {
   return [record(overrides)];
 }
 
-/** npm >= 12: an object keyed by package name. */
+/** npm 12: an object keyed by package name. */
 function npm12Payload(overrides?: Record<string, unknown>) {
   return { [NAME]: record(overrides) };
 }
@@ -68,12 +68,12 @@ describe("extractPackRecord — accepted npm payload shapes", () => {
 
 describe("extractPackRecord — unrecognized containers", () => {
   it("refuses null", () => {
-    expect(() => extractPackRecord(null, expected)).toThrow(/must be an array/);
+    expect(() => extractPackRecord(null, expected)).toThrow(/supported npm 11 array shape/);
   });
 
   it("refuses a scalar", () => {
     expect(() => extractPackRecord("code-pact-2.8.0.tgz", expected)).toThrow(
-      /must be an array/,
+      /supported npm 11 array shape/,
     );
   });
 
@@ -161,15 +161,23 @@ describe("extractPackRecord — incomplete or mismatched records", () => {
     ).toThrow(/for version "9.9.9"/);
   });
 
+  // The declared type requires both, matching the runtime. These two probe the
+  // runtime guard from outside that type rather than weakening it, so a caller
+  // reaching this branch through untyped JS still fails closed.
+  const callUnchecked = extractPackRecord as unknown as (
+    payload: unknown,
+    expected: Record<string, unknown>,
+  ) => unknown;
+
   it("requires expectedName", () => {
     expect(() =>
-      extractPackRecord(npm11Payload(), { expectedVersion: VERSION }),
+      callUnchecked(npm11Payload(), { expectedVersion: VERSION }),
     ).toThrow(/expectedName is required/);
   });
 
   it("requires expectedVersion", () => {
     expect(() =>
-      extractPackRecord(npm11Payload(), { expectedName: NAME }),
+      callUnchecked(npm11Payload(), { expectedName: NAME }),
     ).toThrow(/expectedVersion is required/);
   });
 });
@@ -212,6 +220,18 @@ describe("extractPackRecord — unsafe filenames", () => {
     expect(() =>
       extractPackRecord(npm11Payload({ filename: "code-pact-2.8.0.zip" }), expected),
     ).toThrow(/not a \.tgz tarball/);
+  });
+
+  it("refuses a leading option prefix", () => {
+    expect(() =>
+      extractPackRecord(npm11Payload({ filename: "--help.tgz" }), expected),
+    ).toThrow(/option prefix/);
+  });
+
+  it("refuses a short option prefix", () => {
+    expect(() =>
+      extractPackRecord(npm11Payload({ filename: "-T.tgz" }), expected),
+    ).toThrow(/option prefix/);
   });
 
   it("refuses a NUL byte", () => {
