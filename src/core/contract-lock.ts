@@ -50,11 +50,16 @@ const Contract = z.object({
   acceptance_refs: z.array(z.string()),
   definition_of_done: z.array(z.string()),
   verification_commands: z.array(z.string()),
-  // P90-T0. OPTIONAL so every lock written before the field existed still
-  // parses — including P90-T0's own bootstrap lock, which was created by a
-  // binary that did not know about review contracts. Locks created from now on
-  // always carry it, because `createTaskContractLock` refuses to write a lock
-  // for a task that declares none.
+  // P90. OPTIONAL for two independent reasons, both still live:
+  //
+  //   - Historical compatibility. Every lock written before the field existed
+  //     still parses, including P90-T0A's own bootstrap lock, which was created
+  //     by a binary that did not know about review contracts.
+  //   - The advisory rollout. A task that supplies a contract has it validated
+  //     and stored here; a task that supplies NONE still locks. The
+  //     missing-contract refusal arrives with P90-T0B's project-level
+  //     `review_contract_policy`, so an existing plan is not made unlockable by
+  //     the upgrade.
   review_contract: ReviewContract.optional(),
   base_sha: z.string(),
   phase_blob_sha: z.string(),

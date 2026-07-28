@@ -11,11 +11,16 @@ import { assertSafeRelativePath } from "./path-safety.ts";
 import { matchGlob } from "./glob.ts";
 
 // ---------------------------------------------------------------------------
-// Review contract semantics (P90-T0)
+// Review contract semantics (P90)
 //
-// The single authority for "is this task's declared review boundary complete
-// and coherent?". Plan lint and the task-lock gate both call in here, so a
-// contract that lint accepts can never be refused at lock, and vice versa.
+// The single authority for "does this task's SUPPLIED review contract hold?".
+// Plan lint, `task add`, `task lock`, and `task start` all call in here, so a
+// contract one of them accepts can never be refused by another.
+//
+// Scope note: this module says nothing about a task that supplies NO contract.
+// Absence is an advisory today (`TASK_REVIEW_CONTRACT_MISSING`) and becomes a
+// refusal in P90-T0B, gated on a project-level policy so the upgrade does not
+// make every existing `planned` task unlockable at once.
 //
 // Everything below is pure: no filesystem, no git, no clock. Ref COVERAGE is
 // checked against the task's own declared scope, never against files on disk —
@@ -564,10 +569,11 @@ function validateBoundary(
 /**
  * Semantic validation of a task's review contract against the task itself.
  *
- * Returns an empty list when the task declares NO contract — absence is the
- * lock gate's concern (`assertReviewContractReadyForLock`) and plan lint's
- * `TASK_REVIEW_CONTRACT_MISSING` advisory, so historical tasks that predate the
- * contract stay clean here.
+ * Returns an empty list when the task declares NO contract. Absence is not a
+ * semantic failure: today it is reported by plan lint's
+ * `TASK_REVIEW_CONTRACT_MISSING` advisory, and P90-T0B turns it into a refusal
+ * gated on a project-level policy. Keeping it out of here is what lets
+ * historical tasks that predate the contract stay clean.
  */
 export function validateReviewContractForTask(
   task: Task,
@@ -588,12 +594,13 @@ export type ReviewContractInvalidError = NodeJS.ErrnoException & {
  * Refuse a review contract that was SUPPLIED but does not hold.
  *
  * A task that declares no contract passes: the missing-contract refusal is
- * deliberately NOT part of this stage. Activating it needs two things this
- * stage does not have — a way to author a contract without hand-editing phase
- * YAML, and a rollout policy that does not make every existing `planned` task
- * unlockable the moment the field ships. Both land with the migration, which
- * also introduces `TASK_REVIEW_CONTRACT_REQUIRED`. Until then a missing
- * contract is surfaced by plan lint's advisory, never by a refusal.
+ * deliberately NOT part of this stage. Activating it needs a rollout policy that
+ * does not make every existing `planned` task unlockable the moment the field
+ * ships, plus the fixture migration that goes with it. Both land in P90-T0B,
+ * which is also what introduces the missing-contract error code. Until then a
+ * missing contract is surfaced by plan lint's advisory, never by a refusal.
+ * (The other prerequisite — authoring a contract without hand-editing phase
+ * YAML — shipped here as `task add --review-contract-file`.)
  *
  * What IS refused here is a contract someone actually wrote that contradicts
  * its task — that can only come from post-field authoring, so it is a defect,

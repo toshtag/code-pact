@@ -22,13 +22,16 @@ import { ReviewContract } from "./review-contract.ts";
  * The `status` is pinned to `planned` because registration is always a new
  * task; historical states must use `phase import`.
  *
- * `review_contract` (P90-T0) is the one OPTIONAL field. Spec files written
- * before P90 exist on disk and are re-parsed by `assertTaskContractCurrent` for
- * every lock that stored a `spec_path`; requiring the field would turn those
- * historical locks into permanent drift failures. Presence is enforced where it
- * belongs — the lock gate — while losslessness still holds here, because a spec
- * that declares a contract the phase task does not (or declares a different one)
- * diverges in the registration digest.
+ * `review_contract` (P90) is the one OPTIONAL field, and it stays optional
+ * through the advisory rollout. Spec files written before P90 exist on disk and
+ * are re-parsed by `assertTaskContractCurrent` for every lock that stored a
+ * `spec_path`; requiring the field would turn those historical locks into
+ * permanent drift failures. Nothing enforces PRESENCE yet — P90-T0B introduces
+ * the project-level policy that does.
+ *
+ * Losslessness still holds regardless: when a contract IS supplied it takes part
+ * in the canonical registration JSON and the digest, so a spec that declares a
+ * contract the phase task does not (or declares a different one) diverges.
  */
 export const TaskRegistrationSpec = z
   .object({

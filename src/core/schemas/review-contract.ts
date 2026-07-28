@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
-// Review contract schema (P90-T0)
+// Review contract schema (P90)
 //
 // A review contract is the task's declared REVIEW BOUNDARY, recorded before the
 // task is locked: which layers of the change are in scope, which operating
@@ -9,10 +9,17 @@ import { z } from "zod";
 // not proof — later P90 tasks verify that the declared evidence and the required
 // external CI actually ran. See docs/review-contract.md.
 //
-// This file declares the SHAPE only. Every rule that depends on the task it
-// belongs to (minimal-mode eligibility, the exact stage/platform sets, ref
-// coverage) lives in `src/core/review-contract.ts` so plan lint and the task
-// lock gate share one verdict and cannot drift apart.
+// Three layers, kept apart on purpose:
+//
+//   - THIS FILE is the SHAPE: field types, enums, and unknown-key rejection.
+//   - `src/core/review-contract.ts` is the SEMANTIC validator — every rule that
+//     depends on the surrounding task (minimal-mode eligibility, the exact
+//     stage/platform sets, ref coverage). Plan lint, `task add`, `task lock`,
+//     and `task start` all share it, so their verdict on a SUPPLIED contract
+//     cannot drift apart.
+//   - Enforcing that a contract EXISTS at all is neither of the above. It is
+//     not part of this stage: absence is a plan-lint advisory today and becomes
+//     a policy-gated refusal in P90-T0B.
 //
 // Unknown keys are rejected on every object. A mistyped key must fail loudly at
 // parse time rather than being silently stripped and leaving the contract
