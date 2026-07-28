@@ -287,10 +287,12 @@ describe("review_contract_policy — the missing-contract refusal", () => {
     const code = await cmdTaskLock(["P1-T1"], "en-US", false);
 
     expect(code).toBe(2);
+    // No envelope in human mode — that is the whole difference between the two
+    // surfaces, so it is asserted rather than assumed.
     expect(stdout.some(chunk => chunk.trimStart().startsWith("{"))).toBe(false);
     const output = [...stdout, ...stderr].join("");
-    expect(output).toContain("review_contract");
     expect(output).toContain("P1-T1");
+    expect(output).toContain("review_contract_policy: required");
     expect(output).not.toContain("internal error");
   });
 
@@ -316,11 +318,19 @@ describe("review_contract_policy — the missing-contract refusal", () => {
   });
 
   it("task start keeps the human-readable path structured too", async () => {
+    // Human mode does not carry the JSON envelope — `emitError` writes the
+    // message alone. What has to survive is the actionable content: which task
+    // was refused and which policy refused it. Asserting only "not an internal
+    // error" would let the message decay into something an agent cannot act on.
     await setupProject("none", "required");
     const code = await cmdTask(["start", "P1-T1"], "en-US", false);
 
     expect(code).toBe(2);
-    expect([...stdout, ...stderr].join("")).not.toContain("internal error");
+    expect(stdout.some(chunk => chunk.trimStart().startsWith("{"))).toBe(false);
+    const output = [...stdout, ...stderr].join("");
+    expect(output).toContain("P1-T1");
+    expect(output).toContain("review_contract_policy: required");
+    expect(output).not.toContain("internal error");
   });
 
   it("locks and starts normally when the contract is present", async () => {
