@@ -23,6 +23,7 @@ import {
   expectJsonErr,
 } from "../helpers/cli.ts";
 import { runTaskContext } from "../../src/commands/task-context.ts";
+import { setReviewContractPolicy } from "../helpers/review-contract.ts";
 
 beforeAll(() => {
   ensureCliBuilt();
@@ -69,6 +70,11 @@ async function setupTask(
     },
   ];
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+  // These tests measure the context pack, and their task declares no scope, so
+  // there is nothing a boundary contract could honestly point at. The fixture
+  // project says it has not opted into the review-contract gate.
+  await setReviewContractPolicy(project.dir, "advisory");
 
   spawnSync("git", ["init"], { cwd: project.dir, stdio: "ignore" });
   spawnSync("git", ["config", "user.email", "test@example.com"], {

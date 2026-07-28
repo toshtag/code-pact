@@ -17,6 +17,7 @@ import {
   repoRoot,
   run,
 } from "../helpers/cli.ts";
+import { renderValidReviewContractYaml } from "../helpers/review-contract.ts";
 
 const fakeExecutorPath = join(
   repoRoot,
@@ -67,6 +68,15 @@ tasks:
       - src/example.ts
     writes:
       - src/example.ts
+${renderValidReviewContractYaml({
+  id: "P78-T1",
+  type: "feature",
+  ambiguity: "low",
+  risk: "low",
+  write_surface: "low",
+  reads: ["src/example.ts"],
+  writes: ["src/example.ts"],
+}).trimEnd()}
 `;
 
   await writeFile(join(cwd, "design", "roadmap.yaml"), roadmap, "utf8");

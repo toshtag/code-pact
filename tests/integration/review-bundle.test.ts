@@ -8,6 +8,7 @@ import {
   expectJsonOk,
   expectJsonErr,
 } from "../helpers/cli.ts";
+import { writeReviewContractFile } from "../helpers/review-contract.ts";
 
 let project: Awaited<ReturnType<typeof createTempProject>> | undefined;
 
@@ -80,6 +81,13 @@ async function setupDoneTask(): Promise<
   );
   // src/example.ts is the only declared write; phase YAML lifecycle changes
   // must be reclassified by review-bundle, not declared by the task.
+  // `init` scaffolds with the gate on; a task whose bundle is under review is
+  // exactly the kind that should carry a declared boundary.
+  const contractFile = await writeReviewContractFile(p.dir, {
+    id: "P1-T1",
+    type: "feature",
+    writes: ["src/example.ts"],
+  });
   expectJsonOk(
     p.run([
       "task",
@@ -91,6 +99,8 @@ async function setupDoneTask(): Promise<
       "Reviewable task",
       "--write",
       "src/example.ts",
+      "--review-contract-file",
+      contractFile,
       "--json",
     ]),
   );
@@ -304,6 +314,11 @@ describe("task review-bundle", () => {
         "--json",
       ]),
     );
+    const contractFile = await writeReviewContractFile(project.dir, {
+      id: "P1-T1",
+      type: "feature",
+      writes: ["src/example.ts"],
+    });
     expectJsonOk(
       project.run([
         "task",
@@ -315,6 +330,8 @@ describe("task review-bundle", () => {
         "Reviewable task",
         "--write",
         "src/example.ts",
+        "--review-contract-file",
+        contractFile,
         "--json",
       ]),
     );
@@ -516,6 +533,16 @@ describe("task review-bundle", () => {
         "--json",
       ]),
     );
+    const contractFile = await writeReviewContractFile(project.dir, {
+      id: "P1-T1",
+      type: "feature",
+      writes: ["src/example.ts"],
+    });
+    const siblingContractFile = await writeReviewContractFile(
+      project.dir,
+      { id: "P1-T2", type: "bugfix", writes: ["src/sibling.ts"] },
+      "sibling-review-contract.yaml",
+    );
 
     expectJsonOk(
       project.run([
@@ -528,6 +555,8 @@ describe("task review-bundle", () => {
         "Done task",
         "--write",
         "src/example.ts",
+        "--review-contract-file",
+        contractFile,
         "--json",
       ]),
     );
@@ -540,6 +569,10 @@ describe("task review-bundle", () => {
         "bugfix",
         "--description",
         "Cancelled sibling",
+        "--write",
+        "src/sibling.ts",
+        "--review-contract-file",
+        siblingContractFile,
         "--json",
       ]),
     );
@@ -749,6 +782,16 @@ describe("task review-bundle", () => {
         "--json",
       ]),
     );
+    const contractFile = await writeReviewContractFile(project.dir, {
+      id: "P1-T1",
+      type: "feature",
+      writes: ["src/example.ts"],
+    });
+    const siblingContractFile = await writeReviewContractFile(
+      project.dir,
+      { id: "P1-T2", type: "bugfix", writes: ["src/sibling.ts"] },
+      "sibling-review-contract.yaml",
+    );
 
     expectJsonOk(
       project.run([
@@ -761,6 +804,8 @@ describe("task review-bundle", () => {
         "Done task",
         "--write",
         "src/example.ts",
+        "--review-contract-file",
+        contractFile,
         "--json",
       ]),
     );
@@ -773,6 +818,10 @@ describe("task review-bundle", () => {
         "bugfix",
         "--description",
         "Blocked sibling",
+        "--write",
+        "src/sibling.ts",
+        "--review-contract-file",
+        siblingContractFile,
         "--json",
       ]),
     );

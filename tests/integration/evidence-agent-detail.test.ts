@@ -10,6 +10,7 @@ import {
   expectJsonErr,
   expectJsonOk,
 } from "../helpers/cli.ts";
+import { setReviewContractPolicy } from "../helpers/review-contract.ts";
 
 type Project = Awaited<ReturnType<typeof createTempProject>>;
 
@@ -81,6 +82,10 @@ async function setupTask(opts: {
     },
   ];
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+  // The fixture task declares no scope — these tests are about how evidence is
+  // rendered, not about review boundaries — so the project has not opted in.
+  await setReviewContractPolicy(project.dir, "advisory");
   if (opts.progressDone) {
     await writeFile(
       join(project.dir, ".code-pact", "state", "progress.yaml"),

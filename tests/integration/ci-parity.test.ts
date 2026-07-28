@@ -8,6 +8,7 @@ import {
   expectJsonOk,
   expectJsonErr,
 } from "../helpers/cli.ts";
+import { writeReviewContractFile } from "../helpers/review-contract.ts";
 
 let project: Awaited<ReturnType<typeof createTempProject>> | undefined;
 
@@ -78,6 +79,13 @@ async function setupReviewableTask(): Promise<
       "--json",
     ]),
   );
+  // `init` scaffolds a project with `review_contract_policy: required`, so the
+  // fixture task has to declare a boundary the same way a real one would.
+  const contractFile = await writeReviewContractFile(p.dir, {
+    id: "P1-T1",
+    type: "feature",
+    writes: ["design/phases/P1-foundation.yaml"],
+  });
   expectJsonOk(
     p.run([
       "task",
@@ -89,6 +97,8 @@ async function setupReviewableTask(): Promise<
       "Parity task",
       "--write",
       "design/phases/P1-foundation.yaml",
+      "--review-contract-file",
+      contractFile,
       "--json",
     ]),
   );

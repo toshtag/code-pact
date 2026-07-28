@@ -21,6 +21,7 @@ import {
   type RunResult,
 } from "../helpers/cli.ts";
 import { loadMergedProgress } from "../../src/core/progress/io.ts";
+import { setReviewContractPolicy } from "../helpers/review-contract.ts";
 
 let tmpDir: string;
 
@@ -921,6 +922,11 @@ describe("CLI: task complete (v0.2)", () => {
     ];
     await writeFile(phasePath, stringifyYaml(doc), "utf8");
 
+    // These fixtures exercise unrelated CLI surfaces and their task declares
+    // no scope, so a boundary contract would have nothing to point at. The
+    // fixture project states that it has not opted into the gate.
+    await setReviewContractPolicy(tmpDir, "advisory");
+
     execSync("git init", { cwd: tmpDir, stdio: "ignore" });
     execSync("git config user.email test@example.com", {
       cwd: tmpDir,
@@ -1377,6 +1383,11 @@ describe("CLI: status (v1.32)", () => {
     ];
     await writeFile(phasePath, stringifyYaml(doc), "utf8");
 
+    // These fixtures exercise unrelated CLI surfaces and their task declares
+    // no scope, so a boundary contract would have nothing to point at. The
+    // fixture project states that it has not opted into the gate.
+    await setReviewContractPolicy(tmpDir, "advisory");
+
     execSync("git init", { cwd: tmpDir, stdio: "ignore" });
     execSync("git config user.email test@example.com", {
       cwd: tmpDir,
@@ -1640,6 +1651,11 @@ describe("CLI: task record-done (v1.21)", () => {
     ];
     await writeFile(phasePath, stringifyYaml(doc), "utf8");
 
+    // These fixtures exercise unrelated CLI surfaces and their task declares
+    // no scope, so a boundary contract would have nothing to point at. The
+    // fixture project states that it has not opted into the gate.
+    await setReviewContractPolicy(tmpDir, "advisory");
+
     execSync("git init", { cwd: tmpDir, stdio: "ignore" });
     execSync("git config user.email test@example.com", {
       cwd: tmpDir,
@@ -1858,6 +1874,11 @@ describe("CLI: task state machine (v0.6)", () => {
     ];
     doc.verification = { commands: ["echo ok"] };
     await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+    // These fixtures exercise unrelated CLI surfaces and their task declares
+    // no scope, so a boundary contract would have nothing to point at. The
+    // fixture project states that it has not opted into the gate.
+    await setReviewContractPolicy(tmpDir, "advisory");
 
     execSync("git init", { cwd: tmpDir, stdio: "ignore" });
     execSync("git config user.email test@example.com", {

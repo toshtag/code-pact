@@ -6,6 +6,7 @@ import {
   expectJsonOk,
   expectJsonErr,
 } from "../helpers/cli.ts";
+import { writeReviewContractFile } from "../helpers/review-contract.ts";
 
 let project: Awaited<ReturnType<typeof createTempProject>> | undefined;
 
@@ -43,6 +44,13 @@ async function setupTask(): Promise<
       "--json",
     ]),
   );
+  // `init` scaffolds with the gate on, so a task these tests intend to lock
+  // declares its review boundary the same way a real one would.
+  const contractFile = await writeReviewContractFile(p.dir, {
+    id: "P1-T1",
+    type: "feature",
+    writes: ["src/example.ts"],
+  });
   expectJsonOk(
     p.run([
       "task",
@@ -52,6 +60,10 @@ async function setupTask(): Promise<
       "feature",
       "--description",
       "Lockable task",
+      "--write",
+      "src/example.ts",
+      "--review-contract-file",
+      contractFile,
       "--json",
     ]),
   );

@@ -25,6 +25,7 @@ import {
   ensureCliBuilt,
   type RunResult,
 } from "../helpers/cli.ts";
+import { writeReviewContractFile } from "../helpers/review-contract.ts";
 
 let tmpDir: string;
 
@@ -200,7 +201,7 @@ describe("misused aliases name the alias, not the canonical command", () => {
 });
 
 describe("`task reconcile --write` finalizes like `task finalize --write`", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     // A phase whose verify command (`node --version`) passes, so the task can
     // reach `done` and become finalize-eligible. (phase add sets the verify
     // command reliably; lenient `phase import` would default it to `pnpm test`.)
@@ -219,6 +220,11 @@ describe("`task reconcile --write` finalizes like `task finalize --write`", () =
       "node --version",
       "--json",
     ]);
+    const contractFile = await writeReviewContractFile(tmpDir, {
+      id: "PX-T1",
+      type: "feature",
+      writes: ["src/example.ts"],
+    });
     run([
       "task",
       "add",
@@ -227,6 +233,10 @@ describe("`task reconcile --write` finalizes like `task finalize --write`", () =
       "Task to finalize via the reconcile alias",
       "--type",
       "feature",
+      "--write",
+      "src/example.ts",
+      "--review-contract-file",
+      contractFile,
       "--json",
     ]);
 

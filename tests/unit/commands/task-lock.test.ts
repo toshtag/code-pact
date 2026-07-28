@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runTaskLock } from "../../../src/commands/task-lock.ts";
 import { readContractLock } from "../../../src/core/contract-lock.ts";
+import { renderValidReviewContractYaml } from "../../helpers/review-contract.ts";
 
 let cwd: string;
 
@@ -16,77 +17,30 @@ afterEach(async () => {
 });
 
 /**
- * Review-contract YAML for the fixture task, indented for a task entry.
- *
- * `boundary` is the default because the fixture task is a `feature`: minimal
- * mode is restricted to low-risk docs / mechanical_refactor work, so a feature
- * task can only be locked with a full boundary contract. Every ref points at
- * `ref`, which the caller also declares in `writes`, so the ref-coverage rule
- * holds for stage, platform, and evidence entries alike.
+ * A minimal contract written out by hand, for the one case a builder of VALID
+ * contracts cannot express: minimal mode on a `feature` task, which the
+ * validator must refuse. Every other fixture contract comes from the shared
+ * helper.
  */
-function reviewContractLines(
-  kind: "boundary" | "minimal",
-  ref: string,
-): string[] {
-  if (kind === "minimal") {
-    return [
-      "    review_contract:",
-      "      version: 1",
-      "      mode: minimal",
-      "      rationale: Documentation-only change with no executable boundary.",
-    ];
-  }
-  const stage = (name: string, claim: string): string[] => [
-    `        - stage: ${name}`,
-    "          disposition: in_scope",
-    `          claim: ${claim}`,
-    "          refs:",
-    `            - ${ref}`,
-  ];
-  return [
-    "    review_contract:",
-    "      version: 1",
-    "      mode: boundary",
-    "      stages:",
-    ...stage("producer", "The producer emits a stable envelope."),
-    ...stage("consumer", "The consumer validates the envelope."),
-    ...stage("runner", "The validated command reaches the bounded runner."),
-    ...stage("os", "Windows launch semantics are exercised on Windows."),
-    ...stage("security", "The authority boundary fails closed."),
-    "      platforms:",
-    "        - platform: linux",
-    "          disposition: required",
-    "          level: integration",
-    "          refs:",
-    `            - ${ref}`,
-    "        - platform: macos",
-    "          disposition: not_required",
-    "          rationale: No macOS-specific behavior changes.",
-    "        - platform: windows",
-    "          disposition: required",
-    "          level: actual_platform",
-    "          refs:",
-    `            - ${ref}`,
-    "      evidence:",
-    "        - id: envelope-contract",
-    "          claim: Producer and consumer agree on the envelope.",
-    "          level: integration",
-    "          refs:",
-    `            - ${ref}`,
-    "        - id: windows-runtime",
-    "          claim: The real Windows launch succeeds.",
-    "          level: actual_platform",
-    "          platform: windows",
-    "          refs:",
-    `            - ${ref}`,
-  ];
-}
+const RAW_MINIMAL_CONTRACT_LINES: string[] = [
+  "    review_contract:",
+  "      version: 1",
+  "      mode: minimal",
+  "      rationale: Documentation-only change with no executable boundary.",
+];
 
 type SetupOptions = {
-  /** Review contract to embed. `"none"` reproduces a pre-P90 task. */
-  reviewContract?: "boundary" | "minimal" | "none";
+  /**
+   * Review contract to embed. `"valid"` asks the shared helper for one the
+   * validator accepts (minimal or boundary, whichever the task metadata earns).
+   * `"raw_minimal"` is the deliberately wrong one above; `"none"` reproduces a
+   * pre-P90 task.
+   */
+  reviewContract?: "valid" | "raw_minimal" | "none";
   /** Task type, so a `docs` task can exercise valid minimal mode. */
   taskType?: string;
+  /** Project rollout policy. Omitted means the field is absent → advisory. */
+  reviewContractPolicy?: "advisory" | "required";
 };
 
 async function setupProject(
@@ -96,6 +50,24 @@ async function setupProject(
 ): Promise<void> {
   await mkdir(join(cwd, "design", "phases"), { recursive: true });
   await mkdir(join(cwd, ".code-pact", "state"), { recursive: true });
+
+  await writeFile(
+    join(cwd, ".code-pact", "project.yaml"),
+    [
+      "name: test",
+      "version: 0.1.0",
+      "locale: en-US",
+      "default_agent: claude-code",
+      "agents:",
+      "  - name: claude-code",
+      "    profile: agent-profiles/claude-code.yaml",
+      "    enabled: true",
+      ...(options.reviewContractPolicy
+        ? [`review_contract_policy: ${options.reviewContractPolicy}`]
+        : []),
+    ].join("\n") + "\n",
+    "utf8",
+  );
 
   await writeFile(
     join(cwd, "design", "roadmap.yaml"),
@@ -123,10 +95,20 @@ async function setupProject(
     taskBlock.push("    writes:");
     for (const w of writes) taskBlock.push(`      - ${w}`);
   }
-  const contractKind = options.reviewContract ?? "boundary";
-  if (contractKind !== "none") {
+  const contractKind = options.reviewContract ?? "valid";
+  if (contractKind === "raw_minimal") {
+    taskBlock.push(...RAW_MINIMAL_CONTRACT_LINES);
+  } else if (contractKind === "valid") {
     taskBlock.push(
-      ...reviewContractLines(contractKind, writes?.[0] ?? "src/a.ts"),
+      renderValidReviewContractYaml({
+        id: "P1-T1",
+        type: options.taskType ?? "feature",
+        ambiguity: "low",
+        risk: "low",
+        write_surface: "low",
+        reads,
+        writes: writes ?? ["src/a.ts"],
+      }).trimEnd(),
     );
   }
 
@@ -242,7 +224,9 @@ describe("runTaskLock review contract", () => {
   });
 
   it("refuses minimal mode for a feature task", async () => {
-    await setupProject(["src/a.ts"], undefined, { reviewContract: "minimal" });
+    await setupProject(["src/a.ts"], undefined, {
+      reviewContract: "raw_minimal",
+    });
     await expect(runTaskLock({ cwd, taskId: "P1-T1" })).rejects.toMatchObject({
       code: "TASK_REVIEW_CONTRACT_INVALID",
     });
@@ -250,10 +234,7 @@ describe("runTaskLock review contract", () => {
   });
 
   it("accepts minimal mode for a low-risk docs task", async () => {
-    await setupProject(["docs/example.md"], undefined, {
-      reviewContract: "minimal",
-      taskType: "docs",
-    });
+    await setupProject(["docs/example.md"], undefined, { taskType: "docs" });
     const result = await runTaskLock({ cwd, taskId: "P1-T1" });
     expect(result.kind).toBe("locked");
 
@@ -269,8 +250,64 @@ describe("runTaskLock review contract", () => {
     expect(lock?.contract.review_contract?.mode).toBe("boundary");
     expect(lock?.contract.review_contract?.stages).toHaveLength(5);
     expect(lock?.contract.review_contract?.platforms).toHaveLength(3);
-    expect(
-      lock?.contract.review_contract?.evidence?.map(e => e.id),
-    ).toEqual(["envelope-contract", "windows-runtime"]);
+    expect(lock?.contract.review_contract?.evidence).not.toHaveLength(0);
+  });
+});
+
+describe("runTaskLock review_contract_policy", () => {
+  it("locks without a contract when the project omits the policy", async () => {
+    // The field-absent state an existing project upgrades into. It must stay
+    // lockable, or the upgrade strands every task planned before P90.
+    await setupProject(["src/a.ts"], undefined, { reviewContract: "none" });
+    const result = await runTaskLock({ cwd, taskId: "P1-T1" });
+
+    expect(result.kind).toBe("locked");
+  });
+
+  it("locks without a contract under advisory", async () => {
+    await setupProject(["src/a.ts"], undefined, {
+      reviewContract: "none",
+      reviewContractPolicy: "advisory",
+    });
+    const result = await runTaskLock({ cwd, taskId: "P1-T1" });
+
+    expect(result.kind).toBe("locked");
+  });
+
+  it("refuses a missing contract under required and writes no lock", async () => {
+    await setupProject(["src/a.ts"], undefined, {
+      reviewContract: "none",
+      reviewContractPolicy: "required",
+    });
+
+    await expect(runTaskLock({ cwd, taskId: "P1-T1" })).rejects.toMatchObject({
+      code: "TASK_REVIEW_CONTRACT_REQUIRED",
+      task_id: "P1-T1",
+      review_contract_policy: "required",
+    });
+    expect(await readContractLock(cwd, "P1-T1")).toBeNull();
+  });
+
+  it("locks a task that declares a valid contract under required", async () => {
+    await setupProject(["src/a.ts"], undefined, {
+      reviewContractPolicy: "required",
+    });
+    const result = await runTaskLock({ cwd, taskId: "P1-T1" });
+
+    expect(result.kind).toBe("locked");
+  });
+
+  it("keeps the invalid-contract code under required", async () => {
+    // A contract that is present but wrong is a different defect from one that
+    // is absent, and the more specific code must win under either policy.
+    await setupProject(["src/a.ts"], undefined, {
+      reviewContract: "raw_minimal",
+      reviewContractPolicy: "required",
+    });
+
+    await expect(runTaskLock({ cwd, taskId: "P1-T1" })).rejects.toMatchObject({
+      code: "TASK_REVIEW_CONTRACT_INVALID",
+    });
+    expect(await readContractLock(cwd, "P1-T1")).toBeNull();
   });
 });

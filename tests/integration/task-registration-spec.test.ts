@@ -11,6 +11,7 @@ import {
   expectJsonOk,
   expectJsonErr,
 } from "../helpers/cli.ts";
+import { setReviewContractPolicy } from "../helpers/review-contract.ts";
 
 let project: Awaited<ReturnType<typeof createTempProject>> | undefined;
 
@@ -73,6 +74,10 @@ function yamlArray(arr: string[]): string {
 async function setupPhase(
   p: Awaited<ReturnType<typeof createTempProject>>,
 ): Promise<void> {
+  // The registration specs here declare empty `reads`/`writes` on purpose —
+  // the spec round trip is the subject, not the review boundary — so there is
+  // no scope a contract could point at. The project has not opted into the gate.
+  await setReviewContractPolicy(p.dir, "advisory");
   expectJsonOk(
     p.run([
       "phase",

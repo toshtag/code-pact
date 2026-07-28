@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import { runInit } from "../../../src/commands/init.ts";
+import { runTaskLock } from "../../../src/commands/task-lock.ts";
 import { CLAUDE_TIER_MODEL_IDS } from "../../../src/core/models/catalog.ts";
 import {
   Project,
@@ -277,5 +278,81 @@ describe("runInit — blanket /.code-pact/ ignore advisory (v1.32)", () => {
     // Conditional phrasing present; the old unconditional coupling is gone.
     expect(w).toContain("If the ledger itself is ignored");
     expect(w).not.toContain("the branch-drift CI gate silently skips");
+  });
+});
+
+describe("runInit — review_contract_policy (P90)", () => {
+  function git(cwd: string, args: readonly string[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn("git", args, {
+        cwd,
+        stdio: ["ignore", "ignore", "pipe"],
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@e.com",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@e.com",
+        },
+      });
+      proc.on("close", code =>
+        code === 0 ? resolve() : reject(new Error(`git ${args.join(" ")} (${code})`)),
+      );
+      proc.on("error", reject);
+    });
+  }
+
+  it("writes required into a freshly generated project.yaml", async () => {
+    await runInit({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["claude-code"],
+      force: false,
+      json: false,
+    });
+
+    const project = Project.parse(await readYaml(".code-pact/project.yaml"));
+    expect(project.review_contract_policy).toBe("required");
+  });
+
+  it("writes the policy explicitly rather than relying on the runtime default", async () => {
+    // Absence means advisory, so a new project that only inherited the default
+    // would silently get the compatibility reading meant for old projects.
+    await runInit({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["claude-code"],
+      force: false,
+      json: false,
+    });
+
+    const raw = await readFile(join(dir, ".code-pact", "project.yaml"), "utf8");
+    expect(raw).toContain("review_contract_policy: required");
+  });
+
+  it("can lock its own sample task under the policy it just wrote", async () => {
+    // The self-consistency check that matters: a project generated with the gate
+    // switched on must not ship a sample phase the gate would refuse.
+    await runInit({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["claude-code"],
+      force: false,
+      json: false,
+      createSamplePhase: true,
+    });
+
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "--quiet", "-m", "init"]);
+
+    const roadmap = Roadmap.parse(await readYaml("design/roadmap.yaml"));
+    expect(roadmap.phases.length).toBeGreaterThan(0);
+    const phase = (await readYaml(roadmap.phases[0]!.path)) as {
+      tasks: { id: string }[];
+    };
+
+    const result = await runTaskLock({ cwd: dir, taskId: phase.tasks[0]!.id });
+    expect(result.kind).toBe("locked");
   });
 });

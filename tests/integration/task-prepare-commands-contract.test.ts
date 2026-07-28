@@ -33,6 +33,7 @@ import {
   ensureCliBuilt,
   expectJsonOk,
 } from "../helpers/cli.ts";
+import { withValidReviewContract } from "../helpers/review-contract.ts";
 
 beforeAll(() => {
   ensureCliBuilt();
@@ -83,8 +84,9 @@ async function setupTask(
       expected_duration: "short",
       status: "planned",
       description: "prepare-commands contract test task",
+      writes: ["src/example.ts"],
     },
-  ];
+  ].map(withValidReviewContract);
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
 
   execSync("git init", { cwd: project.dir, stdio: "ignore" });

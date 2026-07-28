@@ -199,7 +199,7 @@ rejected.
 | Task schema (parse)           | Shape only. Unknown keys are rejected on every object so a mistyped key fails loudly instead of being silently stripped.                  |
 | `task add`                    | `--review-contract-file <path>` attaches a contract; an invalid one is `TASK_REVIEW_CONTRACT_INVALID`, exit 2, **no phase YAML write**.    |
 | `plan lint`                   | `TASK_REVIEW_CONTRACT_MISSING` (advisory, never fails `--strict`) and `TASK_REVIEW_CONTRACT_INVALID` (error).                              |
-| `task lock` / `task start`    | A **supplied** contract that does not hold is `TASK_REVIEW_CONTRACT_INVALID`, exit 2, **no lock file written**.                            |
+| `task lock` / `task start`    | A **supplied** contract that does not hold is `TASK_REVIEW_CONTRACT_INVALID`, exit 2, **no lock file written**. Under `review_contract_policy: required`, a **missing** contract is `TASK_REVIEW_CONTRACT_REQUIRED`, exit 2, no lock file and no progress event. |
 | Contract lock                 | The whole contract is stored in `contract.review_contract` and folded into the registration digest.                                       |
 | Post-lock drift               | Any change to a stage, platform, claim, evidence entry, or ref surfaces as `TASK_CONTRACT_DRIFT` with `review_contract` in `changed_fields`. |
 
@@ -224,19 +224,53 @@ rather than silently resolved.
 mode: the `feature` walkthrough task carries a full boundary contract, and the
 `docs` task carries a minimal one.
 
+## The rollout policy
+
+Whether a **missing** contract blocks a new lock is a property of the project,
+declared in `.code-pact/project.yaml`:
+
+```yaml
+review_contract_policy: required   # advisory | required
+```
+
+| Value                  | A task with no `review_contract`                                                              |
+| ---------------------- | ---------------------------------------------------------------------------------------------- |
+| field absent (default) | Locks. Read as `advisory` — the state every project is in immediately after upgrading.          |
+| `advisory`             | Locks. `plan lint` still reports `TASK_REVIEW_CONTRACT_MISSING`.                                 |
+| `required`             | Refused: `TASK_REVIEW_CONTRACT_REQUIRED`, exit 2, no lock file and no progress event.            |
+
+Three properties are deliberate:
+
+- **Absence is not a default written into your file.** The schema has no default,
+  so normalizing an existing `project.yaml` never grows the field. "Never heard of
+  review contracts" stays distinguishable from "decided not to require them".
+- **A typo is not a silent opt-out.** Any value outside the two above is rejected
+  by the project schema, so `validate` and `doctor` report it and the lock path
+  fails with `CONFIG_ERROR` rather than quietly reverting to `advisory`.
+- **`init` writes `required` explicitly.** A new project has no legacy tasks to
+  strand, and its generated sample phase ships valid contracts, so it can lock
+  its own tutorial task on day one.
+
+The refusal applies to **new** locks only. Existing lock files, archived phases,
+done tasks, and already-started work are never rewritten and never
+retro-validated.
+
 ## Migrating an existing plan
 
-A missing contract does **not** block `task lock` yet. That refusal ships with a
-project-level rollout policy, so upgrading cannot make every `planned` task in an
-existing plan unlockable at once. Until then:
+Upgrading cannot make an existing plan unlockable: without the policy field your
+project reads as `advisory`, which is exactly its current behavior. To opt in:
 
-- `plan lint` reports `TASK_REVIEW_CONTRACT_MISSING` for every active task with
-  no contract. It is `affects_exit: false`, so it never fails `--strict`.
-- Add contracts task by task, at your own pace, before the enforcement stage
-  lands.
-- An *invalid* contract is already a hard error everywhere, because a contract
-  only exists if someone wrote it after the field did — that cannot be a
-  migration artifact.
+1. `plan lint` reports `TASK_REVIEW_CONTRACT_MISSING` for every active task with
+   no contract. It is `affects_exit: false`, so it never fails `--strict`.
+2. Add contracts task by task, at your own pace.
+3. When the active tasks are covered, set `review_contract_policy: required`.
+   From then on a new lock without a contract is refused.
+
+An *invalid* contract is a hard error under either policy, because a contract
+only exists if someone wrote it after the field did — that cannot be a migration
+artifact. It also keeps its own, more specific code: under `required`, a contract
+that is present but wrong is still `TASK_REVIEW_CONTRACT_INVALID`, never
+"missing".
 
 ## Backward compatibility
 

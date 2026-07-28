@@ -41,6 +41,12 @@ const ROADMAP = `phases:
  * lock gate only accepts a full boundary contract. Every ref points at
  * `src/example.ts`, the task's single declared write, so stage, platform, and
  * evidence refs all stay inside the declared scope.
+ *
+ * Written out by hand rather than taken from `tests/helpers/review-contract.ts`
+ * ON PURPOSE: the drift tests below edit this exact text — a stage claim, a
+ * platform disposition, the whole block — and assert that the edit surfaces as
+ * `TASK_CONTRACT_DRIFT`. The literal bytes are the subject under test, so they
+ * belong in the file that mutates them, not behind a builder.
  */
 const REVIEW_CONTRACT_LINES: string[] = (() => {
   const stage = (name: string, claim: string): string[] => [
@@ -159,6 +165,8 @@ async function setupProject(
     requiresDecision?: boolean;
     full?: boolean;
     reviewContract?: boolean;
+    /** Rollout policy. Omitted means the field is absent → advisory. */
+    reviewContractPolicy?: "advisory" | "required";
   } = {},
 ): Promise<void> {
   await mkdir(join(cwd, "design", "phases"), { recursive: true });
@@ -175,6 +183,9 @@ async function setupProject(
       "  - name: claude-code",
       "    profile: agent-profiles/claude-code.yaml",
       "    enabled: true",
+      ...(opts.reviewContractPolicy
+        ? [`review_contract_policy: ${opts.reviewContractPolicy}`]
+        : []),
     ].join("\n") + "\n",
     "utf8",
   );
@@ -440,8 +451,8 @@ describe("assertTaskContractCurrent spec-file drift (P83-T4)", () => {
 
 describe("createTaskContractLock review contract", () => {
   it("locks a task that declares no review contract", async () => {
-    // The missing-contract refusal is deferred to the enforcement stage, so
-    // every pre-field task and fixture keeps locking unchanged.
+    // A project that never carried `review_contract_policy` reads as advisory,
+    // so every pre-field task and fixture keeps locking unchanged.
     await setupProject({ requiresDecision: false, reviewContract: false });
     const lock = await createTaskContractLock({ cwd, taskId: "P1-T1" });
     expect(lock.kind).toBe("locked");
@@ -467,6 +478,112 @@ describe("createTaskContractLock review contract", () => {
     };
     expect(lock.contract.review_contract?.mode).toBe("boundary");
     expect(lock.contract.review_contract?.stages).toHaveLength(5);
+  });
+});
+
+describe("createTaskContractLock review_contract_policy", () => {
+  async function lockPathExists(): Promise<boolean> {
+    try {
+      await readFile(
+        join(cwd, ".code-pact", "state", "locks", "P1-T1.yaml"),
+        "utf8",
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  it("locks a contract-less task under advisory", async () => {
+    await setupProject({
+      requiresDecision: false,
+      reviewContract: false,
+      reviewContractPolicy: "advisory",
+    });
+
+    const lock = await createTaskContractLock({ cwd, taskId: "P1-T1" });
+    expect(lock.kind).toBe("locked");
+  });
+
+  it("refuses a contract-less task under required", async () => {
+    await setupProject({
+      requiresDecision: false,
+      reviewContract: false,
+      reviewContractPolicy: "required",
+    });
+
+    await expect(
+      createTaskContractLock({ cwd, taskId: "P1-T1" }),
+    ).rejects.toMatchObject({
+      code: "TASK_REVIEW_CONTRACT_REQUIRED",
+      task_id: "P1-T1",
+      review_contract_policy: "required",
+    });
+  });
+
+  it("writes no lock file when it refuses", async () => {
+    // Fail-closed: a refusal that left a lock behind would let the next command
+    // read a lock for a task the gate just rejected.
+    await setupProject({
+      requiresDecision: false,
+      reviewContract: false,
+      reviewContractPolicy: "required",
+    });
+
+    await expect(
+      createTaskContractLock({ cwd, taskId: "P1-T1" }),
+    ).rejects.toThrow();
+    expect(await lockPathExists()).toBe(false);
+  });
+
+  it("locks a task that declares a valid contract under required", async () => {
+    await setupProject({
+      requiresDecision: false,
+      reviewContractPolicy: "required",
+    });
+
+    const lock = await createTaskContractLock({ cwd, taskId: "P1-T1" });
+    expect(lock.kind).toBe("locked");
+  });
+
+  it("keeps the invalid-contract code ahead of the policy refusal", async () => {
+    await setupProject({
+      requiresDecision: false,
+      reviewContractPolicy: "required",
+    });
+    await mutatePhase(content =>
+      content.replace("        - stage: runner\n", "        - stage: producer\n"),
+    );
+
+    await expect(
+      createTaskContractLock({ cwd, taskId: "P1-T1" }),
+    ).rejects.toMatchObject({ code: "TASK_REVIEW_CONTRACT_INVALID" });
+  });
+
+  it("refuses an out-of-enum policy instead of falling back to advisory", async () => {
+    // A typo must not silently disable the gate the maintainer asked for.
+    await setupProject({ requiresDecision: false, reviewContract: false });
+    await writeFile(
+      join(cwd, ".code-pact", "project.yaml"),
+      [
+        "name: test",
+        "version: 0.1.0",
+        "locale: en-US",
+        "default_agent: claude-code",
+        "agents:",
+        "  - name: claude-code",
+        "    profile: agent-profiles/claude-code.yaml",
+        "    enabled: true",
+        "review_contract_policy: require",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await expect(
+      createTaskContractLock({ cwd, taskId: "P1-T1" }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+    expect(await lockPathExists()).toBe(false);
   });
 });
 

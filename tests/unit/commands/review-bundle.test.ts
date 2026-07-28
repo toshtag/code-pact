@@ -72,6 +72,24 @@ async function setupDoneTaskProject(): Promise<void> {
     ["/.code-pact/locks/", "/.code-pact/cache/", ""].join("\n"),
     "utf8",
   );
+  // Locking a contract now resolves the project's review-contract policy, so
+  // the fixture needs the project config every real project already has. The
+  // policy field is omitted on purpose: absent reads as advisory.
+  await writeFile(
+    join(cwd, ".code-pact", "project.yaml"),
+    [
+      "name: test",
+      "version: 0.1.0",
+      "locale: en-US",
+      "default_agent: claude-code",
+      "agents:",
+      "  - name: claude-code",
+      "    profile: agent-profiles/claude-code.yaml",
+      "    enabled: true",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
   await writeFile(
     join(cwd, "design", "roadmap.yaml"),
     `phases:\n  - id: P1\n    path: design/phases/P1-foundation.yaml\n    weight: 10\n`,

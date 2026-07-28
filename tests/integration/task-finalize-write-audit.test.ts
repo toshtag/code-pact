@@ -28,6 +28,7 @@ import {
   type JsonEnvelope,
   type RunResult,
 } from "../helpers/cli.ts";
+import { setReviewContractPolicy } from "../helpers/review-contract.ts";
 
 type Project = Awaited<ReturnType<typeof createTempProject>>;
 
@@ -110,6 +111,11 @@ async function projectWithFinalizableTask(
     },
   ];
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+  // The write audit is what is under test here, and these fixtures vary the
+  // task's declared writes on purpose — including declaring none. The fixture
+  // project therefore states that it has not opted into the contract gate.
+  await setReviewContractPolicy(p.dir, "advisory");
 
   // Contract lock gates require git and a lock; initialize and commit the
   // fixtures before start/complete so task start can create the lock on a

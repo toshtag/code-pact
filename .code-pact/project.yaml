@@ -3,6 +3,7 @@ version: 0.1.0
 locale: en-US
 default_agent: claude-code
 decision_retention: keep-full
+review_contract_policy: required
 verification_policy:
   focused_command: >
     node scripts/verification-scope.mjs --local --stage focused --run --task-id

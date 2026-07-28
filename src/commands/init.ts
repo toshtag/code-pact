@@ -366,6 +366,13 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
       profile: `agent-profiles/${a}.yaml`,
       enabled: true,
     })),
+    // Written EXPLICITLY rather than left to the runtime default. A new project
+    // has no legacy tasks to strand, so it starts with the review boundary
+    // required; leaving the field out would silently give it the compatibility
+    // reading meant for projects that predate review contracts. The sample
+    // phase below ships valid contracts, so a fresh project can lock its
+    // tutorial task against this policy immediately.
+    review_contract_policy: "required",
   };
   await writeIfAbsent(
     await resolveProjectScaffoldWritePath(cwd, ".code-pact/project.yaml"),

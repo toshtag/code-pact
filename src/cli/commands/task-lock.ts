@@ -110,6 +110,23 @@ export async function cmdTaskLock(
           });
           return 2;
         }
+        // The project requires a review contract and this task declares none.
+        // Same envelope shape and exit code as the invalid-contract refusal —
+        // an agent should not need two parsers for "your review contract is
+        // the problem". `data` names the policy so the message is actionable
+        // without re-reading project.yaml. No lock file exists at this point.
+        if (code === "TASK_REVIEW_CONTRACT_REQUIRED") {
+          const required = err as NodeJS.ErrnoException & {
+            review_contract_policy?: string;
+          };
+          emitError(json, code, message, {
+            data: {
+              task_id: taskId,
+              review_contract_policy: required.review_contract_policy,
+            },
+          });
+          return 2;
+        }
         if (code === "TASK_REGISTRATION_SPEC_MISMATCH") {
           const mismatch = err as NodeJS.ErrnoException & {
             task_id?: string;

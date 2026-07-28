@@ -30,6 +30,7 @@ import {
   ensureCliBuilt,
   type RunResult,
 } from "../helpers/cli.ts";
+import { setReviewContractPolicy } from "../helpers/review-contract.ts";
 
 type Project = Awaited<ReturnType<typeof createTempProject>>;
 
@@ -95,6 +96,11 @@ async function projectWithTask(prefix: string): Promise<Project> {
     },
   ];
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+  // These tests assert that every command's stdout is parseable JSON. Their
+  // task declares no scope, so a boundary contract would have nothing to point
+  // at; the fixture project states that it has not opted into the gate.
+  await setReviewContractPolicy(p.dir, "advisory");
 
   execSync("git init", { cwd: p.dir, stdio: "ignore" });
   execSync("git config user.email test@example.com", {

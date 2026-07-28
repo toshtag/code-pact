@@ -29,6 +29,7 @@ import {
   expectJsonOk,
   expectJsonErr,
 } from "../helpers/cli.ts";
+import { withValidReviewContract } from "../helpers/review-contract.ts";
 
 beforeAll(() => {
   ensureCliBuilt();
@@ -92,8 +93,11 @@ describe("e2e: full agent-facing loop (init → adapter install → recommend �
         string,
         unknown
       >;
+      // The smoke task carries a real review contract: `init` scaffolds the
+      // project with the gate on, and an end-to-end run that opted out of it
+      // would stop being end-to-end.
       doc.tasks = [
-        {
+        withValidReviewContract({
           id: "P1-T1",
           type: "feature",
           ambiguity: "low",
@@ -104,7 +108,8 @@ describe("e2e: full agent-facing loop (init → adapter install → recommend �
           expected_duration: "short",
           status: "planned",
           description: "e2e smoke task",
-        },
+          writes: ["src/example.ts"],
+        }),
       ];
       await writeFile(phasePath, stringifyYaml(doc), "utf8");
     }

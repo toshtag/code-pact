@@ -2731,6 +2731,19 @@ function emitTaskCommonError(
       });
       return 2;
     }
+    // The auto-lock refusal for a task with no contract in a project that
+    // requires one. Byte-compatible with what `task lock` emits, so the two
+    // entry points into the same rule cannot be told apart by an agent. The
+    // refusal happens before the lock is written, so no `started` event exists.
+    case "TASK_REVIEW_CONTRACT_REQUIRED": {
+      const policy = (
+        err as NodeJS.ErrnoException & { review_contract_policy?: string }
+      ).review_contract_policy;
+      emitError(json, "TASK_REVIEW_CONTRACT_REQUIRED", err.message, {
+        data: { task_id: taskId, review_contract_policy: policy },
+      });
+      return 2;
+    }
     // Control-plane integrity error from the shared resolver / plan-state loaders.
     case "PHASE_SNAPSHOT_INVALID":
       msg = err.message;
