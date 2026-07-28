@@ -1,0 +1,115 @@
+schema_version: 1
+task_id: P90-T0A
+phase_id: P90
+phase_path: design/phases/P90-review-loop-prevention.yaml
+base_ref: HEAD
+base_sha: d4d9888a8ce684fedf8646fdc6aec25ec3f14303
+phase_blob_sha: dcc52eeec94db77a02b84a13eef1f0b77143d453
+contract_digest: 63cc29cbbdcd8d81c2ffb4d5cbae1e7800009c4e8952ed92c66bfb89e2c59ffa
+contract:
+  description: >
+    Introduce a versioned task-level review contract without activating the
+    missing-contract lock refusal yet. Parse and validate supplied contracts,
+    include them in task registration and immutable contract locks when present,
+    detect post-lock drift, emit plan-lint diagnostics, provide an explicit
+    task-authoring path, and generate valid contracts in shipped sample phases.
+    Existing projects, historical tasks, historical locks, and existing test
+    fixtures remain operational until P90-T0B performs migration and activates
+    enforcement.
+  reads:
+    - docs/cli-contract.md
+    - src/cli/commands/task-lock.ts
+    - src/cli/commands/task.ts
+    - src/cli/spec/task.ts
+    - src/cli/util.ts
+    - src/commands/init.ts
+    - src/commands/task-add.ts
+    - src/commands/task-lock.ts
+    - src/core/contract-lock.ts
+    - src/core/glob.ts
+    - src/core/path-safety.ts
+    - src/core/plan/checks.ts
+    - src/core/plan/lint.ts
+    - src/core/schemas/task-registration-spec.ts
+    - src/core/schemas/task.ts
+    - src/core/services/createPhase.ts
+    - src/core/task-registration-spec.ts
+    - tests/integration/plan-lint.test.ts
+    - tests/unit/cli/spec-render.test.ts
+    - tests/unit/commands/plan-lint.test.ts
+    - tests/unit/commands/task-add.test.ts
+    - tests/unit/commands/task-lock.test.ts
+    - tests/unit/commands/tutorial.test.ts
+    - tests/unit/core/contract-lock.test.ts
+    - tests/unit/core/plan/lint.test.ts
+    - tests/unit/core/task-registration-spec.test.ts
+    - tests/unit/error-code-surface.test.ts
+  writes:
+    - docs/cli-contract.md
+    - docs/cli-reference.generated.md
+    - docs/review-contract.md
+    - src/cli/commands/task-lock.ts
+    - src/cli/commands/task.ts
+    - src/cli/spec/task.ts
+    - src/commands/init.ts
+    - src/commands/task-add.ts
+    - src/core/contract-lock.ts
+    - src/core/plan/checks.ts
+    - src/core/plan/checks/review-contract.ts
+    - src/core/plan/lint.ts
+    - src/core/review-contract.ts
+    - src/core/schemas/review-contract.ts
+    - src/core/schemas/task-registration-spec.ts
+    - src/core/schemas/task.ts
+    - src/core/task-registration-spec.ts
+    - tests/integration/plan-lint.test.ts
+    - tests/unit/cli/review-contract-errors.test.ts
+    - tests/unit/cli/spec-render.test.ts
+    - tests/unit/commands/plan-lint.test.ts
+    - tests/unit/commands/task-add.test.ts
+    - tests/unit/commands/task-lock.test.ts
+    - tests/unit/commands/tutorial.test.ts
+    - tests/unit/core/contract-lock.test.ts
+    - tests/unit/core/plan/lint.test.ts
+    - tests/unit/core/review-contract.test.ts
+    - tests/unit/core/task-registration-spec.test.ts
+    - tests/unit/error-code-surface.test.ts
+  depends_on:
+    - P89-T3
+  decision_refs: []
+  acceptance_refs:
+    - tests/unit/commands/task-add.test.ts
+    - tests/unit/commands/task-lock.test.ts
+    - tests/unit/core/contract-lock.test.ts
+  definition_of_done:
+    - A low-capability dogfood run demonstrates fewer correction rounds
+    - A review contract can be authored without hand-editing phase YAML
+    - Boundary contracts cover producer, consumer, runner, OS, and security
+    - Declared contracts are immutable after lock
+    - Existing projects keep working across the upgrade
+    - Finalization waits for required external CI
+    - Finalized work becomes stale after source changes
+    - Lifecycle-owned status changes do not require implementation write claims
+    - More than two correction rounds require contract-level replanning
+    - New task locks require a valid review contract once the project opts in
+    - PR claims are checked against recorded evidence
+    - Review contracts distinguish minimal and boundary-scoped work
+    - Shipped sample phases generate valid review contracts
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm exec vitest run tests/unit/core/review-contract.test.ts
+      tests/unit/core/contract-lock.test.ts
+      tests/unit/core/task-registration-spec.test.ts
+      tests/unit/core/plan/lint.test.ts tests/unit/commands/plan-lint.test.ts
+      tests/unit/commands/task-add.test.ts tests/unit/commands/task-lock.test.ts
+      tests/unit/commands/tutorial.test.ts
+      tests/unit/cli/review-contract-errors.test.ts
+      tests/unit/cli/spec-render.test.ts tests/unit/error-code-surface.test.ts
+    - pnpm typecheck
+  base_sha: d4d9888a8ce684fedf8646fdc6aec25ec3f14303
+  phase_blob_sha: dcc52eeec94db77a02b84a13eef1f0b77143d453
+at: 2026-07-28T02:53:58.069Z
+actor: agent
+author: Pocket
