@@ -57,7 +57,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       Introduce a versioned task-level review contract without activating the
       missing-contract lock refusal yet. Parse and validate supplied contracts,
