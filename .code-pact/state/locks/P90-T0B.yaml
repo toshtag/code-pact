@@ -1,0 +1,242 @@
+schema_version: 1
+task_id: P90-T0B
+phase_id: P90
+phase_path: design/phases/P90-review-loop-prevention.yaml
+base_ref: HEAD
+base_sha: bd75bf989ec4db4ce5a05b81cfc8558d8ffaf6c0
+phase_blob_sha: fbd443230ccc141c47f448950592d00a9709a5ff
+contract_digest: 1942570fca737deee01d2b488289f1aafc2ea89d9a4a1df852ad30863b5fbbc9
+contract:
+  description: >
+    Migrate the repository's own task fixtures behind a single test-only
+    review-contract helper, add a project-level review_contract_policy of
+    advisory or required so an existing plan is not made unlockable by the
+    upgrade, and activate the missing-contract refusal in task lock and in the
+    task start auto-lock. Publish TASK_REVIEW_CONTRACT_REQUIRED with structured
+    JSON and human-readable CLI output, and switch this repository to required.
+    The declared read/write scope and this task's own review contract are
+    settled at its planning commit, before it is locked.
+  reads:
+    - .code-pact/project.yaml
+    - src/commands/task-lock.ts
+    - src/commands/task-progress.ts
+    - src/core/decisions/retention.ts
+    - src/core/plan/checks/review-contract.ts
+    - src/core/project.ts
+    - src/core/review-contract.ts
+    - src/core/schemas/review-contract.ts
+    - src/core/schemas/task.ts
+    - src/core/verification-policy.ts
+    - tests/helpers/cli.ts
+    - tests/unit/core/review-contract.test.ts
+  writes:
+    - docs/cli-contract.md
+    - docs/review-contract.md
+    - src/cli/commands/task-lock.ts
+    - src/cli/commands/task.ts
+    - src/commands/init.ts
+    - src/core/contract-lock.ts
+    - src/core/review-contract-policy.ts
+    - src/core/schemas/project.ts
+    - tests/helpers/review-contract.ts
+    - tests/integration/ci-parity.test.ts
+    - tests/integration/cli-aliases.test.ts
+    - tests/integration/cli.test.ts
+    - tests/integration/completion-cause-code.test.ts
+    - tests/integration/e2e-workflow.test.ts
+    - tests/integration/evidence-agent-detail.test.ts
+    - tests/integration/helpers/execute-once.ts
+    - tests/integration/json-stdout.test.ts
+    - tests/integration/migration.test.ts
+    - tests/integration/review-bundle.test.ts
+    - tests/integration/review-contract-policy.test.ts
+    - tests/integration/task-context-budget.test.ts
+    - tests/integration/task-execute-cli.test.ts
+    - tests/integration/task-finalize-audit-strict.test.ts
+    - tests/integration/task-finalize-write-audit.test.ts
+    - tests/integration/task-lock.test.ts
+    - tests/integration/task-prepare-commands-contract.test.ts
+    - tests/integration/task-registration-spec.test.ts
+    - tests/integration/task-start-dependency-gate.test.ts
+    - tests/unit/cli/review-contract-errors.test.ts
+    - tests/unit/commands/init.test.ts
+    - tests/unit/commands/review-bundle.test.ts
+    - tests/unit/commands/task-finalize.test.ts
+    - tests/unit/commands/task-lock.test.ts
+    - tests/unit/core/contract-lock.test.ts
+    - tests/unit/core/review-bundle.test.ts
+    - tests/unit/core/review-contract-policy.test.ts
+    - tests/unit/error-code-surface.test.ts
+    - tests/unit/helpers/review-contract.test.ts
+  depends_on:
+    - P90-T0A
+  decision_refs: []
+  acceptance_refs:
+    - tests/unit/cli/review-contract-errors.test.ts
+    - tests/unit/commands/init.test.ts
+    - tests/unit/commands/task-lock.test.ts
+    - tests/unit/core/contract-lock.test.ts
+  definition_of_done:
+    - A low-capability dogfood run demonstrates fewer correction rounds
+    - A review contract can be authored without hand-editing phase YAML
+    - Boundary contracts cover producer, consumer, runner, OS, and security
+    - Declared contracts are immutable after lock
+    - Existing projects keep working across the upgrade
+    - Finalization waits for required external CI
+    - Finalized work becomes stale after source changes
+    - Lifecycle-owned status changes do not require implementation write claims
+    - More than two correction rounds require contract-level replanning
+    - New task locks require a valid review contract once the project opts in
+    - PR claims are checked against recorded evidence
+    - Review contracts distinguish minimal and boundary-scoped work
+    - Shipped sample phases generate valid review contracts
+  verification_commands:
+    - git diff --check
+    - pnpm build
+    - pnpm check:docs
+    - pnpm exec vitest run tests/unit/core/review-contract.test.ts
+      tests/unit/core/review-contract-policy.test.ts
+      tests/unit/core/contract-lock.test.ts
+      tests/unit/core/task-registration-spec.test.ts
+      tests/unit/core/plan/lint.test.ts tests/unit/commands/plan-lint.test.ts
+      tests/unit/commands/task-add.test.ts tests/unit/commands/task-lock.test.ts
+      tests/unit/commands/init.test.ts tests/unit/commands/tutorial.test.ts
+      tests/unit/cli/review-contract-errors.test.ts
+      tests/unit/cli/spec-render.test.ts
+      tests/unit/helpers/review-contract.test.ts
+      tests/unit/error-code-surface.test.ts
+    - pnpm typecheck
+  review_contract:
+    version: 1
+    mode: boundary
+    stages:
+      - stage: producer
+        disposition: in_scope
+        claim: >
+          init writes an explicit review_contract_policy of required into a
+          freshly generated project.yaml, and one shared test-only helper builds
+          valid review contracts for migrated fixtures whose contract is not
+          itself the subject under test.
+        refs:
+          - src/commands/init.ts
+          - tests/helpers/review-contract.ts
+          - .code-pact/project.yaml
+      - stage: consumer
+        disposition: in_scope
+        claim: >
+          The project schema accepts advisory and required and rejects any other
+          value, and the runtime resolver reads an absent field as advisory so
+          an existing project keeps its current behavior.
+        refs:
+          - src/core/schemas/project.ts
+          - src/core/review-contract-policy.ts
+      - stage: runner
+        disposition: in_scope
+        claim: >
+          Explicit task lock and the task start auto-lock share one refusal
+          point. JSON mode emits the same TASK_REVIEW_CONTRACT_REQUIRED envelope
+          with the task id and effective policy, while human mode emits the same
+          actionable refusal message; both paths exit 2.
+        refs:
+          - src/core/contract-lock.ts
+          - src/cli/commands/task-lock.ts
+          - src/cli/commands/task.ts
+      - stage: os
+        disposition: not_applicable
+        rationale: >
+          Policy resolution and the refusal compare declared YAML against the
+          task declaration. No filesystem layout, process launch, or platform
+          API is involved, so no operating system can decide the outcome
+          differently.
+      - stage: security
+        disposition: in_scope
+        claim: >
+          The refusal is fail-closed: under required policy a task with no
+          contract leaves no lock file and no progress event behind, and an
+          out-of-enum policy value fails project validation rather than silently
+          degrading to advisory.
+        refs:
+          - src/core/contract-lock.ts
+          - tests/integration/review-contract-policy.test.ts
+    platforms:
+      - platform: linux
+        disposition: required
+        level: integration
+        refs:
+          - tests/integration/review-contract-policy.test.ts
+      - platform: macos
+        disposition: not_required
+        rationale: >
+          The change adds no macOS-specific behavior; the policy decision is the
+          same pure comparison the Linux integration run already proves.
+      - platform: windows
+        disposition: not_required
+        rationale: >
+          The change adds no Windows-specific behavior; no path handling,
+          process launch, or line-ending semantics are touched.
+    evidence:
+      - id: policy-resolution
+        claim: >
+          An absent field resolves to advisory, a declared value is honoured,
+          and an unknown value is refused by the project schema.
+        level: unit
+        refs:
+          - tests/unit/core/review-contract-policy.test.ts
+      - id: explicit-lock-refusal
+        claim: >
+          Under required policy a task with no review contract is refused and no
+          lock file is written, while a valid contract still locks.
+        level: unit
+        refs:
+          - tests/unit/core/contract-lock.test.ts
+          - tests/unit/commands/task-lock.test.ts
+      - id: start-auto-lock-refusal
+        claim: >
+          The task start auto-lock is refused under the same policy through a
+          real CLI process, leaving no lock file and no started event.
+        level: integration
+        refs:
+          - tests/integration/review-contract-policy.test.ts
+      - id: cli-error-envelope
+        claim: >
+          Both JSON refusal surfaces emit TASK_REVIEW_CONTRACT_REQUIRED with the
+          task id and effective policy. Their human-readable paths emit an
+          actionable message naming the task and required policy instead of
+          falling through to an internal error.
+        level: unit
+        refs:
+          - tests/unit/cli/review-contract-errors.test.ts
+          - tests/unit/error-code-surface.test.ts
+      - id: fresh-init-policy
+        claim: >
+          A freshly initialized project declares required and its generated
+          sample task still locks against that policy.
+        level: unit
+        refs:
+          - tests/unit/commands/init.test.ts
+      - id: fixture-helper-boundary
+        claim: >
+          One shared helper builds validator-accepted contracts for migrated
+          non-contract-focused fixtures, refuses a task whose scope cannot back
+          a contract, and is never imported by production code.
+        level: unit
+        refs:
+          - tests/unit/helpers/review-contract.test.ts
+      - id: migrated-integration-fixtures
+        claim: >
+          The shared execute-once boundary and the contract-capable task-lock
+          integration fixtures run under required with generated contracts.
+          Dedicated policy tests prove the absent, advisory, and required
+          rollout behavior, while intentionally historical or scope-less
+          fixtures explicitly remain advisory.
+        level: integration
+        refs:
+          - tests/integration/helpers/execute-once.ts
+          - tests/integration/task-lock.test.ts
+          - tests/integration/review-contract-policy.test.ts
+  base_sha: bd75bf989ec4db4ce5a05b81cfc8558d8ffaf6c0
+  phase_blob_sha: fbd443230ccc141c47f448950592d00a9709a5ff
+at: 2026-07-28T08:02:17.142Z
+actor: agent
+agent: claude-code
+author: Pocket
