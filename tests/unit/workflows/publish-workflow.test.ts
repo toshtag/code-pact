@@ -646,12 +646,31 @@ describe("publish-workflow inline scripts", () => {
 
     // The registry probe is inline in the workflow now, so the shell runs the
     // real Node interpreter over it. Only `fetch` is replaced, and only to keep
-    // the suite off the network — the probe's own branching, exit codes, and
+    // the suite off the network — the probe's own branching, state channel, and
     // ordering are exercised as written.
+    //
+    // `MOCK_FETCH_STATUS_THROW` is the regression that matters: the request
+    // succeeds and the *handler* then fails. That is the shape of a future
+    // typo or a ReferenceError, and it must never look like "absent".
+    // `MOCK_FETCH_STDOUT_NOISE` covers the other half — a process that exits
+    // zero but says something the shell does not recognize.
     const FETCH_STUB = [
       "globalThis.fetch = async () => {",
+      "  if (process.env.FETCH_LOG) {",
+      '    require("node:fs").appendFileSync(process.env.FETCH_LOG, "fetch\\n");',
+      "  }",
       '  if (process.env.MOCK_FETCH_ERROR === "1") {',
       '    throw new Error("synthetic network failure");',
+      "  }",
+      '  if (process.env.MOCK_FETCH_STDOUT_NOISE === "1") {',
+      '    process.stdout.write("noise\\n");',
+      "  }",
+      '  if (process.env.MOCK_FETCH_STATUS_THROW === "1") {',
+      "    return {",
+      "      get status() {",
+      '        throw new Error("synthetic callback failure");',
+      "      },",
+      "    };",
       "  }",
       '  return { status: Number(process.env.MOCK_FETCH_STATUS ?? "404") };',
       "};",
@@ -742,6 +761,7 @@ describe("publish-workflow inline scripts", () => {
             NPM_REGISTRY: "https://registry.npmjs.org",
             NPM_LOG: join(tmpDir, "npm-calls.log"),
             NODE_LOG: join(tmpDir, "node-calls.log"),
+            FETCH_LOG: join(tmpDir, "fetch-calls.log"),
             GITHUB_OUTPUT: join(tmpDir, "github-output.txt"),
             ...env,
           },
@@ -758,6 +778,12 @@ describe("publish-workflow inline scripts", () => {
     function npmCalls(tmpDir: string): string {
       const path = join(tmpDir, "npm-calls.log");
       return existsSync(path) ? readFileSync(path, "utf8") : "";
+    }
+
+    function fetchCount(tmpDir: string): number {
+      const path = join(tmpDir, "fetch-calls.log");
+      if (!existsSync(path)) return 0;
+      return readFileSync(path, "utf8").split("\n").filter(Boolean).length;
     }
 
     for (const version of ["12.0.0", "11.5.1", "11.16.0"]) {
@@ -792,6 +818,7 @@ describe("publish-workflow inline scripts", () => {
               MOCK_FETCH_STATUS: "404",
             }),
           ).toThrow();
+          expect(fetchCount(tmpDir)).toBe(0);
           expect(npmCalls(tmpDir)).not.toContain("publish");
         } finally {
           rmSync(tmpDir, { recursive: true, force: true });
@@ -816,6 +843,39 @@ describe("publish-workflow inline scripts", () => {
       try {
         expect(() =>
           runPublishShell(tmpDir, { MOCK_FETCH_STATUS: "500" }),
+        ).toThrow();
+        expect(npmCalls(tmpDir)).not.toContain("publish");
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    // The R4 regression. The request succeeds and the handler then throws, so
+    // the probe process fails the way a syntax error or a ReferenceError would.
+    // Node exits 1 for all of them — which is exactly why "absent" cannot be an
+    // exit code. Nothing about this case is a proven absence.
+    it("exception after fetch fulfillment: refuses to publish", () => {
+      const { tmpDir } = makeTmpEnv({});
+      try {
+        expect(() =>
+          runPublishShell(tmpDir, { MOCK_FETCH_STATUS_THROW: "1" }),
+        ).toThrow();
+        expect(fetchCount(tmpDir)).toBe(1);
+        expect(npmCalls(tmpDir)).not.toContain("publish");
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    // A probe that exits zero but says something unrecognized is not a state.
+    it("unrecognized probe output: refuses to publish", () => {
+      const { tmpDir } = makeTmpEnv({});
+      try {
+        expect(() =>
+          runPublishShell(tmpDir, {
+            MOCK_FETCH_STDOUT_NOISE: "1",
+            MOCK_FETCH_STATUS: "404",
+          }),
         ).toThrow();
         expect(npmCalls(tmpDir)).not.toContain("publish");
       } finally {
@@ -849,6 +909,7 @@ describe("publish-workflow inline scripts", () => {
         expect(() =>
           runPublishShell(tmpDir, { MOCK_FETCH_STATUS: "404" }),
         ).toThrow();
+        expect(fetchCount(tmpDir)).toBe(0);
         expect(npmCalls(tmpDir)).not.toContain("publish");
       } finally {
         rmSync(tmpDir, { recursive: true, force: true });

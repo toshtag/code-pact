@@ -73,7 +73,7 @@ function hashRun(run) {
 }
 
 export const PUBLISH_RUN_HASH =
-  "cbd9cd8f3ef27594419a3e46dd720544681458eb55d4b87f5cdcd4ac5862ed2c";
+  "540500fe2e3e04b2a40e72c573bc57b60ede305e4b109d1209881a3da5c9bda3";
 export const GITHUB_RELEASE_RUN_HASH =
   "0a8cf86fb0cea315594a2d1018d1ee8cb8d337ee065abbde3458b9fecb17637c";
 
@@ -2117,10 +2117,48 @@ export function checkSupplyChainInvariants(root) {
           /status === 404/.test(s) &&
           /unexpected status/.test(s),
       );
+
+      // The probe answers on two channels: the process either ran or it did
+      // not, and stdout carries the registry state. Collapsing them is how a
+      // syntax error, an uncaught exception, or a missing module — all Node
+      // exit 1 — becomes indistinguishable from a proven absent version, and
+      // it is the broken probe that would then publish.
+      const probeUsesStateChannel = publishScripts.some(
+        s =>
+          /probe_state="\$\(/.test(s) &&
+          /process\.stdout\.write\("exists\\n"\)/.test(s) &&
+          /process\.stdout\.write\("absent\\n"\)/.test(s) &&
+          /case "\$probe_state" in/.test(s),
+      );
+      const probeRefusesFailedProcess = publishScripts.some(s =>
+        /Registry probe process failed with exit/.test(s),
+      );
+      const probeRefusesUnknownState = publishScripts.some(s =>
+        /Registry probe returned an unrecognized state/.test(s),
+      );
+      // An exit code must never carry the "absent" verdict again. Scoped to the
+      // availability probe: the npm version gate's own `process.exit(1)` is a
+      // hard refusal, which is exactly what an exit code should mean.
+      const probeSignalsAbsenceByExitCode = publishScripts.some(s => {
+        const probeBody = /<<'NPM_AVAILABILITY_NODE'\n([\s\S]*?)\n\s*NPM_AVAILABILITY_NODE/.exec(
+          s,
+        )?.[1];
+        return (
+          (probeBody !== undefined && /process\.exit\(/.test(probeBody)) ||
+          /probe_exit"? -eq 1/.test(s) ||
+          /probe_exit"? -ne 1/.test(s)
+        );
+      });
+
       const probeBeforePublish = publishScripts.some(s => {
         const probeAt = s.indexOf("NPM_AVAILABILITY_NODE");
         const publishAt = s.indexOf("npm publish");
         return probeAt >= 0 && publishAt > probeAt;
+      });
+      const stateCheckBeforePublish = publishScripts.some(s => {
+        const caseAt = s.indexOf('case "$probe_state" in');
+        const publishAt = s.indexOf("npm publish");
+        return caseAt >= 0 && publishAt > caseAt;
       });
       const npmGateBeforeProbe = publishScripts.some(s => {
         const gateAt = s.indexOf("NPM_VERSION_NODE");
@@ -2155,6 +2193,43 @@ export function checkSupplyChainInvariants(root) {
         pass("publish.yml: registry probe precedes npm publish");
       } else {
         fail("publish.yml: the registry probe must run before npm publish");
+      }
+      if (probeUsesStateChannel) {
+        pass(
+          "publish.yml: registry probe reports state on stdout, not through its exit code",
+        );
+      } else {
+        fail(
+          "publish.yml: the registry probe must capture stdout into probe_state and emit exactly exists/absent",
+        );
+      }
+      if (probeRefusesFailedProcess) {
+        pass("publish.yml: a failed probe process refuses to publish");
+      } else {
+        fail(
+          "publish.yml: a non-zero probe process must stop the release, not be read as a registry state",
+        );
+      }
+      if (probeRefusesUnknownState) {
+        pass("publish.yml: an unrecognized probe state refuses to publish");
+      } else {
+        fail(
+          "publish.yml: a probe state other than exists/absent must stop the release",
+        );
+      }
+      if (!probeSignalsAbsenceByExitCode) {
+        pass("publish.yml: no exit code doubles as an absent-version verdict");
+      } else {
+        fail(
+          "publish.yml: absence must not be signalled by exit 1 — Node returns 1 for a syntax error, an uncaught exception, and a missing module too",
+        );
+      }
+      if (stateCheckBeforePublish) {
+        pass("publish.yml: probe state is validated before npm publish");
+      } else {
+        fail(
+          "publish.yml: the probe state must be validated before npm publish",
+        );
       }
       if (hasPublishRegistry) {
         pass("publish.yml: npm publish uses --registry flag");

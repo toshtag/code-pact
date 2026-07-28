@@ -266,70 +266,80 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          registry=\"$NPM_REGISTRY\"",
     "",
     "          # Inline rather than a repository file: there is no checkout here, so",
-    "          # no repository path resolves. `node` on a missing module exits 1 —",
-    "          # the very code this shell reads as \"not published yet\" — so calling",
-    "          # one made the collision guard fail open and publish regardless.",
-    "          # Exit codes keep the established contract: 0 exists, 1 free,",
-    "          # anything else unproven.",
-    "          if PACKAGE_NAME=\"code-pact\" PACKAGE_VERSION=\"$version\" node <<'NPM_AVAILABILITY_NODE'",
-    "          const packageName = process.env.PACKAGE_NAME;",
-    "          const version = process.env.PACKAGE_VERSION;",
-    "          const registry = process.env.NPM_REGISTRY;",
+    "          # no repository path resolves.",
+    "          #",
+    "          # The probe reports on two channels, deliberately kept apart. Process",
+    "          # success means \"the probe ran to completion\"; stdout carries the",
+    "          # registry state. Node exits 1 for a syntax error, an uncaught",
+    "          # exception, and a missing module alike, so an exit code that also",
+    "          # encodes \"absent\" cannot tell a proven absence from a broken probe —",
+    "          # and it is the broken probe that would publish.",
+    "          if probe_state=\"$(",
+    "            PACKAGE_NAME=\"code-pact\" PACKAGE_VERSION=\"$version\" node <<'NPM_AVAILABILITY_NODE'",
+    "          (async () => {",
+    "            const packageName = process.env.PACKAGE_NAME;",
+    "            const version = process.env.PACKAGE_VERSION;",
+    "            const registry = process.env.NPM_REGISTRY;",
     "",
-    "          if (",
-    "            typeof packageName !== \"string\" ||",
-    "            packageName === \"\" ||",
-    "            typeof version !== \"string\" ||",
-    "            version === \"\" ||",
-    "            registry !== \"https://registry.npmjs.org\"",
-    "          ) {",
-    "            console.error(\"invalid npm availability probe input\");",
-    "            process.exit(2);",
-    "          }",
+    "            if (",
+    "              typeof packageName !== \"string\" ||",
+    "              packageName === \"\" ||",
+    "              typeof version !== \"string\" ||",
+    "              version === \"\" ||",
+    "              registry !== \"https://registry.npmjs.org\"",
+    "            ) {",
+    "              throw new Error(\"invalid npm availability probe input\");",
+    "            }",
     "",
-    "          const target = `${registry}/${packageName.replace(/\\//g, \"%2F\")}/${encodeURIComponent(version)}`;",
+    "            const target = `${registry}/${packageName.replace(/\\//g, \"%2F\")}/${encodeURIComponent(version)}`;",
     "",
-    "          fetch(target, {",
-    "            headers: { accept: \"application/json\" },",
-    "            signal: AbortSignal.timeout(10000),",
-    "          }).then(",
-    "            response => {",
-    "              if (response.status === 200) {",
-    "                console.error(`version ${packageName}@${version} already exists in the registry`);",
-    "                process.exit(0);",
-    "              }",
-    "              if (response.status === 404) {",
-    "                console.log(`version ${packageName}@${version} is not published yet`);",
-    "                process.exit(1);",
-    "              }",
-    "              console.error(`npm registry returned unexpected status ${response.status}`);",
-    "              process.exit(2);",
-    "            },",
-    "            error => {",
-    "              console.error(`npm registry probe failed: ${error.message}`);",
-    "              process.exit(2);",
-    "            },",
-    "          );",
+    "            const response = await fetch(target, {",
+    "              headers: { accept: \"application/json\" },",
+    "              signal: AbortSignal.timeout(10000),",
+    "            });",
+    "",
+    "            if (response.status === 200) {",
+    "              process.stdout.write(\"exists\\n\");",
+    "              return;",
+    "            }",
+    "",
+    "            if (response.status === 404) {",
+    "              process.stdout.write(\"absent\\n\");",
+    "              return;",
+    "            }",
+    "",
+    "            throw new Error(",
+    "              `npm registry returned unexpected status ${response.status}`,",
+    "            );",
+    "          })().catch(error => {",
+    "            console.error(`npm registry probe failed: ${error.message}`);",
+    "            process.exitCode = 2;",
+    "          });",
     "          NPM_AVAILABILITY_NODE",
+    "          )\"",
     "          then",
-    "            probe_exit=0",
+    "            :",
     "          else",
     "            probe_exit=$?",
-    "          fi",
-    "",
-    "          if [ \"$probe_exit\" -eq 0 ]",
-    "          then",
-    "            echo \"::error::Version code-pact@${version} already exists in the registry. A tag/version collision is not a successful release.\"",
+    "            echo \"::error::Registry probe process failed with exit ${probe_exit}. Refusing to publish because the existing-version check could not be completed.\"",
     "            exit 1",
     "          fi",
     "",
-    "          if [ \"$probe_exit\" -ne 1 ]",
-    "          then",
-    "            echo \"::error::Registry probe failed with exit $probe_exit. Refusing to publish because the existing-version check could not be completed.\"",
-    "            exit 1",
-    "          fi",
+    "          case \"$probe_state\" in",
+    "            exists)",
+    "              echo \"::error::Version code-pact@${version} already exists in the registry. A tag/version collision is not a successful release.\"",
+    "              exit 1",
+    "              ;;",
+    "            absent)",
+    "              ;;",
+    "            *)",
+    "              echo \"::error::Registry probe returned an unrecognized state: ${probe_state}\"",
+    "              exit 1",
+    "              ;;",
+    "          esac",
     "",
     "          npm publish \"./$tarball\" --ignore-scripts --registry=\"$registry\"",
+    "",
     "",
     "",
     "  verify:",
@@ -1506,6 +1516,58 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     );
     expect(unpinned).not.toBe(wellFormedPublish);
     root = await buildTree({ publishContent: unpinned });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  // The R4 contract: the probe's process result and the registry state are
+  // separate authorities. Each mutation below collapses them again, and each
+  // must be refused by name rather than only by the canonical run hash — a
+  // hash failure says "this changed", not "this is unsafe".
+  it("fails when absence is signalled by a probe exit code", async () => {
+    const byExitCode = wellFormedPublish.replace(
+      '              process.stdout.write("absent\\n");\n              return;',
+      "              process.exit(1);",
+    );
+    expect(byExitCode).not.toBe(wellFormedPublish);
+    root = await buildTree({ publishContent: byExitCode });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when a failed probe process is not refused", async () => {
+    const noProcessGuard = wellFormedPublish.replace(
+      "Registry probe process failed with exit",
+      "Registry probe note",
+    );
+    expect(noProcessGuard).not.toBe(wellFormedPublish);
+    root = await buildTree({ publishContent: noProcessGuard });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when an unrecognized probe state is not refused", async () => {
+    const noUnknownGuard = wellFormedPublish.replace(
+      "Registry probe returned an unrecognized state",
+      "Registry probe note",
+    );
+    expect(noUnknownGuard).not.toBe(wellFormedPublish);
+    root = await buildTree({ publishContent: noUnknownGuard });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when the probe stops reporting state on stdout", async () => {
+    const noStateChannel = wellFormedPublish.replace(
+      'case "$probe_state" in',
+      'case "$unused" in',
+    );
+    expect(noStateChannel).not.toBe(wellFormedPublish);
+    root = await buildTree({ publishContent: noStateChannel });
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBeGreaterThan(0);
     await cleanup();
