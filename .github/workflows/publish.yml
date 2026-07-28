@@ -68,7 +68,7 @@ jobs:
 
           if (!supported) {
             console.error(
-              `npm >= 11.5.1 and < 13 is required for Trusted Publishing; got ${raw}`,
+              `This release workflow supports npm 11.5.1 through npm 12.x; got ${raw}`,
             );
             process.exit(1);
           }

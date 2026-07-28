@@ -145,6 +145,19 @@ describe("publish-workflow inline scripts", () => {
         runNodeScriptThrows(nodeScript!, { env: { NPM_VERSION: version } });
       });
     }
+
+    // The ceiling is this workflow's own contract — the payload shapes its
+    // parser has measured — not a Trusted Publishing requirement. Saying
+    // otherwise would send a maintainer hunting through npm's release notes
+    // for a rule that does not exist.
+    it("attributes the upper bound to this workflow, not to Trusted Publishing", () => {
+      expect(versionCheckScript).toContain(
+        "This release workflow supports npm 11.5.1 through npm 12.x",
+      );
+      expect(versionCheckScript).not.toMatch(
+        /< ?13 is required for Trusted Publishing/,
+      );
+    });
   });
 
   describe("prepare job: pack metadata", () => {
