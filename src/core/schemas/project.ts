@@ -36,6 +36,14 @@ export const DECISION_RETENTION_VALUES = ["keep-full", "compress-on-ship", "prun
 export const DecisionRetention = z.enum(DECISION_RETENTION_VALUES);
 export type DecisionRetention = z.infer<typeof DecisionRetention>;
 
+// Whether a new task lock may be created without a `review_contract` (P90).
+// `advisory` is the backward-compatible reading — plan lint still reports the
+// gap, but the lock is written. `required` refuses it. The enum lives here so
+// the schema, the runtime resolver, and the CLI all name the same two values.
+export const REVIEW_CONTRACT_POLICY_VALUES = ["advisory", "required"] as const;
+export const ReviewContractPolicy = z.enum(REVIEW_CONTRACT_POLICY_VALUES);
+export type ReviewContractPolicy = z.infer<typeof ReviewContractPolicy>;
+
 export const VerificationPolicy = z
   .object({
     focused_command: z.string().min(1),
@@ -68,5 +76,12 @@ export const Project = z.object({
   // `validate` / `doctor` flag a typo'd policy.
   decision_retention: DecisionRetention.optional(),
   verification_policy: VerificationPolicy.optional(),
+  // Same posture as `decision_retention`: optional with NO schema default, so
+  // an absent field stays absent through a parse/serialize round trip and the
+  // effective value (`advisory`) is owned by the runtime reader. An existing
+  // project that never heard of review contracts is therefore not made
+  // unlockable by the upgrade, while a typo'd value is still REJECTED here so
+  // `validate` / `doctor` report it instead of quietly enforcing nothing.
+  review_contract_policy: ReviewContractPolicy.optional(),
 });
 export type Project = z.infer<typeof Project>;
