@@ -127,6 +127,44 @@ describe("publish-workflow inline scripts", () => {
     });
   });
 
+  describe("prepare job: pack metadata", () => {
+    const content = readWorkflow();
+    const scripts = extractRunScripts(content, "prepare");
+    const packScript = scripts.find(s => s.includes("check-package-tarball"));
+
+    it("script exists in prepare job", () => {
+      expect(packScript).toBeDefined();
+    });
+
+    it("asks the checker to publish verified metadata", () => {
+      expect(packScript).toContain("--metadata-out checked-pack.json");
+    });
+
+    it("takes the tarball filename from the verified metadata", () => {
+      expect(packScript).toMatch(
+        /tarball="\$\(node -p 'require\("\.\/checked-pack\.json"\)\.filename'\)"/,
+      );
+    });
+
+    it("moves the tarball only after the inspection step", () => {
+      const inspectAt = packScript!.indexOf("check-package-tarball");
+      const moveAt = packScript!.indexOf('mv "$tarball"');
+      expect(inspectAt).toBeGreaterThanOrEqual(0);
+      expect(moveAt).toBeGreaterThan(inspectAt);
+    });
+
+    // The npm prerequisite admits npm 12, whose `npm pack --json` payload is an
+    // object keyed by package name rather than an array. A second reader in the
+    // workflow would have to know that too, so there is only one reader.
+    it("does not parse the raw pack JSON itself", () => {
+      for (const script of scripts) {
+        expect(script).not.toMatch(/packData\[0\]/);
+        expect(script).not.toMatch(/JSON\.parse\([^)]*pack\.json/);
+        expect(script).not.toMatch(/pack\.json[^\n]*\[0\]/);
+      }
+    });
+  });
+
   describe("prepare job: manifest generation", () => {
     const content = readWorkflow();
     const scripts = extractRunScripts(content, "prepare");

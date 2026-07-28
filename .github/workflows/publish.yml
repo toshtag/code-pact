@@ -87,9 +87,10 @@ jobs:
         run: |
           npm pack --json --ignore-scripts > pack.json
           node scripts/check-package-tarball.mjs \
-            --pack-json pack.json
+            --pack-json pack.json \
+            --metadata-out checked-pack.json
 
-          tarball="$(node -p 'JSON.parse(require("fs").readFileSync("pack.json","utf8"))[0].filename')"
+          tarball="$(node -p 'require("./checked-pack.json").filename')"
 
           mkdir -p release-artifact
           mv "$tarball" release-artifact/package.tgz
