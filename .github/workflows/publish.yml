@@ -194,9 +194,42 @@ jobs:
           EXPECTED_TAG: ${{ github.ref_name }}
           EXPECTED_COMMIT: ${{ github.sha }}
           NPM_CONFIG_PROVENANCE: "true"
+          NPM_REGISTRY: https://registry.npmjs.org
         run: |
           manifest="release-artifact/release-manifest.json"
           tarball="release-artifact/package.tgz"
+
+          # This job has no checkout by design — it holds id-token: write, so it
+          # runs no repository code. Everything it needs is either downloaded
+          # artifact or inline. It is also a fresh runner, so the prepare job's
+          # toolchain check proves nothing about this one; npm is re-checked
+          # here before anything reaches the registry.
+          NPM_VERSION="$(npm --version)" node <<'NPM_VERSION_NODE'
+          const raw = process.env.NPM_VERSION ?? "";
+          const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(raw);
+
+          if (!match) {
+            console.error(
+              `npm version must be a stable x.y.z value, got ${JSON.stringify(raw)}`,
+            );
+            process.exit(1);
+          }
+
+          const major = Number(match[1]);
+          const minor = Number(match[2]);
+          const patch = Number(match[3]);
+
+          const supported =
+            (major === 11 && (minor > 5 || (minor === 5 && patch >= 1))) ||
+            major === 12;
+
+          if (!supported) {
+            console.error(
+              `This release workflow supports npm 11.5.1 through npm 12.x; got ${raw}`,
+            );
+            process.exit(1);
+          }
+          NPM_VERSION_NODE
 
           MANIFEST="$manifest" \
           TARBALL="$tarball" \
@@ -243,12 +276,55 @@ jobs:
           NODE
 
           version="$(node -p 'require("./release-artifact/release-manifest.json").version')"
-          registry="https://registry.npmjs.org"
+          registry="$NPM_REGISTRY"
 
-          if node scripts/check-npm-version-availability.mjs \
-            --package code-pact \
-            --version "$version" \
-            --registry "$registry"; then
+          # Inline rather than a repository file: there is no checkout here, so
+          # no repository path resolves. `node` on a missing module exits 1 —
+          # the very code this shell reads as "not published yet" — so calling
+          # one made the collision guard fail open and publish regardless.
+          # Exit codes keep the established contract: 0 exists, 1 free,
+          # anything else unproven.
+          if PACKAGE_NAME="code-pact" PACKAGE_VERSION="$version" node <<'NPM_AVAILABILITY_NODE'
+          const packageName = process.env.PACKAGE_NAME;
+          const version = process.env.PACKAGE_VERSION;
+          const registry = process.env.NPM_REGISTRY;
+
+          if (
+            typeof packageName !== "string" ||
+            packageName === "" ||
+            typeof version !== "string" ||
+            version === "" ||
+            registry !== "https://registry.npmjs.org"
+          ) {
+            console.error("invalid npm availability probe input");
+            process.exit(2);
+          }
+
+          const target = `${registry}/${packageName.replace(/\//g, "%2F")}/${encodeURIComponent(version)}`;
+
+          fetch(target, {
+            headers: { accept: "application/json" },
+            signal: AbortSignal.timeout(10000),
+          }).then(
+            response => {
+              if (response.status === 200) {
+                console.error(`version ${packageName}@${version} already exists in the registry`);
+                process.exit(0);
+              }
+              if (response.status === 404) {
+                console.log(`version ${packageName}@${version} is not published yet`);
+                process.exit(1);
+              }
+              console.error(`npm registry returned unexpected status ${response.status}`);
+              process.exit(2);
+            },
+            error => {
+              console.error(`npm registry probe failed: ${error.message}`);
+              process.exit(2);
+            },
+          );
+          NPM_AVAILABILITY_NODE
+          then
             probe_exit=0
           else
             probe_exit=$?

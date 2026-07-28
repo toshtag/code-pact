@@ -73,7 +73,7 @@ function hashRun(run) {
 }
 
 export const PUBLISH_RUN_HASH =
-  "cc04e645e58d9ef269afbbe87109c664a0d519ced73d0eccc40a15d778bc92c0";
+  "cbd9cd8f3ef27594419a3e46dd720544681458eb55d4b87f5cdcd4ac5862ed2c";
 export const GITHUB_RELEASE_RUN_HASH =
   "0a8cf86fb0cea315594a2d1018d1ee8cb8d337ee065abbde3458b9fecb17637c";
 
@@ -106,6 +106,7 @@ export const EXPECTED_CANONICAL_JOBS = {
           EXPECTED_TAG: "${{ github.ref_name }}",
           EXPECTED_COMMIT: "${{ github.sha }}",
           NPM_CONFIG_PROVENANCE: "true",
+          NPM_REGISTRY: "https://registry.npmjs.org",
         },
         "run-sha256": PUBLISH_RUN_HASH,
       },
@@ -1902,11 +1903,12 @@ export function checkSupplyChainInvariants(root) {
       );
       const publishHasPnpm = publishActionRefs.some(r => r.startsWith("pnpm/"));
       const publishScripts = collectRunScripts(doc, "publish");
-      const publishHasRepoScript = publishScripts.some(
-        s =>
-          /scripts\//.test(s) &&
-          !/scripts\/check-npm-version-availability\.mjs/.test(s),
-      );
+      // No exception. This job has no checkout, so `scripts/` does not exist in
+      // its workspace; the one carve-out that used to live here named a real
+      // file in the repository and an absent one on the runner, and `node` on a
+      // missing module exits 1 — the same code the probe shell reads as "not
+      // published yet". The gate that permitted it is the reason it survived.
+      const publishHasRepoScript = publishScripts.some(s => /scripts\//.test(s));
       const publishHasReleaseCheck = publishScripts.some(s =>
         /release:check/.test(s),
       );
@@ -2078,19 +2080,81 @@ export function checkSupplyChainInvariants(root) {
         );
       }
 
-      // OIDC invariant: registry probe and npm publish must use --registry flag
+      // OIDC invariant: the registry probe and npm publish must both pin the
+      // registry rather than inherit NPM_CONFIG_REGISTRY.
+      // The step env pins NPM_REGISTRY (held exactly by the canonical job
+      // structure above); the probe refuses any other value rather than
+      // trusting whatever the environment supplies.
       const hasViewRegistry = publishScripts.some(s =>
-        /scripts\/check-npm-version-availability\.mjs[\s\S]*--registry/.test(s),
+        /registry !== "https:\/\/registry\.npmjs\.org"/.test(s),
       );
       const hasPublishRegistry = publishScripts.some(s =>
         /npm publish.*--registry=/.test(s),
       );
       if (hasViewRegistry) {
-        pass("publish.yml: registry probe script uses --registry flag");
+        pass("publish.yml: registry probe pins the npm registry");
       } else {
         fail(
-          "publish.yml: registry probe script must use --registry flag to prevent env override",
+          "publish.yml: registry probe must pin https://registry.npmjs.org and refuse any other value",
         );
+      }
+
+      // The publish job is a fresh runner holding id-token: write. Everything
+      // it needs must be downloaded artifact or inline, and every guard that
+      // stands between the signed tag and the registry must run here — not in
+      // prepare, whose toolchain it does not share.
+      const publishHasOwnNpmGate = publishScripts.some(
+        s =>
+          /npm --version/.test(s) &&
+          /This release workflow supports npm 11\.5\.1 through npm 12\.x/.test(
+            s,
+          ),
+      );
+      const publishHasInlineProbe = publishScripts.some(
+        s =>
+          /AbortSignal\.timeout\(/.test(s) &&
+          /status === 200/.test(s) &&
+          /status === 404/.test(s) &&
+          /unexpected status/.test(s),
+      );
+      const probeBeforePublish = publishScripts.some(s => {
+        const probeAt = s.indexOf("NPM_AVAILABILITY_NODE");
+        const publishAt = s.indexOf("npm publish");
+        return probeAt >= 0 && publishAt > probeAt;
+      });
+      const npmGateBeforeProbe = publishScripts.some(s => {
+        const gateAt = s.indexOf("NPM_VERSION_NODE");
+        const probeAt = s.indexOf("NPM_AVAILABILITY_NODE");
+        return gateAt >= 0 && probeAt > gateAt;
+      });
+
+      if (publishHasOwnNpmGate) {
+        pass("publish.yml: publish job validates its own npm version");
+      } else {
+        fail(
+          "publish.yml: publish job must validate the npm version on its own runner; prepare's check does not carry over",
+        );
+      }
+      if (publishHasInlineProbe) {
+        pass(
+          "publish.yml: registry probe is bounded and distinguishes exists/free/unprovable",
+        );
+      } else {
+        fail(
+          "publish.yml: registry probe must be inline, time-bounded, and distinguish 200 / 404 / any other outcome",
+        );
+      }
+      if (npmGateBeforeProbe) {
+        pass("publish.yml: npm version gate precedes the registry probe");
+      } else {
+        fail(
+          "publish.yml: the npm version gate must run before the registry probe",
+        );
+      }
+      if (probeBeforePublish) {
+        pass("publish.yml: registry probe precedes npm publish");
+      } else {
+        fail("publish.yml: the registry probe must run before npm publish");
       }
       if (hasPublishRegistry) {
         pass("publish.yml: npm publish uses --registry flag");

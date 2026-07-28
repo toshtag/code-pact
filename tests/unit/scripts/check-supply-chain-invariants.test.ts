@@ -181,23 +181,56 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          EXPECTED_TAG: ${{ github.ref_name }}",
     "          EXPECTED_COMMIT: ${{ github.sha }}",
     "          NPM_CONFIG_PROVENANCE: 'true'",
+    "          NPM_REGISTRY: https://registry.npmjs.org",
     "        run: |",
-    '          manifest="release-artifact/release-manifest.json"',
-    '          tarball="release-artifact/package.tgz"',
+    "          manifest=\"release-artifact/release-manifest.json\"",
+    "          tarball=\"release-artifact/package.tgz\"",
     "",
-    '          MANIFEST="$manifest" \\',
-    '          TARBALL="$tarball" \\',
+    "          # This job has no checkout by design — it holds id-token: write, so it",
+    "          # runs no repository code. Everything it needs is either downloaded",
+    "          # artifact or inline. It is also a fresh runner, so the prepare job's",
+    "          # toolchain check proves nothing about this one; npm is re-checked",
+    "          # here before anything reaches the registry.",
+    "          NPM_VERSION=\"$(npm --version)\" node <<'NPM_VERSION_NODE'",
+    "          const raw = process.env.NPM_VERSION ?? \"\";",
+    "          const match = /^(\\d+)\\.(\\d+)\\.(\\d+)$/.exec(raw);",
+    "",
+    "          if (!match) {",
+    "            console.error(",
+    "              `npm version must be a stable x.y.z value, got ${JSON.stringify(raw)}`,",
+    "            );",
+    "            process.exit(1);",
+    "          }",
+    "",
+    "          const major = Number(match[1]);",
+    "          const minor = Number(match[2]);",
+    "          const patch = Number(match[3]);",
+    "",
+    "          const supported =",
+    "            (major === 11 && (minor > 5 || (minor === 5 && patch >= 1))) ||",
+    "            major === 12;",
+    "",
+    "          if (!supported) {",
+    "            console.error(",
+    "              `This release workflow supports npm 11.5.1 through npm 12.x; got ${raw}`,",
+    "            );",
+    "            process.exit(1);",
+    "          }",
+    "          NPM_VERSION_NODE",
+    "",
+    "          MANIFEST=\"$manifest\" \\",
+    "          TARBALL=\"$tarball\" \\",
     "          node <<'NODE'",
-    '          const fs = require("fs");',
-    '          const crypto = require("crypto");',
+    "          const fs = require(\"fs\");",
+    "          const crypto = require(\"crypto\");",
     "",
-    '          const m = JSON.parse(fs.readFileSync(process.env.MANIFEST, "utf8"));',
+    "          const m = JSON.parse(fs.readFileSync(process.env.MANIFEST, \"utf8\"));",
     "",
-    '          if (m.package !== "code-pact") {',
+    "          if (m.package !== \"code-pact\") {",
     "            throw new Error(`unexpected package: ${JSON.stringify(m.package)}`);",
     "          }",
     "",
-    '          const match = /^v(\\d+\\.\\d+\\.\\d+(?:-(?:alpha|beta|rc)\\.\\d+)?)$/.exec(process.env.EXPECTED_TAG ?? "");',
+    "          const match = /^v(\\d+\\.\\d+\\.\\d+(?:-(?:alpha|beta|rc)\\.\\d+)?)$/.exec(process.env.EXPECTED_TAG ?? \"\");",
     "",
     "          if (!match) {",
     "            throw new Error(`unexpected workflow tag: ${JSON.stringify(process.env.EXPECTED_TAG)}`);",
@@ -218,42 +251,86 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          }",
     "",
     "          if (!/^[0-9a-f]{64}$/.test(m.tarball_sha256)) {",
-    '            throw new Error("manifest tarball_sha256 is invalid");',
+    "            throw new Error(\"manifest tarball_sha256 is invalid\");",
     "          }",
     "",
     "          const bytes = fs.readFileSync(process.env.TARBALL);",
-    '          const actual = crypto.createHash("sha256").update(bytes).digest("hex");',
+    "          const actual = crypto.createHash(\"sha256\").update(bytes).digest(\"hex\");",
     "",
     "          if (actual !== m.tarball_sha256) {",
     "            throw new Error(`tarball SHA-256 ${actual} != manifest ${m.tarball_sha256}`);",
     "          }",
     "          NODE",
     "",
-    '          version="$(node -p \'require("./release-artifact/release-manifest.json").version\')"',
-    '          registry="https://registry.npmjs.org"',
+    "          version=\"$(node -p 'require(\"./release-artifact/release-manifest.json\").version')\"",
+    "          registry=\"$NPM_REGISTRY\"",
     "",
-    "          if node scripts/check-npm-version-availability.mjs \\",
-    "            --package code-pact \\",
-    '            --version "$version" \\',
-    '            --registry "$registry"; then',
+    "          # Inline rather than a repository file: there is no checkout here, so",
+    "          # no repository path resolves. `node` on a missing module exits 1 —",
+    "          # the very code this shell reads as \"not published yet\" — so calling",
+    "          # one made the collision guard fail open and publish regardless.",
+    "          # Exit codes keep the established contract: 0 exists, 1 free,",
+    "          # anything else unproven.",
+    "          if PACKAGE_NAME=\"code-pact\" PACKAGE_VERSION=\"$version\" node <<'NPM_AVAILABILITY_NODE'",
+    "          const packageName = process.env.PACKAGE_NAME;",
+    "          const version = process.env.PACKAGE_VERSION;",
+    "          const registry = process.env.NPM_REGISTRY;",
+    "",
+    "          if (",
+    "            typeof packageName !== \"string\" ||",
+    "            packageName === \"\" ||",
+    "            typeof version !== \"string\" ||",
+    "            version === \"\" ||",
+    "            registry !== \"https://registry.npmjs.org\"",
+    "          ) {",
+    "            console.error(\"invalid npm availability probe input\");",
+    "            process.exit(2);",
+    "          }",
+    "",
+    "          const target = `${registry}/${packageName.replace(/\\//g, \"%2F\")}/${encodeURIComponent(version)}`;",
+    "",
+    "          fetch(target, {",
+    "            headers: { accept: \"application/json\" },",
+    "            signal: AbortSignal.timeout(10000),",
+    "          }).then(",
+    "            response => {",
+    "              if (response.status === 200) {",
+    "                console.error(`version ${packageName}@${version} already exists in the registry`);",
+    "                process.exit(0);",
+    "              }",
+    "              if (response.status === 404) {",
+    "                console.log(`version ${packageName}@${version} is not published yet`);",
+    "                process.exit(1);",
+    "              }",
+    "              console.error(`npm registry returned unexpected status ${response.status}`);",
+    "              process.exit(2);",
+    "            },",
+    "            error => {",
+    "              console.error(`npm registry probe failed: ${error.message}`);",
+    "              process.exit(2);",
+    "            },",
+    "          );",
+    "          NPM_AVAILABILITY_NODE",
+    "          then",
     "            probe_exit=0",
     "          else",
     "            probe_exit=$?",
     "          fi",
     "",
-    '          if [ "$probe_exit" -eq 0 ]',
+    "          if [ \"$probe_exit\" -eq 0 ]",
     "          then",
-    '            echo "::error::Version code-pact@${version} already exists in the registry. A tag/version collision is not a successful release."',
+    "            echo \"::error::Version code-pact@${version} already exists in the registry. A tag/version collision is not a successful release.\"",
     "            exit 1",
     "          fi",
     "",
-    '          if [ "$probe_exit" -ne 1 ]',
+    "          if [ \"$probe_exit\" -ne 1 ]",
     "          then",
-    '            echo "::error::Registry probe failed with exit $probe_exit. Refusing to publish because the existing-version check could not be completed."',
+    "            echo \"::error::Registry probe failed with exit $probe_exit. Refusing to publish because the existing-version check could not be completed.\"",
     "            exit 1",
     "          fi",
     "",
-    '          npm publish "./$tarball" --ignore-scripts --registry="$registry"',
+    "          npm publish \"./$tarball\" --ignore-scripts --registry=\"$registry\"",
+    "",
     "",
     "  verify:",
     "    runs-on: ubuntu-latest",
@@ -1365,6 +1442,70 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     root = await buildTree({
       publishContent: wellFormedPublish + "\n# NPM_TOKEN reference",
     });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  // The publish job has no checkout, so a repository path in its shell names a
+  // file that does not exist on that runner — and `node` on a missing module
+  // exits 1, the same code the probe reads as "not published yet". The gate
+  // used to carve out one such script by name, which is how it survived.
+  it("fails when publish job calls any repository script", async () => {
+    root = await buildTree({
+      publishContent: wellFormedPublish.replace(
+        '          version="$(node -p \'require("./release-artifact/release-manifest.json").version\')"',
+        '          node scripts/check-npm-version-availability.mjs\n          version="$(node -p \'require("./release-artifact/release-manifest.json").version\')"',
+      ),
+    });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when publish job drops its own npm version gate", async () => {
+    const withoutGate = wellFormedPublish.replace(
+      "This release workflow supports npm 11.5.1 through npm 12.x",
+      "some other message",
+    );
+    expect(withoutGate).not.toBe(wellFormedPublish);
+    root = await buildTree({ publishContent: withoutGate });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when the registry probe loses its timeout", async () => {
+    const unbounded = wellFormedPublish.replace(
+      "AbortSignal.timeout(10000)",
+      "undefined",
+    );
+    expect(unbounded).not.toBe(wellFormedPublish);
+    root = await buildTree({ publishContent: unbounded });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when the registry probe stops distinguishing an unprovable state", async () => {
+    const twoState = wellFormedPublish.replace(
+      "unexpected status",
+      "ignored status",
+    );
+    expect(twoState).not.toBe(wellFormedPublish);
+    root = await buildTree({ publishContent: twoState });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when the probe stops pinning the registry", async () => {
+    const unpinned = wellFormedPublish.replace(
+      'registry !== "https://registry.npmjs.org"',
+      "!registry",
+    );
+    expect(unpinned).not.toBe(wellFormedPublish);
+    root = await buildTree({ publishContent: unpinned });
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBeGreaterThan(0);
     await cleanup();
