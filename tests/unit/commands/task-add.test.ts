@@ -543,3 +543,170 @@ describe("runTaskAdd — round-trip rollback (P83-T3)", () => {
     );
   });
 });
+
+describe("runTaskAdd — review contract", () => {
+  const boundaryContract = {
+    version: 1 as const,
+    mode: "boundary" as const,
+    stages: [
+      {
+        stage: "producer" as const,
+        disposition: "in_scope" as const,
+        claim: "The producer emits a stable envelope.",
+        refs: ["src/example.ts"],
+      },
+      {
+        stage: "consumer" as const,
+        disposition: "in_scope" as const,
+        claim: "The consumer validates the envelope.",
+        refs: ["src/example.ts"],
+      },
+      {
+        stage: "runner" as const,
+        disposition: "not_applicable" as const,
+        rationale: "No process is launched.",
+      },
+      {
+        stage: "os" as const,
+        disposition: "not_applicable" as const,
+        rationale: "No OS-specific behavior changes.",
+      },
+      {
+        stage: "security" as const,
+        disposition: "not_applicable" as const,
+        rationale: "No authority boundary is touched.",
+      },
+    ],
+    platforms: [
+      {
+        platform: "linux" as const,
+        disposition: "required" as const,
+        level: "integration" as const,
+        refs: ["src/example.ts"],
+      },
+      {
+        platform: "macos" as const,
+        disposition: "not_required" as const,
+        rationale: "No macOS-specific behavior changes.",
+      },
+      {
+        platform: "windows" as const,
+        disposition: "not_required" as const,
+        rationale: "No Windows-specific behavior changes.",
+      },
+    ],
+    evidence: [
+      {
+        id: "envelope-contract",
+        claim: "Producer and consumer agree on the envelope.",
+        level: "integration" as const,
+        refs: ["src/example.ts"],
+      },
+    ],
+  };
+
+  it("stores a valid boundary contract on the created task", async () => {
+    const result = await runTaskAdd({
+      cwd,
+      phaseId: "P1",
+      locale: "en-US",
+      nonInteractive: {
+        description: "Harden the envelope boundary",
+        type: "feature",
+        writes: ["src/example.ts"],
+        review_contract: boundaryContract,
+      },
+    });
+
+    const phase = parseYaml(
+      await readFile(join(cwd, result.phasePath), "utf8"),
+    ) as {
+      tasks: Array<{
+        id: string;
+        review_contract?: { mode?: string; stages?: unknown[] };
+      }>;
+    };
+    const t = phase.tasks[0]!;
+    expect(t.review_contract?.mode).toBe("boundary");
+    expect(t.review_contract?.stages).toHaveLength(5);
+  });
+
+  it("stores a valid minimal contract on a low-risk docs task", async () => {
+    const result = await runTaskAdd({
+      cwd,
+      phaseId: "P1",
+      locale: "en-US",
+      nonInteractive: {
+        description: "Document the envelope",
+        type: "docs",
+        ambiguity: "low",
+        risk: "low",
+        write_surface: "low",
+        review_contract: {
+          version: 1,
+          mode: "minimal",
+          rationale:
+            "Documentation-only change with no executable, platform, or security boundary.",
+        },
+      },
+    });
+
+    const phase = parseYaml(
+      await readFile(join(cwd, result.phasePath), "utf8"),
+    ) as { tasks: Array<{ review_contract?: { mode?: string } }> };
+    expect(phase.tasks[0]!.review_contract?.mode).toBe("minimal");
+  });
+
+  it("refuses minimal mode on a feature task and writes no phase YAML", async () => {
+    const before = await readFile(join(cwd, phasePath), "utf8");
+
+    await expect(
+      runTaskAdd({
+        cwd,
+        phaseId: "P1",
+        locale: "en-US",
+        nonInteractive: {
+          description: "Looks small enough",
+          type: "feature",
+          review_contract: {
+            version: 1,
+            mode: "minimal",
+            rationale: "Looks small enough to review quickly.",
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ code: "TASK_REVIEW_CONTRACT_INVALID" });
+
+    expect(await readFile(join(cwd, phasePath), "utf8")).toBe(before);
+  });
+
+  it("refuses a contract whose refs fall outside the task's declared scope", async () => {
+    await expect(
+      runTaskAdd({
+        cwd,
+        phaseId: "P1",
+        locale: "en-US",
+        nonInteractive: {
+          description: "Harden the envelope boundary",
+          type: "feature",
+          writes: ["src/other.ts"],
+          review_contract: boundaryContract,
+        },
+      }),
+    ).rejects.toMatchObject({ code: "TASK_REVIEW_CONTRACT_INVALID" });
+  });
+
+  it("leaves a task with no contract untouched", async () => {
+    const result = await runTaskAdd({
+      cwd,
+      phaseId: "P1",
+      locale: "en-US",
+      nonInteractive: { description: "No contract yet", type: "feature" },
+    });
+
+    const phase = parseYaml(
+      await readFile(join(cwd, result.phasePath), "utf8"),
+    ) as { tasks: Array<{ review_contract?: unknown }> };
+    expect(phase.tasks[0]!.review_contract).toBeUndefined();
+  });
+});

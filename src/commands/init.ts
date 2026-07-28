@@ -580,6 +580,11 @@ async function writeSamplePhase(
   verifyCommand: string,
 ): Promise<string | undefined> {
   const { createPhase } = await import("../core/services/createPhase.ts");
+  // The path createPhase will derive below. Needed up front because the sample
+  // tasks reference the phase file as their acceptance evidence, and the tasks
+  // are passed INTO createPhase. Kept in step with the `id` / `name` pair by the
+  // slug comment on the call itself; `init`'s golden test pins the real path.
+  const samplePhasePath = "design/phases/TUTORIAL-walkthrough.yaml";
   try {
     // The phase `name` becomes the file slug via createPhase's slugify().
     // Using just "Walkthrough" yields the file path
@@ -616,6 +621,77 @@ async function writeSamplePhase(
           status: "planned",
           description:
             "Tutorial-only task. Run `code-pact task context TUTORIAL-T1` to see the context pack, then `code-pact task complete TUTORIAL-T1` to mark it done. Delete this entire TUTORIAL phase (and its roadmap entry) before treating design/ as your project's source-of-truth.",
+          acceptance_refs: [samplePhasePath],
+          // A worked `boundary` contract. This task is a `feature`, so the
+          // restricted `minimal` form is not available to it — that pairing is
+          // exactly what the tutorial is meant to show. Every stage really is
+          // `not_applicable` here (the walkthrough changes no code), and each
+          // rationale says why rather than restating the disposition.
+          review_contract: {
+            version: 1,
+            mode: "boundary",
+            stages: [
+              {
+                stage: "producer",
+                disposition: "not_applicable",
+                rationale:
+                  "The walkthrough introduces no new artifact producer; it only reads the plan Code Pact already generated.",
+              },
+              {
+                stage: "consumer",
+                disposition: "not_applicable",
+                rationale:
+                  "Nothing new consumes the walkthrough's output — completing the task writes a progress event and nothing else.",
+              },
+              {
+                stage: "runner",
+                disposition: "not_applicable",
+                rationale:
+                  "The walkthrough adds no executable; the phase's verification command is the project's own, unchanged.",
+              },
+              {
+                stage: "os",
+                disposition: "not_applicable",
+                rationale:
+                  "No launch, path, or filesystem behavior differs by operating system.",
+              },
+              {
+                stage: "security",
+                disposition: "not_applicable",
+                rationale:
+                  "No shell, filesystem, network, or credential authority is crossed beyond the verification command already configured.",
+              },
+            ],
+            platforms: [
+              {
+                platform: "linux",
+                disposition: "not_required",
+                rationale:
+                  "The walkthrough introduces no platform-specific behavior to prove.",
+              },
+              {
+                platform: "macos",
+                disposition: "not_required",
+                rationale:
+                  "The walkthrough introduces no platform-specific behavior to prove.",
+              },
+              {
+                platform: "windows",
+                disposition: "not_required",
+                rationale:
+                  "The walkthrough introduces no platform-specific behavior to prove.",
+              },
+            ],
+            evidence: [
+              {
+                id: "walkthrough-verification",
+                claim:
+                  "The phase's verification command exits 0 on this project.",
+                level: "integration",
+                refs: [samplePhasePath],
+              },
+            ],
+          },
         },
         {
           id: "TUTORIAL-T2",
@@ -630,6 +706,16 @@ async function writeSamplePhase(
           depends_on: ["TUTORIAL-T1"],
           description:
             "Tutorial-only task. Demonstrates `code-pact task finalize TUTORIAL-T2 --write` after `task complete`. The `depends_on: [TUTORIAL-T1]` lets the tutorial demo the dependency field + the `task runbook` blocking-step output: `task runbook TUTORIAL-T2 --json` returns a blocking `manual_action` step at the head of `next_steps[]` until `task complete TUTORIAL-T1` runs. Safe to delete with the rest of TUTORIAL.",
+          // The counterpart to TUTORIAL-T1: a `docs` task with ambiguity, risk,
+          // and write_surface all low is the one shape that qualifies for the
+          // restricted `minimal` form, so the sample shows both modes side by
+          // side and why each task got the one it did.
+          review_contract: {
+            version: 1,
+            mode: "minimal",
+            rationale:
+              "Tutorial-only documentation step with no executable, platform, or security boundary.",
+          },
         },
       ],
     });

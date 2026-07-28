@@ -15,9 +15,84 @@ afterEach(async () => {
   if (cwd) await rm(cwd, { recursive: true, force: true });
 });
 
+/**
+ * Review-contract YAML for the fixture task, indented for a task entry.
+ *
+ * `boundary` is the default because the fixture task is a `feature`: minimal
+ * mode is restricted to low-risk docs / mechanical_refactor work, so a feature
+ * task can only be locked with a full boundary contract. Every ref points at
+ * `ref`, which the caller also declares in `writes`, so the ref-coverage rule
+ * holds for stage, platform, and evidence entries alike.
+ */
+function reviewContractLines(
+  kind: "boundary" | "minimal",
+  ref: string,
+): string[] {
+  if (kind === "minimal") {
+    return [
+      "    review_contract:",
+      "      version: 1",
+      "      mode: minimal",
+      "      rationale: Documentation-only change with no executable boundary.",
+    ];
+  }
+  const stage = (name: string, claim: string): string[] => [
+    `        - stage: ${name}`,
+    "          disposition: in_scope",
+    `          claim: ${claim}`,
+    "          refs:",
+    `            - ${ref}`,
+  ];
+  return [
+    "    review_contract:",
+    "      version: 1",
+    "      mode: boundary",
+    "      stages:",
+    ...stage("producer", "The producer emits a stable envelope."),
+    ...stage("consumer", "The consumer validates the envelope."),
+    ...stage("runner", "The validated command reaches the bounded runner."),
+    ...stage("os", "Windows launch semantics are exercised on Windows."),
+    ...stage("security", "The authority boundary fails closed."),
+    "      platforms:",
+    "        - platform: linux",
+    "          disposition: required",
+    "          level: integration",
+    "          refs:",
+    `            - ${ref}`,
+    "        - platform: macos",
+    "          disposition: not_required",
+    "          rationale: No macOS-specific behavior changes.",
+    "        - platform: windows",
+    "          disposition: required",
+    "          level: actual_platform",
+    "          refs:",
+    `            - ${ref}`,
+    "      evidence:",
+    "        - id: envelope-contract",
+    "          claim: Producer and consumer agree on the envelope.",
+    "          level: integration",
+    "          refs:",
+    `            - ${ref}`,
+    "        - id: windows-runtime",
+    "          claim: The real Windows launch succeeds.",
+    "          level: actual_platform",
+    "          platform: windows",
+    "          refs:",
+    `            - ${ref}`,
+  ];
+}
+
+type SetupOptions = {
+  /** Review contract to embed. `"none"` reproduces a pre-P90 task. */
+  reviewContract?: "boundary" | "minimal" | "none";
+  /** Task type, so a `docs` task can exercise valid minimal mode. */
+  taskType?: string;
+};
+
 async function setupProject(
   writes?: string[],
   reads?: string[],
+  options: SetupOptions = {},
 ): Promise<void> {
   await mkdir(join(cwd, "design", "phases"), { recursive: true });
   await mkdir(join(cwd, ".code-pact", "state"), { recursive: true });
@@ -30,7 +105,7 @@ async function setupProject(
 
   const taskBlock: string[] = [
     "  - id: P1-T1",
-    "    type: feature",
+    `    type: ${options.taskType ?? "feature"}`,
     "    ambiguity: low",
     "    risk: low",
     "    context_size: small",
@@ -47,6 +122,12 @@ async function setupProject(
   if (writes && writes.length > 0) {
     taskBlock.push("    writes:");
     for (const w of writes) taskBlock.push(`      - ${w}`);
+  }
+  const contractKind = options.reviewContract ?? "boundary";
+  if (contractKind !== "none") {
+    taskBlock.push(
+      ...reviewContractLines(contractKind, writes?.[0] ?? "src/a.ts"),
+    );
   }
 
   await writeFile(
@@ -144,5 +225,52 @@ describe("runTaskLock", () => {
     });
     expect(result.base_sha.length).toBe(40);
     expect(result.base_ref).toBe("HEAD");
+  });
+});
+
+describe("runTaskLock review contract", () => {
+  it("still locks a task that declares no review contract", async () => {
+    // Migration safety: the missing-contract refusal ships with the rollout
+    // policy, not with the field. Until then every task that locked before the
+    // field existed keeps locking exactly as it did.
+    await setupProject(["src/a.ts"], undefined, { reviewContract: "none" });
+    const result = await runTaskLock({ cwd, taskId: "P1-T1" });
+
+    expect(result.kind).toBe("locked");
+    const lock = await readContractLock(cwd, "P1-T1");
+    expect(lock?.contract.review_contract).toBeUndefined();
+  });
+
+  it("refuses minimal mode for a feature task", async () => {
+    await setupProject(["src/a.ts"], undefined, { reviewContract: "minimal" });
+    await expect(runTaskLock({ cwd, taskId: "P1-T1" })).rejects.toMatchObject({
+      code: "TASK_REVIEW_CONTRACT_INVALID",
+    });
+    expect(await readContractLock(cwd, "P1-T1")).toBeNull();
+  });
+
+  it("accepts minimal mode for a low-risk docs task", async () => {
+    await setupProject(["docs/example.md"], undefined, {
+      reviewContract: "minimal",
+      taskType: "docs",
+    });
+    const result = await runTaskLock({ cwd, taskId: "P1-T1" });
+    expect(result.kind).toBe("locked");
+
+    const lock = await readContractLock(cwd, "P1-T1");
+    expect(lock?.contract.review_contract?.mode).toBe("minimal");
+  });
+
+  it("stores the boundary contract in the lock body", async () => {
+    await setupProject(["src/a.ts"]);
+    await runTaskLock({ cwd, taskId: "P1-T1" });
+
+    const lock = await readContractLock(cwd, "P1-T1");
+    expect(lock?.contract.review_contract?.mode).toBe("boundary");
+    expect(lock?.contract.review_contract?.stages).toHaveLength(5);
+    expect(lock?.contract.review_contract?.platforms).toHaveLength(3);
+    expect(
+      lock?.contract.review_contract?.evidence?.map(e => e.id),
+    ).toEqual(["envelope-contract", "windows-runtime"]);
   });
 });

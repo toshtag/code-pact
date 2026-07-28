@@ -95,6 +95,21 @@ export async function cmdTaskLock(
           emitError(json, code, message);
           return 1;
         }
+        // A supplied review contract that contradicts its task is a declaration
+        // error the caller fixes in the phase YAML, so it exits 2 with the same
+        // structured envelope every other refusal uses — never the top-level
+        // internal-error path, which would leave an agent parsing `--json` with
+        // nothing machine-readable to act on. No lock file exists at this point:
+        // the check runs before the lock is written.
+        if (code === "TASK_REVIEW_CONTRACT_INVALID") {
+          const invalid = err as NodeJS.ErrnoException & {
+            issues?: { message: string; path: string; details: unknown }[];
+          };
+          emitError(json, code, message, {
+            data: { task_id: taskId, issues: invalid.issues ?? [] },
+          });
+          return 2;
+        }
         if (code === "TASK_REGISTRATION_SPEC_MISMATCH") {
           const mismatch = err as NodeJS.ErrnoException & {
             task_id?: string;

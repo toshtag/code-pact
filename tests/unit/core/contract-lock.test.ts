@@ -36,8 +36,75 @@ const ROADMAP = `phases:
     weight: 10
 `;
 
+/**
+ * The fixture task is a `feature`, so minimal mode is not available to it — the
+ * lock gate only accepts a full boundary contract. Every ref points at
+ * `src/example.ts`, the task's single declared write, so stage, platform, and
+ * evidence refs all stay inside the declared scope.
+ */
+const REVIEW_CONTRACT_LINES: string[] = (() => {
+  const stage = (name: string, claim: string): string[] => [
+    `        - stage: ${name}`,
+    "          disposition: in_scope",
+    `          claim: ${claim}`,
+    "          refs:",
+    "            - src/example.ts",
+  ];
+  return [
+    "    review_contract:",
+    "      version: 1",
+    "      mode: boundary",
+    "      stages:",
+    ...stage("producer", "The producer emits a stable envelope."),
+    ...stage("consumer", "The consumer validates the envelope."),
+    ...stage("runner", "The validated command reaches the bounded runner."),
+    ...stage("os", "Windows launch semantics are exercised on Windows."),
+    ...stage("security", "The authority boundary fails closed."),
+    "      platforms:",
+    "        - platform: linux",
+    "          disposition: required",
+    "          level: integration",
+    "          refs:",
+    "            - src/example.ts",
+    "        - platform: macos",
+    "          disposition: not_required",
+    "          rationale: No macOS-specific behavior changes.",
+    "        - platform: windows",
+    "          disposition: required",
+    "          level: actual_platform",
+    "          refs:",
+    "            - src/example.ts",
+    "      evidence:",
+    "        - id: envelope-contract",
+    "          claim: Producer and consumer agree on the envelope.",
+    "          level: integration",
+    "          refs:",
+    "            - src/example.ts",
+    "        - id: windows-runtime",
+    "          claim: The real Windows launch succeeds.",
+    "          level: actual_platform",
+    "          platform: windows",
+    "          refs:",
+    "            - src/example.ts",
+  ];
+})();
+
+/** The same contract as an object, for spec digests built in-test. */
+function reviewContractObject(): Record<string, unknown> {
+  return parseYaml(
+    ["review_contract:", ...REVIEW_CONTRACT_LINES.slice(1)]
+      .map(line => line.replace(/^ {4}/, ""))
+      .join("\n"),
+  ).review_contract as Record<string, unknown>;
+}
+
 function phaseYaml(
-  opts: { status?: string; requiresDecision?: boolean; full?: boolean } = {},
+  opts: {
+    status?: string;
+    requiresDecision?: boolean;
+    full?: boolean;
+    reviewContract?: boolean;
+  } = {},
 ): string {
   const status = opts.status ?? "planned";
   const requiresDecision =
@@ -51,6 +118,8 @@ function phaseYaml(
         "      - design/specs/P1-T1-task-spec.yaml",
       ]
     : [];
+  const reviewContract =
+    opts.reviewContract === false ? [] : REVIEW_CONTRACT_LINES;
   return [
     "id: P1",
     "name: Foundation",
@@ -79,12 +148,18 @@ function phaseYaml(
     ...emptyArrays,
     "    writes:",
     "      - src/example.ts",
+    ...reviewContract,
     "",
   ].join("\n");
 }
 
 async function setupProject(
-  opts: { status?: string; requiresDecision?: boolean; full?: boolean } = {},
+  opts: {
+    status?: string;
+    requiresDecision?: boolean;
+    full?: boolean;
+    reviewContract?: boolean;
+  } = {},
 ): Promise<void> {
   await mkdir(join(cwd, "design", "phases"), { recursive: true });
   await mkdir(join(cwd, ".code-pact", "state"), { recursive: true });
@@ -115,6 +190,7 @@ async function setupProject(
       status: opts.status,
       requiresDecision: opts.requiresDecision,
       full: opts.full,
+      reviewContract: opts.reviewContract,
     }),
     "utf8",
   );
@@ -176,7 +252,8 @@ async function createLockWithRegistration(
     description: "test",
     requires_decision: false,
     writes: ["src/example.ts"],
-  };
+    review_contract: reviewContractObject(),
+  } as unknown as Parameters<typeof taskRegistrationDigest>[1];
   const specDigest = taskRegistrationDigest("P1", task);
   const specCanonical = canonicalTaskRegistration("P1", task);
   const lockPath = join(cwd, ".code-pact", "state", "locks", "P1-T1.yaml");
@@ -250,7 +327,8 @@ async function createLockWithSpecFile(cwd: string) {
     reads: [] as string[],
     writes: ["src/example.ts"],
     acceptance_refs: ["design/specs/P1-T1-task-spec.yaml"],
-  };
+    review_contract: reviewContractObject(),
+  } as unknown as Parameters<typeof taskRegistrationDigest>[1];
 
   const spec = {
     schema_version: 1 as const,
@@ -357,5 +435,156 @@ describe("assertTaskContractCurrent spec-file drift (P83-T4)", () => {
       code: "TASK_CONTRACT_DRIFT",
       changed_fields: expect.arrayContaining(["registration_spec_file"]),
     });
+  });
+});
+
+describe("createTaskContractLock review contract", () => {
+  it("locks a task that declares no review contract", async () => {
+    // The missing-contract refusal is deferred to the enforcement stage, so
+    // every pre-field task and fixture keeps locking unchanged.
+    await setupProject({ requiresDecision: false, reviewContract: false });
+    const lock = await createTaskContractLock({ cwd, taskId: "P1-T1" });
+    expect(lock.kind).toBe("locked");
+  });
+
+  it("refuses a semantically invalid review contract", async () => {
+    await setupProject({ requiresDecision: false });
+    await mutatePhase(content =>
+      content.replace("        - stage: runner\n", "        - stage: producer\n"),
+    );
+    await expect(
+      createTaskContractLock({ cwd, taskId: "P1-T1" }),
+    ).rejects.toMatchObject({ code: "TASK_REVIEW_CONTRACT_INVALID" });
+  });
+
+  it("stores the review contract in the lock body", async () => {
+    await setupProject({ requiresDecision: false });
+    await createTaskContractLock({ cwd, taskId: "P1-T1" });
+
+    const lockPath = join(cwd, ".code-pact", "state", "locks", "P1-T1.yaml");
+    const lock = parseYaml(await readFile(lockPath, "utf8")) as {
+      contract: { review_contract?: { mode?: string; stages?: unknown[] } };
+    };
+    expect(lock.contract.review_contract?.mode).toBe("boundary");
+    expect(lock.contract.review_contract?.stages).toHaveLength(5);
+  });
+});
+
+describe("assertTaskContractCurrent review contract drift", () => {
+  it("passes when the review contract is unchanged", async () => {
+    await setupProject({ requiresDecision: false });
+    await createLockWithRegistration(cwd);
+
+    const result = await assertTaskContractCurrent({ cwd, taskId: "P1-T1" });
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects a stage claim edit after lock", async () => {
+    await setupProject({ requiresDecision: false });
+    await createLockWithRegistration(cwd);
+
+    await mutatePhase(content =>
+      content.replace(
+        "          claim: The authority boundary fails closed.",
+        "          claim: The authority boundary is reviewed by hand.",
+      ),
+    );
+
+    await expect(
+      assertTaskContractCurrent({ cwd, taskId: "P1-T1" }),
+    ).rejects.toMatchObject({
+      code: "TASK_CONTRACT_DRIFT",
+      changed_fields: ["review_contract"],
+    });
+  });
+
+  it("rejects a platform disposition downgrade after lock", async () => {
+    await setupProject({ requiresDecision: false });
+    await createLockWithRegistration(cwd);
+
+    await mutatePhase(content =>
+      content.replace(
+        [
+          "        - platform: windows",
+          "          disposition: required",
+          "          level: actual_platform",
+          "          refs:",
+          "            - src/example.ts",
+        ].join("\n"),
+        [
+          "        - platform: windows",
+          "          disposition: not_required",
+          "          rationale: Reconsidered after lock.",
+        ].join("\n"),
+      ),
+    );
+
+    await expect(
+      assertTaskContractCurrent({ cwd, taskId: "P1-T1" }),
+    ).rejects.toMatchObject({
+      code: "TASK_CONTRACT_DRIFT",
+      changed_fields: expect.arrayContaining(["review_contract"]),
+    });
+  });
+
+  it("rejects removing the review contract after lock", async () => {
+    await setupProject({ requiresDecision: false });
+    await createLockWithRegistration(cwd);
+
+    await mutatePhase(content =>
+      content.slice(0, content.indexOf("    review_contract:")) + "\n",
+    );
+
+    await expect(
+      assertTaskContractCurrent({ cwd, taskId: "P1-T1" }),
+    ).rejects.toMatchObject({
+      code: "TASK_CONTRACT_DRIFT",
+      changed_fields: expect.arrayContaining(["review_contract"]),
+    });
+  });
+
+  it("reads a historical lock that predates the review contract", async () => {
+    // A lock written before P90 has no `contract.review_contract`, and the task
+    // it locked has none either. Both sides are absent, so the digests agree and
+    // the historical lock stays readable and drift-free.
+    await setupProject({ requiresDecision: false, reviewContract: false });
+
+    const lockPath = join(cwd, ".code-pact", "state", "locks", "P1-T1.yaml");
+    await mkdir(join(cwd, ".code-pact", "state", "locks"), { recursive: true });
+    const { buildContract, contractDigest } = await import(
+      "../../../src/core/contract-lock.ts"
+    );
+    const { loadPhase } = await import("../../../src/core/plan/load-phase.ts");
+    const phase = await loadPhase(cwd, "design/phases/P1-foundation.yaml");
+    const task = phase.tasks!.find(t => t.id === "P1-T1")!;
+    const { spawnSync: spawn } = await import("node:child_process");
+    const baseSha = spawn("git", ["rev-parse", "HEAD"], {
+      cwd,
+      encoding: "utf8",
+    }).stdout.trim();
+    const blobSha = spawn(
+      "git",
+      ["rev-parse", `${baseSha}:design/phases/P1-foundation.yaml`],
+      { cwd, encoding: "utf8" },
+    ).stdout.trim();
+    const contract = buildContract(task, phase, baseSha, blobSha);
+    const historical = {
+      schema_version: 1,
+      task_id: "P1-T1",
+      phase_id: "P1",
+      phase_path: "design/phases/P1-foundation.yaml",
+      base_ref: "HEAD",
+      base_sha: baseSha,
+      phase_blob_sha: blobSha,
+      contract_digest: contractDigest(contract),
+      contract,
+      at: "2026-01-01T00:00:00.000Z",
+      actor: "agent",
+    };
+    await writeFile(lockPath, stringifyYaml(historical), "utf8");
+
+    const result = await assertTaskContractCurrent({ cwd, taskId: "P1-T1" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.lock).not.toBeNull();
   });
 });

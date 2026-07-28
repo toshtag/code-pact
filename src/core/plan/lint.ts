@@ -20,6 +20,8 @@ import {
   detectTaskWritesProtectedPath,
   detectTaskAcceptanceRefUnsafePath,
   detectTaskAcceptanceRefNotFound,
+  detectTaskReviewContractMissing,
+  detectTaskReviewContractInvalid,
 } from "./checks.ts";
 import { loadProtectedPaths } from "../rules/protected-paths.ts";
 import { projectRegularFilePresence } from "./checks/fs.ts";
@@ -150,6 +152,12 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
   const { paths: protectedPaths } = await loadProtectedPaths(opts.cwd);
   issues.push(...detectTaskWritesProtectedPath(phases, protectedPaths));
   issues.push(...detectTaskAcceptanceRefUnsafePath(phases));
+  // Review Contract (P90-T0). Both detectors are pure and run in the base lint,
+  // not behind --include-quality: a missing contract blocks `task lock`, so it
+  // has to be visible without an opt-in flag. The missing advisory is
+  // `affects_exit: false`; the invalid diagnostic is an exit-relevant error.
+  issues.push(...detectTaskReviewContractMissing(phases));
+  issues.push(...detectTaskReviewContractInvalid(phases));
   issues.push(...(await detectTaskDecisionRefNotFound(opts.cwd, phases)));
   issues.push(...(await detectTaskReadsNoMatch(opts.cwd, phases)));
   issues.push(...(await detectTaskAcceptanceRefNotFound(opts.cwd, phases)));

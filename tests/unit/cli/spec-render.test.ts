@@ -118,6 +118,9 @@ describe("CommandSpec derivation (P46)", () => {
         "write-surface",
         "verification-strength",
         "expected-duration",
+        // Single path to a review-contract fragment; a task has exactly one
+        // contract, so unlike --read / --write this flag is not repeatable.
+        "review-contract-file",
       ]) {
         expect(opts[name]).toEqual({ type: "string" });
       }
@@ -127,7 +130,7 @@ describe("CommandSpec derivation (P46)", () => {
       expect(opts.json).toEqual({ type: "boolean" });
     });
 
-    it("covers exactly the 16 documented flags (no addition, no drop)", () => {
+    it("covers exactly the 17 documented flags (no addition, no drop)", () => {
       expect(Object.keys(opts).sort()).toEqual(
         [
           "acceptance-ref",
@@ -140,6 +143,7 @@ describe("CommandSpec derivation (P46)", () => {
           "id",
           "json",
           "read",
+          "review-contract-file",
           "risk",
           "spec-file",
           "type",

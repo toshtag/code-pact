@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Task } from "../../../src/core/schemas/task.ts";
+import type { ReviewContract } from "../../../src/core/schemas/review-contract.ts";
 import {
   canonicalTaskRegistration,
   taskRegistrationDigest,
@@ -26,6 +27,68 @@ function baseTask(overrides: Partial<Task> = {}): Task {
     writes: [],
     acceptance_refs: [],
     ...overrides,
+  };
+}
+
+function reviewContract(): ReviewContract {
+  return {
+    version: 1,
+    mode: "boundary",
+    stages: [
+      {
+        stage: "producer",
+        disposition: "in_scope",
+        claim: "The producer emits a stable envelope.",
+        refs: ["src/a.ts"],
+      },
+      {
+        stage: "consumer",
+        disposition: "in_scope",
+        claim: "The consumer validates the envelope.",
+        refs: ["src/a.ts"],
+      },
+      {
+        stage: "runner",
+        disposition: "not_applicable",
+        rationale: "No process is launched.",
+      },
+      {
+        stage: "os",
+        disposition: "not_applicable",
+        rationale: "No OS-specific behavior changes.",
+      },
+      {
+        stage: "security",
+        disposition: "not_applicable",
+        rationale: "No authority boundary is touched.",
+      },
+    ],
+    platforms: [
+      {
+        platform: "linux",
+        disposition: "required",
+        level: "integration",
+        refs: ["src/a.ts"],
+      },
+      {
+        platform: "macos",
+        disposition: "not_required",
+        rationale: "No macOS-specific behavior changes.",
+      },
+      {
+        platform: "windows",
+        disposition: "not_required",
+        rationale: "No Windows-specific behavior changes.",
+      },
+    ],
+    evidence: [
+      {
+        id: "envelope-contract",
+        claim: "Producer and consumer agree on the envelope.",
+        level: "integration",
+        refs: ["src/a.ts"],
+      },
+    ],
   };
 }
 
@@ -144,5 +207,83 @@ describe("canonicalTaskRegistration", () => {
     expect(taskRegistrationDigest("P1", withEmpty)).not.toBe(
       taskRegistrationDigest("P1", omitted),
     );
+  });
+});
+
+describe("review_contract in the task registration contract", () => {
+  it("includes review_contract in the canonical JSON", () => {
+    const task = baseTask({ review_contract: reviewContract() });
+    const parsed = JSON.parse(canonicalTaskRegistration("P1", task)) as {
+      task: { review_contract?: ReviewContract };
+    };
+    expect(parsed.task.review_contract?.mode).toBe("boundary");
+    expect(parsed.task.review_contract?.stages).toHaveLength(5);
+  });
+
+  it("omits review_contract when the task declares none", () => {
+    const parsed = JSON.parse(canonicalTaskRegistration("P1", baseTask())) as {
+      task: { review_contract?: ReviewContract };
+    };
+    expect(parsed.task.review_contract).toBeUndefined();
+  });
+
+  it("makes presence and absence of review_contract change the digest", () => {
+    const withContract = baseTask({ review_contract: reviewContract() });
+    const without = baseTask();
+    expect(taskRegistrationDigest("P1", withContract)).not.toBe(
+      taskRegistrationDigest("P1", without),
+    );
+  });
+
+  it("makes a stage order change change the digest", () => {
+    const original = reviewContract();
+    const reordered = reviewContract();
+    reordered.stages = [
+      original.stages![1]!,
+      original.stages![0]!,
+      ...original.stages!.slice(2),
+    ];
+    expect(
+      taskRegistrationDigest("P1", baseTask({ review_contract: original })),
+    ).not.toBe(
+      taskRegistrationDigest("P1", baseTask({ review_contract: reordered })),
+    );
+  });
+
+  it("detects a platform disposition change at lock time", () => {
+    const expected = baseTask({ review_contract: reviewContract() });
+    const mutated = reviewContract();
+    mutated.platforms![1] = {
+      platform: "macos",
+      disposition: "required",
+      level: "integration",
+      refs: ["src/a.ts"],
+    };
+    const actual = baseTask({ review_contract: mutated });
+    expect(lockTimeRegistrationChangedFields(expected, actual)).toContain(
+      "review_contract",
+    );
+  });
+
+  it("detects an evidence change after lock", () => {
+    const expected = baseTask({ review_contract: reviewContract() });
+    const mutated = reviewContract();
+    mutated.evidence![0]!.claim = "Something else entirely.";
+    const actual = baseTask({ review_contract: mutated });
+    expect(postLockRegistrationChangedFields(expected, actual)).toContain(
+      "review_contract",
+    );
+  });
+
+  it("keeps a post-lock status-only change free of review_contract drift", () => {
+    const expected = baseTask({
+      status: "planned",
+      review_contract: reviewContract(),
+    });
+    const actual = baseTask({
+      status: "done",
+      review_contract: reviewContract(),
+    });
+    expect(postLockRegistrationChangedFields(expected, actual)).toEqual([]);
   });
 });

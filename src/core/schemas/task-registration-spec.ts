@@ -10,6 +10,7 @@ import {
   ExpectedDuration,
 } from "./task.ts";
 import { DecisionRefPath } from "./decision-ref.ts";
+import { ReviewContract } from "./review-contract.ts";
 
 /**
  * Strict, lossless task-registration spec.
@@ -20,6 +21,14 @@ import { DecisionRefPath } from "./decision-ref.ts";
  *
  * The `status` is pinned to `planned` because registration is always a new
  * task; historical states must use `phase import`.
+ *
+ * `review_contract` (P90-T0) is the one OPTIONAL field. Spec files written
+ * before P90 exist on disk and are re-parsed by `assertTaskContractCurrent` for
+ * every lock that stored a `spec_path`; requiring the field would turn those
+ * historical locks into permanent drift failures. Presence is enforced where it
+ * belongs — the lock gate — while losslessness still holds here, because a spec
+ * that declares a contract the phase task does not (or declares a different one)
+ * diverges in the registration digest.
  */
 export const TaskRegistrationSpec = z
   .object({
@@ -43,6 +52,7 @@ export const TaskRegistrationSpec = z
         reads: z.array(z.string().min(1)),
         writes: z.array(z.string().min(1)),
         acceptance_refs: z.array(z.string().min(1)),
+        review_contract: ReviewContract.optional(),
       })
       .strict(),
   })

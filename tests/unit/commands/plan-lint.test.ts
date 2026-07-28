@@ -53,6 +53,49 @@ tasks:
     expected_duration: short
     status: planned
     description: Implements the thing
+    writes:
+      - src/example.ts
+    review_contract:
+      version: 1
+      mode: boundary
+      stages:
+        - stage: producer
+          disposition: in_scope
+          claim: The thing emits a stable result.
+          refs:
+            - src/example.ts
+        - stage: consumer
+          disposition: in_scope
+          claim: The caller validates the result.
+          refs:
+            - src/example.ts
+        - stage: runner
+          disposition: not_applicable
+          rationale: No process is launched.
+        - stage: os
+          disposition: not_applicable
+          rationale: No OS-specific behavior changes.
+        - stage: security
+          disposition: not_applicable
+          rationale: No authority boundary is touched.
+      platforms:
+        - platform: linux
+          disposition: required
+          level: integration
+          refs:
+            - src/example.ts
+        - platform: macos
+          disposition: not_required
+          rationale: No macOS-specific behavior changes.
+        - platform: windows
+          disposition: not_required
+          rationale: No Windows-specific behavior changes.
+      evidence:
+        - id: result-contract
+          claim: The producer and the caller agree on the result.
+          level: integration
+          refs:
+            - src/example.ts
 `,
     "utf8",
   );

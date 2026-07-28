@@ -8,7 +8,13 @@
 // private to this module.
 
 import { parseArgs } from "node:util";
+import { parse as parseYaml } from "yaml";
 import { strictParse, strictParseAlias, ConfigError } from "../../lib/argv.ts";
+import { ReviewContract } from "../../core/schemas/review-contract.ts";
+import {
+  resolveExplicitUserReadPath,
+  readExplicitUserText,
+} from "../../core/project-fs/index.ts";
 import { cmdTaskExecute } from "./task-execute.ts";
 import { cmdTaskLock } from "./task-lock.ts";
 import { cmdReviewBundle } from "./review-bundle.ts";
@@ -242,12 +248,91 @@ const TASK_ADD_NON_INTERACTIVE_ONLY_FLAGS = [
   "read",
   "write",
   "acceptance-ref",
+  "review-contract-file",
 ] as const;
 
 type LocaleMessages = (typeof messages)[Locale];
 
 function emitConfigError(message: string, json: boolean): void {
   emitError(json, "CONFIG_ERROR", message);
+}
+
+/**
+ * Read `--review-contract-file` into a parsed `review_contract`.
+ *
+ * The file holds the contract fragment ITSELF, not a whole task-registration
+ * spec — `--spec-file` already covers that and carries its own contract, which
+ * is why the two flags are mutually exclusive.
+ *
+ * Two failure classes, deliberately distinct:
+ *   - the FILE is unusable (outside the project, missing, not YAML/JSON) →
+ *     `CONFIG_ERROR`, the same as every other bad path argument.
+ *   - the CONTRACT is unusable (wrong shape, unknown key, bad enum) →
+ *     `TASK_REVIEW_CONTRACT_INVALID`, so an agent gets one code for "your
+ *     contract is wrong" whether the problem is structural or semantic. The
+ *     semantic half runs later, against the fully-built task.
+ *
+ * JSON parses as YAML, so both formats work without a format flag.
+ */
+async function readReviewContractFile(
+  cwd: string,
+  path: string,
+  json: boolean,
+): Promise<
+  { ok: true; contract: ReviewContract } | { ok: false; exitCode: number }
+> {
+  let raw: string;
+  try {
+    raw = await readExplicitUserText(
+      await resolveExplicitUserReadPath(cwd, path),
+    );
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    const detail =
+      code === "ENOENT"
+        ? "not found"
+        : code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED"
+          ? "outside the project or not a safe path"
+          : "unreadable";
+    emitConfigError(
+      `task add: --review-contract-file "${path}" is ${detail}.`,
+      json,
+    );
+    return { ok: false, exitCode: 2 };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(raw) as unknown;
+  } catch (err) {
+    emitConfigError(
+      `task add: --review-contract-file "${path}" is not valid YAML or JSON: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+      json,
+    );
+    return { ok: false, exitCode: 2 };
+  }
+
+  const result = ReviewContract.safeParse(parsed);
+  if (!result.success) {
+    const issues = result.error.issues.map(i => ({
+      message: i.message,
+      path: `review_contract${i.path.length > 0 ? `.${i.path.join(".")}` : ""}`,
+      details: { reason: "schema_invalid" as const },
+    }));
+    emitError(
+      json,
+      "TASK_REVIEW_CONTRACT_INVALID",
+      `task add: --review-contract-file "${path}" is not a valid review contract: ${issues
+        .map(i => `${i.path}: ${i.message}`)
+        .join("; ")}`,
+      { data: { issues } },
+    );
+    return { ok: false, exitCode: 2 };
+  }
+
+  return { ok: true, contract: result.data };
 }
 
 /**
@@ -582,6 +667,9 @@ async function cmdTaskAdd(
       "read",
       "write",
       "acceptance-ref",
+      // A registration spec carries its own `review_contract`, so accepting a
+      // second source would leave two contracts with no defined precedence.
+      "review-contract-file",
     ].filter(name => {
       const v = values[name];
       if (Array.isArray(v)) return v.length > 0;
@@ -802,6 +890,25 @@ async function cmdTaskAdd(
         ? { acceptance_refs: asStringArray(values["acceptance-ref"])! }
         : {}),
     };
+
+    // Read the review contract AFTER the field flags so a malformed enum is
+    // reported before a filesystem read is attempted. Only the shape is
+    // checked here; the semantic rules depend on the finished task (its type,
+    // risk, and declared scope), so they run in `runTaskAdd` once the task is
+    // built — the same check `task lock` applies.
+    const reviewContractFile =
+      typeof values["review-contract-file"] === "string"
+        ? (values["review-contract-file"] as string)
+        : undefined;
+    if (reviewContractFile !== undefined) {
+      const loaded = await readReviewContractFile(
+        cwd,
+        reviewContractFile,
+        json,
+      );
+      if (!loaded.ok) return loaded.exitCode;
+      nonInteractiveSpec.review_contract = loaded.contract;
+    }
   }
 
   // Advisory write lock: serialize task-add (phase YAML write)
@@ -861,6 +968,22 @@ async function cmdTaskAdd(
               : {},
           );
           return code === "DUPLICATE_TASK_ID" ? 1 : 2;
+        }
+        // The supplied contract parsed but contradicts the task it was attached
+        // to. Structured, with every failing rule, so the author can repair it
+        // without re-deriving the rules. The phase YAML is never written.
+        if (code === "TASK_REVIEW_CONTRACT_INVALID") {
+          const invalid = err as NodeJS.ErrnoException & {
+            task_id?: string;
+            issues?: { message: string; path: string; details: unknown }[];
+          };
+          emitError(json, code, message, {
+            data: {
+              task_id: invalid.task_id,
+              issues: invalid.issues ?? [],
+            },
+          });
+          return 2;
         }
         if (code === "CONFIG_ERROR") {
           // Contained roadmap/phase loader refusal → structured, not exit 3.
@@ -2590,6 +2713,24 @@ function emitTaskCommonError(
       outCode = "TASK_CANCELLED";
       emitError(json, outCode, msg);
       return 2;
+    // `task start` auto-locks a task that has no lock yet, so the invalid
+    // review-contract refusal `task lock` raises can surface here too. It is a
+    // declaration error the caller fixes in the phase YAML → exit 2 with a
+    // structured envelope, never the uncoded internal-error path. The error
+    // carries every failing rule so an agent can repair without re-deriving
+    // them; each entry has a machine-readable `details.reason`.
+    case "TASK_REVIEW_CONTRACT_INVALID": {
+      const issues =
+        (
+          err as NodeJS.ErrnoException & {
+            issues?: { message: string; path: string; details: unknown }[];
+          }
+        ).issues ?? [];
+      emitError(json, "TASK_REVIEW_CONTRACT_INVALID", err.message, {
+        data: { task_id: taskId, issues },
+      });
+      return 2;
+    }
     // Control-plane integrity error from the shared resolver / plan-state loaders.
     case "PHASE_SNAPSHOT_INVALID":
       msg = err.message;

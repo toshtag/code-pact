@@ -18,6 +18,8 @@ import {
   parseTaskRegistrationSpec,
 } from "./task-registration-spec.ts";
 import { assertTaskLifecycleNotCancelled } from "./task-cancellation.ts";
+import { ReviewContract } from "./schemas/review-contract.ts";
+import { assertSuppliedReviewContractValid } from "./review-contract.ts";
 import {
   readOwnedText,
   readExplicitUserText,
@@ -48,6 +50,12 @@ const Contract = z.object({
   acceptance_refs: z.array(z.string()),
   definition_of_done: z.array(z.string()),
   verification_commands: z.array(z.string()),
+  // P90-T0. OPTIONAL so every lock written before the field existed still
+  // parses — including P90-T0's own bootstrap lock, which was created by a
+  // binary that did not know about review contracts. Locks created from now on
+  // always carry it, because `createTaskContractLock` refuses to write a lock
+  // for a task that declares none.
+  review_contract: ReviewContract.optional(),
   base_sha: z.string(),
   phase_blob_sha: z.string(),
 });
@@ -188,6 +196,13 @@ export function buildContract(
     acceptance_refs: sortedCopy(task.acceptance_refs),
     definition_of_done: sortedCopy(phase.definition_of_done),
     verification_commands: sortedCopy(phase.verification.commands),
+    // NOT sorted, unlike the ref arrays above: the review contract's stage,
+    // platform, and evidence order is part of the declaration, and reordering it
+    // is a change the lock should catch. `canonicalJson` (used for the digest)
+    // sorts object KEYS but preserves array order, which is exactly right here.
+    ...(task.review_contract !== undefined
+      ? { review_contract: task.review_contract }
+      : {}),
     base_sha: baseSha,
     phase_blob_sha: phaseBlobSha,
   };
@@ -299,6 +314,14 @@ export async function createTaskContractLock(
     throw err;
   }
 
+  // A SUPPLIED review contract that contradicts its task is refused before any
+  // git work and before the lock file is written, so an incoherent contract
+  // never reaches the immutable lock or the registration digest. A task that
+  // declares NO contract still locks: the missing-contract refusal ships with
+  // the migration, together with the rollout policy that keeps existing
+  // projects working. Plan lint's advisory is what surfaces the gap today.
+  assertSuppliedReviewContractValid(task);
+
   await assertWorktreeClean(cwd);
 
   const baseRef = opts.baseRef ?? "HEAD";
@@ -390,6 +413,14 @@ function arraysEqual(a: unknown[], b: unknown[]): boolean {
   return true;
 }
 
+/** Deep contract comparison; `undefined` on both sides is equal, which is what
+ *  keeps a pre-P90 lock of a pre-P90 task drift-free. */
+function reviewContractsEqual(a: unknown, b: unknown): boolean {
+  if (a === undefined && b === undefined) return true;
+  if (a === undefined || b === undefined) return false;
+  return canonicalJson(a) === canonicalJson(b);
+}
+
 function changedContractFields(locked: Contract, current: Contract): string[] {
   const fields: string[] = [];
   if (locked.description !== current.description) fields.push("description");
@@ -405,6 +436,11 @@ function changedContractFields(locked: Contract, current: Contract): string[] {
     fields.push("definition_of_done");
   if (!arraysEqual(locked.verification_commands, current.verification_commands))
     fields.push("verification_commands");
+  // Deep, key-order-independent comparison — the same `canonicalJson` the
+  // digest uses, so a contract that reformats identically never reports drift
+  // while any change to a stage, platform, claim, evidence entry, or ref does.
+  if (!reviewContractsEqual(locked.review_contract, current.review_contract))
+    fields.push("review_contract");
   if (locked.base_sha !== current.base_sha) fields.push("base_sha");
   if (locked.phase_blob_sha !== current.phase_blob_sha)
     fields.push("phase_blob_sha");
