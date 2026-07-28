@@ -132,3 +132,24 @@ tasks:
       - tests/unit/commands/task-lock.test.ts
       - tests/unit/core/contract-lock.test.ts
       - tests/unit/commands/task-add.test.ts
+  - id: P90-T0B
+    type: feature
+    ambiguity: medium
+    risk: high
+    context_size: large
+    write_surface: high
+    verification_strength: strong
+    expected_duration: long
+    status: planned
+    description: >
+      Migrate the repository's own task fixtures behind a single test-only
+      review-contract helper, add a project-level review_contract_policy of
+      advisory or required so an existing plan is not made unlockable by the
+      upgrade, and activate the missing-contract refusal in task lock and in the
+      task start auto-lock. Publish TASK_REVIEW_CONTRACT_REQUIRED with structured
+      JSON and human-readable CLI output, and switch this repository to
+      required. The declared read/write scope and this task's own review contract
+      are settled at its planning commit, before it is locked.
+    requires_decision: false
+    depends_on:
+      - P90-T0A
