@@ -7,26 +7,39 @@
 //
 // Usage:
 //   node scripts/check-package-tarball.mjs --pack-json pack.json
+//   node scripts/check-package-tarball.mjs --pack-json pack.json \
+//     --tarball-dir /path/to/packed --metadata-out checked-pack.json
 //
-// The --pack-json argument is the path to `npm pack --json` output.
+// The --pack-json argument is the path to `npm pack --json` output, read in
+// whichever shape the running npm emits (see scripts/npm-pack-json.mjs).
+// --tarball-dir locates the tarball when `npm pack --pack-destination` put it
+// somewhere other than the repository root. --metadata-out writes the verified
+// name/version/filename, and is written only after the tarball passes, so a
+// consumer reading it never has to re-parse the raw npm payload itself.
 
-import { readFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { readFile, mkdtemp, rm, writeFile, rename } from "node:fs/promises";
 import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve, join } from "node:path";
+import { dirname, resolve, join, basename } from "node:path";
 import { tmpdir } from "node:os";
+import { extractPackRecord } from "./npm-pack-json.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
  * Parse CLI arguments.
- * @returns {{packJson: string}}
+ * @returns {{packJson?: string, tarballDir?: string, metadataOut?: string}}
  */
 function parseArgs(argv) {
   const args = {};
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--pack-json" && i + 1 < argv.length) {
       args.packJson = argv[++i];
+    } else if (argv[i] === "--tarball-dir" && i + 1 < argv.length) {
+      args.tarballDir = argv[++i];
+    } else if (argv[i] === "--metadata-out" && i + 1 < argv.length) {
+      args.metadataOut = argv[++i];
     }
   }
   return args;
@@ -302,6 +315,80 @@ export async function checkPackageTarball(opts) {
   return { ok: problems.length === 0, problems };
 }
 
+/**
+ * Write the verified pack metadata atomically.
+ *
+ * The temp name is unpredictable and created exclusively (`wx`), so a
+ * pre-planted symlink at the temp path is refused rather than written through.
+ *
+ * @param {string} targetPath - destination for the canonical metadata
+ * @param {{name: string, version: string, filename: string}} record
+ * @returns {Promise<string>} the resolved destination path
+ */
+export async function writePackMetadata(targetPath, record) {
+  const target = resolve(targetPath);
+  const tempPath = join(
+    dirname(target),
+    `.${basename(target)}.${randomBytes(8).toString("hex")}.tmp`,
+  );
+  const body = `${JSON.stringify(
+    { name: record.name, version: record.version, filename: record.filename },
+    null,
+    2,
+  )}\n`;
+  await writeFile(tempPath, body, { encoding: "utf8", flag: "wx" });
+  await rename(tempPath, target);
+  return target;
+}
+
+/**
+ * Read the pack record, inspect the tarball it names, and — only when the
+ * inspection passes — publish the canonical metadata.
+ *
+ * Separated from `main` for testability; the ordering is the point, so a
+ * failed inspection can never leave metadata behind for a consumer to trust.
+ *
+ * @param {object} opts
+ * @param {unknown} opts.payload - parsed `npm pack --json` output
+ * @param {object} opts.repoPkg - parsed repository package.json
+ * @param {string} [opts.tarballDir] - directory holding the packed tarball
+ * @param {string} [opts.metadataOut] - where to write verified metadata
+ * @param {function} [opts.checker] - injectable tarball inspector
+ * @param {function} [opts.metadataWriter] - injectable metadata writer
+ * @returns {Promise<{ok: boolean, problems: string[], record: object, metadataPath: string|null}>}
+ */
+export async function inspectPackedTarball(opts) {
+  const {
+    payload,
+    repoPkg,
+    tarballDir,
+    metadataOut,
+    checker = checkPackageTarball,
+    metadataWriter = writePackMetadata,
+  } = opts;
+
+  const record = extractPackRecord(payload, {
+    expectedName: repoPkg.name,
+    expectedVersion: repoPkg.version,
+  });
+
+  const baseDir = tarballDir ? resolve(tarballDir) : repoRoot;
+  const result = await checker({
+    tarballPath: resolve(baseDir, record.filename),
+    repoPkg,
+  });
+
+  if (!result.ok) {
+    return { ...result, record, metadataPath: null };
+  }
+
+  const metadataPath = metadataOut
+    ? await metadataWriter(metadataOut, record)
+    : null;
+
+  return { ...result, record, metadataPath };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.packJson) {
@@ -309,10 +396,13 @@ async function main() {
     process.exit(1);
   }
 
-  const packData = JSON.parse(await readFile(args.packJson, "utf8"));
-  const tarballName = packData[0]?.filename;
-  if (!tarballName) {
-    console.error("check-package-tarball: no tarball filename in pack JSON");
+  let payload;
+  try {
+    payload = JSON.parse(await readFile(args.packJson, "utf8"));
+  } catch (err) {
+    console.error(
+      `check-package-tarball: cannot read pack JSON at ${args.packJson}: ${err.message}`,
+    );
     process.exit(1);
   }
 
@@ -320,10 +410,18 @@ async function main() {
     await readFile(resolve(repoRoot, "package.json"), "utf8"),
   );
 
-  const result = await checkPackageTarball({
-    tarballPath: resolve(repoRoot, tarballName),
-    repoPkg,
-  });
+  let result;
+  try {
+    result = await inspectPackedTarball({
+      payload,
+      repoPkg,
+      tarballDir: args.tarballDir,
+      metadataOut: args.metadataOut,
+    });
+  } catch (err) {
+    console.error(`check-package-tarball: ${err.message}`);
+    process.exit(1);
+  }
 
   if (!result.ok) {
     console.error(
@@ -334,7 +432,7 @@ async function main() {
   }
 
   console.log(
-    `check-package-tarball: OK — tarball ${tarballName} passed all checks`,
+    `check-package-tarball: OK — tarball ${result.record.filename} passed all checks`,
   );
 }
 
