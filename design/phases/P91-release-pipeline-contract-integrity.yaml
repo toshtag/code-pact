@@ -3,7 +3,7 @@ name: Release Pipeline Contract Integrity
 weight: 1
 confidence: high
 risk: high
-status: in_progress
+status: done
 objective: Keep the release toolchain, the npm pack metadata parser, the tarball
   checker, the registry probe, and the privileged publish job under one
   fail-closed contract, so a signed tag cannot progress past artifact
@@ -48,7 +48,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: "Make the privileged publish job self-contained and keep every
       external command's process result separate from its output value: the npm
       version command and the registry probe are each checked as a process
