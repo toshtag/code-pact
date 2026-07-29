@@ -1,0 +1,260 @@
+id: P91
+name: Release Pipeline Contract Integrity
+weight: 1
+confidence: high
+risk: high
+status: done
+objective: Keep the release toolchain, the npm pack metadata parser, the tarball
+  checker, the registry probe, and the privileged publish job under one
+  fail-closed contract, so a signed tag cannot progress past artifact
+  preparation or npm publication when the active runner toolchain, the pack
+  metadata, the registry state, or the verified artifact handoff cannot be
+  proven safe.
+non_goals:
+  - Change the installed package or the public CLI contract
+  - Change the release version or changelog metadata
+  - Publish a tag, an npm package, or a GitHub Release
+  - Implement P90-T1 or fix the verification-ledger stress issue tracked as 573
+  - Wire the branch-drift gate into CI
+  - Give the privileged publish job a checkout or repository code
+  - Admit an unmeasured future npm major automatically
+definition_of_done:
+  - "The privileged publish job needs no checkout and no repository script: it
+    validates its own toolchain, probes the pinned registry with bounded inline
+    logic, and publishes only after the manifest, digest, and availability
+    proofs hold."
+  - "Every external command whose result the release depends on is checked as a
+    process before its output is read as a value: the npm version command and
+    the registry probe each report success and result on separate channels."
+  - Both the prepare and the publish runner independently admit only npm majors
+    whose pack payload container has been measured.
+  - Unknown payloads, unsupported or unverifiable npm toolchains, an unprovable
+    registry state, and unsafe filenames fail closed before publication.
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm exec vitest run tests/unit/scripts/npm-pack-json.test.ts
+      tests/unit/scripts/check-package-tarball.test.ts
+      tests/unit/scripts/check-supply-chain-invariants.test.ts
+      tests/unit/workflows/publish-workflow.test.ts
+    - node scripts/check-supply-chain-invariants.mjs
+    - git diff --check
+tasks:
+  - id: P91-T1
+    type: bugfix
+    ambiguity: low
+    risk: high
+    context_size: small
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: "Make the privileged publish job self-contained and keep every
+      external command's process result separate from its output value: the npm
+      version command and the registry probe are each checked as a process
+      before their output is read, so no repository script, failed toolchain
+      query, unknown pack payload, or unexpected probe failure can reach npm
+      publish."
+    reads:
+      - package.json
+      - scripts/check-npm-version-availability.mjs
+      - docs/maintainers/releasing.md
+      - docs/dogfood.md
+    writes:
+      - design/phases/P91-release-pipeline-contract-integrity.yaml
+      - .github/workflows/publish.yml
+      - scripts/check-supply-chain-invariants.mjs
+      - scripts/check-package-tarball.mjs
+      - scripts/check-package-tarball.d.mts
+      - scripts/npm-pack-json.mjs
+      - scripts/npm-pack-json.d.mts
+      - tests/unit/scripts/npm-pack-json.test.ts
+      - tests/unit/scripts/check-package-tarball.test.ts
+      - tests/unit/scripts/check-supply-chain-invariants.test.ts
+      - tests/unit/workflows/publish-workflow.test.ts
+    acceptance_refs:
+      - tests/unit/scripts/check-package-tarball.test.ts
+      - tests/unit/scripts/check-supply-chain-invariants.test.ts
+      - tests/unit/workflows/publish-workflow.test.ts
+    review_contract:
+      version: 1
+      mode: boundary
+      stages:
+        - stage: producer
+          disposition: in_scope
+          claim: >
+            The prepare and publish jobs each capture `npm --version` exactly
+            once on their own runner and proceed only if that command exits
+            successfully and its complete stdout is a stable version in the
+            measured 11.5.1-through-12.x range. The prepare job additionally
+            admits only the npm 11 and npm 12 pack containers the canonical
+            parser has measured.
+          refs:
+            - .github/workflows/publish.yml
+            - tests/unit/workflows/publish-workflow.test.ts
+        - stage: consumer
+          disposition: in_scope
+          claim: >
+            One canonical parser reads both measured containers, validates the
+            single expected package record against the repository name and
+            version, and refuses an unsafe tarball filename; the tarball checker
+            publishes canonical metadata only after content inspection succeeds.
+          refs:
+            - scripts/npm-pack-json.mjs
+            - scripts/check-package-tarball.mjs
+            - tests/unit/scripts/npm-pack-json.test.ts
+            - tests/unit/scripts/check-package-tarball.test.ts
+        - stage: runner
+          disposition: in_scope
+          claim: >
+            The privileged publish shell treats every external command's process
+            result and its output as separate authorities. It needs no checkout
+            and no repository script; a valid-looking version string is never
+            proof that `npm --version` succeeded; and it reaches npm publish
+            only when the probe process succeeds and reports the exact state
+            `absent`. A failed version process stops before manifest
+            verification, registry probing, or publish, and a non-zero probe
+            process is always an unproven probe.
+          refs:
+            - .github/workflows/publish.yml
+            - scripts/check-supply-chain-invariants.mjs
+            - tests/unit/workflows/publish-workflow.test.ts
+            - tests/unit/scripts/check-supply-chain-invariants.test.ts
+        - stage: os
+          disposition: in_scope
+          claim: >
+            Both production jobs run under Ubuntu's POSIX shell, and Linux CI
+            executes the workflow's own option-terminated tarball move and the
+            whole privileged publish shell with a real interpreter rather than
+            asserting on their text.
+          refs:
+            - .github/workflows/publish.yml
+            - tests/unit/workflows/publish-workflow.test.ts
+        - stage: security
+          disposition: in_scope
+          claim: >
+            A syntax error, a runtime exception raised after fetch fulfillment,
+            a rejected fetch, an unexpected HTTP status, an unknown probe
+            output, a version command that prints an allowed version and exits
+            non-zero, an unsupported or malformed npm version, an unknown or
+            ambiguous pack payload, a package or version mismatch, an unsafe
+            tarball filename, and a failed tarball inspection all fail closed.
+            Process success and output validity are separate authorities: a
+            generic Node exit 1 is never read as proof that a version is absent,
+            and a well-formed string is never read as proof that the command
+            producing it succeeded.
+          refs:
+            - .github/workflows/publish.yml
+            - scripts/npm-pack-json.mjs
+            - scripts/check-package-tarball.mjs
+            - tests/unit/scripts/npm-pack-json.test.ts
+            - tests/unit/workflows/publish-workflow.test.ts
+      platforms:
+        - platform: linux
+          disposition: required
+          level: actual_platform
+          refs:
+            - tests/unit/workflows/publish-workflow.test.ts
+        - platform: macos
+          disposition: not_required
+          rationale: >
+            No production release job runs on macOS. Local npm 11 and npm 12
+            probes may be executed there, but no macOS-specific production path
+            exists.
+        - platform: windows
+          disposition: not_required
+          rationale: >
+            No production release job runs on Windows. Windows path syntax is
+            covered as hostile metadata input by platform-neutral parser unit
+            tests, not as a platform whose runtime behavior is claimed.
+      evidence:
+        - id: prepare-runner-npm-contract
+          claim: >
+            The prepare runner accepts npm 11.5.1 through 12.x and refuses
+            older, future-major, prerelease, malformed, and incomplete versions.
+          level: unit
+          refs:
+            - tests/unit/workflows/publish-workflow.test.ts
+        - id: publish-runner-npm-contract
+          claim: >
+            The fresh publish runner independently applies the same range before
+            it probes the registry or invokes npm publish.
+          level: unit
+          refs:
+            - tests/unit/workflows/publish-workflow.test.ts
+        - id: measured-payload-shapes
+          claim: >
+            The canonical parser accepts the measured npm 11 array and npm 12
+            package-keyed object containers and refuses every unknown or
+            ambiguous one without falling back to reading index 0.
+          level: unit
+          refs:
+            - tests/unit/scripts/npm-pack-json.test.ts
+        - id: unsafe-filename-refusal
+          claim: >
+            Absolute, drive-qualified, traversing, nested, non-tgz, NUL-bearing,
+            and option-prefixed tarball names are refused before the value can
+            reach a shell.
+          level: unit
+          refs:
+            - tests/unit/scripts/npm-pack-json.test.ts
+        - id: verified-metadata-publication
+          claim: >
+            Canonical metadata is written only after tarball inspection
+            succeeds, and a failed inspection does not invoke the metadata
+            writer.
+          level: unit
+          refs:
+            - tests/unit/scripts/check-package-tarball.test.ts
+        - id: privileged-job-self-contained
+          claim: >
+            The publish shell runs to completion in an isolated workspace
+            holding only the downloaded release artifact and tool stubs — no
+            checkout, no scripts directory — and invokes no repository script
+            path.
+          level: integration
+          refs:
+            - tests/unit/workflows/publish-workflow.test.ts
+        - id: registry-probe-state-channel
+          claim: >
+            A successfully completed probe emits exactly `exists` or `absent` on
+            stdout and exits zero. Any process failure is unproven and stops the
+            workflow, and only the exact `absent` state permits npm publish.
+          level: integration
+          refs:
+            - tests/unit/workflows/publish-workflow.test.ts
+        - id: unexpected-probe-failure
+          claim: >
+            An exception raised after fetch fulfillment makes the probe process
+            fail and prevents npm publish, rather than being mistaken for an
+            absent package version.
+          level: integration
+          refs:
+            - tests/unit/workflows/publish-workflow.test.ts
+        - id: privileged-job-invariants
+          claim: >
+            The supply-chain gate refuses any repository script reference or
+            checkout in the publish job, and requires its own npm gate, a pinned
+            registry, a bounded probe, an explicit state channel, and refusal of
+            both a failed probe process and an unknown state.
+          level: unit
+          refs:
+            - tests/unit/scripts/check-supply-chain-invariants.test.ts
+        - id: npm-version-process-boundary
+          claim: >
+            Both workflow jobs refuse an npm executable that prints a supported
+            version and exits non-zero. Each invokes `npm --version` exactly
+            once, validates its process result first, and only then validates
+            the captured version string.
+          level: integration
+          refs:
+            - tests/unit/workflows/publish-workflow.test.ts
+        - id: linux-mv-option-boundary
+          claim: >
+            Linux CI executes the workflow's own `mv --` handoff with a real
+            shell and moves a tarball whose name begins with a dash without
+            treating it as an option.
+          level: actual_platform
+          platform: linux
+          refs:
+            - tests/unit/workflows/publish-workflow.test.ts

@@ -1,6 +1,19 @@
 import { describe, it, expect, vi } from "vitest";
-import { checkPackageTarball } from "../../../scripts/check-package-tarball.mjs";
-import { mkdtemp, mkdir, writeFile, rm, symlink, link } from "node:fs/promises";
+import {
+  checkPackageTarball,
+  inspectPackedTarball,
+  writePackMetadata,
+} from "../../../scripts/check-package-tarball.mjs";
+import {
+  mkdtemp,
+  mkdir,
+  writeFile,
+  readFile,
+  rm,
+  symlink,
+  link,
+  access,
+} from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -30,6 +43,7 @@ async function buildTarball(
   tempDir: string,
   files: Record<string, string>,
   tarRunner: (args: string[], cwd: string) => Promise<TarResult>,
+  tarballName = "test.tgz",
 ): Promise<string> {
   const pkgDir = join(tempDir, "package");
   await mkdir(pkgDir, { recursive: true });
@@ -39,7 +53,7 @@ async function buildTarball(
     await mkdir(dir, { recursive: true });
     await writeFile(fullPath, content);
   }
-  const tarballPath = join(tempDir, "test.tgz");
+  const tarballPath = join(tempDir, tarballName);
   await tarRunner(["-czf", tarballPath, "-C", tempDir, "package"], tempDir);
   return tarballPath;
 }
@@ -652,5 +666,191 @@ describe("checkPackageTarball", () => {
 
     expect(result.ok).toBe(false);
     expect(result.problems.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("inspectPackedTarball", () => {
+  const tarballName = `${repoPkg.name}-${repoPkg.version}.tgz`;
+
+  /**
+   * The two container shapes `npm pack --json` emits, fed to the checker
+   * exactly as npm writes them — no normalization step in between, which is
+   * the whole point of the canonical reader.
+   */
+  const shapes: Array<[string, (record: object) => unknown]> = [
+    ["npm 11 array", record => [record]],
+    ["npm 12 object", record => ({ [repoPkg.name]: record })],
+  ];
+
+  async function packedFixture() {
+    const tempDir = await mkdtemp(join(tmpdir(), "tarball-inspect-"));
+    const tarRunner = makeTarRunner();
+    await buildTarball(
+      tempDir,
+      {
+        "package.json": JSON.stringify(repoPkg),
+        "README.md": "# code-pact",
+        LICENSE: "MIT",
+        "dist/cli.js": "#!/usr/bin/env node\nconsole.log('hi');",
+      },
+      tarRunner,
+      tarballName,
+    );
+    return { tempDir, tarRunner };
+  }
+
+  for (const [label, wrap] of shapes) {
+    it(`accepts a raw ${label} payload`, async () => {
+      const { tempDir, tarRunner } = await packedFixture();
+
+      const result = await inspectPackedTarball({
+        payload: wrap({
+          name: repoPkg.name,
+          version: repoPkg.version,
+          filename: tarballName,
+        }),
+        repoPkg,
+        tarballDir: tempDir,
+        checker: opts =>
+          checkPackageTarball({
+            ...opts,
+            tarRunner,
+            tempDirMaker: makeTempDir,
+            tempDirRemover: removeTempDir,
+          }),
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.problems).toEqual([]);
+      expect(result.record).toEqual({
+        name: repoPkg.name,
+        version: repoPkg.version,
+        filename: tarballName,
+      });
+      await rm(tempDir, { recursive: true, force: true });
+    });
+  }
+
+  it("writes canonical metadata after a passing inspection", async () => {
+    const { tempDir, tarRunner } = await packedFixture();
+    const metadataOut = join(tempDir, "checked-pack.json");
+
+    const result = await inspectPackedTarball({
+      payload: { [repoPkg.name]: { name: repoPkg.name, version: repoPkg.version, filename: tarballName } },
+      repoPkg,
+      tarballDir: tempDir,
+      metadataOut,
+      checker: opts =>
+        checkPackageTarball({
+          ...opts,
+          tarRunner,
+          tempDirMaker: makeTempDir,
+          tempDirRemover: removeTempDir,
+        }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.metadataPath).toBe(metadataOut);
+    expect(JSON.parse(await readFile(metadataOut, "utf8"))).toEqual({
+      name: repoPkg.name,
+      version: repoPkg.version,
+      filename: tarballName,
+    });
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("does not call the metadata writer when inspection fails", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "tarball-inspect-"));
+    const metadataOut = join(tempDir, "checked-pack.json");
+    const metadataWriter = vi.fn();
+
+    const result = await inspectPackedTarball({
+      payload: [{ name: repoPkg.name, version: repoPkg.version, filename: tarballName }],
+      repoPkg,
+      tarballDir: tempDir,
+      metadataOut,
+      checker: async () => ({ ok: false, problems: ["src/ file in tarball"] }),
+      metadataWriter,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.metadataPath).toBeNull();
+    expect(metadataWriter).not.toHaveBeenCalled();
+    await expect(access(metadataOut)).rejects.toThrow();
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("refuses an unreadable payload before inspecting anything", async () => {
+    const checker = vi.fn();
+    const metadataWriter = vi.fn();
+
+    await expect(
+      inspectPackedTarball({
+        payload: { "other-pkg": { name: "other-pkg", version: "1.0.0", filename: "other.tgz" } },
+        repoPkg,
+        checker,
+        metadataWriter,
+      }),
+    ).rejects.toThrow(/keyed by "other-pkg"/);
+
+    expect(checker).not.toHaveBeenCalled();
+    expect(metadataWriter).not.toHaveBeenCalled();
+  });
+
+  it("reports no metadata path when none was requested", async () => {
+    const { tempDir, tarRunner } = await packedFixture();
+
+    const result = await inspectPackedTarball({
+      payload: [{ name: repoPkg.name, version: repoPkg.version, filename: tarballName }],
+      repoPkg,
+      tarballDir: tempDir,
+      checker: opts =>
+        checkPackageTarball({
+          ...opts,
+          tarRunner,
+          tempDirMaker: makeTempDir,
+          tempDirRemover: removeTempDir,
+        }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.metadataPath).toBeNull();
+    await rm(tempDir, { recursive: true, force: true });
+  });
+});
+
+describe("writePackMetadata", () => {
+  it("writes only the canonical fields", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "pack-metadata-"));
+    const target = join(tempDir, "checked-pack.json");
+
+    await writePackMetadata(target, {
+      name: "code-pact",
+      version: "2.0.1",
+      filename: "code-pact-2.0.1.tgz",
+      integrity: "sha512-should-not-be-copied",
+    });
+
+    expect(JSON.parse(await readFile(target, "utf8"))).toEqual({
+      name: "code-pact",
+      version: "2.0.1",
+      filename: "code-pact-2.0.1.tgz",
+    });
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("leaves no temp file behind", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "pack-metadata-"));
+    const target = join(tempDir, "checked-pack.json");
+
+    await writePackMetadata(target, {
+      name: "code-pact",
+      version: "2.0.1",
+      filename: "code-pact-2.0.1.tgz",
+    });
+
+    const { readdir } = await import("node:fs/promises");
+    expect(await readdir(tempDir)).toEqual(["checked-pack.json"]);
+    await rm(tempDir, { recursive: true, force: true });
   });
 });

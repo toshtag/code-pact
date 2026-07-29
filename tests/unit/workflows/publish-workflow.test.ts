@@ -61,8 +61,22 @@ function extractRunScripts(content: string, jobName: string): string[] {
   return [];
 }
 
-function extractNodeScript(runScript: string): string | undefined {
-  const match = runScript.match(/node\s+<<'(\w+)'\n([\s\S]*?)\n\1/);
+/**
+ * Pull one inline `node <<'DELIM'` heredoc out of a run script.
+ *
+ * A step can hold several — the publish step carries its npm gate, its manifest
+ * check, and its registry probe — so the caller names the one it means. Without
+ * the name this returns the first, which silently changes meaning the moment a
+ * new heredoc is added above the intended one.
+ */
+function extractNodeScript(
+  runScript: string,
+  delimiter?: string,
+): string | undefined {
+  const pattern = delimiter
+    ? new RegExp(`node\\s+<<'(${delimiter})'\\n([\\s\\S]*?)\\n\\1`)
+    : /node\s+<<'(\w+)'\n([\s\S]*?)\n\1/;
+  const match = runScript.match(pattern);
   if (!match) return undefined;
   return match[2];
 }
@@ -105,25 +119,271 @@ describe("publish-workflow inline scripts", () => {
       expect(versionCheckScript).toBeDefined();
     });
 
-    it("passes with npm 11.5.1", () => {
-      const nodeScript = extractNodeScript(versionCheckScript!);
-      expect(nodeScript).toBeDefined();
-      runNodeScript(nodeScript!, { env: { NPM_VERSION: "11.5.1" } });
+    // The range is bounded on both sides. Below 11.5.1 there is no Trusted
+    // Publishing; at 13 and above there is no measured `npm pack --json`
+    // payload shape, and scripts/npm-pack-json.mjs reads only the two that
+    // were measured. Widening either end belongs in a change that moves the
+    // parser with it.
+    for (const version of ["11.5.1", "11.16.0", "12.0.0", "12.99.99"]) {
+      it(`passes with npm ${version}`, () => {
+        const nodeScript = extractNodeScript(versionCheckScript!);
+        expect(nodeScript).toBeDefined();
+        runNodeScript(nodeScript!, { env: { NPM_VERSION: version } });
+      });
+    }
+
+    for (const version of ["10.0.0", "10.99.99", "11.5.0", "11.4.99"]) {
+      it(`fails below the Trusted Publishing floor: npm ${version}`, () => {
+        const nodeScript = extractNodeScript(versionCheckScript!);
+        runNodeScriptThrows(nodeScript!, { env: { NPM_VERSION: version } });
+      });
+    }
+
+    for (const version of ["13.0.0", "99.0.0"]) {
+      it(`fails closed on npm ${version} until its payload is measured`, () => {
+        const nodeScript = extractNodeScript(versionCheckScript!);
+        runNodeScriptThrows(nodeScript!, { env: { NPM_VERSION: version } });
+      });
+    }
+
+    for (const version of ["garbage", "12.x.0", "v12.0.0", "12.0.0-rc.1"]) {
+      it(`fails closed on a malformed npm version: ${JSON.stringify(version)}`, () => {
+        const nodeScript = extractNodeScript(versionCheckScript!);
+        runNodeScriptThrows(nodeScript!, { env: { NPM_VERSION: version } });
+      });
+    }
+
+    for (const version of ["12.0", "12", ""]) {
+      it(`fails closed on an incomplete npm version: ${JSON.stringify(version)}`, () => {
+        const nodeScript = extractNodeScript(versionCheckScript!);
+        runNodeScriptThrows(nodeScript!, { env: { NPM_VERSION: version } });
+      });
+    }
+
+    // The ceiling is this workflow's own contract — the payload shapes its
+    // parser has measured — not a Trusted Publishing requirement. Saying
+    // otherwise would send a maintainer hunting through npm's release notes
+    // for a rule that does not exist.
+    it("attributes the upper bound to this workflow, not to Trusted Publishing", () => {
+      expect(versionCheckScript).toContain(
+        "This release workflow supports npm 11.5.1 through npm 12.x",
+      );
+      expect(versionCheckScript).not.toMatch(
+        /< ?13 is required for Trusted Publishing/,
+      );
+    });
+  });
+
+  // The prepare job's version matrix above injects NPM_VERSION straight into
+  // the validator, so it never crosses the `npm --version` process boundary.
+  // These run the whole step with a real shell and a stub npm, which is the
+  // only way that boundary is exercised at all.
+  describe("prepare job: npm version process boundary", () => {
+    const content = readWorkflow();
+    const scripts = extractRunScripts(content, "prepare");
+    const prerequisiteScript = scripts.find(s => s.includes("NPM_VERSION"));
+
+    function runPrepareStep(env: Record<string, string> = {}): {
+      tmpDir: string;
+      run: () => void;
+    } {
+      const tmpDir = join(repoRoot, "tmp-test-prepare-npm");
+      rmSync(tmpDir, { recursive: true, force: true });
+      mkdirSync(join(tmpDir, "bin"), { recursive: true });
+
+      writeFileSync(
+        join(tmpDir, "bin", "npm"),
+        [
+          "#!/bin/sh",
+          'printf \'%s\\n\' "$*" >> "$NPM_LOG"',
+          'if [ "$1" = "--version" ]; then',
+          '  printf \'%s\\n\' "${NPM_STUB_VERSION:-12.0.0}"',
+          '  exit "${NPM_STUB_VERSION_EXIT:-0}"',
+          "fi",
+          "exit 2",
+        ].join("\n"),
+      );
+      chmodSync(join(tmpDir, "bin", "npm"), 0o755);
+
+      const scriptFile = join(tmpDir, "__run_prepare.sh");
+      writeFileSync(scriptFile, "set -e\n" + prerequisiteScript!);
+
+      return {
+        tmpDir,
+        run: () =>
+          execFileSync("bash", [scriptFile], {
+            encoding: "utf8",
+            cwd: tmpDir,
+            env: {
+              ...process.env,
+              PATH: `${join(tmpDir, "bin")}:${process.env.PATH}`,
+              NPM_LOG: join(tmpDir, "npm-calls.log"),
+              ...env,
+            },
+            stdio: "pipe",
+            timeout: CHILD_TIMEOUT_MS,
+            killSignal: CHILD_KILL_SIGNAL,
+            maxBuffer: CHILD_MAX_BUFFER,
+          }),
+      };
+    }
+
+    function versionCalls(tmpDir: string): number {
+      const path = join(tmpDir, "npm-calls.log");
+      if (!existsSync(path)) return 0;
+      return readFileSync(path, "utf8")
+        .split("\n")
+        .filter(line => line.trim() === "--version").length;
+    }
+
+    it("asks npm for its version exactly once", () => {
+      const { tmpDir, run } = runPrepareStep();
+      try {
+        run();
+        expect(versionCalls(tmpDir)).toBe(1);
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
     });
 
-    it("passes with npm 12.0.0", () => {
-      const nodeScript = extractNodeScript(versionCheckScript!);
-      runNodeScript(nodeScript!, { env: { NPM_VERSION: "12.0.0" } });
+    it("refuses a version command that prints a supported version and fails", () => {
+      const { tmpDir, run } = runPrepareStep({
+        NPM_STUB_VERSION: "12.0.0",
+        NPM_STUB_VERSION_EXIT: "7",
+      });
+      try {
+        expect(() => run()).toThrow();
+        expect(versionCalls(tmpDir)).toBe(1);
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
     });
 
-    it("fails with npm 11.5.0", () => {
-      const nodeScript = extractNodeScript(versionCheckScript!);
-      runNodeScriptThrows(nodeScript!, { env: { NPM_VERSION: "11.5.0" } });
+    it("refuses an unsupported version through the real boundary", () => {
+      const { tmpDir, run } = runPrepareStep({ NPM_STUB_VERSION: "13.0.0" });
+      try {
+        expect(() => run()).toThrow();
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // Neither job may drift its accepted range alone.
+  describe("npm version validator parity", () => {
+    const content = readWorkflow();
+
+    function validatorBody(job: string, delimiter: string): string {
+      const script = extractRunScripts(content, job).find(s =>
+        s.includes("NPM_VERSION"),
+      );
+      const body = extractNodeScript(script!, delimiter);
+      expect(body).toBeDefined();
+      return body!
+        .split("\n")
+        .map(line => line.trim())
+        .filter(line => line !== "" && !line.startsWith("//"))
+        .join("\n");
+    }
+
+    it("prepare and publish share one accepted range", () => {
+      expect(validatorBody("prepare", "NODE")).toBe(
+        validatorBody("publish", "NPM_VERSION_NODE"),
+      );
+    });
+  });
+
+  describe("prepare job: pack metadata", () => {
+    const content = readWorkflow();
+    const scripts = extractRunScripts(content, "prepare");
+    const packScript = scripts.find(s => s.includes("check-package-tarball"));
+
+    it("script exists in prepare job", () => {
+      expect(packScript).toBeDefined();
     });
 
-    it("fails with npm 10.0.0", () => {
-      const nodeScript = extractNodeScript(versionCheckScript!);
-      runNodeScriptThrows(nodeScript!, { env: { NPM_VERSION: "10.0.0" } });
+    it("asks the checker to publish verified metadata", () => {
+      expect(packScript).toContain("--metadata-out checked-pack.json");
+    });
+
+    it("takes the tarball filename from the verified metadata", () => {
+      expect(packScript).toMatch(
+        /tarball="\$\(node -p 'require\("\.\/checked-pack\.json"\)\.filename'\)"/,
+      );
+    });
+
+    it("moves the tarball only after the inspection step", () => {
+      const inspectAt = packScript!.indexOf("check-package-tarball");
+      const moveAt = packScript!.indexOf('mv -- "$tarball"');
+      expect(inspectAt).toBeGreaterThanOrEqual(0);
+      expect(moveAt).toBeGreaterThan(inspectAt);
+    });
+
+    // The parser refuses a leading `-`, and `mv` gets `--` as well. Quoting
+    // stops word splitting, not option parsing, so neither half alone closes
+    // the boundary this PR claims to verify.
+    it("ends mv option parsing before the filename", () => {
+      expect(packScript).toContain('mv -- "$tarball" release-artifact/package.tgz');
+      expect(packScript).not.toMatch(/mv "\$tarball"/);
+    });
+
+    // The production runner is Ubuntu, and the claim is about how a real shell
+    // and a real `mv` treat the name — which a string assertion cannot settle.
+    // The command is lifted from the workflow rather than retyped, so a change
+    // there is executed here instead of drifting past a hardcoded copy.
+    it.runIf(process.platform === "linux")(
+      "executes the option-terminated handoff on Linux",
+      () => {
+        const moveLine = packScript!
+          .split("\n")
+          .map(line => line.trim())
+          .find(line => line.startsWith("mv --"));
+        expect(moveLine).toBeDefined();
+
+        const tmpDir = join(repoRoot, "tmp-test-mv-boundary");
+        rmSync(tmpDir, { recursive: true, force: true });
+        mkdirSync(join(tmpDir, "release-artifact"), { recursive: true });
+        try {
+          // A name the parser would refuse, used here to prove the shell half
+          // of the boundary independently of the parser half.
+          const hostileName = "--not-an-option.tgz";
+          const bytes = Buffer.from("linux-mv-boundary");
+          writeFileSync(join(tmpDir, hostileName), bytes);
+
+          const scriptFile = join(tmpDir, "__run_mv.sh");
+          writeFileSync(
+            scriptFile,
+            ["set -e", `tarball="${hostileName}"`, moveLine!].join("\n"),
+          );
+
+          execFileSync("bash", [scriptFile], {
+            encoding: "utf8",
+            cwd: tmpDir,
+            stdio: "pipe",
+            timeout: CHILD_TIMEOUT_MS,
+            killSignal: CHILD_KILL_SIGNAL,
+            maxBuffer: CHILD_MAX_BUFFER,
+          });
+
+          expect(existsSync(join(tmpDir, hostileName))).toBe(false);
+          expect(
+            readFileSync(join(tmpDir, "release-artifact", "package.tgz")),
+          ).toEqual(bytes);
+        } finally {
+          rmSync(tmpDir, { recursive: true, force: true });
+        }
+      },
+    );
+
+    // The npm prerequisite admits npm 12, whose `npm pack --json` payload is an
+    // object keyed by package name rather than an array. A second reader in the
+    // workflow would have to know that too, so there is only one reader.
+    it("does not parse the raw pack JSON itself", () => {
+      for (const script of scripts) {
+        expect(script).not.toMatch(/packData\[0\]/);
+        expect(script).not.toMatch(/JSON\.parse\([^)]*pack\.json/);
+        expect(script).not.toMatch(/pack\.json[^\n]*\[0\]/);
+      }
     });
   });
 
@@ -236,7 +496,7 @@ describe("publish-workflow inline scripts", () => {
     });
 
     it("passes when manifest matches GitHub context", () => {
-      const nodeScript = extractNodeScript(verifyScript!);
+      const nodeScript = extractNodeScript(verifyScript!, "NODE");
       expect(nodeScript).toBeDefined();
 
       const tmpDir = join(repoRoot, "tmp-test-verify");
@@ -280,7 +540,7 @@ describe("publish-workflow inline scripts", () => {
     });
 
     it("fails when manifest tag does not match GitHub tag", () => {
-      const nodeScript = extractNodeScript(verifyScript!);
+      const nodeScript = extractNodeScript(verifyScript!, "NODE");
       const tmpDir = join(repoRoot, "tmp-test-verify-tagmismatch");
       try {
         rmSync(tmpDir, { recursive: true, force: true });
@@ -322,7 +582,7 @@ describe("publish-workflow inline scripts", () => {
     });
 
     it("fails when manifest commit does not match GitHub commit", () => {
-      const nodeScript = extractNodeScript(verifyScript!);
+      const nodeScript = extractNodeScript(verifyScript!, "NODE");
       const tmpDir = join(repoRoot, "tmp-test-verify-commitmismatch");
       try {
         rmSync(tmpDir, { recursive: true, force: true });
@@ -364,7 +624,7 @@ describe("publish-workflow inline scripts", () => {
     });
 
     it("fails when tarball SHA-256 does not match manifest", () => {
-      const nodeScript = extractNodeScript(verifyScript!);
+      const nodeScript = extractNodeScript(verifyScript!, "NODE");
       const tmpDir = join(repoRoot, "tmp-test-verify-shamismatch");
       try {
         rmSync(tmpDir, { recursive: true, force: true });
@@ -402,7 +662,7 @@ describe("publish-workflow inline scripts", () => {
     });
 
     it("fails when EXPECTED_TAG is not a valid version tag", () => {
-      const nodeScript = extractNodeScript(verifyScript!);
+      const nodeScript = extractNodeScript(verifyScript!, "NODE");
       const tmpDir = join(repoRoot, "tmp-test-verify-badtag");
       try {
         rmSync(tmpDir, { recursive: true, force: true });
@@ -503,11 +763,43 @@ describe("publish-workflow inline scripts", () => {
     const scripts = extractRunScripts(content, "publish");
     const publishScript = scripts.find(s => s.includes("EXPECTED_TAG"));
 
+    // The registry probe is inline in the workflow now, so the shell runs the
+    // real Node interpreter over it. Only `fetch` is replaced, and only to keep
+    // the suite off the network — the probe's own branching, state channel, and
+    // ordering are exercised as written.
+    //
+    // `MOCK_FETCH_STATUS_THROW` is the regression that matters: the request
+    // succeeds and the *handler* then fails. That is the shape of a future
+    // typo or a ReferenceError, and it must never look like "absent".
+    // `MOCK_FETCH_STDOUT_NOISE` covers the other half — a process that exits
+    // zero but says something the shell does not recognize.
+    const FETCH_STUB = [
+      "globalThis.fetch = async () => {",
+      "  if (process.env.FETCH_LOG) {",
+      '    require("node:fs").appendFileSync(process.env.FETCH_LOG, "fetch\\n");',
+      "  }",
+      '  if (process.env.MOCK_FETCH_ERROR === "1") {',
+      '    throw new Error("synthetic network failure");',
+      "  }",
+      '  if (process.env.MOCK_FETCH_STDOUT_NOISE === "1") {',
+      '    process.stdout.write("noise\\n");',
+      "  }",
+      '  if (process.env.MOCK_FETCH_STATUS_THROW === "1") {',
+      "    return {",
+      "      get status() {",
+      '        throw new Error("synthetic callback failure");',
+      "      },",
+      "    };",
+      "  }",
+      '  return { status: Number(process.env.MOCK_FETCH_STATUS ?? "404") };',
+      "};",
+      "",
+    ].join("\n");
+
     function makeTmpEnv(opts: {
-      npmViewExit?: number;
       manifest?: Record<string, unknown>;
       tarballContent?: Buffer;
-    }): { tmpDir: string; npmViewExit: number } {
+    }): { tmpDir: string } {
       const tmpDir = join(repoRoot, "tmp-test-publish-shell");
       rmSync(tmpDir, { recursive: true, force: true });
       mkdirSync(join(tmpDir, "release-artifact"), { recursive: true });
@@ -529,12 +821,24 @@ describe("publish-workflow inline scripts", () => {
         JSON.stringify(manifest, null, 2) + "\n",
       );
 
-      const npmViewExit = opts.npmViewExit ?? 1;
+      writeFileSync(join(tmpDir, "mock-fetch.cjs"), FETCH_STUB);
+
+      // The npm stub answers --version so the job's own toolchain gate runs,
+      // and records publish invocations. Any other subcommand is a failure:
+      // the job must not reach for npm to do anything else.
+      //
+      // `NPM_STUB_VERSION_EXIT` is what makes the R5 regression expressible: a
+      // version command that prints a supported version and *then* fails. A
+      // stub that could only succeed made that path untestable.
       writeFileSync(
         join(tmpDir, "bin", "npm"),
         [
           "#!/bin/sh",
           'printf \'%s\\n\' "$*" >> "$NPM_LOG"',
+          'if [ "$1" = "--version" ]; then',
+          '  printf \'%s\\n\' "${NPM_STUB_VERSION:-12.0.0}"',
+          '  exit "${NPM_STUB_VERSION_EXIT:-0}"',
+          "fi",
           'if [ "$1" = "publish" ]; then',
           "  exit 0",
           "fi",
@@ -543,205 +847,281 @@ describe("publish-workflow inline scripts", () => {
       );
       chmodSync(join(tmpDir, "bin", "npm"), 0o755);
 
+      // A thin recorder over the real interpreter. It fakes nothing: unlike the
+      // node stub it replaces, it cannot make an absent repository file look
+      // present, which is exactly how a checkout-less job calling a repository
+      // script went unnoticed.
       writeFileSync(
         join(tmpDir, "bin", "node"),
         [
           "#!/bin/sh",
           'printf \'%s\\n\' "$*" >> "$NODE_LOG"',
-          'if [ "$1" = "scripts/check-npm-version-availability.mjs" ]; then',
-          '  version=""',
-          "  while [ $# -gt 0 ]; do",
-          '    case "$1" in',
-          '      --version) version="$2"; shift 2 ;;',
-          "      --package|--registry) shift 2 ;;",
-          "      *) shift ;;",
-          "    esac",
-          "  done",
-          '  if [ "$version" = "2.0.0" ] && [ "${NPM_VIEW_EXIT:-1}" -eq 0 ]; then exit 0; fi',
-          '  if [ "$version" = "2.0.0" ] && [ "${NPM_VIEW_EXIT:-1}" -eq 1 ]; then exit 1; fi',
-          "  exit ${NPM_VIEW_EXIT:-1}",
-          "fi",
           `exec ${process.execPath} "$@"`,
         ].join("\n"),
       );
       chmodSync(join(tmpDir, "bin", "node"), 0o755);
 
-      return { tmpDir, npmViewExit };
+      return { tmpDir };
     }
 
-    it("new version: calls registry probe then npm publish", () => {
-      const { tmpDir, npmViewExit } = makeTmpEnv({});
-      const npmLog = join(tmpDir, "npm-calls.log");
-      const nodeLog = join(tmpDir, "node-calls.log");
+    function runPublishShell(
+      tmpDir: string,
+      env: Record<string, string> = {},
+    ): void {
+      const scriptFile = join(tmpDir, "__run_publish.sh");
+      writeFileSync(scriptFile, "set -e\n" + publishScript!);
       try {
-        const scriptFile = join(tmpDir, "__run_publish.sh");
-        writeFileSync(scriptFile, "set -e\n" + publishScript!);
-        try {
-          execFileSync("bash", [scriptFile], {
-            encoding: "utf8",
-            cwd: tmpDir,
-            env: {
-              ...process.env,
-              PATH: `${join(tmpDir, "bin")}:${process.env.PATH}`,
-              EXPECTED_TAG: "v2.0.0",
-              EXPECTED_COMMIT: "c".repeat(40),
-              NPM_CONFIG_PROVENANCE: "true",
-              NPM_VIEW_EXIT: String(npmViewExit),
-              NPM_LOG: npmLog,
-              NODE_LOG: nodeLog,
-              GITHUB_OUTPUT: join(tmpDir, "github-output.txt"),
-            },
-            stdio: "pipe",
-            timeout: CHILD_TIMEOUT_MS,
-            killSignal: CHILD_KILL_SIGNAL,
-            maxBuffer: CHILD_MAX_BUFFER,
-          });
-        } finally {
-          rmSync(scriptFile, { force: true });
-        }
-
-        const nodeCalls = readFileSync(nodeLog, "utf8").trim();
-        expect(nodeCalls).toContain(
-          "scripts/check-npm-version-availability.mjs",
-        );
-        expect(nodeCalls).toContain("--version 2.0.0");
-        expect(nodeCalls).toContain("--registry https://registry.npmjs.org");
-
-        const npmCalls = readFileSync(npmLog, "utf8").trim();
-        expect(npmCalls).toContain(
-          "publish ./release-artifact/package.tgz --ignore-scripts",
-        );
+        execFileSync("bash", [scriptFile], {
+          encoding: "utf8",
+          cwd: tmpDir,
+          env: {
+            ...process.env,
+            PATH: `${join(tmpDir, "bin")}:${process.env.PATH}`,
+            NODE_OPTIONS: `--require=${join(tmpDir, "mock-fetch.cjs")}`,
+            EXPECTED_TAG: "v2.0.0",
+            EXPECTED_COMMIT: "c".repeat(40),
+            NPM_CONFIG_PROVENANCE: "true",
+            NPM_REGISTRY: "https://registry.npmjs.org",
+            NPM_LOG: join(tmpDir, "npm-calls.log"),
+            NODE_LOG: join(tmpDir, "node-calls.log"),
+            FETCH_LOG: join(tmpDir, "fetch-calls.log"),
+            GITHUB_OUTPUT: join(tmpDir, "github-output.txt"),
+            ...env,
+          },
+          stdio: "pipe",
+          timeout: CHILD_TIMEOUT_MS,
+          killSignal: CHILD_KILL_SIGNAL,
+          maxBuffer: CHILD_MAX_BUFFER,
+        });
       } finally {
-        rmSync(tmpDir, { recursive: true, force: true });
+        rmSync(scriptFile, { force: true });
       }
-    });
+    }
+
+    function npmCalls(tmpDir: string): string {
+      const path = join(tmpDir, "npm-calls.log");
+      return existsSync(path) ? readFileSync(path, "utf8") : "";
+    }
+
+    function fetchCount(tmpDir: string): number {
+      const path = join(tmpDir, "fetch-calls.log");
+      if (!existsSync(path)) return 0;
+      return readFileSync(path, "utf8").split("\n").filter(Boolean).length;
+    }
+
+    function versionCallCount(tmpDir: string): number {
+      return npmCalls(tmpDir)
+        .split("\n")
+        .filter(line => line.trim() === "--version").length;
+    }
+
+    for (const version of ["12.0.0", "11.5.1", "11.16.0"]) {
+      it(`unpublished version on npm ${version}: publishes`, () => {
+        const { tmpDir } = makeTmpEnv({});
+        try {
+          runPublishShell(tmpDir, {
+            NPM_STUB_VERSION: version,
+            MOCK_FETCH_STATUS: "404",
+          });
+          expect(npmCalls(tmpDir)).toContain(
+            "publish ./release-artifact/package.tgz --ignore-scripts",
+          );
+        } finally {
+          rmSync(tmpDir, { recursive: true, force: true });
+        }
+      });
+    }
+
+    for (const [label, version] of [
+      ["a future major", "13.0.0"],
+      ["a malformed version", "garbage"],
+      ["an incomplete version", "12.0"],
+      ["a prerelease", "12.0.0-rc.1"],
+    ] as const) {
+      it(`refuses ${label} before probing the registry`, () => {
+        const { tmpDir } = makeTmpEnv({});
+        try {
+          expect(() =>
+            runPublishShell(tmpDir, {
+              NPM_STUB_VERSION: version,
+              MOCK_FETCH_STATUS: "404",
+            }),
+          ).toThrow();
+          expect(fetchCount(tmpDir)).toBe(0);
+          expect(npmCalls(tmpDir)).not.toContain("publish");
+        } finally {
+          rmSync(tmpDir, { recursive: true, force: true });
+        }
+      });
+    }
 
     it("existing version: fails as a tag/version collision", () => {
-      const { tmpDir, npmViewExit } = makeTmpEnv({ npmViewExit: 0 });
-      const npmLog = join(tmpDir, "npm-calls.log");
-      const nodeLog = join(tmpDir, "node-calls.log");
+      const { tmpDir } = makeTmpEnv({});
       try {
-        const scriptFile = join(tmpDir, "__run_publish.sh");
-        writeFileSync(scriptFile, "set -e\n" + publishScript!);
-        let threw = false;
-        try {
-          execFileSync("bash", [scriptFile], {
-            encoding: "utf8",
-            cwd: tmpDir,
-            env: {
-              ...process.env,
-              PATH: `${join(tmpDir, "bin")}:${process.env.PATH}`,
-              EXPECTED_TAG: "v2.0.0",
-              EXPECTED_COMMIT: "c".repeat(40),
-              NPM_CONFIG_PROVENANCE: "true",
-              NPM_VIEW_EXIT: String(npmViewExit),
-              NPM_LOG: npmLog,
-              NODE_LOG: nodeLog,
-            },
-            stdio: "pipe",
-            timeout: CHILD_TIMEOUT_MS,
-            killSignal: CHILD_KILL_SIGNAL,
-            maxBuffer: CHILD_MAX_BUFFER,
-          });
-        } catch {
-          threw = true;
-        } finally {
-          rmSync(scriptFile, { force: true });
-        }
-
-        expect(threw).toBe(true);
-        const nodeCalls = readFileSync(nodeLog, "utf8").trim();
-        expect(nodeCalls).toContain(
-          "scripts/check-npm-version-availability.mjs",
-        );
-        expect(nodeCalls).toContain("--version 2.0.0");
-        const npmCalls = existsSync(npmLog)
-          ? readFileSync(npmLog, "utf8").trim()
-          : "";
-        expect(npmCalls).not.toContain("publish");
+        expect(() =>
+          runPublishShell(tmpDir, { MOCK_FETCH_STATUS: "200" }),
+        ).toThrow();
+        expect(npmCalls(tmpDir)).not.toContain("publish");
       } finally {
         rmSync(tmpDir, { recursive: true, force: true });
       }
     });
 
-    it("manifest mismatch: fails before registry probe", () => {
-      const { tmpDir, npmViewExit } = makeTmpEnv({
+    it("registry 5xx: refuses to publish from an unproven state", () => {
+      const { tmpDir } = makeTmpEnv({});
+      try {
+        expect(() =>
+          runPublishShell(tmpDir, { MOCK_FETCH_STATUS: "500" }),
+        ).toThrow();
+        expect(npmCalls(tmpDir)).not.toContain("publish");
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    // The R5 regression. `npm --version` prints a supported version and then
+    // fails. Prefixing the validator with an inline assignment would have given
+    // the shell the validator's status instead, so a broken npm executable read
+    // as a verified toolchain — and the job went on to probe and publish.
+    it("npm --version prints a supported version but fails: refuses to publish", () => {
+      const { tmpDir } = makeTmpEnv({});
+      try {
+        expect(() =>
+          runPublishShell(tmpDir, {
+            NPM_STUB_VERSION: "12.0.0",
+            NPM_STUB_VERSION_EXIT: "7",
+            MOCK_FETCH_STATUS: "404",
+          }),
+        ).toThrow();
+        expect(versionCallCount(tmpDir)).toBe(1);
+        expect(fetchCount(tmpDir)).toBe(0);
+        expect(npmCalls(tmpDir)).not.toContain("publish");
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("asks npm for its version exactly once", () => {
+      const { tmpDir } = makeTmpEnv({});
+      try {
+        runPublishShell(tmpDir, { MOCK_FETCH_STATUS: "404" });
+        expect(versionCallCount(tmpDir)).toBe(1);
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    // The R4 regression. The request succeeds and the handler then throws, so
+    // the probe process fails the way a syntax error or a ReferenceError would.
+    // Node exits 1 for all of them — which is exactly why "absent" cannot be an
+    // exit code. Nothing about this case is a proven absence.
+    it("exception after fetch fulfillment: refuses to publish", () => {
+      const { tmpDir } = makeTmpEnv({});
+      try {
+        expect(() =>
+          runPublishShell(tmpDir, { MOCK_FETCH_STATUS_THROW: "1" }),
+        ).toThrow();
+        expect(fetchCount(tmpDir)).toBe(1);
+        expect(npmCalls(tmpDir)).not.toContain("publish");
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    // A probe that exits zero but says something unrecognized is not a state.
+    it("unrecognized probe output: refuses to publish", () => {
+      const { tmpDir } = makeTmpEnv({});
+      try {
+        expect(() =>
+          runPublishShell(tmpDir, {
+            MOCK_FETCH_STDOUT_NOISE: "1",
+            MOCK_FETCH_STATUS: "404",
+          }),
+        ).toThrow();
+        expect(npmCalls(tmpDir)).not.toContain("publish");
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("registry network failure: refuses to publish", () => {
+      const { tmpDir } = makeTmpEnv({});
+      try {
+        expect(() =>
+          runPublishShell(tmpDir, { MOCK_FETCH_ERROR: "1" }),
+        ).toThrow();
+        expect(npmCalls(tmpDir)).not.toContain("publish");
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("manifest mismatch: fails before the registry probe", () => {
+      const { tmpDir } = makeTmpEnv({
         manifest: {
           package: "code-pact",
-          version: "1.0.0",
-          tag: "v1.0.0",
-          commit: "d".repeat(40),
+          version: "9.9.9",
+          tag: "v9.9.9",
+          commit: "c".repeat(40),
           tarball_sha256: "0".repeat(64),
         },
       });
-      const npmLog = join(tmpDir, "npm-calls.log");
       try {
-        const scriptFile = join(tmpDir, "__run_publish.sh");
-        writeFileSync(scriptFile, "set -e\n" + publishScript!);
-        let threw = false;
-        try {
-          execFileSync("bash", [scriptFile], {
-            encoding: "utf8",
-            cwd: tmpDir,
-            env: {
-              ...process.env,
-              PATH: `${join(tmpDir, "bin")}:${process.env.PATH}`,
-              EXPECTED_TAG: "v2.0.0",
-              EXPECTED_COMMIT: "c".repeat(40),
-              NPM_CONFIG_PROVENANCE: "true",
-              NPM_VIEW_EXIT: String(npmViewExit),
-              NPM_LOG: npmLog,
-              GITHUB_OUTPUT: join(tmpDir, "github-output.txt"),
-            },
-            stdio: "pipe",
-            timeout: CHILD_TIMEOUT_MS,
-            killSignal: CHILD_KILL_SIGNAL,
-            maxBuffer: CHILD_MAX_BUFFER,
-          });
-        } catch {
-          threw = true;
-        } finally {
-          rmSync(scriptFile, { force: true });
-        }
-        expect(threw).toBe(true);
-        expect(existsSync(npmLog)).toBe(false);
+        expect(() =>
+          runPublishShell(tmpDir, { MOCK_FETCH_STATUS: "404" }),
+        ).toThrow();
+        expect(fetchCount(tmpDir)).toBe(0);
+        expect(npmCalls(tmpDir)).not.toContain("publish");
       } finally {
         rmSync(tmpDir, { recursive: true, force: true });
       }
     });
 
-    it("NPM_CONFIG_REGISTRY env does not override --registry flag", () => {
-      const { tmpDir, npmViewExit } = makeTmpEnv({});
-      const nodeLog = join(tmpDir, "node-calls.log");
+    // The regression that motivated the rewrite: this workspace holds only the
+    // downloaded artifact, exactly what the job has after download-artifact.
+    // The previous suite passed with a `scripts/` call in the shell because its
+    // node stub answered for a file that was never there.
+    it("succeeds in an isolated workspace with no repository code", () => {
+      const { tmpDir } = makeTmpEnv({});
       try {
-        const scriptFile = join(tmpDir, "__run_publish.sh");
-        writeFileSync(scriptFile, "set -e\n" + publishScript!);
-        try {
-          execFileSync("bash", [scriptFile], {
-            encoding: "utf8",
-            cwd: tmpDir,
-            env: {
-              ...process.env,
-              PATH: `${join(tmpDir, "bin")}:${process.env.PATH}`,
-              EXPECTED_TAG: "v2.0.0",
-              EXPECTED_COMMIT: "c".repeat(40),
-              NPM_CONFIG_PROVENANCE: "true",
-              NPM_VIEW_EXIT: String(npmViewExit),
-              NPM_CONFIG_REGISTRY: "https://attacker.invalid",
-              NODE_LOG: nodeLog,
-            },
-            stdio: "pipe",
-            timeout: CHILD_TIMEOUT_MS,
-            killSignal: CHILD_KILL_SIGNAL,
-            maxBuffer: CHILD_MAX_BUFFER,
-          });
-        } finally {
-          rmSync(scriptFile, { force: true });
-        }
+        expect(existsSync(join(tmpDir, "scripts"))).toBe(false);
+        expect(existsSync(join(tmpDir, "package.json"))).toBe(false);
 
-        const nodeCalls = readFileSync(nodeLog, "utf8").trim();
-        expect(nodeCalls).toContain("--registry https://registry.npmjs.org");
-        expect(nodeCalls).not.toContain("attacker.invalid");
+        runPublishShell(tmpDir, { MOCK_FETCH_STATUS: "404" });
+
+        const nodeArgs = readFileSync(join(tmpDir, "node-calls.log"), "utf8");
+        expect(nodeArgs).not.toMatch(/scripts\//);
+        expect(npmCalls(tmpDir)).toContain("publish");
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("pins the registry against an NPM_CONFIG_REGISTRY override", () => {
+      const { tmpDir } = makeTmpEnv({});
+      try {
+        runPublishShell(tmpDir, {
+          MOCK_FETCH_STATUS: "404",
+          NPM_CONFIG_REGISTRY: "https://attacker.invalid",
+        });
+        const calls = npmCalls(tmpDir);
+        expect(calls).toContain("--registry=https://registry.npmjs.org");
+        expect(calls).not.toContain("attacker.invalid");
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("refuses a registry the step env did not pin", () => {
+      const { tmpDir } = makeTmpEnv({});
+      try {
+        expect(() =>
+          runPublishShell(tmpDir, {
+            NPM_REGISTRY: "https://attacker.invalid",
+            MOCK_FETCH_STATUS: "404",
+          }),
+        ).toThrow();
+        expect(npmCalls(tmpDir)).not.toContain("publish");
       } finally {
         rmSync(tmpDir, { recursive: true, force: true });
       }

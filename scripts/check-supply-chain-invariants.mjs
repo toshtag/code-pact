@@ -73,7 +73,7 @@ function hashRun(run) {
 }
 
 export const PUBLISH_RUN_HASH =
-  "cc04e645e58d9ef269afbbe87109c664a0d519ced73d0eccc40a15d778bc92c0";
+  "031f2ab7f2af4dfe9636d6ac650e97055f81df0d296f31b170c47e668bcd0fb9";
 export const GITHUB_RELEASE_RUN_HASH =
   "0a8cf86fb0cea315594a2d1018d1ee8cb8d337ee065abbde3458b9fecb17637c";
 
@@ -106,6 +106,7 @@ export const EXPECTED_CANONICAL_JOBS = {
           EXPECTED_TAG: "${{ github.ref_name }}",
           EXPECTED_COMMIT: "${{ github.sha }}",
           NPM_CONFIG_PROVENANCE: "true",
+          NPM_REGISTRY: "https://registry.npmjs.org",
         },
         "run-sha256": PUBLISH_RUN_HASH,
       },
@@ -1902,11 +1903,12 @@ export function checkSupplyChainInvariants(root) {
       );
       const publishHasPnpm = publishActionRefs.some(r => r.startsWith("pnpm/"));
       const publishScripts = collectRunScripts(doc, "publish");
-      const publishHasRepoScript = publishScripts.some(
-        s =>
-          /scripts\//.test(s) &&
-          !/scripts\/check-npm-version-availability\.mjs/.test(s),
-      );
+      // No exception. This job has no checkout, so `scripts/` does not exist in
+      // its workspace; the one carve-out that used to live here named a real
+      // file in the repository and an absent one on the runner, and `node` on a
+      // missing module exits 1 — the same code the probe shell reads as "not
+      // published yet". The gate that permitted it is the reason it survived.
+      const publishHasRepoScript = publishScripts.some(s => /scripts\//.test(s));
       const publishHasReleaseCheck = publishScripts.some(s =>
         /release:check/.test(s),
       );
@@ -2078,19 +2080,211 @@ export function checkSupplyChainInvariants(root) {
         );
       }
 
-      // OIDC invariant: registry probe and npm publish must use --registry flag
+      // OIDC invariant: the registry probe and npm publish must both pin the
+      // registry rather than inherit NPM_CONFIG_REGISTRY.
+      // The step env pins NPM_REGISTRY (held exactly by the canonical job
+      // structure above); the probe refuses any other value rather than
+      // trusting whatever the environment supplies.
       const hasViewRegistry = publishScripts.some(s =>
-        /scripts\/check-npm-version-availability\.mjs[\s\S]*--registry/.test(s),
+        /registry !== "https:\/\/registry\.npmjs\.org"/.test(s),
       );
       const hasPublishRegistry = publishScripts.some(s =>
         /npm publish.*--registry=/.test(s),
       );
       if (hasViewRegistry) {
-        pass("publish.yml: registry probe script uses --registry flag");
+        pass("publish.yml: registry probe pins the npm registry");
       } else {
         fail(
-          "publish.yml: registry probe script must use --registry flag to prevent env override",
+          "publish.yml: registry probe must pin https://registry.npmjs.org and refuse any other value",
         );
+      }
+
+      // The publish job is a fresh runner holding id-token: write. Everything
+      // it needs must be downloaded artifact or inline, and every guard that
+      // stands between the signed tag and the registry must run here — not in
+      // prepare, whose toolchain it does not share.
+      const publishHasOwnNpmGate = publishScripts.some(
+        s =>
+          /npm --version/.test(s) &&
+          /This release workflow supports npm 11\.5\.1 through npm 12\.x/.test(
+            s,
+          ),
+      );
+
+      // A version command's process result and its printed value are separate
+      // authorities. Prefixing the validator with an inline assignment hands
+      // the shell the validator's status instead, so an npm that prints a
+      // supported version and then fails passes as a verified toolchain.
+      const guardedVersionCapture = (scripts, job) => {
+        const unsafe = scripts.some(s =>
+          /[A-Z_]+="\$\(npm --version\)"\s+\S/.test(s),
+        );
+        const guarded = scripts.some(
+          s =>
+            /if npm_version="\$\(npm --version\)"/.test(s) &&
+            /npm_version_exit=\$\?/.test(s) &&
+            /unverified npm toolchain/.test(s) &&
+            /NPM_VERSION="\$npm_version"/.test(s),
+        );
+        const invocations = scripts.reduce(
+          (total, s) => total + (s.match(/\bnpm --version\b/g) ?? []).length,
+          0,
+        );
+        // Two mentions per job: the guarded capture and its error message.
+        return { job, unsafe, guarded, singleInvocation: invocations === 2 };
+      };
+      const versionCaptureChecks = [
+        guardedVersionCapture(collectRunScripts(doc, "prepare"), "prepare"),
+        guardedVersionCapture(publishScripts, "publish"),
+      ];
+      const publishHasInlineProbe = publishScripts.some(
+        s =>
+          /AbortSignal\.timeout\(/.test(s) &&
+          /status === 200/.test(s) &&
+          /status === 404/.test(s) &&
+          /unexpected status/.test(s),
+      );
+
+      // The probe answers on two channels: the process either ran or it did
+      // not, and stdout carries the registry state. Collapsing them is how a
+      // syntax error, an uncaught exception, or a missing module — all Node
+      // exit 1 — becomes indistinguishable from a proven absent version, and
+      // it is the broken probe that would then publish.
+      const probeUsesStateChannel = publishScripts.some(
+        s =>
+          /probe_state="\$\(/.test(s) &&
+          /process\.stdout\.write\("exists\\n"\)/.test(s) &&
+          /process\.stdout\.write\("absent\\n"\)/.test(s) &&
+          /case "\$probe_state" in/.test(s),
+      );
+      const probeRefusesFailedProcess = publishScripts.some(s =>
+        /Registry probe process failed with exit/.test(s),
+      );
+      const probeRefusesUnknownState = publishScripts.some(s =>
+        /Registry probe returned an unrecognized state/.test(s),
+      );
+      // An exit code must never carry the "absent" verdict again. Scoped to the
+      // availability probe: the npm version gate's own `process.exit(1)` is a
+      // hard refusal, which is exactly what an exit code should mean.
+      const probeSignalsAbsenceByExitCode = publishScripts.some(s => {
+        const probeBody = /<<'NPM_AVAILABILITY_NODE'\n([\s\S]*?)\n\s*NPM_AVAILABILITY_NODE/.exec(
+          s,
+        )?.[1];
+        return (
+          (probeBody !== undefined && /process\.exit\(/.test(probeBody)) ||
+          /probe_exit"? -eq 1/.test(s) ||
+          /probe_exit"? -ne 1/.test(s)
+        );
+      });
+
+      const probeBeforePublish = publishScripts.some(s => {
+        const probeAt = s.indexOf("NPM_AVAILABILITY_NODE");
+        const publishAt = s.indexOf("npm publish");
+        return probeAt >= 0 && publishAt > probeAt;
+      });
+      const stateCheckBeforePublish = publishScripts.some(s => {
+        const caseAt = s.indexOf('case "$probe_state" in');
+        const publishAt = s.indexOf("npm publish");
+        return caseAt >= 0 && publishAt > caseAt;
+      });
+      const npmGateBeforeProbe = publishScripts.some(s => {
+        const gateAt = s.indexOf("NPM_VERSION_NODE");
+        const probeAt = s.indexOf("NPM_AVAILABILITY_NODE");
+        return gateAt >= 0 && probeAt > gateAt;
+      });
+
+      if (publishHasOwnNpmGate) {
+        pass("publish.yml: publish job validates its own npm version");
+      } else {
+        fail(
+          "publish.yml: publish job must validate the npm version on its own runner; prepare's check does not carry over",
+        );
+      }
+      if (publishHasInlineProbe) {
+        pass(
+          "publish.yml: registry probe is bounded and distinguishes exists/free/unprovable",
+        );
+      } else {
+        fail(
+          "publish.yml: registry probe must be inline, time-bounded, and distinguish 200 / 404 / any other outcome",
+        );
+      }
+      if (npmGateBeforeProbe) {
+        pass("publish.yml: npm version gate precedes the registry probe");
+      } else {
+        fail(
+          "publish.yml: the npm version gate must run before the registry probe",
+        );
+      }
+      if (probeBeforePublish) {
+        pass("publish.yml: registry probe precedes npm publish");
+      } else {
+        fail("publish.yml: the registry probe must run before npm publish");
+      }
+      if (probeUsesStateChannel) {
+        pass(
+          "publish.yml: registry probe reports state on stdout, not through its exit code",
+        );
+      } else {
+        fail(
+          "publish.yml: the registry probe must capture stdout into probe_state and emit exactly exists/absent",
+        );
+      }
+      if (probeRefusesFailedProcess) {
+        pass("publish.yml: a failed probe process refuses to publish");
+      } else {
+        fail(
+          "publish.yml: a non-zero probe process must stop the release, not be read as a registry state",
+        );
+      }
+      if (probeRefusesUnknownState) {
+        pass("publish.yml: an unrecognized probe state refuses to publish");
+      } else {
+        fail(
+          "publish.yml: a probe state other than exists/absent must stop the release",
+        );
+      }
+      if (!probeSignalsAbsenceByExitCode) {
+        pass("publish.yml: no exit code doubles as an absent-version verdict");
+      } else {
+        fail(
+          "publish.yml: absence must not be signalled by exit 1 — Node returns 1 for a syntax error, an uncaught exception, and a missing module too",
+        );
+      }
+      if (stateCheckBeforePublish) {
+        pass("publish.yml: probe state is validated before npm publish");
+      } else {
+        fail(
+          "publish.yml: the probe state must be validated before npm publish",
+        );
+      }
+
+      for (const check of versionCaptureChecks) {
+        if (!check.unsafe) {
+          pass(
+            `publish.yml: ${check.job} job does not discard the npm version command's exit status`,
+          );
+        } else {
+          fail(
+            `publish.yml: ${check.job} job must not prefix a command with the npm version capture — the shell would observe the wrong exit status`,
+          );
+        }
+        if (check.guarded) {
+          pass(
+            `publish.yml: ${check.job} job checks the npm version process before reading its output`,
+          );
+        } else {
+          fail(
+            `publish.yml: ${check.job} job must capture npm --version in a guarded branch and refuse a non-zero result`,
+          );
+        }
+        if (check.singleInvocation) {
+          pass(`publish.yml: ${check.job} job asks npm for its version once`);
+        } else {
+          fail(
+            `publish.yml: ${check.job} job must invoke npm --version exactly once, so every call is the guarded one`,
+          );
+        }
       }
       if (hasPublishRegistry) {
         pass("publish.yml: npm publish uses --registry flag");
