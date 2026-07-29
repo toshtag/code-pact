@@ -15,6 +15,8 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`INVALID_EVIDENCE_REF` / `EVIDENCE_*`](#evidence-retrieval-errors-from-evidence-show-or-agent-detail)                                                                                                                       | A cached verification evidence artifact cannot be retrieved or trusted                               | Re-run the failing verification if the evidence is missing/stale; inspect `data.system_code` or `data.failure.evidence_error` for filesystem/cache faults                                                                                  |
 | [`INVALID_CONTEXT_REF` / `CONTEXT_*`](#context-retrieval-errors-from-context-show)                                                                                                                                           | A deferred context artifact cannot be retrieved or trusted                                           | Use the exact `retrieve_command` from `task prepare`; if the cache is missing or corrupt, rerun `task prepare` to recreate the context                                                                                                     |
 | [`INVALID_TASK_TRANSITION`](#invalid_task_transition-from-task-start--block--resume--complete)                                                                                                                               | Wrong state transition (e.g. complete a blocked task)                                                | Check `task status`; `task resume` first                                                                                                                                                                                                   |
+| [`TASK_REVIEW_CONTRACT_REQUIRED`](#task_review_contract_required-from-task-lock--task-start)                                                                                                                                 | The project requires a `review_contract` and the task declares none                                  | Attach a contract with `task add --review-contract-file`, or stay on `review_contract_policy: advisory` while migrating                                                                                                                     |
+| [`TASK_REVIEW_CONTRACT_INVALID`](#task_review_contract_invalid-from-task-add--task-lock--task-start--plan-lint)                                                                                                              | A declared `review_contract` contradicts the task that owns it                                       | Read `data.issues[]` / `details.reason`; fix the mode, the boundary stage, or the out-of-scope ref                                                                                                                                          |
 | [`TASK_FINALIZE_NOT_ELIGIBLE`](#task_finalize_not_eligible-from-task-finalize)                                                                                                                                               | Task isn't `done` yet                                                                                | Run `task complete` first                                                                                                                                                                                                                  |
 | [`TASK_FINALIZE_WRITE_REFUSED`](#task_finalize_write_refused-from-task-finalize---write)                                                                                                                                     | Phase-YAML write blocked by the safety check                                                         | Read `data.reason`; usually fix the phase file                                                                                                                                                                                             |
 | [`PHASE_RECONCILE_WRITE_REFUSED`](#phase_reconcile_write_refused-from-phase-reconcile---write)                                                                                                                               | Every reconcile write was refused                                                                    | Re-run dry-run; fix the phase file                                                                                                                                                                                                         |
@@ -73,6 +75,41 @@ code-pact task status <task-id> --json
 code-pact task resume <task-id>   # if currently blocked
 code-pact task complete <task-id>
 ```
+
+## `TASK_REVIEW_CONTRACT_REQUIRED` from `task lock` / `task start`
+
+The project sets `.code-pact/project.yaml` `review_contract_policy: required` and the task declares no `review_contract`, so the lock is refused before anything is written — no lock file and no `started` event. `data` carries `task_id` and `review_contract_policy`.
+
+Write the contract fragment and attach it, then lock:
+
+```sh
+code-pact task add <phase-id> --description "…" --type feature --review-contract-file contract.yaml --json
+code-pact plan lint --json   # TASK_REVIEW_CONTRACT_MISSING lists every active task still uncovered
+```
+
+For a task that already exists, add the `review_contract` block to it in `design/phases/<phase>.yaml`. See [Review contracts](review-contract.md) for the field-by-field shape and the two modes.
+
+If the project is mid-migration and not every active task carries a contract yet, set `review_contract_policy: advisory` (or remove the field — absence reads as `advisory`) until the backlog is covered. The refusal applies to **new** locks only: existing lock files, archived phases, and done tasks are never retro-validated.
+
+## `TASK_REVIEW_CONTRACT_INVALID` from `task add` / `task lock` / `task start` / `plan lint`
+
+A `review_contract` was supplied and parsed, but it contradicts the task that owns it. This is a hard error under **either** policy — a contract only exists because someone wrote it, so it can never be a migration artifact. Nothing is written: no phase YAML from `task add`, no lock file from `task lock` / `task start`.
+
+Read `data.issues[]` (`plan lint`: `details.reason`); each entry names the failing rule. The usual causes:
+
+- `mode: minimal` on work that is not low-risk docs or `mechanical_refactor` — use `mode: boundary`.
+- A boundary stage or platform that is missing or declared twice — all five stages and all three platforms are decided exactly once.
+- An `in_scope` stage missing a `claim` or refs, or a `not_applicable` stage missing a `rationale` or carrying refs.
+- A `required` platform missing an `integration` / `actual_platform` `level` or refs, or a `not_required` platform missing a `rationale` or carrying a `level` or refs.
+- An `os` stage in scope without an `actual_platform` requirement.
+- Evidence with a duplicate `id`, a missing `claim` or refs, or an `actual_platform` entry naming a platform that is not `required` at `actual_platform` level.
+- A ref outside the task's declared `reads` / `writes` scope.
+
+```sh
+code-pact plan lint --json   # same validator as task add / lock / start
+```
+
+One validator backs every surface, so a contract `plan lint` accepts is a contract those commands accept. Distinct from `TASK_REVIEW_CONTRACT_REQUIRED`, which means no contract was declared at all.
 
 ## `PLAN_NORMALIZE_REQUIRED` from `plan normalize --check`
 
