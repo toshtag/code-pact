@@ -236,3 +236,6 @@ phases:
   - id: P90
     path: design/phases/P90-review-loop-prevention.yaml
     weight: 1
+  - id: P91
+    path: design/phases/P91-release-pipeline-contract-integrity.yaml
+    weight: 1
