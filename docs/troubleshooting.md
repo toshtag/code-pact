@@ -98,10 +98,11 @@ A `review_contract` was supplied and parsed, but it contradicts the task that ow
 Read `data.issues[]` (`plan lint`: `details.reason`); each entry names the failing rule. The usual causes:
 
 - `mode: minimal` on work that is not low-risk docs or `mechanical_refactor` — use `mode: boundary`.
-- A boundary stage or platform that is missing or declared twice.
-- An `in_scope` stage or a `required` platform with no claim, rationale, or refs.
+- A boundary stage or platform that is missing or declared twice — all five stages and all three platforms are decided exactly once.
+- An `in_scope` stage missing a `claim` or refs, or a `not_applicable` stage missing a `rationale` or carrying refs.
+- A `required` platform missing an `integration` / `actual_platform` `level` or refs, or a `not_required` platform missing a `rationale` or carrying a `level` or refs.
 - An `os` stage in scope without an `actual_platform` requirement.
-- Duplicate or unbacked evidence entries.
+- Evidence with a duplicate `id`, a missing `claim` or refs, or an `actual_platform` entry naming a platform that is not `required` at `actual_platform` level.
 - A ref outside the task's declared `reads` / `writes` scope.
 
 ```sh
