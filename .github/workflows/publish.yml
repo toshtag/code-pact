@@ -39,8 +39,23 @@ jobs:
       - name: Verify npm Trusted Publishing prerequisites
         run: |
           node --version
-          npm --version
-          NPM_VERSION="$(npm --version)" node <<'NODE'
+          # Prefixing the validator with an inline assignment would hand the
+          # shell the validator's exit status instead of the version command's,
+          # so an npm that prints a supported version and then fails would pass
+          # as a verified toolchain. The process is checked first; only then is
+          # its output read.
+          if npm_version="$(npm --version)"
+          then
+            :
+          else
+            npm_version_exit=$?
+            echo "::error::npm --version failed with exit ${npm_version_exit}. Refusing to continue with an unverified npm toolchain."
+            exit 1
+          fi
+
+          printf '%s\n' "$npm_version"
+
+          NPM_VERSION="$npm_version" node <<'NODE'
           // Bounded on both sides. The lower bound is Trusted Publishing; the
           // upper bound is `npm pack --json`, whose container shape changed
           // between npm 11 and npm 12. scripts/npm-pack-json.mjs reads exactly
@@ -204,7 +219,23 @@ jobs:
           # artifact or inline. It is also a fresh runner, so the prepare job's
           # toolchain check proves nothing about this one; npm is re-checked
           # here before anything reaches the registry.
-          NPM_VERSION="$(npm --version)" node <<'NPM_VERSION_NODE'
+          # Prefixing the validator with an inline assignment would hand the
+          # shell the validator's exit status instead of the version command's,
+          # so an npm that prints a supported version and then fails would pass
+          # as a verified toolchain. The process is checked first; only then is
+          # its output read.
+          if npm_version="$(npm --version)"
+          then
+            :
+          else
+            npm_version_exit=$?
+            echo "::error::npm --version failed with exit ${npm_version_exit}. Refusing to continue with an unverified npm toolchain."
+            exit 1
+          fi
+
+          printf '%s\n' "$npm_version"
+
+          NPM_VERSION="$npm_version" node <<'NPM_VERSION_NODE'
           const raw = process.env.NPM_VERSION ?? "";
           const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(raw);
 

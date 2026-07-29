@@ -73,7 +73,7 @@ function hashRun(run) {
 }
 
 export const PUBLISH_RUN_HASH =
-  "540500fe2e3e04b2a40e72c573bc57b60ede305e4b109d1209881a3da5c9bda3";
+  "031f2ab7f2af4dfe9636d6ac650e97055f81df0d296f31b170c47e668bcd0fb9";
 export const GITHUB_RELEASE_RUN_HASH =
   "0a8cf86fb0cea315594a2d1018d1ee8cb8d337ee065abbde3458b9fecb17637c";
 
@@ -2110,6 +2110,33 @@ export function checkSupplyChainInvariants(root) {
             s,
           ),
       );
+
+      // A version command's process result and its printed value are separate
+      // authorities. Prefixing the validator with an inline assignment hands
+      // the shell the validator's status instead, so an npm that prints a
+      // supported version and then fails passes as a verified toolchain.
+      const guardedVersionCapture = (scripts, job) => {
+        const unsafe = scripts.some(s =>
+          /[A-Z_]+="\$\(npm --version\)"\s+\S/.test(s),
+        );
+        const guarded = scripts.some(
+          s =>
+            /if npm_version="\$\(npm --version\)"/.test(s) &&
+            /npm_version_exit=\$\?/.test(s) &&
+            /unverified npm toolchain/.test(s) &&
+            /NPM_VERSION="\$npm_version"/.test(s),
+        );
+        const invocations = scripts.reduce(
+          (total, s) => total + (s.match(/\bnpm --version\b/g) ?? []).length,
+          0,
+        );
+        // Two mentions per job: the guarded capture and its error message.
+        return { job, unsafe, guarded, singleInvocation: invocations === 2 };
+      };
+      const versionCaptureChecks = [
+        guardedVersionCapture(collectRunScripts(doc, "prepare"), "prepare"),
+        guardedVersionCapture(publishScripts, "publish"),
+      ];
       const publishHasInlineProbe = publishScripts.some(
         s =>
           /AbortSignal\.timeout\(/.test(s) &&
@@ -2230,6 +2257,34 @@ export function checkSupplyChainInvariants(root) {
         fail(
           "publish.yml: the probe state must be validated before npm publish",
         );
+      }
+
+      for (const check of versionCaptureChecks) {
+        if (!check.unsafe) {
+          pass(
+            `publish.yml: ${check.job} job does not discard the npm version command's exit status`,
+          );
+        } else {
+          fail(
+            `publish.yml: ${check.job} job must not prefix a command with the npm version capture — the shell would observe the wrong exit status`,
+          );
+        }
+        if (check.guarded) {
+          pass(
+            `publish.yml: ${check.job} job checks the npm version process before reading its output`,
+          );
+        } else {
+          fail(
+            `publish.yml: ${check.job} job must capture npm --version in a guarded branch and refuse a non-zero result`,
+          );
+        }
+        if (check.singleInvocation) {
+          pass(`publish.yml: ${check.job} job asks npm for its version once`);
+        } else {
+          fail(
+            `publish.yml: ${check.job} job must invoke npm --version exactly once, so every call is the guarded one`,
+          );
+        }
       }
       if (hasPublishRegistry) {
         pass("publish.yml: npm publish uses --registry flag");

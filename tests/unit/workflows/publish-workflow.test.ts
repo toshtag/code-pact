@@ -174,6 +174,125 @@ describe("publish-workflow inline scripts", () => {
     });
   });
 
+  // The prepare job's version matrix above injects NPM_VERSION straight into
+  // the validator, so it never crosses the `npm --version` process boundary.
+  // These run the whole step with a real shell and a stub npm, which is the
+  // only way that boundary is exercised at all.
+  describe("prepare job: npm version process boundary", () => {
+    const content = readWorkflow();
+    const scripts = extractRunScripts(content, "prepare");
+    const prerequisiteScript = scripts.find(s => s.includes("NPM_VERSION"));
+
+    function runPrepareStep(env: Record<string, string> = {}): {
+      tmpDir: string;
+      run: () => void;
+    } {
+      const tmpDir = join(repoRoot, "tmp-test-prepare-npm");
+      rmSync(tmpDir, { recursive: true, force: true });
+      mkdirSync(join(tmpDir, "bin"), { recursive: true });
+
+      writeFileSync(
+        join(tmpDir, "bin", "npm"),
+        [
+          "#!/bin/sh",
+          'printf \'%s\\n\' "$*" >> "$NPM_LOG"',
+          'if [ "$1" = "--version" ]; then',
+          '  printf \'%s\\n\' "${NPM_STUB_VERSION:-12.0.0}"',
+          '  exit "${NPM_STUB_VERSION_EXIT:-0}"',
+          "fi",
+          "exit 2",
+        ].join("\n"),
+      );
+      chmodSync(join(tmpDir, "bin", "npm"), 0o755);
+
+      const scriptFile = join(tmpDir, "__run_prepare.sh");
+      writeFileSync(scriptFile, "set -e\n" + prerequisiteScript!);
+
+      return {
+        tmpDir,
+        run: () =>
+          execFileSync("bash", [scriptFile], {
+            encoding: "utf8",
+            cwd: tmpDir,
+            env: {
+              ...process.env,
+              PATH: `${join(tmpDir, "bin")}:${process.env.PATH}`,
+              NPM_LOG: join(tmpDir, "npm-calls.log"),
+              ...env,
+            },
+            stdio: "pipe",
+            timeout: CHILD_TIMEOUT_MS,
+            killSignal: CHILD_KILL_SIGNAL,
+            maxBuffer: CHILD_MAX_BUFFER,
+          }),
+      };
+    }
+
+    function versionCalls(tmpDir: string): number {
+      const path = join(tmpDir, "npm-calls.log");
+      if (!existsSync(path)) return 0;
+      return readFileSync(path, "utf8")
+        .split("\n")
+        .filter(line => line.trim() === "--version").length;
+    }
+
+    it("asks npm for its version exactly once", () => {
+      const { tmpDir, run } = runPrepareStep();
+      try {
+        run();
+        expect(versionCalls(tmpDir)).toBe(1);
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("refuses a version command that prints a supported version and fails", () => {
+      const { tmpDir, run } = runPrepareStep({
+        NPM_STUB_VERSION: "12.0.0",
+        NPM_STUB_VERSION_EXIT: "7",
+      });
+      try {
+        expect(() => run()).toThrow();
+        expect(versionCalls(tmpDir)).toBe(1);
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("refuses an unsupported version through the real boundary", () => {
+      const { tmpDir, run } = runPrepareStep({ NPM_STUB_VERSION: "13.0.0" });
+      try {
+        expect(() => run()).toThrow();
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // Neither job may drift its accepted range alone.
+  describe("npm version validator parity", () => {
+    const content = readWorkflow();
+
+    function validatorBody(job: string, delimiter: string): string {
+      const script = extractRunScripts(content, job).find(s =>
+        s.includes("NPM_VERSION"),
+      );
+      const body = extractNodeScript(script!, delimiter);
+      expect(body).toBeDefined();
+      return body!
+        .split("\n")
+        .map(line => line.trim())
+        .filter(line => line !== "" && !line.startsWith("//"))
+        .join("\n");
+    }
+
+    it("prepare and publish share one accepted range", () => {
+      expect(validatorBody("prepare", "NODE")).toBe(
+        validatorBody("publish", "NPM_VERSION_NODE"),
+      );
+    });
+  });
+
   describe("prepare job: pack metadata", () => {
     const content = readWorkflow();
     const scripts = extractRunScripts(content, "prepare");
@@ -707,6 +826,10 @@ describe("publish-workflow inline scripts", () => {
       // The npm stub answers --version so the job's own toolchain gate runs,
       // and records publish invocations. Any other subcommand is a failure:
       // the job must not reach for npm to do anything else.
+      //
+      // `NPM_STUB_VERSION_EXIT` is what makes the R5 regression expressible: a
+      // version command that prints a supported version and *then* fails. A
+      // stub that could only succeed made that path untestable.
       writeFileSync(
         join(tmpDir, "bin", "npm"),
         [
@@ -714,7 +837,7 @@ describe("publish-workflow inline scripts", () => {
           'printf \'%s\\n\' "$*" >> "$NPM_LOG"',
           'if [ "$1" = "--version" ]; then',
           '  printf \'%s\\n\' "${NPM_STUB_VERSION:-12.0.0}"',
-          "  exit 0",
+          '  exit "${NPM_STUB_VERSION_EXIT:-0}"',
           "fi",
           'if [ "$1" = "publish" ]; then',
           "  exit 0",
@@ -786,6 +909,12 @@ describe("publish-workflow inline scripts", () => {
       return readFileSync(path, "utf8").split("\n").filter(Boolean).length;
     }
 
+    function versionCallCount(tmpDir: string): number {
+      return npmCalls(tmpDir)
+        .split("\n")
+        .filter(line => line.trim() === "--version").length;
+    }
+
     for (const version of ["12.0.0", "11.5.1", "11.16.0"]) {
       it(`unpublished version on npm ${version}: publishes`, () => {
         const { tmpDir } = makeTmpEnv({});
@@ -845,6 +974,38 @@ describe("publish-workflow inline scripts", () => {
           runPublishShell(tmpDir, { MOCK_FETCH_STATUS: "500" }),
         ).toThrow();
         expect(npmCalls(tmpDir)).not.toContain("publish");
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    // The R5 regression. `npm --version` prints a supported version and then
+    // fails. Prefixing the validator with an inline assignment would have given
+    // the shell the validator's status instead, so a broken npm executable read
+    // as a verified toolchain — and the job went on to probe and publish.
+    it("npm --version prints a supported version but fails: refuses to publish", () => {
+      const { tmpDir } = makeTmpEnv({});
+      try {
+        expect(() =>
+          runPublishShell(tmpDir, {
+            NPM_STUB_VERSION: "12.0.0",
+            NPM_STUB_VERSION_EXIT: "7",
+            MOCK_FETCH_STATUS: "404",
+          }),
+        ).toThrow();
+        expect(versionCallCount(tmpDir)).toBe(1);
+        expect(fetchCount(tmpDir)).toBe(0);
+        expect(npmCalls(tmpDir)).not.toContain("publish");
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("asks npm for its version exactly once", () => {
+      const { tmpDir } = makeTmpEnv({});
+      try {
+        runPublishShell(tmpDir, { MOCK_FETCH_STATUS: "404" });
+        expect(versionCallCount(tmpDir)).toBe(1);
       } finally {
         rmSync(tmpDir, { recursive: true, force: true });
       }

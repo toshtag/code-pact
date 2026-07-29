@@ -146,6 +146,58 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2",
     "        with:",
     "          persist-credentials: false",
+    "      - name: Verify npm Trusted Publishing prerequisites",
+    "        run: |",
+    "          node --version",
+    "          # Prefixing the validator with an inline assignment would hand the",
+    "          # shell the validator's exit status instead of the version command's,",
+    "          # so an npm that prints a supported version and then fails would pass",
+    "          # as a verified toolchain. The process is checked first; only then is",
+    "          # its output read.",
+    "          if npm_version=\"$(npm --version)\"",
+    "          then",
+    "            :",
+    "          else",
+    "            npm_version_exit=$?",
+    "            echo \"::error::npm --version failed with exit ${npm_version_exit}. Refusing to continue with an unverified npm toolchain.\"",
+    "            exit 1",
+    "          fi",
+    "",
+    "          printf '%s\\n' \"$npm_version\"",
+    "",
+    "          NPM_VERSION=\"$npm_version\" node <<'NODE'",
+    "          // Bounded on both sides. The lower bound is Trusted Publishing; the",
+    "          // upper bound is `npm pack --json`, whose container shape changed",
+    "          // between npm 11 and npm 12. scripts/npm-pack-json.mjs reads exactly",
+    "          // those two measured shapes, so admitting an unmeasured major would",
+    "          // put this job back where it was: a gate wider than its parser,",
+    "          // failing after the tag is already pushed. A new major is unlocked by",
+    "          // a PR that measures its payload and covers it there.",
+    "          const raw = process.env.NPM_VERSION ?? \"\";",
+    "          const match = /^(\\d+)\\.(\\d+)\\.(\\d+)$/.exec(raw);",
+    "",
+    "          if (!match) {",
+    "            console.error(",
+    "              `npm version must be a stable x.y.z value, got ${JSON.stringify(raw)}`,",
+    "            );",
+    "            process.exit(1);",
+    "          }",
+    "",
+    "          const major = Number(match[1]);",
+    "          const minor = Number(match[2]);",
+    "          const patch = Number(match[3]);",
+    "",
+    "          const supported =",
+    "            (major === 11 && (minor > 5 || (minor === 5 && patch >= 1))) ||",
+    "            major === 12;",
+    "",
+    "          if (!supported) {",
+    "            console.error(",
+    "              `This release workflow supports npm 11.5.1 through npm 12.x; got ${raw}`,",
+    "            );",
+    "            process.exit(1);",
+    "          }",
+    "          NODE",
     "      - run: node scripts/check-required-ci-for-sha.mjs --json",
     "      - run: pnpm check:release-version",
     "      - run: node scripts/check-package-tarball.mjs",
@@ -191,7 +243,23 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          # artifact or inline. It is also a fresh runner, so the prepare job's",
     "          # toolchain check proves nothing about this one; npm is re-checked",
     "          # here before anything reaches the registry.",
-    "          NPM_VERSION=\"$(npm --version)\" node <<'NPM_VERSION_NODE'",
+    "          # Prefixing the validator with an inline assignment would hand the",
+    "          # shell the validator's exit status instead of the version command's,",
+    "          # so an npm that prints a supported version and then fails would pass",
+    "          # as a verified toolchain. The process is checked first; only then is",
+    "          # its output read.",
+    "          if npm_version=\"$(npm --version)\"",
+    "          then",
+    "            :",
+    "          else",
+    "            npm_version_exit=$?",
+    "            echo \"::error::npm --version failed with exit ${npm_version_exit}. Refusing to continue with an unverified npm toolchain.\"",
+    "            exit 1",
+    "          fi",
+    "",
+    "          printf '%s\\n' \"$npm_version\"",
+    "",
+    "          NPM_VERSION=\"$npm_version\" node <<'NPM_VERSION_NODE'",
     "          const raw = process.env.NPM_VERSION ?? \"\";",
     "          const match = /^(\\d+)\\.(\\d+)\\.(\\d+)$/.exec(raw);",
     "",
@@ -339,6 +407,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          esac",
     "",
     "          npm publish \"./$tarball\" --ignore-scripts --registry=\"$registry\"",
+    "",
     "",
     "",
     "",
@@ -1474,10 +1543,19 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
   });
 
   it("fails when publish job drops its own npm version gate", async () => {
-    const withoutGate = wellFormedPublish.replace(
-      "This release workflow supports npm 11.5.1 through npm 12.x",
-      "some other message",
-    );
+    // Both jobs carry the same message now, and `String.replace` takes the
+    // first hit — which is prepare's. Mutate only the publish half, or this
+    // asserts something other than what it says.
+    const publishStart = wellFormedPublish.indexOf("  publish:");
+    expect(publishStart).toBeGreaterThan(0);
+    const withoutGate =
+      wellFormedPublish.slice(0, publishStart) +
+      wellFormedPublish
+        .slice(publishStart)
+        .replace(
+          "This release workflow supports npm 11.5.1 through npm 12.x",
+          "some other message",
+        );
     expect(withoutGate).not.toBe(wellFormedPublish);
     root = await buildTree({ publishContent: withoutGate });
     const { failures } = checkSupplyChainInvariants(root);
@@ -1568,6 +1646,68 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     );
     expect(noStateChannel).not.toBe(wellFormedPublish);
     root = await buildTree({ publishContent: noStateChannel });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  // R5: the npm version command's process result and its printed value are
+  // separate authorities. Each mutation below collapses them again.
+  for (const [label, marker] of [
+    ["prepare", "  prepare:"],
+    ["publish", "  publish:"],
+  ] as const) {
+    it(`fails when the ${label} job discards the npm version exit status`, async () => {
+      const start = wellFormedPublish.indexOf(marker);
+      const end =
+        label === "prepare"
+          ? wellFormedPublish.indexOf("  publish:")
+          : wellFormedPublish.length;
+      expect(start).toBeGreaterThan(0);
+
+      const section = wellFormedPublish.slice(start, end);
+      expect(section).toContain('if npm_version="$(npm --version)"');
+
+      const mutated =
+        wellFormedPublish.slice(0, start) +
+        section.replace(
+          /if npm_version="\$\(npm --version\)"[\s\S]*?fi\n/,
+          "",
+        ).replace(
+          'NPM_VERSION="$npm_version" node',
+          'NPM_VERSION="$(npm --version)" node',
+        ) +
+        wellFormedPublish.slice(end);
+      expect(mutated).not.toBe(wellFormedPublish);
+
+      root = await buildTree({ publishContent: mutated });
+      const { failures } = checkSupplyChainInvariants(root);
+      expect(failures).toBeGreaterThan(0);
+      await cleanup();
+    });
+  }
+
+  it("fails when the prepare job asks npm for its version twice", async () => {
+    const twice = wellFormedPublish.replace(
+      '          if npm_version="$(npm --version)"',
+      "          npm --version\n          if npm_version=\"$(npm --version)\"",
+    );
+    expect(twice).not.toBe(wellFormedPublish);
+    root = await buildTree({ publishContent: twice });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when the publish job drops the version process refusal", async () => {
+    const publishStart = wellFormedPublish.indexOf("  publish:");
+    const noRefusal =
+      wellFormedPublish.slice(0, publishStart) +
+      wellFormedPublish
+        .slice(publishStart)
+        .replace("unverified npm toolchain", "unremarkable npm toolchain");
+    expect(noRefusal).not.toBe(wellFormedPublish);
+    root = await buildTree({ publishContent: noRefusal });
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBeGreaterThan(0);
     await cleanup();
