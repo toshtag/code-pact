@@ -3,7 +3,7 @@ name: Release Artifact Build Boundary
 weight: 1
 confidence: high
 risk: high
-status: in_progress
+status: done
 objective: Make the release artifact's existence a step the publish pipeline
   owns rather than a side effect of some other command, and hold that step's
   identity and position with invariants whose failures are asserted by name.
@@ -34,7 +34,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: Give the publish workflow's prepare job an explicit standalone
       build step, and hold its identity and position through the YAML step
       structure with invariants whose failures each mutation asserts by name, so
