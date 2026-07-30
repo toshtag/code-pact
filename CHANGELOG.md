@@ -13,7 +13,7 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
-## [2.9.0] — 2026-07-29
+## [2.9.0] — 2026-07-30
 
 ### Added
 
@@ -28,7 +28,7 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 - **Right-sized the generated `claude-code` instruction file.** `CLAUDE.md` is now a bootstrap — repository purpose, the `task prepare` entrypoint, the envelope reference, and a bounded repository-gotcha section — instead of a restatement of the lifecycle, failure, repair, and model surfaces that `task prepare` already returns. Every line of it is generator-owned, the repository-gotcha bullets included: the manifest pins the file's hash, so a repository's own conventions belong in the sources the generator does not write. The `codex`, `cursor`, `gemini-cli`, and `generic` instruction files are unchanged.
 - **Made the generated `claude-code` instruction file model-neutral.** `--model` and a profile `model_version` pin the profile as before; they no longer change the generated instruction bytes. Effort and tier guidance reach the agent per-task through `recommend` / `task prepare --detail full`.
-- **Made the automated release path deterministic and fail-closed.** The publish workflow no longer sets ambient git identity environment variables, a target version that already exists in the registry is a hard collision instead of a no-op, and a dedicated provenance job verifies the published attestation before the GitHub Release is created. The publish job is self-contained on its own runner — no checkout, no repository code — and every guard on that path reports whether it ran separately from what it found, so a check that breaks stops the release instead of reading as a pass. Publishing keeps its Trusted Publishing (OIDC), registry-tarball byte verification, and strict per-job permission separation.
+- **Made the automated release path deterministic and fail-closed.** The publish workflow no longer sets ambient git identity environment variables, a target version that already exists in the registry is a hard collision instead of a no-op, and a dedicated provenance job verifies the published attestation before the GitHub Release is created. The tag-triggered preparation builds the distribution explicitly from the signed-tag checkout and its frozen dependencies, before the package metadata assertion and before packing, rather than relying on a build side effect of another release command. The publish job is self-contained on its own runner — no checkout, no repository code — and every guard on that path reports whether it ran separately from what it found, so a check that breaks stops the release instead of reading as a pass. Publishing keeps its Trusted Publishing (OIDC), registry-tarball byte verification, and strict per-job permission separation.
 
 ### Fixed
 
