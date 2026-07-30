@@ -1,5 +1,10 @@
 # code-pact
 
+> [!WARNING]
+> **code-pact is retired as of 2026-07-30.** This repository is archived and the npm package is no longer maintained.
+>
+> **Post-mortem.** The hypothesis: deriving each task's work order, verification, and completion state from a machine-readable plan would reduce agent token spend and raise output quality. Dogfooding refuted it — across 2.5 months and ~570 commits, the tool's own lifecycle machinery (locks, phase state, review bundles, adapters) generated more complexity and consumed more review tokens than it removed, even for its author as the sole and ideal user. The salvageable kernel — plan-derived work orders plus verification gates — fits in a few hundred lines of per-project hooks and scripts, and does not need to be a product. As agent models improve, heavyweight scaffolding built to constrain them depreciates; the enforcement that proved durable lives in plain git hooks, not in a lifecycle CLI.
+
 [![npm version](https://img.shields.io/npm/v/code-pact)](https://www.npmjs.com/package/code-pact)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js version](https://img.shields.io/node/v/code-pact)](package.json)
