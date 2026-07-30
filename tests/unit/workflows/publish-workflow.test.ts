@@ -293,6 +293,54 @@ describe("publish-workflow inline scripts", () => {
     });
   });
 
+  // The v2.9.0 tag push failed here: `prepare` had no build step, so
+  // `assert-package-metadata` found no dist/cli.js. The build used to arrive as
+  // a side effect of `pnpm release:check`, and removing that step took it away.
+  // Presence alone is not the property — both readers of the built output must
+  // come after it.
+  describe("prepare job: distribution build boundary", () => {
+    const content = readWorkflow();
+    const scripts = extractRunScripts(content, "prepare");
+
+    function stepIndex(pattern: RegExp): number {
+      return scripts.findIndex(script => pattern.test(script));
+    }
+
+    // Anchored to a line start: the npm prerequisite step's comment mentions
+    // `npm pack --json`, and a mention is not an invocation.
+    const buildAt = stepIndex(/^\s*pnpm build\s*$/m);
+    const metadataAssertAt = stepIndex(
+      /^\s*node scripts\/assert-package-metadata\.mjs\b/m,
+    );
+    const packAt = stepIndex(/^\s*npm pack\b/m);
+
+    it("builds the distribution as its own step", () => {
+      expect(buildAt).toBeGreaterThanOrEqual(0);
+    });
+
+    it("does not source the build from the release gate", () => {
+      for (const script of scripts) {
+        expect(script).not.toMatch(/release:check/);
+      }
+    });
+
+    it("builds before asserting package metadata", () => {
+      expect(metadataAssertAt).toBeGreaterThanOrEqual(0);
+      expect(metadataAssertAt).toBeGreaterThan(buildAt);
+    });
+
+    it("builds before packing the tarball", () => {
+      expect(packAt).toBeGreaterThanOrEqual(0);
+      expect(packAt).toBeGreaterThan(buildAt);
+    });
+
+    it("builds after installing dependencies", () => {
+      const installAt = stepIndex(/^\s*pnpm install --frozen-lockfile\s*$/m);
+      expect(installAt).toBeGreaterThanOrEqual(0);
+      expect(buildAt).toBeGreaterThan(installAt);
+    });
+  });
+
   describe("prepare job: pack metadata", () => {
     const content = readWorkflow();
     const scripts = extractRunScripts(content, "prepare");

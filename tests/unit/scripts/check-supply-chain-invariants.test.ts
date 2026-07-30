@@ -200,7 +200,14 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          NODE",
     "      - run: node scripts/check-required-ci-for-sha.mjs --json",
     "      - run: pnpm check:release-version",
-    "      - run: node scripts/check-package-tarball.mjs",
+    "      - name: Build the distribution",
+    "        run: |",
+    "          pnpm build",
+    "      - run: node scripts/assert-package-metadata.mjs",
+    "      - name: Build and inspect exact package tarball",
+    "        run: |",
+    "          npm pack --json --ignore-scripts > pack.json",
+    "          node scripts/check-package-tarball.mjs --pack-json pack.json",
     "      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2",
     "        with:",
     "          name: release-artifact",
@@ -407,6 +414,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          esac",
     "",
     "          npm publish \"./$tarball\" --ignore-scripts --registry=\"$registry\"",
+    "",
     "",
     "",
     "",
@@ -1708,6 +1716,74 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
         .replace("unverified npm toolchain", "unremarkable npm toolchain");
     expect(noRefusal).not.toBe(wellFormedPublish);
     root = await buildTree({ publishContent: noRefusal });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  // P92: the distribution must be a step of the prepare job, positioned before
+  // both readers of it. These four mutations are the ways v2.9.0 actually broke
+  // or could break again — the first is exactly the state that failed on the
+  // tag push.
+  it("fails when the prepare job has no build step", async () => {
+    const noBuild = wellFormedPublish.replace(
+      '      - name: Build the distribution\n        run: |\n          pnpm build\n',
+      "",
+    );
+    expect(noBuild).not.toBe(wellFormedPublish);
+    root = await buildTree({ publishContent: noBuild });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when the build is ordered after the metadata assertion", async () => {
+    const buildStep =
+      "      - name: Build the distribution\n        run: |\n          pnpm build\n";
+    const assertStep = "      - run: node scripts/assert-package-metadata.mjs\n";
+    expect(wellFormedPublish).toContain(buildStep);
+    expect(wellFormedPublish).toContain(assertStep);
+    const swapped = wellFormedPublish
+      .replace(buildStep + assertStep, assertStep + buildStep);
+    expect(swapped).not.toBe(wellFormedPublish);
+    root = await buildTree({ publishContent: swapped });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when the build is ordered after npm pack", async () => {
+    const buildStep =
+      "      - name: Build the distribution\n        run: |\n          pnpm build\n";
+    const start = wellFormedPublish.indexOf(buildStep);
+    expect(start).toBeGreaterThan(0);
+    const withoutBuild =
+      wellFormedPublish.slice(0, start) +
+      wellFormedPublish.slice(start + buildStep.length);
+    const packAnchor = "      - name: Build and inspect exact package tarball\n";
+    expect(withoutBuild).toContain(packAnchor);
+    const moved = withoutBuild.replace(
+      packAnchor,
+      packAnchor +
+        "        # build moved after pack\n",
+    );
+    const packEnd =
+      moved.indexOf("--pack-json pack.json") + "--pack-json pack.json".length + 1;
+    const afterPack = moved.slice(0, packEnd) + buildStep + moved.slice(packEnd);
+    expect(afterPack).not.toBe(wellFormedPublish);
+    root = await buildTree({ publishContent: afterPack });
+    const { failures } = checkSupplyChainInvariants(root);
+    expect(failures).toBeGreaterThan(0);
+    await cleanup();
+  });
+
+  it("fails when the build is sourced from the release gate again", async () => {
+    const viaGate = wellFormedPublish.replace(
+      "          pnpm build\n",
+      "          pnpm release:check\n",
+    );
+    expect(viaGate).not.toBe(wellFormedPublish);
+    root = await buildTree({ publishContent: viaGate });
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBeGreaterThan(0);
     await cleanup();

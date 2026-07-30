@@ -2002,6 +2002,49 @@ export function checkSupplyChainInvariants(root) {
         fail("publish.yml: prepare job must run tarball inspection");
       }
 
+      // The distribution must be produced by a step of its own. It used to
+      // arrive as a side effect of `pnpm release:check`, and removing that step
+      // silently removed the build — the tag push failed on a missing
+      // `dist/cli.js` and nothing had caught it, because a developer's
+      // workspace always has one. Position matters as much as presence: both
+      // readers of the built output run after it.
+      const prepareStepIndex = pattern => {
+        for (const [index, script] of prepareScripts.entries()) {
+          if (pattern.test(script)) return index;
+        }
+        return -1;
+      };
+      // Anchored to the start of a line so a mention inside a comment — the npm
+      // prerequisite step explains why the pack payload shape is bounded — is
+      // not mistaken for the command itself.
+      const buildAt = prepareStepIndex(/^\s*pnpm build\s*$/m);
+      const metadataAssertAt = prepareStepIndex(
+        /^\s*node scripts\/assert-package-metadata\.mjs\b/m,
+      );
+      const packAt = prepareStepIndex(/^\s*npm pack\b/m);
+
+      if (buildAt >= 0) {
+        pass("publish.yml: prepare job builds the distribution explicitly");
+      } else {
+        fail(
+          "publish.yml: prepare job must run `pnpm build` as its own step — the artifact's existence cannot be another command's side effect",
+        );
+      }
+      if (buildAt >= 0 && metadataAssertAt > buildAt) {
+        pass("publish.yml: build precedes the package metadata assertion");
+      } else {
+        fail(
+          "publish.yml: the build must precede the package metadata assertion, which reads dist/cli.js",
+        );
+      }
+      if (buildAt >= 0 && packAt > buildAt) {
+        pass("publish.yml: build precedes npm pack");
+      } else {
+        fail(
+          "publish.yml: the build must precede npm pack, so the inspected tarball is built from this checkout",
+        );
+      }
+
       // verify job has post-publish tarball verification
       const verifyScripts = collectRunScripts(doc, "verify");
       const hasVerify = verifyScripts.some(s =>
