@@ -1,0 +1,163 @@
+id: P92
+name: Release Artifact Build Boundary
+weight: 1
+confidence: high
+risk: high
+status: in_progress
+objective: Make the release artifact's existence a step the publish pipeline
+  owns rather than a side effect of some other command, and hold that step's
+  identity and position with invariants whose failures are asserted by name.
+non_goals:
+  - Change the package version, changelog, or any release metadata
+  - Reinstate `pnpm release:check` in the prepare job
+  - Change src, the CLI, or the published bytes
+  - Create a tag, publish to npm, or create a GitHub Release
+  - Implement P90-T1 or fix the verification-ledger stress issue tracked as 573
+definition_of_done:
+  - The prepare job owns exactly one unconditional standalone build step, after
+    the frozen dependency install and before both readers of the built output.
+  - Every build-boundary mutation asserts the specific named invariant it
+    violates, so no test can pass on an unrelated failure.
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm exec vitest run tests/unit/workflows/publish-workflow.test.ts
+      tests/unit/scripts/check-supply-chain-invariants.test.ts
+    - node scripts/check-supply-chain-invariants.mjs
+    - git diff --check
+tasks:
+  - id: P92-T1
+    type: bugfix
+    ambiguity: low
+    risk: high
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: Give the publish workflow's prepare job an explicit standalone
+      build step, and hold its identity and position through the YAML step
+      structure with invariants whose failures each mutation asserts by name, so
+      the release artifact's existence stops depending on another command's side
+      effect and cannot silently regress.
+    reads:
+      - scripts/assert-package-metadata.mjs
+      - scripts/check-package-tarball.mjs
+      - package.json
+      - docs/maintainers/releasing.md
+    writes:
+      - design/phases/P92-release-artifact-build-boundary.yaml
+      - .github/workflows/publish.yml
+      - scripts/check-supply-chain-invariants.mjs
+      - tests/unit/workflows/publish-workflow.test.ts
+      - tests/unit/scripts/check-supply-chain-invariants.test.ts
+    acceptance_refs:
+      - tests/unit/workflows/publish-workflow.test.ts
+      - tests/unit/scripts/check-supply-chain-invariants.test.ts
+    review_contract:
+      version: 1
+      mode: boundary
+      stages:
+        - stage: producer
+          disposition: in_scope
+          claim: >
+            The prepare job owns exactly one unconditional standalone `pnpm
+            build` step after the frozen dependency install, rather than
+            receiving `dist` as a side effect of another command.
+          refs:
+            - .github/workflows/publish.yml
+            - tests/unit/workflows/publish-workflow.test.ts
+        - stage: consumer
+          disposition: in_scope
+          claim: >
+            Both readers of the built output — the package metadata assertion
+            and the tarball inspection — are ordered after that step, and each
+            independently refuses a distribution that is absent.
+          refs:
+            - .github/workflows/publish.yml
+            - scripts/assert-package-metadata.mjs
+            - scripts/check-package-tarball.mjs
+            - tests/unit/workflows/publish-workflow.test.ts
+        - stage: runner
+          disposition: in_scope
+          claim: >
+            The step's identity and position are read from the workflow's YAML
+            step structure, not inferred from text: the gate refuses a missing
+            build, a build merged into another step, a conditional or
+            continue-on-error build, a duplicate build, a build after either
+            consumer, and any attempt to source it from the release gate again.
+          refs:
+            - .github/workflows/publish.yml
+            - scripts/check-supply-chain-invariants.mjs
+            - tests/unit/scripts/check-supply-chain-invariants.test.ts
+            - tests/unit/workflows/publish-workflow.test.ts
+        - stage: os
+          disposition: not_applicable
+          rationale: >
+            The change adds one build step to an Ubuntu-only job and nothing in
+            it branches on the operating system. The build, the metadata
+            assertion, and the tarball inspection are the same commands
+            everywhere, and no OS-dependent production path is introduced.
+        - stage: security
+          disposition: in_scope
+          claim: >
+            A checkout with no distribution cannot reach the release artifact
+            upload: the metadata assertion and the tarball inspection each fail
+            closed on a missing `dist/cli.js`, so a signed tag cannot produce an
+            empty package.
+          refs:
+            - .github/workflows/publish.yml
+            - scripts/assert-package-metadata.mjs
+            - scripts/check-package-tarball.mjs
+      platforms:
+        - platform: linux
+          disposition: not_required
+          rationale: >
+            The production prepare job runs on Linux, but P92 changes no
+            Linux-specific behavior. Its committed proof is structural workflow
+            and invariant coverage, which is unit-level wherever it runs; the
+            cold detached-worktree run is reported as a measurement, not as
+            platform-specific contract evidence.
+        - platform: macos
+          disposition: not_required
+          rationale: >
+            The cold-worktree reproduction ran on macOS, but the change
+            introduces no macOS-specific behavior and that measurement is not
+            used as platform contract evidence.
+        - platform: windows
+          disposition: not_required
+          rationale: >
+            No production release job runs on Windows and P92 adds no
+            Windows-specific behavior.
+      evidence:
+        - id: standalone-build-step-identity
+          claim: >
+            The prepare job holds exactly one build step whose run body is
+            exactly `pnpm build`, unconditional and not continue-on-error, after
+            the frozen dependency install.
+          level: unit
+          refs:
+            - tests/unit/workflows/publish-workflow.test.ts
+        - id: build-precedes-both-consumers
+          claim: >
+            That step's YAML index precedes both the package metadata assertion
+            and the tarball packing step.
+          level: unit
+          refs:
+            - tests/unit/workflows/publish-workflow.test.ts
+        - id: build-boundary-invariants
+          claim: >
+            The supply-chain gate refuses a missing build, a merged build, a
+            conditional or continue-on-error build, a duplicate build, a build
+            after either consumer, and a build sourced from the release gate.
+          level: unit
+          refs:
+            - tests/unit/scripts/check-supply-chain-invariants.test.ts
+        - id: named-build-boundary-mutations
+          claim: >
+            Each build-boundary mutation asserts the specific named invariant it
+            violates, so no case can pass on an unrelated failure, and each
+            mutated workflow is asserted to be valid YAML first.
+          level: unit
+          refs:
+            - tests/unit/scripts/check-supply-chain-invariants.test.ts

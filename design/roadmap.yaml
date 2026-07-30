@@ -239,3 +239,6 @@ phases:
   - id: P91
     path: design/phases/P91-release-pipeline-contract-integrity.yaml
     weight: 1
+  - id: P92
+    path: design/phases/P92-release-artifact-build-boundary.yaml
+    weight: 1
