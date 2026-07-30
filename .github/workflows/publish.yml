@@ -113,6 +113,15 @@ jobs:
           node scripts/check-supply-chain-invariants.mjs
           pnpm check:release-version
 
+      # The distribution is built here, as a step, and not as a side effect of
+      # anything else. It used to arrive via `pnpm release:check` — whose own
+      # `pnpm test` builds — and when that step was correctly removed (CI had
+      # already verified this SHA) the build left with it. Nothing noticed until
+      # a tag was pushed, because a developer's workspace always has `dist/`.
+      # Both steps below read it, so it precedes both.
+      - name: Build the distribution
+        run: pnpm build
+
       - name: Assert package metadata
         run: node scripts/assert-package-metadata.mjs
 

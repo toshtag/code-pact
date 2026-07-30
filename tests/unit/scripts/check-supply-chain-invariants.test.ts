@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   checkActionShaPins,
   checkCancellationCoverage,
@@ -7,6 +7,7 @@ import {
   checkSupplyChainInvariants,
 } from "../../../scripts/check-supply-chain-invariants.mjs";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { parseDocument } from "yaml";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -198,9 +199,16 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "            process.exit(1);",
     "          }",
     "          NODE",
+    "      - run: pnpm install --frozen-lockfile",
     "      - run: node scripts/check-required-ci-for-sha.mjs --json",
     "      - run: pnpm check:release-version",
-    "      - run: node scripts/check-package-tarball.mjs",
+    "      - name: Build the distribution",
+    "        run: pnpm build",
+    "      - run: node scripts/assert-package-metadata.mjs",
+    "      - name: Build and inspect exact package tarball",
+    "        run: |",
+    "          npm pack --json --ignore-scripts > pack.json",
+    "          node scripts/check-package-tarball.mjs --pack-json pack.json",
     "      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2",
     "        with:",
     "          name: release-artifact",
@@ -407,6 +415,7 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     "          esac",
     "",
     "          npm publish \"./$tarball\" --ignore-scripts --registry=\"$registry\"",
+    "",
     "",
     "",
     "",
@@ -918,6 +927,40 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
       await rm(root, { recursive: true, force: true });
       root = undefined;
     }
+  }
+
+  /**
+   * The named failures a mutated workflow produces.
+   *
+   * `failures > 0` is not evidence that a specific rule fired: another
+   * invariant can satisfy it while the rule under test is broken. Measured on
+   * this suite — with the build-boundary checks disabled, three of the four
+   * mutations dropped to zero failures, but the release-gate one stayed green
+   * on `prepare job must NOT re-run release:check`, proving nothing about the
+   * build. Asserting the message closes that gap.
+   */
+  async function invariantErrorsFor(publishContent: string): Promise<string[]> {
+    const errors: string[] = [];
+    const errorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation((...args: unknown[]) => {
+        errors.push(args.map(String).join(" "));
+      });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      root = await buildTree({ publishContent });
+      checkSupplyChainInvariants(root);
+      return errors;
+    } finally {
+      errorSpy.mockRestore();
+      logSpy.mockRestore();
+      await cleanup();
+    }
+  }
+
+  /** A mutation must stay parseable, or it tests the YAML parser, not the gate. */
+  function assertValidYaml(content: string): void {
+    expect(parseDocument(content).errors).toHaveLength(0);
   }
 
   function packageWithScript(name: string, value: string): string {
@@ -1711,6 +1754,160 @@ describe("checkSupplyChainInvariants — synthetic tree", () => {
     const { failures } = checkSupplyChainInvariants(root);
     expect(failures).toBeGreaterThan(0);
     await cleanup();
+  });
+
+  // P92: the distribution must be a step of the prepare job, positioned before
+  // both readers of it. Each case asserts the *named* invariant it violates —
+  // a raised failure count is not proof, since another rule can satisfy it
+  // while the rule under test is broken.
+  describe("build boundary", () => {
+    const buildStep =
+      "      - name: Build the distribution\n        run: pnpm build\n";
+
+    function withoutBuildStep(): string {
+      expect(wellFormedPublish).toContain(buildStep);
+      return wellFormedPublish.replace(buildStep, "");
+    }
+
+    it("refuses a prepare job with no build step", async () => {
+      const mutated = withoutBuildStep();
+      assertValidYaml(mutated);
+      expect(await invariantErrorsFor(mutated)).toContainEqual(
+        expect.stringContaining(
+          "prepare job must contain exactly one standalone distribution build step",
+        ),
+      );
+    });
+
+    it("refuses a build ordered after the package metadata assertion", async () => {
+      const assertStep =
+        "      - run: node scripts/assert-package-metadata.mjs\n";
+      expect(wellFormedPublish).toContain(buildStep + assertStep);
+      const mutated = wellFormedPublish.replace(
+        buildStep + assertStep,
+        assertStep + buildStep,
+      );
+      assertValidYaml(mutated);
+      expect(await invariantErrorsFor(mutated)).toContainEqual(
+        expect.stringContaining(
+          "distribution build must precede the package metadata assertion",
+        ),
+      );
+    });
+
+    it("refuses a build ordered after npm pack", async () => {
+      // Removed whole, then reinserted as a whole step before the upload —
+      // never spliced into a run scalar, which would test the YAML parser.
+      const uploadAnchor = "      - uses: actions/upload-artifact@";
+      const withoutBuild = withoutBuildStep();
+      expect(withoutBuild).toContain(uploadAnchor);
+      const mutated = withoutBuild.replace(
+        uploadAnchor,
+        buildStep + uploadAnchor,
+      );
+      assertValidYaml(mutated);
+      expect(await invariantErrorsFor(mutated)).toContainEqual(
+        expect.stringContaining("distribution build must precede npm pack"),
+      );
+    });
+
+    it("refuses a build sourced from the release gate", async () => {
+      const mutated = wellFormedPublish.replace(
+        buildStep,
+        "      - name: Build the distribution\n        run: pnpm release:check\n",
+      );
+      expect(mutated).not.toBe(wellFormedPublish);
+      assertValidYaml(mutated);
+      const errors = await invariantErrorsFor(mutated);
+      // Both matter: the gate is refused, *and* the build is still missing.
+      expect(errors).toContainEqual(
+        expect.stringContaining("prepare job must NOT re-run release:check"),
+      );
+      expect(errors).toContainEqual(
+        expect.stringContaining(
+          "prepare job must contain exactly one standalone distribution build step",
+        ),
+      );
+    });
+
+    it("refuses a build merged into a step with another command", async () => {
+      const mutated = wellFormedPublish.replace(
+        buildStep,
+        "      - name: Build the distribution\n        run: |\n          echo building\n          pnpm build\n",
+      );
+      expect(mutated).not.toBe(wellFormedPublish);
+      assertValidYaml(mutated);
+      expect(await invariantErrorsFor(mutated)).toContainEqual(
+        expect.stringContaining(
+          "prepare job must contain exactly one standalone distribution build step",
+        ),
+      );
+    });
+
+    it("refuses a duplicate build step", async () => {
+      const mutated = wellFormedPublish.replace(buildStep, buildStep + buildStep);
+      expect(mutated).not.toBe(wellFormedPublish);
+      assertValidYaml(mutated);
+      expect(await invariantErrorsFor(mutated)).toContainEqual(
+        expect.stringContaining(
+          "prepare job must contain exactly one standalone distribution build step",
+        ),
+      );
+    });
+
+    it("refuses a continue-on-error build", async () => {
+      const mutated = wellFormedPublish.replace(
+        buildStep,
+        "      - name: Build the distribution\n        continue-on-error: true\n        run: pnpm build\n",
+      );
+      expect(mutated).not.toBe(wellFormedPublish);
+      assertValidYaml(mutated);
+      expect(await invariantErrorsFor(mutated)).toContainEqual(
+        expect.stringContaining(
+          "distribution build must not be conditional or continue-on-error",
+        ),
+      );
+    });
+
+    it("refuses a conditional build", async () => {
+      const mutated = wellFormedPublish.replace(
+        buildStep,
+        "      - name: Build the distribution\n        if: false\n        run: pnpm build\n",
+      );
+      expect(mutated).not.toBe(wellFormedPublish);
+      assertValidYaml(mutated);
+      expect(await invariantErrorsFor(mutated)).toContainEqual(
+        expect.stringContaining(
+          "distribution build must not be conditional or continue-on-error",
+        ),
+      );
+    });
+
+    it("refuses a build that runs something other than pnpm build", async () => {
+      const mutated = wellFormedPublish.replace(
+        buildStep,
+        "      - name: Build the distribution\n        run: pnpm build || true\n",
+      );
+      expect(mutated).not.toBe(wellFormedPublish);
+      assertValidYaml(mutated);
+      expect(await invariantErrorsFor(mutated)).toContainEqual(
+        expect.stringContaining("distribution build must run exactly"),
+      );
+    });
+
+    it("refuses a build ordered before the frozen dependency install", async () => {
+      const installStep =
+        "      - run: pnpm install --frozen-lockfile\n";
+      const withoutBuild = withoutBuildStep();
+      expect(withoutBuild).toContain(installStep);
+      const mutated = withoutBuild.replace(installStep, buildStep + installStep);
+      assertValidYaml(mutated);
+      expect(await invariantErrorsFor(mutated)).toContainEqual(
+        expect.stringContaining(
+          "distribution build must follow the frozen dependency install",
+        ),
+      );
+    });
   });
 
   it("fails when publish job has checkout", async () => {
