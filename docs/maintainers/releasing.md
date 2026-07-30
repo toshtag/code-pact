@@ -139,20 +139,22 @@ After the release-prep PR merges to `main`:
 ## One-time security setup
 
 These steps are performed once by a repository administrator, and they live
-outside the repository: **no check in this repo can verify them.**
+outside the repository: **no current check in this repo verifies their live
+external values, and repository state alone cannot prove them.**
 `check-supply-chain-invariants.mjs` verifies that the workflow declares
-`environment: npm-publish` and the per-job permission map — it cannot see the
-environment's protection rules, the deployment tag policy, or the npm Trusted
-Publisher fields.
+`environment: npm-publish` and the per-job permission map. It does not read the
+environment's protection rules, the deployment ref policy, or the npm trusted
+publishing relationship — nothing prevents a future check from calling those
+APIs, but none does today.
 
-Three different authorities hold those settings, and each is read a different
-way:
+Those settings form three readback groups across **two** external authorities,
+GitHub and the npm registry:
 
 | Setting | Authority | Read it with |
 | --- | --- | --- |
 | environment existence, protection rules, deployment policy mode | GitHub | `gh api` (below) |
 | deployment branch/tag policies | GitHub | `gh api` (below) — only exists when the policy mode is custom |
-| npm trusted publishing relationship | npm registry | `npm trust list` as an authenticated maintainer, npm package settings UI for anything the CLI does not expose |
+| npm trusted publishing relationship | npm registry | `npm trust list` as an authorized maintainer; the npm package settings UI for anything the CLI does not expose |
 
 Read those authorities directly rather than inferring them from repository code
 or from a green workflow run.
@@ -218,10 +220,14 @@ gh api repos/toshtag/code-pact/environments/npm-publish \
 
 - `protection_rules: []` — no approval gate. That is the current
   single-maintainer operation; see the optional section above.
-- `deployment_branch_policy: null` — no ref restriction at all (the state as of
-  v2.9.0).
-- `deployment_branch_policy.custom_branch_policies: true` — custom policies are
-  in use, so read them next.
+The policy has three modes; read all of `deployment_branch_policy`, not one
+field of it:
+
+| `deployment_branch_policy` | Means |
+| --- | --- |
+| `null` | no branch or tag restriction at all — **the state measured during v2.9.0** |
+| `protected_branches: true`, `custom_branch_policies: false` | protected branches only. **Not** the intended tag-only policy for a tag-triggered release workflow, and easy to mistake for "restricted" |
+| `protected_branches: false`, `custom_branch_policies: true` | custom branch/tag patterns — read the policies next |
 
 **GitHub — the deployment policies.** Only meaningful when the mode above is
 custom:
@@ -232,8 +238,14 @@ gh api repos/toshtag/code-pact/environments/npm-publish/deployment-branch-polici
 ```
 
 Read `type` as well as `name`: a policy named `v*` may be a **branch** rule or a
-**tag** rule, and only `type: "tag"` restricts this workflow. For the hardening
-above, expect exactly one policy, `type: "tag"`, `name: "v*"`.
+**tag** rule, and only a tag rule restricts this workflow. For the hardening
+above, expect exactly one policy, of tag type, named `v*`.
+
+Read the returned response without discarding fields. This repository currently
+has no custom policy, so a successful response has not been observed here — if
+the response available to the installed `gh` and API version does not expose the
+rule's branch/tag type, confirm it in the GitHub Environment UI rather than
+treating a bare `name` match as verification.
 
 A `404` here does **not** mean "no policies" — it is what the endpoint returns
 when the environment is not using custom policies at all. Check
@@ -263,27 +275,72 @@ npm --version                 # needs >= 11.15.0 for `npm trust`
 npm trust list code-pact --json --registry=https://registry.npmjs.org/
 ```
 
-The call is authenticated — it reads `/-/package/<name>/trust` and returns
-`401 Unauthorized` for an unauthenticated shell, so run it as a maintainer who
-is already logged in. Compare **all five** configured fields:
+The call is authenticated. It reads `/-/package/<name>/trust`, and per npm's
+`npm trust` documentation the caller needs:
 
-| Field | Expected |
+- npm 11.15.0 or newer,
+- **write permission** on the package,
+- **account-level 2FA** enabled,
+- a credential type `npm trust` supports — legacy basic auth and a granular token
+  configured to bypass 2FA are not accepted.
+
+Being logged in is not by itself sufficient. Do not enter, rotate, or persist
+credentials solely for this readback during an automated run.
+
+> Measured during PR #582 on npm 12.0.1: an **unauthenticated** call returns
+> `E401 Unauthorized`. That establishes only that the endpoint requires
+> authentication — it does not characterize how an authorized-but-misconfigured
+> call behaves.
+
+**The website and the CLI represent the same relationship differently**, so
+normalize before comparing. Per npm's trusted publishers documentation the
+GitHub Actions form is six values:
+
+| npm package settings UI | Expected |
 | --- | --- |
 | Provider | GitHub Actions |
-| Repository | `toshtag/code-pact` |
+| Organization or user | `toshtag` |
+| Repository | `code-pact` |
 | Workflow filename | `publish.yml` |
 | Environment | `npm-publish` |
 | Allowed action | `npm publish` only |
 
-`npm trust github` models a relationship with `--repo`, `--env`, `--file`, and
-`--allow-publish` / `--allow-stage-publish`, so the CLI covers the repository,
-environment, workflow file, and publish permission. Use the npm package settings
-UI for any field the installed CLI's output does not show — and do not assume
-the JSON shape without reading it, since it is npm's to change.
+The CLI joins owner and repository into one flag. From `npm trust --help` on
+npm 12.0.1, `npm trust github` takes:
 
-A mismatch in any of the five surfaces as `npm publish` failing with
-`ENEEDAUTH`: npm falls back to token auth and finds no token. That is what
-happened on the first `v2.9.0` tag push.
+| CLI | Expected |
+| --- | --- |
+| subcommand | `github` |
+| `--repo` | `toshtag/code-pact` |
+| `--file` | `publish.yml` |
+| `--env` | `npm-publish` |
+| `--allow-publish` | set |
+| `--allow-stage-publish` | not set |
+
+Compare all six UI values, or their normalized CLI equivalents — never one
+representation against the other unnormalized. Do not assume the shape of a
+successful `npm trust list --json` response without reading it: read the whole
+response rather than a preselected field, since the schema is npm's to change.
+
+An absent or mismatched trusted publishing relationship **can** surface as
+`npm publish` failing with `ENEEDAUTH`, when npm cannot exchange the workflow's
+OIDC identity and then finds no traditional token. Treat `ENEEDAUTH` as a prompt
+to check, not a diagnosis of one specific field:
+
+- the organization/user and repository,
+- the workflow filename,
+- the environment,
+- the allowed action,
+- whether the runner is GitHub-hosted,
+- `id-token: write` on the publishing job,
+- `package.json` `repository.url`,
+- for `workflow_call` / `workflow_dispatch`, the identity of the workflow that
+  actually invoked `npm publish`.
+
+> The first `v2.9.0` attempt ran before the trusted publishing relationship was
+> correctly configured, and ended with `ENEEDAUTH`. The successful rerun shows
+> the final configuration was sufficient for this workflow; it does not show
+> that every possible field mismatch produces that same error.
 
 ### After first successful publish
 
