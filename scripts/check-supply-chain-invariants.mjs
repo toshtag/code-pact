@@ -304,6 +304,40 @@ export function collectActionRefs(content) {
  * @param {string} jobName
  * @returns {string[]} list of run script contents
  */
+/**
+ * Every step of a job, as structure rather than text.
+ *
+ * `collectRunScripts` flattens steps into their run bodies, which loses the
+ * things that decide whether a command is really its own step: the step name,
+ * whether the body holds anything else, `if`, and `continue-on-error`. A check
+ * that greps the flattened text can report "as its own step" while verifying
+ * nothing of the kind.
+ */
+function collectJobSteps(doc, jobName) {
+  const collected = [];
+  const jobs = doc.get("jobs");
+  if (!jobs || !jobs.items) return collected;
+
+  for (const jobPair of jobs.items) {
+    const key = String(jobPair.key.value ?? jobPair.key);
+    if (key !== jobName) continue;
+    const job = jobPair.value;
+    if (!job) continue;
+    const steps = job.get("steps");
+    if (!steps || !steps.items) continue;
+    for (const [index, step] of steps.items.entries()) {
+      collected.push({
+        index,
+        name: step.get("name"),
+        run: step.get("run"),
+        if: step.get("if"),
+        continueOnError: step.get("continue-on-error"),
+      });
+    }
+  }
+  return collected;
+}
+
 function collectRunScripts(doc, jobName) {
   const scripts = [];
   const jobs = doc.get("jobs");
@@ -2006,43 +2040,83 @@ export function checkSupplyChainInvariants(root) {
       // arrive as a side effect of `pnpm release:check`, and removing that step
       // silently removed the build — the tag push failed on a missing
       // `dist/cli.js` and nothing had caught it, because a developer's
-      // workspace always has one. Position matters as much as presence: both
-      // readers of the built output run after it.
-      const prepareStepIndex = pattern => {
-        for (const [index, script] of prepareScripts.entries()) {
-          if (pattern.test(script)) return index;
-        }
-        return -1;
-      };
-      // Anchored to the start of a line so a mention inside a comment — the npm
-      // prerequisite step explains why the pack payload shape is bounded — is
-      // not mistaken for the command itself.
-      const buildAt = prepareStepIndex(/^\s*pnpm build\s*$/m);
-      const metadataAssertAt = prepareStepIndex(
+      // workspace always has one.
+      //
+      // Read from the YAML step structure, not from the flattened run text: a
+      // grep would accept the command merged into another step, a conditional
+      // build, or a duplicate, and would still print "as its own step".
+      const prepareSteps = collectJobSteps(doc, "prepare");
+      const buildSteps = prepareSteps.filter(
+        step => typeof step.run === "string" && /\bpnpm build\b/.test(step.run),
+      );
+      const standaloneBuilds = buildSteps.filter(
+        step => String(step.run).trim() === "pnpm build",
+      );
+      const buildStep = standaloneBuilds[0];
+      const stepIndexOf = pattern =>
+        prepareSteps.find(
+          step => typeof step.run === "string" && pattern.test(step.run),
+        )?.index ?? -1;
+      const installAt = stepIndexOf(/^\s*pnpm install --frozen-lockfile\s*$/m);
+      const metadataAssertAt = stepIndexOf(
         /^\s*node scripts\/assert-package-metadata\.mjs\b/m,
       );
-      const packAt = prepareStepIndex(/^\s*npm pack\b/m);
+      const packAt = stepIndexOf(/^\s*npm pack\b/m);
 
-      if (buildAt >= 0) {
-        pass("publish.yml: prepare job builds the distribution explicitly");
+      if (standaloneBuilds.length === 1 && buildSteps.length === 1) {
+        pass(
+          "publish.yml: prepare job contains exactly one standalone distribution build step",
+        );
       } else {
         fail(
-          "publish.yml: prepare job must run `pnpm build` as its own step — the artifact's existence cannot be another command's side effect",
+          "publish.yml: prepare job must contain exactly one standalone distribution build step",
+          `standalone: ${standaloneBuilds.length}, steps mentioning pnpm build: ${buildSteps.length}`,
         );
       }
-      if (buildAt >= 0 && metadataAssertAt > buildAt) {
-        pass("publish.yml: build precedes the package metadata assertion");
+      if (buildStep && String(buildStep.run).trim() === "pnpm build") {
+        pass("publish.yml: distribution build runs exactly `pnpm build`");
       } else {
         fail(
-          "publish.yml: the build must precede the package metadata assertion, which reads dist/cli.js",
+          "publish.yml: distribution build must run exactly `pnpm build`",
+          buildStep ? JSON.stringify(String(buildStep.run)) : "no standalone build step",
         );
       }
-      if (buildAt >= 0 && packAt > buildAt) {
-        pass("publish.yml: build precedes npm pack");
+      if (
+        buildStep &&
+        buildStep.if === undefined &&
+        (buildStep.continueOnError === undefined ||
+          buildStep.continueOnError === false)
+      ) {
+        pass(
+          "publish.yml: distribution build is unconditional and not continue-on-error",
+        );
       } else {
         fail(
-          "publish.yml: the build must precede npm pack, so the inspected tarball is built from this checkout",
+          "publish.yml: distribution build must not be conditional or continue-on-error",
         );
+      }
+      if (buildStep && installAt >= 0 && buildStep.index > installAt) {
+        pass(
+          "publish.yml: distribution build follows the frozen dependency install",
+        );
+      } else {
+        fail(
+          "publish.yml: distribution build must follow the frozen dependency install",
+        );
+      }
+      if (buildStep && metadataAssertAt > buildStep.index) {
+        pass(
+          "publish.yml: distribution build precedes the package metadata assertion",
+        );
+      } else {
+        fail(
+          "publish.yml: distribution build must precede the package metadata assertion",
+        );
+      }
+      if (buildStep && packAt > buildStep.index) {
+        pass("publish.yml: distribution build precedes npm pack");
+      } else {
+        fail("publish.yml: distribution build must precede npm pack");
       }
 
       // verify job has post-publish tarball verification
