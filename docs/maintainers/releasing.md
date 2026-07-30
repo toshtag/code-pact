@@ -77,9 +77,11 @@ After the release-prep PR merges to `main`:
    git verify-tag v<version>   # expect a good signature before pushing
    git push origin v<version>
    ```
-7. **Approve the publish workflow.** Pushing the tag triggers
-   `.github/workflows/publish.yml`. The workflow has four jobs with strict
-   permission separation:
+7. **The publish workflow runs.** Pushing the verified signed tag starts
+   `.github/workflows/publish.yml` — **the signed tag is the release
+   authorization**, and in a single-maintainer repository publication proceeds
+   from there without a further approval step. The workflow has four jobs with
+   strict permission separation:
 
    | Job              | Permissions                         | Runs                                                                                                                                                  |
    | ---------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -88,9 +90,9 @@ After the release-prep PR merges to `main`:
    | `verify`         | `contents: read`                    | artifact download, registry tarball download + byte verification, integrity report upload                                                             |
    | `github-release` | `contents: write`                   | artifact download, `gh release create/edit` (no checkout, no repository code)                                                                         |
 
-   Approve the deployment in the GitHub Actions UI (the `publish` job runs in
-   the `npm-publish` GitHub Environment with required reviewers). The workflow
-   then:
+   The `publish` job runs in the `npm-publish` GitHub Environment, which exists
+   as the OIDC environment binding npm Trusted Publishing is configured against
+   — not as an approval gate. The workflow then:
    - **prepare** verifies the signed annotated tag (`check-release-tag.mjs`),
      verifies that the `CI status` check passed for the exact commit SHA
      (`check-required-ci-for-sha.mjs`), runs release-specific supply-chain and
@@ -113,6 +115,16 @@ After the release-prep PR merges to `main`:
    - **github-release** creates a GitHub Release with an auto-generated
      `## Integrity` section.
 
+   > **On approval gates.** A repository with an **independent** release
+   > reviewer may additionally configure GitHub Environment required reviewers
+   > on `npm-publish`. That is a separation-of-duty control, and it only
+   > separates duties when the approver is not the person who pushed the tag —
+   > the same maintainer pushing a tag and then approving their own deployment
+   > adds a click, not a boundary. If you enable it, record who may approve,
+   > whether self-review is prevented, and how a release proceeds when that
+   > reviewer is unavailable; otherwise the control becomes an availability
+   > risk instead of a security one.
+
 8. **Verify.** After the workflow succeeds:
    - Check the npm package page for the provenance badge.
    - Check the GitHub Release for the auto-generated Integrity section
@@ -120,18 +132,36 @@ After the release-prep PR merges to `main`:
 
 ## One-time security setup
 
-These steps are performed once by a repository administrator. They cannot be
-verified from code alone — attach evidence (screenshots or API output) to the
-rollout PR.
+These steps are performed once by a repository administrator, and they live
+outside the repository: **no check in this repo can verify them.**
+`check-supply-chain-invariants.mjs` verifies that the workflow declares
+`environment: npm-publish` and the per-job permission map — it cannot see the
+environment's protection rules, the deployment tag policy, or the npm Trusted
+Publisher fields. Those are only ever as configured as someone last left them,
+so verify them directly (below) rather than inferring them from a green gate.
 
-### GitHub Environment: `npm-publish`
+### GitHub Environment: `npm-publish` — required
 
 1. **Create** a GitHub Environment named `npm-publish` (Settings → Environments).
-2. **Required reviewers:** add the maintainer or release team.
-3. **Prevent self-review:** enabled — the person who pushed the tag cannot
+2. **Deployment branches and tags:** selected tags → `v*` only.
+3. The name must match the **Environment** field of the npm Trusted Publisher
+   configuration exactly; that pairing is what the OIDC exchange binds to.
+
+### GitHub Environment: `npm-publish` — optional
+
+These are separation-of-duty controls. They are worth configuring only when an
+**independent** reviewer exists; with a single maintainer they add a step
+without adding a boundary.
+
+1. **Required reviewers:** the independent reviewer or release team.
+2. **Prevent self-review:** enabled — the person who pushed the tag cannot
    approve their own deployment.
-4. **Allow administrators to bypass:** disabled — no bypass.
-5. **Deployment branches and tags:** selected tags → `v*` only.
+3. **Allow administrators to bypass:** disabled — no bypass.
+
+If any of these is enabled, say so in this runbook alongside who may approve and
+what happens when they are unavailable. A control described here but absent in
+the settings is worse than no control: it reads as a guarantee nobody is
+providing.
 
 ### npm Trusted Publisher
 
@@ -143,6 +173,30 @@ Trusted Publishing:
 3. **Workflow filename:** `publish.yml`.
 4. **Environment:** `npm-publish`.
 5. **Allowed action:** `npm publish` only.
+
+### Verifying the external settings
+
+Before a release, or after changing any of the above, read the settings back
+rather than assuming them. These are the only way to know what is actually
+configured:
+
+```sh
+# environment exists, and its protection rules — empty [] means no approval gate
+gh api repos/toshtag/code-pact/environments \
+  --jq '.environments[] | {name, protection_rules}'
+
+# deployment tag policy
+gh api repos/toshtag/code-pact/environments/npm-publish/deployment-branch-policies \
+  --jq '.branch_policies[].name'
+
+# whether a given run actually waited for an approval
+gh api repos/toshtag/code-pact/actions/runs/<run-id>/approvals --jq 'length'
+```
+
+The npm Trusted Publisher fields (provider, repository, workflow filename,
+environment) are visible only in the npm package settings UI. Compare all four
+against this repository by hand: a mismatch surfaces as `npm publish` failing
+with `ENEEDAUTH`, because npm falls back to token auth and finds no token.
 
 ### After first successful publish
 
